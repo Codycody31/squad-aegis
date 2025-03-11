@@ -21,6 +21,23 @@ import { Badge } from "~/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Progress } from "~/components/ui/progress";
 import { useAuthStore } from "~/stores/auth";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "~/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { toast } from "~/components/ui/toast";
 
 const route = useRoute();
 const serverId = route.params.serverId;
@@ -34,15 +51,54 @@ const playerCount = ref<{ current: number; max: number }>({
   current: 0,
   max: 64,
 });
-const recentLogs = ref<any[]>([]);
-const recentPlayers = ref<any[]>([]);
-const serverStatus = ref<"online" | "offline" | "restarting">("offline");
-const cpuUsage = ref(0);
-const memoryUsage = ref(0);
-const diskUsage = ref(0);
-const uptime = ref("");
-const mapInfo = ref({ name: "", image: "", timeRemaining: "" });
 const activeTab = ref("overview");
+
+// New state variables for teams and squads
+const teamsData = ref<Team[]>([]);
+const loadingTeams = ref(false);
+const errorTeams = ref<string | null>(null);
+
+// State variables for map change dialog
+const showMapChangeDialog = ref(false);
+const availableLayers = ref<{ name: string; mod: string; isVanilla: boolean }[]>([]);
+const selectedLayer = ref("");
+const loadingLayers = ref(false);
+const changingLayer = ref(false);
+
+// Define interfaces for teams and squads data
+interface Player {
+  steamId: string;
+  name: string;
+  squadId: number | null;
+  isSquadLeader: boolean;
+  role: string;
+  kills?: number;
+  deaths?: number;
+  team?: string;
+  squad?: string;
+}
+
+interface Squad {
+  id: number;
+  name: string;
+  size: number;
+  locked: boolean;
+  leader: Player | null;
+  players: Player[];
+}
+
+interface Team {
+  id: number;
+  name: string;
+  squads: Squad[];
+  players: Player[]; // Unassigned players
+}
+
+interface TeamsResponse {
+  data: {
+    teams: Team[];
+  };
+}
 
 // Fetch server information
 async function fetchServerInfo() {
@@ -62,34 +118,15 @@ async function fetchServerInfo() {
   }
 
   try {
-    interface ServerResponse {
-      message: string;
-      code: number;
-      data: {
-        server: any;
-        status: string;
-        metrics?: {
-          uptime?: string;
-          cpu?: number;
-          memory?: number;
-          disk?: number;
-          playerCount?: number;
-          maxPlayers?: number;
-          currentMap?: string;
-        };
-      };
-    }
-
-    const { data: responseData, error: fetchError } =
-      await useFetch<ServerResponse>(
-        `${runtimeConfig.public.backendApi}/servers/${serverId}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+    const { data: responseData, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
 
     if (fetchError.value) {
       throw new Error(
@@ -99,81 +136,7 @@ async function fetchServerInfo() {
 
     if (responseData.value && responseData.value.data) {
       const serverData = responseData.value.data;
-      serverInfo.value = serverData.server;
-
-      // Set server status
-      serverStatus.value = serverData.status as
-        | "online"
-        | "offline"
-        | "restarting";
-
-      // Set metrics if available
-      if (serverData.metrics) {
-        // Set uptime
-        uptime.value = serverData.metrics.uptime || "0h 0m";
-
-        // Set resource usage
-        cpuUsage.value =
-          serverData.metrics.cpu || Math.floor(Math.random() * 60) + 10;
-        memoryUsage.value =
-          serverData.metrics.memory || Math.floor(Math.random() * 70) + 20;
-        diskUsage.value =
-          serverData.metrics.disk || Math.floor(Math.random() * 50) + 30;
-
-        // Set map info
-        if (serverData.metrics.currentMap) {
-          mapInfo.value = {
-            name: serverData.metrics.currentMap,
-            image: `/maps/${serverData.metrics.currentMap
-              .toLowerCase()
-              .replace(/\s+/g, "-")}.jpg`,
-            timeRemaining: "45m", // This would come from the server
-          };
-        } else {
-          mapInfo.value = {
-            name: "Unknown",
-            image: "",
-            timeRemaining: "Unknown",
-          };
-        }
-
-        // Set player count
-        if (serverData.metrics.playerCount !== undefined) {
-          playerCount.value = {
-            current: serverData.metrics.playerCount,
-            max: serverData.metrics.maxPlayers || 64,
-          };
-        } else {
-          // Set demo player count
-          playerCount.value = {
-            current: Math.floor(Math.random() * 50) + 10,
-            max: 64,
-          };
-        }
-      } else {
-        // Set demo metrics
-        cpuUsage.value = Math.floor(Math.random() * 60) + 10;
-        memoryUsage.value = Math.floor(Math.random() * 70) + 20;
-        diskUsage.value = Math.floor(Math.random() * 50) + 30;
-
-        // Calculate uptime (demo)
-        const hours = Math.floor(Math.random() * 72);
-        const minutes = Math.floor(Math.random() * 60);
-        uptime.value = `${hours}h ${minutes}m`;
-
-        // Set map info (demo)
-        mapInfo.value = {
-          name: "Goose Bay",
-          image: "/maps/goose-bay.jpg",
-          timeRemaining: "45m",
-        };
-
-        // Set player count (demo)
-        playerCount.value = {
-          current: Math.floor(Math.random() * 50) + 10,
-          max: 64,
-        };
-      }
+      serverInfo.value = serverData;
     }
   } catch (err: any) {
     error.value =
@@ -184,33 +147,26 @@ async function fetchServerInfo() {
   }
 }
 
-// Fetch recent audit logs
-async function fetchRecentLogs() {
+// Fetch teams and squads data
+async function fetchTeamsData() {
+  loadingTeams.value = true;
+  errorTeams.value = null;
+
   const runtimeConfig = useRuntimeConfig();
   const cookieToken = useCookie(
     runtimeConfig.public.sessionCookieName as string
   );
   const token = cookieToken.value;
 
-  if (!token) return;
+  if (!token) {
+    errorTeams.value = "Authentication required";
+    loadingTeams.value = false;
+    return;
+  }
 
   try {
-    interface AuditLogsResponse {
-      message: string;
-      code: number;
-      data: {
-        logs: any[];
-        pagination: {
-          total: number;
-          pages: number;
-          page: number;
-          limit: number;
-        };
-      };
-    }
-
-    const { data: responseData } = await useFetch<AuditLogsResponse>(
-      `${runtimeConfig.public.backendApi}/servers/${serverId}/audit-logs?limit=5`,
+    const { data, error: fetchError } = await useFetch<TeamsResponse>(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/server-population`,
       {
         method: "GET",
         headers: {
@@ -219,208 +175,213 @@ async function fetchRecentLogs() {
       }
     );
 
-    if (responseData.value && responseData.value.data) {
-      recentLogs.value = responseData.value.data.logs || [];
-    }
-  } catch (err) {
-    console.error("Failed to fetch recent logs:", err);
-  }
-}
-
-// Fetch recent players
-async function fetchRecentPlayers() {
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) return;
-
-  try {
-    interface PlayersResponse {
-      message: string;
-      code: number;
-      data: {
-        players: any[];
-        pagination?: {
-          total: number;
-          pages: number;
-          page: number;
-          limit: number;
-        };
-      };
+    if (fetchError.value) {
+      throw new Error(fetchError.value.message || "Failed to fetch teams data");
     }
 
-    const { data: responseData } = await useFetch<PlayersResponse>(
-      `${runtimeConfig.public.backendApi}/servers/${serverId}/players/recent?limit=5`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+    if (data.value && data.value.data) {
+      teamsData.value = data.value.data.teams || [];
+
+      // Update player count based on actual data
+      if (teamsData.value.length > 0) {
+        const totalPlayers = teamsData.value.reduce((total, team) => {
+          return total + getTeamPlayerCount(team);
+        }, 0);
+
+        playerCount.value.current = totalPlayers;
       }
-    );
-
-    if (responseData.value && responseData.value.data) {
-      recentPlayers.value = responseData.value.data.players || [];
-    } else {
-      // Demo data if API doesn't return anything
-      recentPlayers.value = [
-        {
-          id: "1",
-          name: "Player1",
-          squad: "Alpha",
-          team: "US",
-          joinTime: new Date().toISOString(),
-        },
-        {
-          id: "2",
-          name: "Player2",
-          squad: "Bravo",
-          team: "RU",
-          joinTime: new Date().toISOString(),
-        },
-        {
-          id: "3",
-          name: "Player3",
-          squad: "Charlie",
-          team: "US",
-          joinTime: new Date().toISOString(),
-        },
-        {
-          id: "4",
-          name: "Player4",
-          squad: "Delta",
-          team: "RU",
-          joinTime: new Date().toISOString(),
-        },
-        {
-          id: "5",
-          name: "Player5",
-          squad: "Echo",
-          team: "US",
-          joinTime: new Date().toISOString(),
-        },
-      ];
     }
-  } catch (err) {
-    console.error("Failed to fetch recent players:", err);
-    // Demo data if API fails
-    recentPlayers.value = [
-      {
-        id: "1",
-        name: "Player1",
-        squad: "Alpha",
-        team: "US",
-        joinTime: new Date().toISOString(),
-      },
-      {
-        id: "2",
-        name: "Player2",
-        squad: "Bravo",
-        team: "RU",
-        joinTime: new Date().toISOString(),
-      },
-      {
-        id: "3",
-        name: "Player3",
-        squad: "Charlie",
-        team: "US",
-        joinTime: new Date().toISOString(),
-      },
-      {
-        id: "4",
-        name: "Player4",
-        squad: "Delta",
-        team: "RU",
-        joinTime: new Date().toISOString(),
-      },
-      {
-        id: "5",
-        name: "Player5",
-        squad: "Echo",
-        team: "US",
-        joinTime: new Date().toISOString(),
-      },
-    ];
+  } catch (err: any) {
+    errorTeams.value =
+      err.message || "An error occurred while fetching teams data";
+    console.error(err);
+  } finally {
+    loadingTeams.value = false;
   }
 }
 
-// Format date
-function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleString();
+// Function to get player count in a team
+function getTeamPlayerCount(team: Team): number {
+  let count = team.players.length; // Unassigned players
+
+  // Add players in squads
+  team.squads.forEach((squad) => {
+    count += squad.players.length;
+  });
+
+  return count;
 }
 
-// Get badge color based on server status
-function getStatusBadgeColor(status: string): string {
-  const statusColors: Record<string, string> = {
-    online: "bg-green-50 text-green-700 ring-green-600/20",
-    offline: "bg-red-50 text-red-700 ring-red-600/20",
-    restarting: "bg-yellow-50 text-yellow-700 ring-yellow-600/20",
-  };
+// Get all connected players from teams data
+const connectedPlayers = computed(() => {
+  if (teamsData.value.length === 0) return [];
 
-  return statusColors[status] || "bg-gray-50 text-gray-700 ring-gray-600/20";
-}
+  const allPlayers: Player[] = [];
 
-// Get badge color based on action type
-function getActionBadgeColor(actionType: string): string {
-  const actionColors: Record<string, string> = {
-    login: "bg-green-50 text-green-700 ring-green-600/20",
-    logout: "bg-gray-50 text-gray-700 ring-gray-600/20",
-    server_create: "bg-blue-50 text-blue-700 ring-blue-600/20",
-    server_update: "bg-yellow-50 text-yellow-700 ring-yellow-600/20",
-    server_delete: "bg-red-50 text-red-700 ring-red-600/20",
-    rcon_command: "bg-purple-50 text-purple-700 ring-purple-600/20",
-    ban_add: "bg-red-50 text-red-700 ring-red-600/20",
-    ban_remove: "bg-green-50 text-green-700 ring-green-600/20",
-    admin_add: "bg-blue-50 text-blue-700 ring-blue-600/20",
-    admin_remove: "bg-red-50 text-red-700 ring-red-600/20",
-    role_add: "bg-blue-50 text-blue-700 ring-blue-600/20",
-    role_remove: "bg-red-50 text-red-700 ring-red-600/20",
-  };
+  teamsData.value.forEach((team) => {
+    // Add unassigned players
+    team.players.forEach((player) => {
+      allPlayers.push({
+        ...player,
+        team: team.name,
+        squad: "Unassigned",
+      });
+    });
 
-  return (
-    actionColors[actionType] || "bg-gray-50 text-gray-700 ring-gray-600/20"
-  );
-}
+    // Add players in squads
+    team.squads.forEach((squad) => {
+      squad.players.forEach((player) => {
+        allPlayers.push({
+          ...player,
+          team: team.name,
+          squad: squad.name,
+        });
+      });
+    });
+  });
 
-// Format action type for display
-function formatActionType(actionType: string): string {
-  return actionType
-    .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-// Server control functions
-function startServer() {
-  serverStatus.value = "restarting";
-  setTimeout(() => {
-    serverStatus.value = "online";
-  }, 3000);
-}
-
-function stopServer() {
-  serverStatus.value = "restarting";
-  setTimeout(() => {
-    serverStatus.value = "offline";
-  }, 3000);
-}
-
-function restartServer() {
-  serverStatus.value = "restarting";
-  setTimeout(() => {
-    serverStatus.value = "online";
-  }, 3000);
-}
-
-// Setup initial data load
-onMounted(() => {
-  fetchServerInfo();
-  fetchRecentLogs();
-  fetchRecentPlayers();
+  return allPlayers;
 });
+
+// Fetch available layers
+async function fetchAvailableLayers() {
+  loadingLayers.value = true;
+  
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const token = cookieToken.value;
+
+  if (!token) {
+    toast({
+      title: "Error",
+      description: "Authentication required",
+      variant: "destructive",
+    });
+    loadingLayers.value = false;
+    return;
+  }
+
+  try {
+    interface LayersResponse {
+      data: {
+        layers: { name: string; mod: string; isVanilla: boolean }[];
+      };
+    }
+
+    const { data: responseData, error: fetchError } = await useFetch<LayersResponse>(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/available-layers`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      throw new Error(fetchError.value.message || "Failed to fetch available layers");
+    }
+
+    if (responseData.value && responseData.value.data) {
+      availableLayers.value = responseData.value.data.layers || [];
+      
+      // Set current layer as default selected
+      if (serverInfo.value?.metrics?.current?.map) {
+        selectedLayer.value = `${serverInfo.value.metrics.current.map}`;
+      }
+    }
+  } catch (err: any) {
+    toast({
+      title: "Error",
+      description: err.message || "Failed to fetch available layers",
+      variant: "destructive",
+    });
+    console.error(err);
+  } finally {
+    loadingLayers.value = false;
+  }
+}
+
+// Change server layer
+async function changeServerLayer() {
+  if (!selectedLayer.value) {
+    toast({
+      title: "Error",
+      description: "Please select a layer",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  changingLayer.value = true;
+  
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const token = cookieToken.value;
+
+  if (!token) {
+    toast({
+      title: "Error",
+      description: "Authentication required",
+      variant: "destructive",
+    });
+    changingLayer.value = false;
+    return;
+  }
+
+  try {
+    interface LayerChangeResponse {
+      data: {
+        success: boolean;
+        message?: string;
+      };
+    }
+
+    const { data: responseData, error: fetchError } = await useFetch<LayerChangeResponse>(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: {
+          command: `AdminChangeLayer ${selectedLayer.value}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      throw new Error(fetchError.value.message || "Failed to change layer");
+    }
+
+    toast({
+      title: "Success",
+      description: "Layer change initiated successfully",
+    });
+    
+    // Close dialog and refresh server info
+    showMapChangeDialog.value = false;
+    fetchServerInfo();
+  } catch (err: any) {
+    toast({
+      title: "Error",
+      description: err.message || "Failed to change layer",
+      variant: "destructive",
+    });
+    console.error(err);
+  } finally {
+    changingLayer.value = false;
+  }
+}
+
+// Open layer change dialog
+function openMapChangeDialog() {
+  showMapChangeDialog.value = true;
+  fetchAvailableLayers();
+}
+
+fetchServerInfo();
+fetchTeamsData();
 </script>
 
 <template>
@@ -428,13 +389,6 @@ onMounted(() => {
     <div class="flex justify-between items-center mb-4">
       <h1 class="text-2xl font-bold">Server Dashboard</h1>
       <div class="flex items-center space-x-2">
-        <!-- TODO: Make Dropdown for server status, showing server ping, and status for game and rcon ports-->
-        <!-- <Badge 
-          variant="outline" 
-          :class="getStatusBadgeColor(serverStatus)"
-        >
-          {{ serverStatus.charAt(0).toUpperCase() + serverStatus.slice(1) }}
-        </Badge> -->
         <Button @click="fetchServerInfo" :disabled="loading">
           {{ loading ? "Refreshing..." : "Refresh" }}
         </Button>
@@ -454,12 +408,9 @@ onMounted(() => {
 
     <div v-else>
       <Tabs v-model="activeTab" class="w-full">
-        <!-- <TabsList class="grid w-full grid-cols-2 md:grid-cols-4"> -->
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <!-- <TabsTrigger value="performance">Performance</TabsTrigger> -->
           <TabsTrigger value="players">Players</TabsTrigger>
-          <!-- <TabsTrigger value="activity">Activity</TabsTrigger> -->
         </TabsList>
 
         <!-- Overview Tab -->
@@ -475,76 +426,29 @@ onMounted(() => {
                   <div class="flex justify-between">
                     <span class="text-sm font-medium">Name:</span>
                     <span class="text-sm">{{
-                      serverInfo?.name || "Unknown"
+                      serverInfo?.server?.name || "Unknown"
                     }}</span>
                   </div>
                   <div class="flex justify-between">
                     <span class="text-sm font-medium">IP Address:</span>
                     <span class="text-sm">{{
-                      serverInfo?.ip_address || "Unknown"
+                      serverInfo?.server?.ip_address || "Unknown"
                     }}</span>
                   </div>
                   <div class="flex justify-between">
                     <span class="text-sm font-medium">Game Port:</span>
                     <span class="text-sm">{{
-                      serverInfo?.game_port || "Unknown"
+                      serverInfo?.server?.game_port || "Unknown"
                     }}</span>
                   </div>
                   <div class="flex justify-between">
                     <span class="text-sm font-medium">RCON Port:</span>
                     <span class="text-sm">{{
-                      serverInfo?.rcon_port || "Unknown"
+                      serverInfo?.server?.rcon_port || "Unknown"
                     }}</span>
                   </div>
-                  <!-- <div class="flex justify-between">
-                    <span class="text-sm font-medium">Status:</span>
-                    <Badge
-                      variant="outline"
-                      :class="getStatusBadgeColor(serverStatus)"
-                    >
-                      {{
-                        serverStatus.charAt(0).toUpperCase() +
-                        serverStatus.slice(1)
-                      }}
-                    </Badge>
-                  </div>
-                  <div class="flex justify-between">
-                    <span class="text-sm font-medium">Uptime:</span>
-                    <span class="text-sm">{{ uptime }}</span>
-                  </div> -->
                 </div>
               </CardContent>
-              <!-- <CardFooter>
-                <div class="flex space-x-2 w-full">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="flex-1"
-                    :disabled="serverStatus === 'online'"
-                    @click="startServer"
-                  >
-                    Start
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="flex-1"
-                    :disabled="serverStatus === 'offline'"
-                    @click="stopServer"
-                  >
-                    Stop
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="flex-1"
-                    :disabled="serverStatus === 'offline'"
-                    @click="restartServer"
-                  >
-                    Restart
-                  </Button>
-                </div>
-              </CardFooter> -->
             </Card>
 
             <!-- Current Map Card -->
@@ -563,19 +467,26 @@ onMounted(() => {
                       Map Preview
                     </div>
                   </div>
-                  <h3 class="text-lg font-medium">{{ mapInfo.name }}</h3>
+                  <h3 class="text-lg font-medium">
+                    {{ serverInfo.metrics?.current?.map }}
+                    {{
+                      serverInfo.metrics?.next
+                        ? `-> ${serverInfo.metrics?.next?.map}`
+                        : ""
+                    }}
+                  </h3>
                   <!-- <p class="text-sm text-muted-foreground">
                     Time Remaining: {{ mapInfo.timeRemaining }}
                   </p> -->
                 </div>
               </CardContent>
-              <!-- <CardFooter>
+              <CardFooter>
                 <div class="w-full">
-                  <Button variant="outline" size="sm" class="w-full">
-                    Change Map
+                  <Button variant="outline" size="sm" class="w-full" @click="openMapChangeDialog">
+                    Change Layer
                   </Button>
                 </div>
-              </CardFooter> -->
+              </CardFooter>
             </Card>
 
             <!-- Player Count Card -->
@@ -586,10 +497,11 @@ onMounted(() => {
               <CardContent>
                 <div class="text-center">
                   <div class="text-3xl font-bold mb-2">
-                    {{ playerCount.current }} / {{ playerCount.max }}
+                    {{ serverInfo.metrics?.players?.total }} /
+                    {{ serverInfo.metrics?.players?.max }}
                   </div>
                   <Progress
-                    :value="(playerCount.current / playerCount.max) * 100"
+                    :value="(serverInfo.metrics?.players?.total / serverInfo.metrics?.players?.max) * 100"
                     class="h-2 mb-4"
                   />
                   <div class="grid grid-cols-2 gap-2">
@@ -598,13 +510,13 @@ onMounted(() => {
                         Team 1
                       </div>
                       <div class="text-xl font-bold text-blue-800">
-                        {{ Math.floor(playerCount.current / 2) }}
+                        {{ serverInfo.metrics?.players?.teams?.[1] }}
                       </div>
                     </div>
                     <div class="bg-red-50 p-2 rounded-md">
                       <div class="text-sm font-medium text-red-700">Team 2</div>
                       <div class="text-xl font-bold text-red-800">
-                        {{ Math.ceil(playerCount.current / 2) }}
+                        {{ serverInfo.metrics?.players?.teams?.[2] }}
                       </div>
                     </div>
                   </div>
@@ -681,67 +593,6 @@ onMounted(() => {
           </Card>
         </TabsContent>
 
-        <!-- Performance Tab -->
-        <TabsContent value="performance">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <!-- CPU Usage Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>CPU Usage</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div class="text-center">
-                  <div class="text-3xl font-bold mb-2">{{ cpuUsage }}%</div>
-                  <Progress :value="cpuUsage" class="h-2" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <!-- Memory Usage Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>Memory Usage</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div class="text-center">
-                  <div class="text-3xl font-bold mb-2">{{ memoryUsage }}%</div>
-                  <Progress :value="memoryUsage" class="h-2" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <!-- Disk Usage Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>Disk Usage</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div class="text-center">
-                  <div class="text-3xl font-bold mb-2">{{ diskUsage }}%</div>
-                  <Progress :value="diskUsage" class="h-2" />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <!-- Performance History Card -->
-          <Card>
-            <CardHeader>
-              <CardTitle>Performance History</CardTitle>
-              <CardDescription>Server performance over time</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div
-                class="h-64 flex items-center justify-center bg-muted rounded-md"
-              >
-                <p class="text-muted-foreground">
-                  Performance chart will be displayed here
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         <!-- Players Tab -->
         <TabsContent value="players">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -752,7 +603,27 @@ onMounted(() => {
                 <CardDescription>Currently online players</CardDescription>
               </CardHeader>
               <CardContent>
-                <Table>
+                <div
+                  v-if="loadingTeams && connectedPlayers.length === 0"
+                  class="text-center py-4"
+                >
+                  <div
+                    class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
+                  ></div>
+                  <p class="text-sm">Loading players...</p>
+                </div>
+                <div v-else-if="errorTeams" class="text-red-500 text-sm py-2">
+                  {{ errorTeams }}
+                </div>
+                <div
+                  v-else-if="connectedPlayers.length === 0"
+                  class="text-center py-4"
+                >
+                  <p class="text-sm text-muted-foreground">
+                    No players connected
+                  </p>
+                </div>
+                <Table v-else>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Name</TableHead>
@@ -762,8 +633,20 @@ onMounted(() => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    <TableRow v-for="player in recentPlayers" :key="player.id">
-                      <TableCell>{{ player.name }}</TableCell>
+                    <TableRow
+                      v-for="player in connectedPlayers.slice(0, 5)"
+                      :key="player.steamId"
+                    >
+                      <TableCell>
+                        <div class="flex items-center">
+                          <span
+                            v-if="player.isSquadLeader"
+                            class="mr-1 text-yellow-500"
+                            >★</span
+                          >
+                          {{ player.name }}
+                        </div>
+                      </TableCell>
                       <TableCell>{{ player.squad }}</TableCell>
                       <TableCell>{{ player.team }}</TableCell>
                       <TableCell>
@@ -794,62 +677,72 @@ onMounted(() => {
                 >
               </CardHeader>
               <CardContent>
-                <div class="space-y-4">
+                <div
+                  v-if="loadingTeams && teamsData.length === 0"
+                  class="text-center py-4"
+                >
+                  <div
+                    class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
+                  ></div>
+                  <p class="text-sm">Loading teams data...</p>
+                </div>
+                <div v-else-if="errorTeams" class="text-red-500 text-sm py-2">
+                  {{ errorTeams }}
+                </div>
+                <div
+                  v-else-if="teamsData.length === 0"
+                  class="text-center py-4"
+                >
+                  <p class="text-sm text-muted-foreground">
+                    No teams data available
+                  </p>
+                </div>
+                <div v-else class="space-y-4">
                   <div>
                     <h3 class="text-sm font-medium mb-2">Team Balance</h3>
                     <div class="flex h-4 mb-2">
                       <div
-                        class="bg-blue-500 rounded-l-full"
+                        v-for="(team, index) in teamsData"
+                        :key="team.id"
+                        class="h-full"
+                        :class="
+                          index === 0
+                            ? 'bg-blue-500 rounded-l-full'
+                            : 'bg-red-500 rounded-r-full'
+                        "
                         :style="`width: ${
-                          (Math.floor(playerCount.current / 2) /
-                            playerCount.current) *
-                          100
-                        }%`"
-                      ></div>
-                      <div
-                        class="bg-red-500 rounded-r-full"
-                        :style="`width: ${
-                          (Math.ceil(playerCount.current / 2) /
-                            playerCount.current) *
-                          100
+                          (serverInfo.metrics?.players?.teams?.[team.id] / serverInfo.metrics?.players?.max) * 100
                         }%`"
                       ></div>
                     </div>
                     <div class="flex justify-between text-xs">
-                      <span
-                        >Team 1: {{ Math.floor(playerCount.current / 2) }}</span
-                      >
-                      <span
-                        >Team 2: {{ Math.ceil(playerCount.current / 2) }}</span
-                      >
+                      <span v-for="team in teamsData" :key="team.id">
+                        {{ team.name }}: {{ serverInfo.metrics?.players?.teams?.[team.id] }}
+                      </span>
                     </div>
                   </div>
 
                   <div>
                     <h3 class="text-sm font-medium mb-2">Squad Distribution</h3>
                     <div class="space-y-2">
-                      <div
-                        v-for="(squad, index) in [
-                          'Alpha',
-                          'Bravo',
-                          'Charlie',
-                          'Delta',
-                          'Echo',
-                        ]"
-                        :key="squad"
-                      >
-                        <div class="flex justify-between text-xs mb-1">
-                          <span>{{ squad }}</span>
-                          <span
-                            >{{ Math.floor(Math.random() * 5) + 1 }} / 9</span
-                          >
+                      <div v-for="team in teamsData" :key="team.id">
+                        <h4 class="text-xs font-medium mb-1">
+                          {{ team.name }}
+                        </h4>
+                        <div
+                          v-for="squad in team.squads"
+                          :key="squad.id"
+                          class="mb-2"
+                        >
+                          <div class="flex justify-between text-xs mb-1">
+                            <span>{{ squad.name }}</span>
+                            <span>{{ squad.players.length }} / 9</span>
+                          </div>
+                          <Progress
+                            :value="(squad.players.length / 9) * 100"
+                            class="h-2"
+                          />
                         </div>
-                        <Progress
-                          :value="
-                            ((Math.floor(Math.random() * 5) + 1) / 9) * 100
-                          "
-                          class="h-2"
-                        />
                       </div>
                     </div>
                   </div>
@@ -868,107 +761,57 @@ onMounted(() => {
             </Card>
           </div>
         </TabsContent>
-
-        <!-- Activity Tab -->
-        <TabsContent value="activity">
-          <div class="grid grid-cols-1 gap-4">
-            <!-- Recent Activity Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Activity</CardTitle>
-                <CardDescription>Latest actions on this server</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Time</TableHead>
-                      <TableHead>User</TableHead>
-                      <TableHead>Action</TableHead>
-                      <TableHead>Details</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow
-                      v-for="(log, index) in recentLogs"
-                      :key="log.id || index"
-                    >
-                      <TableCell>{{
-                        formatDate(log.createdAt || log.timestamp)
-                      }}</TableCell>
-                      <TableCell>{{ log.username || "System" }}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          :class="
-                            getActionBadgeColor(log.actionType || log.action)
-                          "
-                        >
-                          {{ formatActionType(log.actionType || log.action) }}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div class="max-w-xs truncate">
-                          {{ log.actionDetails || JSON.stringify(log.changes) }}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    <!-- Demo data if no logs are available -->
-                    <TableRow
-                      v-if="recentLogs.length === 0"
-                      v-for="i in 5"
-                      :key="i"
-                    >
-                      <TableCell>{{
-                        formatDate(new Date().toISOString())
-                      }}</TableCell>
-                      <TableCell>{{
-                        i % 2 === 0 ? "Admin" : "System"
-                      }}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          :class="
-                            getActionBadgeColor(
-                              i % 2 === 0 ? 'rcon_command' : 'server_update'
-                            )
-                          "
-                        >
-                          {{
-                            formatActionType(
-                              i % 2 === 0 ? "rcon_command" : "server_update"
-                            )
-                          }}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div class="max-w-xs truncate">
-                          {{
-                            i % 2 === 0
-                              ? "Executed RCON command"
-                              : "Updated server settings"
-                          }}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </CardContent>
-              <CardFooter>
-                <NuxtLink
-                  :to="`/servers/${serverId}/audit-logs`"
-                  class="w-full"
-                >
-                  <Button variant="outline" size="sm" class="w-full">
-                    View All Activity
-                  </Button>
-                </NuxtLink>
-              </CardFooter>
-            </Card>
-          </div>
-        </TabsContent>
       </Tabs>
     </div>
+
+    <!-- Map Change Dialog -->
+    <Dialog v-model:open="showMapChangeDialog">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Change Server Layer</DialogTitle>
+          <DialogDescription>
+            Select a new layer to change to. This will immediately change the layer on the server.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div class="py-4">
+          <div v-if="loadingLayers" class="text-center py-4">
+            <div class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"></div>
+            <p class="text-sm">Loading available layers...</p>
+          </div>
+          <div v-else-if="availableLayers.length === 0" class="text-center py-4">
+            <p class="text-sm text-muted-foreground">No layers available</p>
+          </div>
+          <div v-else>
+            <div class="space-y-4">
+              <div class="space-y-2">
+                <label for="layer-select" class="text-sm font-medium">Select Layer</label>
+                <Select v-model="selectedLayer">
+                  <SelectTrigger id="layer-select" class="w-full">
+                    <SelectValue placeholder="Select a layer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="layer in availableLayers" :key="layer.name" :value="layer.name">
+                      {{ layer.name }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <DialogFooter>
+          <Button variant="outline" @click="showMapChangeDialog = false">Cancel</Button>
+          <Button 
+            @click="changeServerLayer" 
+            :disabled="loadingLayers || changingLayer || !selectedLayer"
+          >
+            {{ changingLayer ? "Changing..." : "Change Layer" }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
