@@ -47,20 +47,6 @@ steps:
         event: [push, tag]
         path: *when_path
 
-  build-web:
-    image: *node_image
-    commands:
-      - make build-web
-    when:
-      - event: pull_request
-        evaluate: 'CI_COMMIT_PULL_REQUEST_LABELS contains "build_pr_images"'
-      - event: pull_request
-        path: *when_path
-      - branch:
-          - ${CI_REPO_DEFAULT_BRANCH}
-        event: [ push, tag ]
-        path: *when_path
-
   publish-preview:
     depends_on:
       - vendor
