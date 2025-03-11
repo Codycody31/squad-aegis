@@ -4,8 +4,9 @@ steps:
     pull: true
     settings:
       release_branch: ${CI_REPO_DEFAULT_BRANCH}
+      forge_type: github
       git_email: me@codycody31.dev
-      forge_token:
+      github_token:
         from_secret: github_token
 
 when:
