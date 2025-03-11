@@ -50,7 +50,6 @@ steps:
   publish-preview:
     depends_on:
       - vendor
-      - build-web
     image: *buildx_plugin
     settings:
       repo: insidiousfiddler/squad-aegis
@@ -66,7 +65,6 @@ steps:
   build-dryrun:
     depends_on:
       - vendor
-      - build-web
     image: *buildx_plugin
     settings:
       dry_run: true
@@ -81,8 +79,6 @@ steps:
         path: *when_path
 
   publish-next:
-    depends_on:
-      - build-web
     image: *buildx_plugin
     settings:
       repo: *publish_repos
@@ -97,8 +93,6 @@ steps:
       path: *when_path
 
   release:
-    depends_on:
-      - build-web
     image: *buildx_plugin
     settings:
       repo: *publish_repos
