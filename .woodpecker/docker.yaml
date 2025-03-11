@@ -12,7 +12,7 @@ variables:
         username: 'robot-insidiousfiddler+woodpecker-ci'
         password:
           from_secret: harbor_password
-  - &publish_repos "insidiousfiddler/squad-aegis"
+  - &publish_repos "registry.vmgware.dev/insidiousfiddler/squad-aegis"
   - path: &when_path
       - 'web/**'
       # go source code
