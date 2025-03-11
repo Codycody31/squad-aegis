@@ -9,10 +9,9 @@ variables:
   # vars used on push / tag events only
   - publish_logins: &publish_logins 
       - registry: registry.vmgware.dev
-        username:
-          from_secret: docker_username
+        username: 'robot-insidiousfiddler+woodpecker-ci'
         password:
-          from_secret: docker_password
+          from_secret: harbor_password
   - &publish_repos "insidiousfiddler/squad-aegis"
   - path: &when_path
       - 'web/**'
