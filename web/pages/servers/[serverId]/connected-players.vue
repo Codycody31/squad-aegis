@@ -6,9 +6,27 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Badge } from "~/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogDescription, 
+  DialogFooter, 
+  DialogHeader, 
+  DialogTitle,
+  DialogTrigger
+} from "~/components/ui/dialog";
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from "~/components/ui/dropdown-menu";
+import { Textarea } from "~/components/ui/textarea";
+import { useToast } from "~/components/ui/toast";
 
 const route = useRoute();
 const serverId = route.params.serverId;
+const { toast } = useToast();
 
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -19,6 +37,15 @@ const copiedId = ref<string | null>(null);
 const filterTeam = ref<string>("all");
 const filterSquad = ref<string>("all");
 const filterRole = ref<string>("all");
+
+// Action dialog state
+const showActionDialog = ref(false);
+const actionType = ref<'kick' | 'ban' | 'warn' | 'move' | null>(null);
+const selectedPlayer = ref<Player | null>(null);
+const actionReason = ref("");
+const actionDuration = ref(""); // For ban duration
+const targetTeamId = ref<number | null>(null); // For move action
+const isActionLoading = ref(false);
 
 interface Player {
   playerId: number;
@@ -86,6 +113,13 @@ const roles = computed(() => {
   });
   
   return Array.from(uniqueRoles) as string[];
+});
+
+// Get available teams for move action (excluding player's current team)
+const availableTeams = computed(() => {
+  if (!selectedPlayer.value) return [];
+  
+  return teams.value.filter(team => team.id !== selectedPlayer.value?.teamId);
 });
 
 // Computed property for filtered players
@@ -244,6 +278,146 @@ function resetFilters() {
   filterSquad.value = "all";
   filterRole.value = "all";
 }
+
+// Open action dialog
+function openActionDialog(player: Player, action: 'kick' | 'ban' | 'warn' | 'move') {
+  selectedPlayer.value = player;
+  actionType.value = action;
+  actionReason.value = "";
+  actionDuration.value = action === 'ban' ? "1" : "";
+  targetTeamId.value = action === 'move' ? (availableTeams.value.length > 0 ? availableTeams.value[0].id : null) : null;
+  showActionDialog.value = true;
+}
+
+// Close action dialog
+function closeActionDialog() {
+  showActionDialog.value = false;
+  selectedPlayer.value = null;
+  actionType.value = null;
+  actionReason.value = "";
+  actionDuration.value = "";
+  targetTeamId.value = null;
+}
+
+// Get action title
+function getActionTitle() {
+  if (!actionType.value || !selectedPlayer.value) return "";
+  
+  const actionMap = {
+    kick: "Kick",
+    ban: "Ban",
+    warn: "Warn",
+    move: "Move"
+  };
+  
+  return `${actionMap[actionType.value]} ${selectedPlayer.value.name}`;
+}
+
+// Execute player action
+async function executePlayerAction() {
+  if (!actionType.value || !selectedPlayer.value) return;
+  
+  isActionLoading.value = true;
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const token = cookieToken.value;
+  
+  if (!token) {
+    toast({
+      title: "Authentication Error",
+      description: "You must be logged in to perform this action",
+      variant: "destructive"
+    });
+    isActionLoading.value = false;
+    closeActionDialog();
+    return;
+  }
+  
+  try {
+    let endpoint = "";
+    let payload: any = {};
+    
+    switch (actionType.value) {
+      case 'kick':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/kick-player`;
+        payload = {
+          steamId: selectedPlayer.value.steamId,
+          reason: actionReason.value
+        };
+        break;
+      case 'ban':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`;
+        payload = {
+          steamId: selectedPlayer.value.steamId,
+          reason: actionReason.value,
+          duration: actionDuration.value
+        };
+        break;
+      case 'warn':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/warn-player`;
+        payload = {
+          steamId: selectedPlayer.value.steamId,
+          message: actionReason.value
+        };
+        break;
+      case 'move':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/move-player`;
+        payload = {
+          steamId: selectedPlayer.value.steamId
+        };
+        break;
+    }
+    
+    const { data, error: fetchError } = await useFetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    
+    if (fetchError.value) {
+      throw new Error(fetchError.value.message || `Failed to ${actionType.value} player`);
+    }
+    
+    // Show success message
+    let successMessage = `Player ${selectedPlayer.value.name} has been `;
+    if (actionType.value === 'move') {
+      successMessage += 'moved';
+    } else if (actionType.value === 'ban') {
+      successMessage += 'banned';
+      if (actionDuration.value) {
+        const days = actionDuration.value;
+        successMessage += ` for ${days} ${days === 1 ? 'day' : 'days'}`;
+      } else {
+        successMessage += ' permanently';
+      }
+    } else {
+      successMessage += actionType.value + 'ed';
+    }
+    
+    toast({
+      title: "Success",
+      description: successMessage,
+      variant: "default"
+    });
+    
+    // Refresh player list
+    fetchConnectedPlayers();
+    
+  } catch (err: any) {
+    console.error(err);
+    toast({
+      title: "Error",
+      description: err.message || `Failed to ${actionType.value} player`,
+      variant: "destructive"
+    });
+  } finally {
+    isActionLoading.value = false;
+    closeActionDialog();
+  }
+}
 </script>
 
 <template>
@@ -391,14 +565,43 @@ function resetFilters() {
                 </TableCell>
                 <TableCell>{{ player.role || 'Unknown' }}</TableCell>
                 <TableCell class="text-right">
-                  <Button variant="outline" size="sm" class="h-8 w-8 p-0" @click="copyToClipboard(player.steamId)">
-                    <span class="sr-only">Copy Steam ID</span>
-                    <Icon 
-                      :name="copiedId === player.steamId ? 'lucide:check' : 'lucide:clipboard-copy'" 
-                      class="h-4 w-4" 
-                      :class="{ 'text-green-500': copiedId === player.steamId }"
-                    />
-                  </Button>
+                  <div class="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" class="h-8 w-8 p-0" @click="copyToClipboard(player.steamId)">
+                      <span class="sr-only">Copy Steam ID</span>
+                      <Icon 
+                        :name="copiedId === player.steamId ? 'lucide:check' : 'lucide:clipboard-copy'" 
+                        class="h-4 w-4" 
+                        :class="{ 'text-green-500': copiedId === player.steamId }"
+                      />
+                    </Button>
+                    
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" class="h-8 w-8 p-0">
+                          <span class="sr-only">Open menu</span>
+                          <Icon name="lucide:more-vertical" class="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem @click="openActionDialog(player, 'warn')">
+                          <Icon name="lucide:alert-triangle" class="mr-2 h-4 w-4 text-yellow-500" />
+                          <span>Warn Player</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @click="openActionDialog(player, 'move')">
+                          <Icon name="lucide:move" class="mr-2 h-4 w-4 text-blue-500" />
+                          <span>Move to Other Team</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @click="openActionDialog(player, 'kick')">
+                          <Icon name="lucide:log-out" class="mr-2 h-4 w-4 text-orange-500" />
+                          <span>Kick Player</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem @click="openActionDialog(player, 'ban')">
+                          <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
+                          <span>Ban Player</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -432,9 +635,80 @@ function resetFilters() {
         <div class="mt-4 text-sm text-muted-foreground">
           <p>This page shows players currently connected to the server. You can filter players by team, squad, role, or search for specific players.</p>
           <p class="mt-2">Squad leaders are marked with a star (★) next to their name.</p>
+          <p class="mt-2">You can warn, kick, ban, or move players using the actions menu.</p>
         </div>
       </CardContent>
     </Card>
+    
+    <!-- Action Dialog -->
+    <Dialog v-model:open="showActionDialog">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>{{ getActionTitle() }}</DialogTitle>
+          <DialogDescription>
+            <template v-if="actionType === 'kick'">
+              Kick this player from the server. They will be able to rejoin.
+            </template>
+            <template v-else-if="actionType === 'ban'">
+              Ban this player from the server for a specified duration.
+            </template>
+            <template v-else-if="actionType === 'warn'">
+              Send a warning message to this player.
+            </template>
+            <template v-else-if="actionType === 'move'">
+              Force this player to switch to another team.
+            </template>
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div class="grid gap-4 py-4">
+          <div v-if="actionType === 'ban'" class="grid grid-cols-4 items-center gap-4">
+            <label for="duration" class="text-right col-span-1">Duration</label>
+            <Input
+              id="duration"
+              v-model="actionDuration"
+              placeholder="7"
+              class="col-span-3"
+            />
+            <div class="col-span-1"></div>
+            <div class="text-xs text-muted-foreground col-span-3">
+              Ban duration in days. Use 0 for a permanent ban.
+            </div>
+          </div>
+        
+          
+          <div v-if="actionType !== 'move'" class="grid grid-cols-4 items-center gap-4">
+            <label for="reason" class="text-right col-span-1">
+              {{ actionType === 'warn' ? 'Message' : 'Reason' }}
+            </label>
+            <Textarea
+              id="reason"
+              v-model="actionReason"
+              :placeholder="actionType === 'warn' ? 'Warning message' : 'Reason for action'"
+              class="col-span-3"
+              rows="3"
+            />
+          </div>
+        </div>
+        
+        <DialogFooter>
+          <Button variant="outline" @click="closeActionDialog">Cancel</Button>
+          <Button 
+            :variant="actionType === 'warn' || actionType === 'move' ? 'default' : 'destructive'" 
+            @click="executePlayerAction"
+            :disabled="isActionLoading"
+          >
+            <span v-if="isActionLoading" class="mr-2">
+              <Icon name="lucide:loader-2" class="h-4 w-4 animate-spin" />
+            </span>
+            <template v-if="actionType === 'kick'">Kick Player</template>
+            <template v-else-if="actionType === 'ban'">Ban Player</template>
+            <template v-else-if="actionType === 'warn'">Send Warning</template>
+            <template v-else-if="actionType === 'move'">Move Player</template>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 

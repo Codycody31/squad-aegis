@@ -2,6 +2,8 @@
 export default defineNuxtConfig({
   compatibilityDate: "2024-11-01",
 
+  ssr: false,
+
   app: {
     buildAssetsDir: "/_static/",
     head: {
@@ -60,5 +62,9 @@ export default defineNuxtConfig({
 
   pinia: {
     storesDirs: ["./stores/**"],
+  },
+
+  icon: {
+    provider: "iconify",
   },
 });

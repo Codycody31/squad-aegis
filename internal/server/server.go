@@ -144,6 +144,11 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/bans", server.ServerBansList)
 				serverGroup.POST("/bans", server.ServerBansAdd)
 				serverGroup.DELETE("/bans/:banId", server.ServerBansRemove)
+
+				// Player action endpoints
+				serverGroup.POST("/rcon/kick-player", server.KickPlayer)
+				serverGroup.POST("/rcon/warn-player", server.WarnPlayer)
+				serverGroup.POST("/rcon/move-player", server.MovePlayer)
 			}
 		}
 

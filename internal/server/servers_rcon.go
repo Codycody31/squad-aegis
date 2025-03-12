@@ -13,6 +13,21 @@ import (
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
+// Request structs for player actions
+type KickPlayerRequest struct {
+	SteamId string `json:"steamId" binding:"required"`
+	Reason  string `json:"reason"`
+}
+
+type WarnPlayerRequest struct {
+	SteamId string `json:"steamId" binding:"required"`
+	Message string `json:"message" binding:"required"`
+}
+
+type MovePlayerRequest struct {
+	SteamId string `json:"steamId" binding:"required"`
+}
+
 // RconCommandList handles the listing of all commands that can be executed by the server
 func (s *Server) RconCommandList(c *gin.Context) {
 	var commandsList []commands.CommandInfo
@@ -47,7 +62,9 @@ func (s *Server) RconCommandAutocomplete(c *gin.Context) {
 func (s *Server) ServerRconExecute(c *gin.Context) {
 	user := s.getUserFromSession(c)
 
-	var request ServerRconExecuteRequest
+	var request struct {
+		Command string `json:"command" binding:"required"`
+	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
@@ -164,4 +181,133 @@ func (s *Server) ServerRconAvailableLayers(c *gin.Context) {
 	}
 
 	responses.Success(c, "Available layers fetched successfully", &gin.H{"layers": availableLayers})
+}
+
+// KickPlayer handles kicking a player from the server
+func (s *Server) KickPlayer(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	var request KickPlayerRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
+	if err != nil {
+		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
+		return
+	}
+	defer r.Close()
+
+	// Format the kick command
+	kickCommand := "AdminKick " + request.SteamId
+	if request.Reason != "" {
+		kickCommand += " " + request.Reason
+	}
+
+	response, err := r.Execute(kickCommand)
+	if err != nil {
+		responses.BadRequest(c, "Failed to kick player", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Player kicked successfully", &gin.H{"response": response})
+}
+
+// WarnPlayer handles sending a warning message to a player
+func (s *Server) WarnPlayer(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	var request WarnPlayerRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
+	if err != nil {
+		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
+		return
+	}
+	defer r.Close()
+
+	// Format the warning command
+	warnCommand := "AdminWarn " + request.SteamId + " " + request.Message
+
+	response, err := r.Execute(warnCommand)
+	if err != nil {
+		responses.BadRequest(c, "Failed to warn player", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Player warned successfully", &gin.H{"response": response})
+}
+
+// MovePlayer handles moving a player to a different team
+func (s *Server) MovePlayer(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	var request MovePlayerRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
+	if err != nil {
+		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
+		return
+	}
+	defer r.Close()
+
+	// Format the move command
+	moveCommand := "AdminForceTeamChange " + request.SteamId
+
+	response, err := r.Execute(moveCommand)
+	if err != nil {
+		responses.BadRequest(c, "Failed to move player", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Player moved successfully", &gin.H{"response": response})
 }

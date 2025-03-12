@@ -7,19 +7,48 @@ import serverNavigationItems from "@/navigation/server";
 import type { NavigationItem } from "~/types";
 
 const route = useRoute();
-let navigationItems = ref<NavigationItem[]>(rootNavigationItems)
+let navigationItems = ref<NavigationItem[]>(rootNavigationItems);
 
+// Function to process server navigation items with the current serverId
+const getServerNavItems = (serverId: string) => {
+  return serverNavigationItems.map(item => {
+    // Create a deep copy of the item to avoid modifying the original
+    const newItem = { ...item };
+    
+    // If the item has a 'to' property, ensure the serverId param is set
+    if (newItem.to && typeof newItem.to === 'object') {
+      newItem.to = {
+        ...newItem.to,
+        params: { 
+          ...newItem.to.params,
+          serverId 
+        }
+      };
+    }
+    
+    return newItem;
+  });
+};
+
+// Initialize navigation items
 if (route.params.serverId) {
-  navigationItems.value = [...rootNavigationItems, ...serverNavigationItems]
+  const serverId = Array.isArray(route.params.serverId) 
+    ? route.params.serverId[0] 
+    : route.params.serverId;
+  navigationItems.value = [...rootNavigationItems, ...getServerNavItems(serverId)];
 }
 
+// Update navigation items when route changes
 watch(route, () => {
   if (route.params.serverId) {
-    navigationItems.value = [...rootNavigationItems, ...serverNavigationItems]
+    const serverId = Array.isArray(route.params.serverId) 
+      ? route.params.serverId[0] 
+      : route.params.serverId;
+    navigationItems.value = [...rootNavigationItems, ...getServerNavItems(serverId)];
   } else {
-    navigationItems.value = rootNavigationItems
+    navigationItems.value = rootNavigationItems;
   }
-})
+});
 </script>
 
 <template>
