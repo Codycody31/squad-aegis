@@ -31,6 +31,7 @@ const { toast } = useToast();
 const loading = ref(true);
 const error = ref<string | null>(null);
 const connectedPlayers = ref<Player[]>([]);
+const teams = ref<Team[]>([]);
 const refreshInterval = ref<NodeJS.Timeout | null>(null);
 const searchQuery = ref("");
 const copiedId = ref<string | null>(null);
@@ -70,22 +71,6 @@ interface PlayersResponse {
   };
 }
 
-// Get unique teams from players
-const teams = computed(() => {
-  const uniqueTeams = new Map();
-  
-  connectedPlayers.value.forEach(player => {
-    if (!uniqueTeams.has(player.teamId)) {
-      uniqueTeams.set(player.teamId, {
-        id: player.teamId,
-        name: `Team ${player.teamId}`
-      });
-    }
-  });
-  
-  return Array.from(uniqueTeams.values());
-});
-
 // Get unique squads from players
 const squads = computed(() => {
   const uniqueSquads = new Map();
@@ -113,13 +98,6 @@ const roles = computed(() => {
   });
   
   return Array.from(uniqueRoles) as string[];
-});
-
-// Get available teams for move action (excluding player's current team)
-const availableTeams = computed(() => {
-  if (!selectedPlayer.value) return [];
-  
-  return teams.value.filter(team => team.id !== selectedPlayer.value?.teamId);
 });
 
 // Computed property for filtered players
@@ -192,6 +170,7 @@ async function fetchConnectedPlayers() {
 
     if (data.value && data.value.data && data.value.data.players) {
       connectedPlayers.value = data.value.data.players.onlinePlayers || [];
+      teams.value = data.value.data.teams || [];
       
       // Sort by team, then squad, then name
       connectedPlayers.value.sort((a, b) => {
@@ -227,28 +206,7 @@ function getSquadName(squadId: number | null): string {
   return squad ? squad.name : `Squad ${squadId}`;
 }
 
-// Get K/D ratio
-function getKDRatio(kills: number, deaths: number): string {
-  if (deaths === 0) return kills.toString();
-  return (kills / deaths).toFixed(2);
-}
-
-// Setup auto-refresh
-onMounted(() => {
-  fetchConnectedPlayers();
-  
-  // Refresh data every 30 seconds
-  refreshInterval.value = setInterval(() => {
-    fetchConnectedPlayers();
-  }, 30000);
-});
-
-// Clear interval on component unmount
-onUnmounted(() => {
-  if (refreshInterval.value) {
-    clearInterval(refreshInterval.value);
-  }
-});
+fetchConnectedPlayers();
 
 // Manual refresh function
 function refreshData() {
