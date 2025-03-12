@@ -3,15 +3,30 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/components/ui/dialog";
+import { useToast } from "~/components/ui/toast";
 
 const route = useRoute();
 const serverId = route.params.serverId;
+const { toast } = useToast();
 
 const loading = ref(true);
 const error = ref<string | null>(null);
 const teams = ref<Team[]>([]);
 const refreshInterval = ref<NodeJS.Timeout | null>(null);
 const activeTab = ref("team1");
+
+// Action dialog state
+const showRemoveDialog = ref(false);
+const selectedPlayer = ref<Player | null>(null);
+const isActionLoading = ref(false);
 
 interface Player {
   steamId: string;
@@ -49,7 +64,9 @@ async function fetchTeamsData() {
   error.value = null;
 
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
   const token = cookieToken.value;
 
   if (!token) {
@@ -75,7 +92,7 @@ async function fetchTeamsData() {
 
     if (data.value && data.value.data) {
       teams.value = data.value.data.teams || [];
-      
+
       // Set active tab to first team if available
       if (teams.value.length > 0 && !activeTab.value) {
         activeTab.value = `team${teams.value[0].id}`;
@@ -92,12 +109,12 @@ async function fetchTeamsData() {
 // Function to get player count in a team
 function getTeamPlayerCount(team: Team): number {
   let count = team.players.length; // Unassigned players
-  
+
   // Add players in squads
-  team.squads.forEach(squad => {
+  team.squads.forEach((squad) => {
     count += squad.players.length;
   });
-  
+
   return count;
 }
 
@@ -106,15 +123,15 @@ function getSquadLeaderName(squad: Squad): string {
   if (squad.leader) {
     return squad.leader.name;
   }
-  
-  const leader = squad.players.find(player => player.isSquadLeader);
+
+  const leader = squad.players.find((player) => player.isSquadLeader);
   return leader ? leader.name : "No Leader";
 }
 
 // Setup auto-refresh
 onMounted(() => {
   fetchTeamsData();
-  
+
   // Refresh data every 30 seconds
   refreshInterval.value = setInterval(() => {
     fetchTeamsData();
@@ -132,6 +149,80 @@ onUnmounted(() => {
 function refreshData() {
   fetchTeamsData();
 }
+
+// Function to open remove from squad dialog
+function openRemoveFromSquadDialog(player: Player) {
+  selectedPlayer.value = player;
+  showRemoveDialog.value = true;
+}
+
+// Function to close remove from squad dialog
+function closeRemoveDialog() {
+  showRemoveDialog.value = false;
+  selectedPlayer.value = null;
+}
+
+// Function to remove player from squad
+async function removeFromSquad() {
+  if (!selectedPlayer.value) return;
+
+  isActionLoading.value = true;
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
+  const token = cookieToken.value;
+
+  if (!token) {
+    toast({
+      title: "Authentication Error",
+      description: "You must be logged in to perform this action",
+      variant: "destructive",
+    });
+    isActionLoading.value = false;
+    closeRemoveDialog();
+    return;
+  }
+
+  try {
+    const endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
+    const command = `AdminRemovePlayerFromSquadById ${selectedPlayer.value.playerId}`;
+
+    const { data, error: fetchError } = await useFetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ command }),
+    });
+
+    if (fetchError.value) {
+      throw new Error(
+        fetchError.value.message || "Failed to remove player from squad"
+      );
+    }
+
+    toast({
+      title: "Success",
+      description: `Player ${selectedPlayer.value.name} has been removed from their squad`,
+      variant: "default",
+    });
+
+    // Refresh teams data
+    fetchTeamsData();
+  } catch (err: any) {
+    console.error(err);
+    toast({
+      title: "Error",
+      description: err.message || "Failed to remove player from squad",
+      variant: "destructive",
+    });
+  } finally {
+    isActionLoading.value = false;
+    closeRemoveDialog();
+  }
+}
 </script>
 
 <template>
@@ -148,7 +239,9 @@ function refreshData() {
     </div>
 
     <div v-if="loading && teams.length === 0" class="text-center py-8">
-      <div class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
+      <div
+        class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
+      ></div>
       <p>Loading teams data...</p>
     </div>
 
@@ -158,10 +251,15 @@ function refreshData() {
 
     <div v-else>
       <Tabs v-model="activeTab" class="w-full">
-        <TabsList class="grid" :style="{ 'grid-template-columns': `repeat(${teams.length}, minmax(0, 1fr))` }">
-          <TabsTrigger 
-            v-for="team in teams" 
-            :key="team.id" 
+        <TabsList
+          class="grid"
+          :style="{
+            'grid-template-columns': `repeat(${teams.length}, minmax(0, 1fr))`,
+          }"
+        >
+          <TabsTrigger
+            v-for="team in teams"
+            :key="team.id"
             :value="`team${team.id}`"
             class="team-tab"
           >
@@ -177,17 +275,27 @@ function refreshData() {
               </div>
 
               <!-- Squads Section -->
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                <Card v-for="squad in team.squads" :key="squad.id" :class="{ 'border-yellow-500': squad.locked }">
+              <div
+                class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6"
+              >
+                <Card
+                  v-for="squad in team.squads"
+                  :key="squad.id"
+                  :class="{ 'border-yellow-500': squad.locked }"
+                >
                   <CardHeader class="pb-2">
                     <CardTitle class="flex justify-between items-center">
                       <span>
                         Squad {{ squad.id }}: {{ squad.name }}
-                        <span v-if="squad.locked" class="text-yellow-500 ml-2">(Locked)</span>
+                        <span v-if="squad.locked" class="text-yellow-500 ml-2"
+                          >(Locked)</span
+                        >
                       </span>
                       <span class="text-sm">{{ squad.players.length }}/9</span>
                     </CardTitle>
-                    <div class="text-sm opacity-70">Leader: {{ getSquadLeaderName(squad) }}</div>
+                    <div class="text-sm opacity-70">
+                      Leader: {{ getSquadLeaderName(squad) }}
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <table class="w-full text-sm">
@@ -195,20 +303,42 @@ function refreshData() {
                         <tr class="border-b border-gray-700">
                           <th class="text-left py-1">Player</th>
                           <th class="text-left py-1">Role</th>
+                          <th class="text-right py-1">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr v-for="player in squad.players" :key="player.steamId" class="border-b border-gray-800">
+                        <tr
+                          v-for="player in squad.players"
+                          :key="player.steamId"
+                          class="border-b border-gray-800"
+                        >
                           <td class="py-1">
                             <div class="flex items-center">
-                              <span v-if="player.isSquadLeader" class="mr-1 text-yellow-500">★</span>
+                              <span
+                                v-if="player.isSquadLeader"
+                                class="mr-1 text-yellow-500"
+                                >★</span
+                              >
                               {{ player.name }}
                             </div>
                           </td>
-                          <td class="py-1">{{ player.role || 'Rifleman' }}</td>
+                          <td class="py-1">{{ player.role || "Rifleman" }}</td>
+                          <td class="py-1 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              class="h-8 w-8 p-0"
+                              @click="openRemoveFromSquadDialog(player)"
+                              title="Remove from squad"
+                            >
+                              <Icon name="lucide:user-minus" class="h-4 w-4" />
+                            </Button>
+                          </td>
                         </tr>
                         <tr v-if="squad.players.length === 0">
-                          <td colspan="3" class="text-center py-2 opacity-70">No players in squad</td>
+                          <td colspan="3" class="text-center py-2 opacity-70">
+                            No players in squad
+                          </td>
                         </tr>
                       </tbody>
                     </table>
@@ -219,15 +349,22 @@ function refreshData() {
               <!-- Unassigned Players Section -->
               <Card v-if="team.players.length > 0">
                 <CardHeader>
-                  <CardTitle>Unassigned Players ({{ team.players.length }})</CardTitle>
+                  <CardTitle
+                    >Unassigned Players ({{ team.players.length }})</CardTitle
+                  >
                 </CardHeader>
                 <CardContent>
-                  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div v-for="player in team.players" :key="player.steamId" class="p-2 border border-gray-700 rounded">
+                  <div
+                    class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+                  >
+                    <div
+                      v-for="player in team.players"
+                      :key="player.steamId"
+                      class="p-2 border border-gray-700 rounded"
+                    >
                       <div class="font-medium">{{ player.name }}</div>
                       <div class="text-sm opacity-70">
-                        <span>{{ player.role || 'Rifleman' }}</span>
-                        <span class="float-right">K/D: {{ player.kills }}/{{ player.deaths }}</span>
+                        <span>{{ player.role || "Rifleman" }}</span>
                       </div>
                     </div>
                   </div>
@@ -239,6 +376,33 @@ function refreshData() {
       </Tabs>
     </div>
   </div>
+
+  <!-- Remove from Squad Dialog -->
+  <Dialog v-model:open="showRemoveDialog">
+    <DialogContent class="sm:max-w-[425px]">
+      <DialogHeader>
+        <DialogTitle>Remove from Squad</DialogTitle>
+        <DialogDescription>
+          Are you sure you want to remove {{ selectedPlayer?.name }} from their
+          squad?
+        </DialogDescription>
+      </DialogHeader>
+
+      <DialogFooter>
+        <Button variant="outline" @click="closeRemoveDialog">Cancel</Button>
+        <Button
+          variant="destructive"
+          @click="removeFromSquad"
+          :disabled="isActionLoading"
+        >
+          <span v-if="isActionLoading" class="mr-2">
+            <Icon name="lucide:loader-2" class="h-4 w-4 animate-spin" />
+          </span>
+          Remove from Squad
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <style scoped>
