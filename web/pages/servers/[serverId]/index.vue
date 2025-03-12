@@ -303,17 +303,18 @@ const formattedPlayerCount = computed(() => {
   const playerCount = rconServerInfo.value.player_count || 0;
   const maxPlayers = rconServerInfo.value.max_players || 0;
   const publicQueue = rconServerInfo.value.public_queue || 0;
+  const playerReserveCount = rconServerInfo.value.player_reserve_count || 0;
   
   // Calculate total queue and reserved slots
   const totalQueue = publicQueue;
   
   // Format as: "current(+queue)/max(reserved)"
   if (totalQueue > 0) {
-    return `${playerCount}(+${totalQueue})/${maxPlayers}`;
+    return `${playerCount}(+${totalQueue})/${maxPlayers-playerReserveCount}(${playerReserveCount})`;
   }
   
   // If no queue, just show current/max(reserved)
-  return `${playerCount}/${maxPlayers}`;
+  return `${playerCount}/${maxPlayers-playerReserveCount}(${playerReserveCount})`;
 });
 
 // Fetch available layers
