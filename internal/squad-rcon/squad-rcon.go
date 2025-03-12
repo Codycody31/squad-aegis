@@ -140,17 +140,29 @@ func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
 	}, nil
 }
 
-func (s *SquadRcon) GetServerSquads() ([]Squad, error) {
+func (s *SquadRcon) GetServerSquads() ([]Squad, []string, error) {
 	squadsResponse, err := s.rcon.Execute("ListSquads")
 	if err != nil {
-		return []Squad{}, err
+		return []Squad{}, []string{}, err
 	}
 
 	squads := []Squad{}
+	teamNames := []string{}
 	var currentTeamID int
 
 	// First pass: Extract teams and squads
 	for _, line := range strings.Split(squadsResponse, "\n") {
+		// Match team information
+		matchesTeam := regexp.MustCompile(`^Team ID: ([1|2]) \((.*)\)`)
+		matchTeam := matchesTeam.FindStringSubmatch(line)
+
+		if len(matchTeam) > 0 {
+			teamId, _ := strconv.Atoi(matchTeam[1])
+			currentTeamID = teamId
+			teamNames = append(teamNames, matchTeam[2])
+			continue
+		}
+
 		// Match squad information
 		matchesSquad := regexp.MustCompile(`^ID: (\d{1,}) \| Name: (.*?) \| Size: (\d) \| Locked: (True|False)`)
 		matchSquad := matchesSquad.FindStringSubmatch(line)
@@ -172,7 +184,7 @@ func (s *SquadRcon) GetServerSquads() ([]Squad, error) {
 		}
 	}
 
-	return squads, nil
+	return squads, teamNames, nil
 }
 
 func (s *SquadRcon) GetCurrentMap() (Map, error) {
@@ -248,24 +260,25 @@ func (s *SquadRcon) GetAvailableLayers() ([]Layer, error) {
 }
 
 // ParseTeamsAndSquads builds the teams/squads structure from parsed squads and players data
-func ParseTeamsAndSquads(squads []Squad, players PlayersData) ([]Team, error) {
+func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData) ([]Team, error) {
 	teams := []Team{}
-
-	// First pass: Extract teams from squads
 	teamMap := make(map[int]*Team)
-	for _, squad := range squads {
-		// Create team if it doesn't exist
-		if _, exists := teamMap[squad.TeamId]; !exists {
-			team := Team{
-				ID:      squad.TeamId,
-				Name:    getTeamName(squad.TeamId), // Helper function to get team name
-				Squads:  []Squad{},
-				Players: []Player{},
-			}
-			teams = append(teams, team)
-			teamMap[squad.TeamId] = &teams[len(teams)-1]
-		}
-	}
+
+	teams = append(teams, Team{
+		ID:      1,
+		Name:    teamNames[0],
+		Squads:  []Squad{},
+		Players: []Player{},
+	})
+	teamMap[0] = &teams[0]
+
+	teams = append(teams, Team{
+		ID:      2,
+		Name:    teamNames[1],
+		Squads:  []Squad{},
+		Players: []Player{},
+	})
+	teamMap[1] = &teams[0]
 
 	// Second pass: Assign players to squads and identify squad leaders
 	squadMap := make(map[int]*Squad)
@@ -312,22 +325,10 @@ func ParseTeamsAndSquads(squads []Squad, players PlayersData) ([]Team, error) {
 	return teams, nil
 }
 
-// Helper function to get team name based on ID
-func getTeamName(teamId int) string {
-	switch teamId {
-	case 1:
-		return "Team 1"
-	case 2:
-		return "Team 2"
-	default:
-		return "Unknown Team"
-	}
-}
-
 // GetTeamsAndSquads combines the ListPlayers and ListSquads commands to build a complete team structure
 func (s *SquadRcon) GetTeamsAndSquads() ([]Team, error) {
 	// Get squads
-	squads, err := s.GetServerSquads()
+	squads, teamNames, err := s.GetServerSquads()
 	if err != nil {
 		return []Team{}, err
 	}
@@ -339,37 +340,7 @@ func (s *SquadRcon) GetTeamsAndSquads() ([]Team, error) {
 	}
 
 	// Parse and combine the data
-	return ParseTeamsAndSquads(squads, players)
-}
-
-// ParseTeamsFromRawSquadsResponse parses the raw squads response and extracts teams
-// This is kept for backward compatibility or if needed to parse directly from raw response
-func ParseTeamsFromRawSquadsResponse(squadsResponse string) []Team {
-	teams := []Team{}
-	teamMap := make(map[int]*Team)
-
-	// Extract teams
-	for _, line := range strings.Split(squadsResponse, "\n") {
-		// Match team information
-		matchesTeam := regexp.MustCompile(`^Team ID: ([1|2]) \((.*)\)`)
-		matchTeam := matchesTeam.FindStringSubmatch(line)
-
-		if len(matchTeam) > 0 {
-			teamId, _ := strconv.Atoi(matchTeam[1])
-
-			team := Team{
-				ID:      teamId,
-				Name:    matchTeam[2],
-				Squads:  []Squad{},
-				Players: []Player{},
-			}
-
-			teams = append(teams, team)
-			teamMap[teamId] = &teams[len(teams)-1]
-		}
-	}
-
-	return teams
+	return ParseTeamsAndSquads(squads, teamNames, players)
 }
 
 func (s *SquadRcon) Close() {

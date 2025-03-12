@@ -110,7 +110,7 @@ func (s *Server) ServerRconServerPopulation(c *gin.Context) {
 	}
 	defer r.Close()
 
-	squads, err := r.GetServerSquads()
+	squads, teamNames, err := r.GetServerSquads()
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server squads", &gin.H{"error": err.Error()})
 		return
@@ -122,7 +122,7 @@ func (s *Server) ServerRconServerPopulation(c *gin.Context) {
 		return
 	}
 
-	teams, err := squadRcon.ParseTeamsAndSquads(squads, players)
+	teams, err := squadRcon.ParseTeamsAndSquads(squads, teamNames, players)
 	if err != nil {
 		responses.BadRequest(c, "Failed to parse teams and squads", &gin.H{"error": err.Error()})
 		return
