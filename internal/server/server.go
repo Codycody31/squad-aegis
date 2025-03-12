@@ -146,9 +146,12 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.DELETE("/bans/:banId", server.ServerBansRemove)
 
 				// Player action endpoints
-				serverGroup.POST("/rcon/kick-player", server.KickPlayer)
-				serverGroup.POST("/rcon/warn-player", server.WarnPlayer)
-				serverGroup.POST("/rcon/move-player", server.MovePlayer)
+				serverGroup.POST("/rcon/kick-player", server.ServerRconKickPlayer)
+				serverGroup.POST("/rcon/warn-player", server.ServerRconWarnPlayer)
+				serverGroup.POST("/rcon/move-player", server.ServerRconMovePlayer)
+
+				// Server info endpoints
+				serverGroup.GET("/rcon/server-info", server.ServerRconServerInfo)
 			}
 		}
 

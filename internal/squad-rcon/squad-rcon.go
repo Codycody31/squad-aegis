@@ -1,6 +1,7 @@
 package squadRcon
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -61,6 +62,227 @@ type Layer struct {
 	Name      string `json:"name"`
 	Mod       string `json:"mod"`
 	IsVanilla bool   `json:"isVanilla"`
+}
+
+// ServerInfo contains the server info and follows the A2S protocol
+type ServerInfo struct {
+	// Server information fields
+	MaxPlayers          int    `json:"max_players"`
+	GameMode            string `json:"game_mode"`
+	MapName             string `json:"map_name"`
+	SearchKeywords      string `json:"search_keywords"`
+	GameVersion         string `json:"game_version"`
+	LicensedServer      bool   `json:"licensed_server"`
+	Playtime            int    `json:"playtime"`
+	Flags               int    `json:"flags"`
+	MatchHopper         string `json:"match_hopper"`
+	MatchTimeout        int    `json:"match_timeout"`
+	SessionTemplateName string `json:"session_template_name"`
+	IsPasswordProtected bool   `json:"is_password_protected"`
+	PlayerCount         int    `json:"player_count"`
+	ServerName          string `json:"server_name"`
+
+	// Tag fields
+	TagLanguage    string `json:"tag_language"`
+	TagPlaystyle   string `json:"tag_playstyle"`
+	TagMapRotation string `json:"tag_map_rotation"`
+	TagExperience  string `json:"tag_experience"`
+	TagRules       string `json:"tag_rules"`
+
+	// Mod information
+	CurrentModLoadedCount int  `json:"current_mod_loaded_count"`
+	AllModsWhitelisted    bool `json:"all_mods_whitelisted"`
+
+	// Region and team information
+	Region  string `json:"region"`
+	TeamOne string `json:"team_one"`
+	TeamTwo string `json:"team_two"`
+
+	// Queue information
+	PlayerReserveCount int `json:"player_reserve_count"`
+	PublicQueueLimit   int `json:"public_queue_limit"`
+	PublicQueue        int `json:"public_queue"`
+	ReservedQueue      int `json:"reserved_queue"`
+	BeaconPort         int `json:"beacon_port"`
+}
+
+func MarshalServerInfo(serverInfo string) (ServerInfo, error) {
+	// Create a map to hold the raw JSON data
+	var rawData map[string]interface{}
+	err := json.Unmarshal([]byte(serverInfo), &rawData)
+	if err != nil {
+		return ServerInfo{}, err
+	}
+
+	// Create a new ServerInfo struct to populate
+	result := ServerInfo{}
+
+	// Handle integer fields with _I suffix
+	for key, value := range rawData {
+		switch key {
+		// Integer fields with _I suffix
+		case "PLAYTIME_I", "FLAGS_I", "MATCHTIMEOUT_I", "PlayerCount_I",
+			"CurrentModLoadedCount_I", "PlayerReserveCount_I", "PublicQueueLimit_I",
+			"PublicQueue_I", "ReservedQueue_I", "BeaconPort_I":
+			// Convert string to int
+			if strValue, ok := value.(string); ok {
+				intValue, err := strconv.Atoi(strValue)
+				if err != nil {
+					return ServerInfo{}, fmt.Errorf("failed to convert %s to integer: %w", key, err)
+				}
+
+				// Assign to the appropriate field
+				switch key {
+				case "PLAYTIME_I":
+					result.Playtime = intValue
+				case "FLAGS_I":
+					result.Flags = intValue
+				case "MATCHTIMEOUT_I":
+					result.MatchTimeout = intValue
+				case "PlayerCount_I":
+					result.PlayerCount = intValue
+				case "CurrentModLoadedCount_I":
+					result.CurrentModLoadedCount = intValue
+				case "PlayerReserveCount_I":
+					result.PlayerReserveCount = intValue
+				case "PublicQueueLimit_I":
+					result.PublicQueueLimit = intValue
+				case "PublicQueue_I":
+					result.PublicQueue = intValue
+				case "ReservedQueue_I":
+					result.ReservedQueue = intValue
+				case "BeaconPort_I":
+					result.BeaconPort = intValue
+				}
+			} else if numValue, ok := value.(float64); ok {
+				// Handle case where JSON unmarshaler already converted to number
+				intValue := int(numValue)
+
+				switch key {
+				case "PLAYTIME_I":
+					result.Playtime = intValue
+				case "FLAGS_I":
+					result.Flags = intValue
+				case "MATCHTIMEOUT_I":
+					result.MatchTimeout = intValue
+				case "PlayerCount_I":
+					result.PlayerCount = intValue
+				case "CurrentModLoadedCount_I":
+					result.CurrentModLoadedCount = intValue
+				case "PlayerReserveCount_I":
+					result.PlayerReserveCount = intValue
+				case "PublicQueueLimit_I":
+					result.PublicQueueLimit = intValue
+				case "PublicQueue_I":
+					result.PublicQueue = intValue
+				case "ReservedQueue_I":
+					result.ReservedQueue = intValue
+				case "BeaconPort_I":
+					result.BeaconPort = intValue
+				}
+			}
+
+		// Boolean fields with _b suffix
+		case "LICENSEDSERVER_b", "Password_b", "AllModsWhitelisted_b":
+			if boolValue, ok := value.(bool); ok {
+				switch key {
+				case "LICENSEDSERVER_b":
+					result.LicensedServer = boolValue
+				case "Password_b":
+					result.IsPasswordProtected = boolValue
+				case "AllModsWhitelisted_b":
+					result.AllModsWhitelisted = boolValue
+				}
+			} else if strValue, ok := value.(string); ok {
+				// Handle boolean as string
+				boolValue := strValue == "true" || strValue == "True" || strValue == "1"
+				switch key {
+				case "LICENSEDSERVER_b":
+					result.LicensedServer = boolValue
+				case "Password_b":
+					result.IsPasswordProtected = boolValue
+				case "AllModsWhitelisted_b":
+					result.AllModsWhitelisted = boolValue
+				}
+			}
+
+		// String fields with _s suffix
+		case "GameMode_s":
+			if strValue, ok := value.(string); ok {
+				result.GameMode = strValue
+			}
+		case "MapName_s":
+			if strValue, ok := value.(string); ok {
+				result.MapName = strValue
+			}
+		case "SEARCHKEYWORDS_s":
+			if strValue, ok := value.(string); ok {
+				result.SearchKeywords = strValue
+			}
+		case "GameVersion_s":
+			if strValue, ok := value.(string); ok {
+				result.GameVersion = strValue
+			}
+		case "MATCHHOPPER_s":
+			if strValue, ok := value.(string); ok {
+				result.MatchHopper = strValue
+			}
+		case "SESSIONTEMPLATENAME_s":
+			if strValue, ok := value.(string); ok {
+				result.SessionTemplateName = strValue
+			}
+		case "ServerName_s":
+			if strValue, ok := value.(string); ok {
+				result.ServerName = strValue
+			}
+		case "TagLanguage_s":
+			if strValue, ok := value.(string); ok {
+				result.TagLanguage = strValue
+			}
+		case "TagPlaystyle_s":
+			if strValue, ok := value.(string); ok {
+				result.TagPlaystyle = strValue
+			}
+		case "TagMapRotation_s":
+			if strValue, ok := value.(string); ok {
+				result.TagMapRotation = strValue
+			}
+		case "TagExperience_s":
+			if strValue, ok := value.(string); ok {
+				result.TagExperience = strValue
+			}
+		case "TagRules_s":
+			if strValue, ok := value.(string); ok {
+				result.TagRules = strValue
+			}
+		case "Region_s":
+			if strValue, ok := value.(string); ok {
+				result.Region = strValue
+			}
+		case "TeamOne_s":
+			if strValue, ok := value.(string); ok {
+				result.TeamOne = strValue
+			}
+		case "TeamTwo_s":
+			if strValue, ok := value.(string); ok {
+				result.TeamTwo = strValue
+			}
+
+		// Handle MaxPlayers separately as it doesn't have a suffix
+		case "MaxPlayers":
+			if numValue, ok := value.(float64); ok {
+				result.MaxPlayers = int(numValue)
+			} else if strValue, ok := value.(string); ok {
+				intValue, err := strconv.Atoi(strValue)
+				if err != nil {
+					return ServerInfo{}, fmt.Errorf("failed to convert MaxPlayers to integer: %w", err)
+				}
+				result.MaxPlayers = intValue
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // PlayersData contains online and disconnected players
@@ -257,6 +479,16 @@ func (s *SquadRcon) GetAvailableLayers() ([]Layer, error) {
 		}
 	}
 	return layers, nil
+}
+
+// GetServerInfo gets the server info from the server
+func (s *SquadRcon) GetServerInfo() (ServerInfo, error) {
+	serverInfo, err := s.rcon.Execute("ShowServerInfo")
+	if err != nil {
+		return ServerInfo{}, err
+	}
+
+	return MarshalServerInfo(serverInfo)
 }
 
 // ParseTeamsAndSquads builds the teams/squads structure from parsed squads and players data

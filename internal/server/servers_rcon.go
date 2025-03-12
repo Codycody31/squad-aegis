@@ -183,8 +183,8 @@ func (s *Server) ServerRconAvailableLayers(c *gin.Context) {
 	responses.Success(c, "Available layers fetched successfully", &gin.H{"layers": availableLayers})
 }
 
-// KickPlayer handles kicking a player from the server
-func (s *Server) KickPlayer(c *gin.Context) {
+// ServerRconKickPlayer handles kicking a player from the server
+func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 	user := s.getUserFromSession(c)
 
 	var request KickPlayerRequest
@@ -228,8 +228,8 @@ func (s *Server) KickPlayer(c *gin.Context) {
 	responses.Success(c, "Player kicked successfully", &gin.H{"response": response})
 }
 
-// WarnPlayer handles sending a warning message to a player
-func (s *Server) WarnPlayer(c *gin.Context) {
+// ServerRconWarnPlayer handles sending a warning message to a player
+func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 	user := s.getUserFromSession(c)
 
 	var request WarnPlayerRequest
@@ -270,8 +270,8 @@ func (s *Server) WarnPlayer(c *gin.Context) {
 	responses.Success(c, "Player warned successfully", &gin.H{"response": response})
 }
 
-// MovePlayer handles moving a player to a different team
-func (s *Server) MovePlayer(c *gin.Context) {
+// ServerRconMovePlayer handles moving a player to a different team
+func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 	user := s.getUserFromSession(c)
 
 	var request MovePlayerRequest
@@ -310,4 +310,36 @@ func (s *Server) MovePlayer(c *gin.Context) {
 	}
 
 	responses.Success(c, "Player moved successfully", &gin.H{"response": response})
+}
+
+func (s *Server) ServerRconServerInfo(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	r, err := squadRcon.NewSquadRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
+	if err != nil {
+		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
+		return
+	}
+	defer r.Close()
+
+	serverInfo, err := r.GetServerInfo()
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server info", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Server info fetched successfully", &gin.H{"serverInfo": serverInfo})
 }

@@ -53,6 +53,10 @@ const playerCount = ref<{ current: number; max: number }>({
 });
 const activeTab = ref("overview");
 
+const rconServerInfo = ref<any>(null);
+const rconServerInfoLoading = ref(false);
+const rconServerInfoError = ref<string | null>(null);
+
 // New state variables for teams and squads
 const teamsData = ref<Team[]>([]);
 const loadingTeams = ref(false);
@@ -60,7 +64,9 @@ const errorTeams = ref<string | null>(null);
 
 // State variables for map change dialog
 const showMapChangeDialog = ref(false);
-const availableLayers = ref<{ name: string; mod: string; isVanilla: boolean }[]>([]);
+const availableLayers = ref<
+  { name: string; mod: string; isVanilla: boolean }[]
+>([]);
 const selectedLayer = ref("");
 const loadingLayers = ref(false);
 const changingLayer = ref(false);
@@ -144,6 +150,52 @@ async function fetchServerInfo() {
     console.error(err);
   } finally {
     loading.value = false;
+  }
+}
+
+async function fetchRconServerInfo() {
+  rconServerInfoLoading.value = true;
+  rconServerInfoError.value = null;
+
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
+  const token = cookieToken.value;
+
+  if (!token) {
+    error.value = "Authentication required";
+    rconServerInfoLoading.value = false;
+    return;
+  }
+
+  try {
+    const { data: responseData, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/server-info`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      throw new Error(
+        fetchError.value.message || "Failed to fetch rcon server information"
+      );
+    }
+
+    if (responseData.value && responseData.value.data) {
+      const serverData = responseData.value.data.serverInfo;
+      rconServerInfo.value = serverData;
+    }
+  } catch (err: any) {
+    rconServerInfoError.value =
+      err.message || "An error occurred while fetching rcon server information";
+    console.error(err);
+  } finally {
+    rconServerInfoLoading.value = false;
   }
 }
 
@@ -243,12 +295,35 @@ const connectedPlayers = computed(() => {
   return allPlayers;
 });
 
+// Add this computed property after the connectedPlayers computed property
+const formattedPlayerCount = computed(() => {
+  if (!rconServerInfo.value) return null;
+  
+  // Get values from rconServerInfo
+  const playerCount = rconServerInfo.value.player_count || 0;
+  const maxPlayers = rconServerInfo.value.max_players || 0;
+  const publicQueue = rconServerInfo.value.public_queue || 0;
+  
+  // Calculate total queue and reserved slots
+  const totalQueue = publicQueue;
+  
+  // Format as: "current(+queue)/max(reserved)"
+  if (totalQueue > 0) {
+    return `${playerCount}(+${totalQueue})/${maxPlayers}`;
+  }
+  
+  // If no queue, just show current/max(reserved)
+  return `${playerCount}/${maxPlayers}`;
+});
+
 // Fetch available layers
 async function fetchAvailableLayers() {
   loadingLayers.value = true;
-  
+
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
   const token = cookieToken.value;
 
   if (!token) {
@@ -268,23 +343,26 @@ async function fetchAvailableLayers() {
       };
     }
 
-    const { data: responseData, error: fetchError } = await useFetch<LayersResponse>(
-      `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/available-layers`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
+    const { data: responseData, error: fetchError } =
+      await useFetch<LayersResponse>(
+        `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/available-layers`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to fetch available layers");
+      throw new Error(
+        fetchError.value.message || "Failed to fetch available layers"
+      );
     }
 
     if (responseData.value && responseData.value.data) {
       availableLayers.value = responseData.value.data.layers || [];
-      
+
       // Set current layer as default selected
       if (serverInfo.value?.metrics?.current?.map) {
         selectedLayer.value = `${serverInfo.value.metrics.current.map}`;
@@ -314,9 +392,11 @@ async function changeServerLayer() {
   }
 
   changingLayer.value = true;
-  
+
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
   const token = cookieToken.value;
 
   if (!token) {
@@ -337,18 +417,19 @@ async function changeServerLayer() {
       };
     }
 
-    const { data: responseData, error: fetchError } = await useFetch<LayerChangeResponse>(
-      `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: {
-          command: `AdminChangeLayer ${selectedLayer.value}`,
-        },
-      }
-    );
+    const { data: responseData, error: fetchError } =
+      await useFetch<LayerChangeResponse>(
+        `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: {
+            command: `AdminChangeLayer ${selectedLayer.value}`,
+          },
+        }
+      );
 
     if (fetchError.value) {
       throw new Error(fetchError.value.message || "Failed to change layer");
@@ -358,7 +439,7 @@ async function changeServerLayer() {
       title: "Success",
       description: "Layer change initiated successfully",
     });
-    
+
     // Close dialog and refresh server info
     showMapChangeDialog.value = false;
     fetchServerInfo();
@@ -380,8 +461,13 @@ function openMapChangeDialog() {
   fetchAvailableLayers();
 }
 
-fetchServerInfo();
-fetchTeamsData();
+function refresh() {
+  fetchServerInfo();
+  fetchTeamsData();
+  fetchRconServerInfo();
+}
+
+refresh();
 </script>
 
 <template>
@@ -466,6 +552,10 @@ fetchTeamsData();
                     >
                       Map Preview
                     </div>
+                    <img
+                      :src="`https://raw.githubusercontent.com/mahtoid/SquadMaps/refs/heads/master/img/maps/thumbnails/${serverInfo.metrics?.current?.layer}.jpg`"
+                      class="absolute inset-0 w-full h-full object-cover"
+                    />
                   </div>
                   <h3 class="text-lg font-medium">
                     {{ serverInfo.metrics?.current?.map }}
@@ -482,7 +572,12 @@ fetchTeamsData();
               </CardContent>
               <CardFooter>
                 <div class="w-full">
-                  <Button variant="outline" size="sm" class="w-full" @click="openMapChangeDialog">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="w-full"
+                    @click="openMapChangeDialog"
+                  >
                     Change Layer
                   </Button>
                 </div>
@@ -497,26 +592,31 @@ fetchTeamsData();
               <CardContent>
                 <div class="text-center">
                   <div class="text-3xl font-bold mb-2">
-                    {{ serverInfo.metrics?.players?.total }} /
-                    {{ serverInfo.metrics?.players?.max }}
+                    {{ formattedPlayerCount || `${serverInfo.metrics?.players?.total} / ${serverInfo.metrics?.players?.max}` }}
                   </div>
                   <Progress
-                    :value="(serverInfo.metrics?.players?.total / serverInfo.metrics?.players?.max) * 100"
+                    :value="
+                      (serverInfo.metrics?.players?.total /
+                        serverInfo.metrics?.players?.max) *
+                      100
+                    "
                     class="h-2 mb-4"
                   />
                   <div class="grid grid-cols-2 gap-2">
                     <div class="bg-blue-50 p-2 rounded-md">
                       <div class="text-sm font-medium text-blue-700">
-                        Team 1
+                        {{ teamsData[0]?.name || 'Team 1' }}
                       </div>
                       <div class="text-xl font-bold text-blue-800">
-                        {{ serverInfo.metrics?.players?.teams?.[1] }}
+                        {{ serverInfo.metrics?.players?.teams?.[1] || 0 }}
                       </div>
                     </div>
                     <div class="bg-red-50 p-2 rounded-md">
-                      <div class="text-sm font-medium text-red-700">Team 2</div>
+                      <div class="text-sm font-medium text-red-700">
+                        {{ teamsData[1]?.name || 'Team 2' }}
+                      </div>
                       <div class="text-xl font-bold text-red-800">
-                        {{ serverInfo.metrics?.players?.teams?.[2] }}
+                        {{ serverInfo.metrics?.players?.teams?.[2] || 0 }}
                       </div>
                     </div>
                   </div>
@@ -707,13 +807,16 @@ fetchTeamsData();
                             : 'bg-red-500 rounded-r-full'
                         "
                         :style="`width: ${
-                          (serverInfo.metrics?.players?.teams?.[team.id] / serverInfo.metrics?.players?.max) * 100
+                          (serverInfo.metrics?.players?.teams?.[team.id] /
+                            serverInfo.metrics?.players?.max) *
+                          100
                         }%`"
                       ></div>
                     </div>
                     <div class="flex justify-between text-xs">
                       <span v-for="team in teamsData" :key="team.id">
-                        {{ team.name }}: {{ serverInfo.metrics?.players?.teams?.[team.id] }}
+                        {{ team.name }}:
+                        {{ serverInfo.metrics?.players?.teams?.[team.id] }}
                       </span>
                     </div>
                   </div>
@@ -766,28 +869,40 @@ fetchTeamsData();
         <DialogHeader>
           <DialogTitle>Change Server Layer</DialogTitle>
           <DialogDescription>
-            Select a new layer to change to. This will immediately change the layer on the server.
+            Select a new layer to change to. This will immediately change the
+            layer on the server.
           </DialogDescription>
         </DialogHeader>
-        
+
         <div class="py-4">
           <div v-if="loadingLayers" class="text-center py-4">
-            <div class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"></div>
+            <div
+              class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
+            ></div>
             <p class="text-sm">Loading available layers...</p>
           </div>
-          <div v-else-if="availableLayers.length === 0" class="text-center py-4">
+          <div
+            v-else-if="availableLayers.length === 0"
+            class="text-center py-4"
+          >
             <p class="text-sm text-muted-foreground">No layers available</p>
           </div>
           <div v-else>
             <div class="space-y-4">
               <div class="space-y-2">
-                <label for="layer-select" class="text-sm font-medium">Select Layer</label>
+                <label for="layer-select" class="text-sm font-medium"
+                  >Select Layer</label
+                >
                 <Select v-model="selectedLayer">
                   <SelectTrigger id="layer-select" class="w-full">
                     <SelectValue placeholder="Select a layer" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem v-for="layer in availableLayers" :key="layer.name" :value="layer.name">
+                    <SelectItem
+                      v-for="layer in availableLayers"
+                      :key="layer.name"
+                      :value="layer.name"
+                    >
                       {{ layer.name }}
                     </SelectItem>
                   </SelectContent>
@@ -796,11 +911,13 @@ fetchTeamsData();
             </div>
           </div>
         </div>
-        
+
         <DialogFooter>
-          <Button variant="outline" @click="showMapChangeDialog = false">Cancel</Button>
-          <Button 
-            @click="changeServerLayer" 
+          <Button variant="outline" @click="showMapChangeDialog = false"
+            >Cancel</Button
+          >
+          <Button
+            @click="changeServerLayer"
             :disabled="loadingLayers || changingLayer || !selectedLayer"
           >
             {{ changingLayer ? "Changing..." : "Change Layer" }}

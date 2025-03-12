@@ -83,6 +83,7 @@ var CommandMatrix = []CommandInfo{
 	{true, "ListPlayers", "info", "ListPlayers", "Lists all players on the server.", PublicCommand},
 	{true, "ListSquads", "info", "ListSquads", "Lists all squads on the server.", PublicCommand},
 	{true, "ListLayers", "info", "ListLayers", "Prints out the list of available layers.", PublicCommand},
+	{true, "ShowServerInfo", "info", "ShowServerInfo", "Shows the server info in JSON format following A2S protocol.", PublicCommand},
 }
 
 // GetCommandsByType returns commands filtered by their type
