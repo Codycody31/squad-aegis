@@ -200,9 +200,9 @@ function getTeamName(teamId: number): string {
 }
 
 // Get squad name by ID
-function getSquadName(squadId: number | null): string {
+function getSquadName(teamId: number, squadId: number | null): string {
   if (!squadId) return "Unassigned";
-  const squad = squads.value.find(s => s.id === squadId);
+  const squad = teams.value.find(t => t.id === teamId)?.squads.find(s => s.id === squadId);
   return squad ? squad.name : `Squad ${squadId}`;
 }
 
@@ -517,7 +517,7 @@ async function executePlayerAction() {
                 </TableCell>
                 <TableCell>
                   <Badge v-if="player.squadId" variant="outline">
-                    {{ getSquadName(player.squadId) }}
+                    {{ getSquadName(player.teamId, player.squadId) }}
                   </Badge>
                   <span v-else class="text-muted-foreground text-xs">Unassigned</span>
                 </TableCell>

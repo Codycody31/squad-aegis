@@ -629,7 +629,6 @@ fetchTeamsData();
                       <TableHead>Name</TableHead>
                       <TableHead>Squad</TableHead>
                       <TableHead>Team</TableHead>
-                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -649,9 +648,6 @@ fetchTeamsData();
                       </TableCell>
                       <TableCell>{{ player.squad }}</TableCell>
                       <TableCell>{{ player.team }}</TableCell>
-                      <TableCell>
-                        <Button variant="outline" size="sm"> Kick </Button>
-                      </TableCell>
                     </TableRow>
                   </TableBody>
                 </Table>
