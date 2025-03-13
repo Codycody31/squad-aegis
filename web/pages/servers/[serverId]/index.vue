@@ -298,23 +298,27 @@ const connectedPlayers = computed(() => {
 // Add this computed property after the connectedPlayers computed property
 const formattedPlayerCount = computed(() => {
   if (!rconServerInfo.value) return null;
-  
+
   // Get values from rconServerInfo
   const playerCount = rconServerInfo.value.player_count || 0;
   const maxPlayers = rconServerInfo.value.max_players || 0;
   const publicQueue = rconServerInfo.value.public_queue || 0;
   const playerReserveCount = rconServerInfo.value.player_reserve_count || 0;
-  
+
   // Calculate total queue and reserved slots
   const totalQueue = publicQueue;
-  
+
   // Format as: "current(+queue)/max(reserved)"
   if (totalQueue > 0) {
-    return `${playerCount}(+${totalQueue})/${maxPlayers-playerReserveCount}(${playerReserveCount})`;
+    return `${playerCount}(+${totalQueue})/${maxPlayers - playerReserveCount}${
+      playerReserveCount !== 0 ? `(+${playerReserveCount})` : ""
+    }`;
   }
-  
+
   // If no queue, just show current/max(reserved)
-  return `${playerCount}/${maxPlayers-playerReserveCount}(${playerReserveCount})`;
+  return `${playerCount}/${maxPlayers - playerReserveCount}${
+    playerReserveCount !== 0 ? `(+${playerReserveCount})` : ""
+  }`;
 });
 
 // Fetch available layers
@@ -476,7 +480,7 @@ refresh();
     <div class="flex justify-between items-center mb-4">
       <h1 class="text-2xl font-bold">Server Dashboard</h1>
       <div class="flex items-center space-x-2">
-        <Button @click="fetchServerInfo" :disabled="loading">
+        <Button @click="refresh" :disabled="loading">
           {{ loading ? "Refreshing..." : "Refresh" }}
         </Button>
       </div>
@@ -566,9 +570,26 @@ refresh();
                         : ""
                     }}
                   </h3>
-                  <!-- <p class="text-sm text-muted-foreground">
-                    Time Remaining: {{ mapInfo.timeRemaining }}
-                  </p> -->
+                  <p class="text-sm text-muted-foreground">
+                    <template
+                      v-if="
+                        rconServerInfo.match_timeout * 60 -
+                          rconServerInfo.playtime >
+                        0
+                      "
+                    >
+                      Time Remaining:
+                      {{
+                        Math.floor(
+                          (rconServerInfo.match_timeout * 60 -
+                            rconServerInfo.playtime) /
+                            60
+                        )
+                      }}
+                      minutes
+                    </template>
+                    <template v-else> Time Remaining: 0 minutes </template>
+                  </p>
                 </div>
               </CardContent>
               <CardFooter>
@@ -593,7 +614,10 @@ refresh();
               <CardContent>
                 <div class="text-center">
                   <div class="text-3xl font-bold mb-2">
-                    {{ formattedPlayerCount || `${serverInfo.metrics?.players?.total} / ${serverInfo.metrics?.players?.max}` }}
+                    {{
+                      formattedPlayerCount ||
+                      `${serverInfo.metrics?.players?.total} / ${serverInfo.metrics?.players?.max}`
+                    }}
                   </div>
                   <Progress
                     :value="
@@ -606,7 +630,7 @@ refresh();
                   <div class="grid grid-cols-2 gap-2">
                     <div class="bg-blue-50 p-2 rounded-md">
                       <div class="text-sm font-medium text-blue-700">
-                        {{ teamsData[0]?.name || 'Team 1' }}
+                        {{ teamsData[0]?.name || "Team 1" }}
                       </div>
                       <div class="text-xl font-bold text-blue-800">
                         {{ serverInfo.metrics?.players?.teams?.[1] || 0 }}
@@ -614,7 +638,7 @@ refresh();
                     </div>
                     <div class="bg-red-50 p-2 rounded-md">
                       <div class="text-sm font-medium text-red-700">
-                        {{ teamsData[1]?.name || 'Team 2' }}
+                        {{ teamsData[1]?.name || "Team 2" }}
                       </div>
                       <div class="text-xl font-bold text-red-800">
                         {{ serverInfo.metrics?.players?.teams?.[2] || 0 }}

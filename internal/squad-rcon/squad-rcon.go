@@ -121,7 +121,7 @@ func MarshalServerInfo(serverInfo string) (ServerInfo, error) {
 	for key, value := range rawData {
 		switch key {
 		// Integer fields with _I suffix
-		case "PLAYTIME_I", "FLAGS_I", "MATCHTIMEOUT_I", "PlayerCount_I",
+		case "PLAYTIME_I", "MatchTimeout_d", "FLAGS_I", "PlayerCount_I",
 			"CurrentModLoadedCount_I", "PlayerReserveCount_I", "PublicQueueLimit_I",
 			"PublicQueue_I", "ReservedQueue_I", "BeaconPort_I":
 			// Convert string to int
@@ -137,7 +137,7 @@ func MarshalServerInfo(serverInfo string) (ServerInfo, error) {
 					result.Playtime = intValue
 				case "FLAGS_I":
 					result.Flags = intValue
-				case "MATCHTIMEOUT_I":
+				case "MatchTimeout_d":
 					result.MatchTimeout = intValue
 				case "PlayerCount_I":
 					result.PlayerCount = intValue
@@ -163,7 +163,7 @@ func MarshalServerInfo(serverInfo string) (ServerInfo, error) {
 					result.Playtime = intValue
 				case "FLAGS_I":
 					result.Flags = intValue
-				case "MATCHTIMEOUT_I":
+				case "MatchTimeout_d":
 					result.MatchTimeout = intValue
 				case "PlayerCount_I":
 					result.PlayerCount = intValue
