@@ -122,7 +122,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// serverGroup.PUT("", server.ServerUpdate)
 				serverGroup.DELETE("", server.AuthIsSuperAdmin(), server.ServerDelete)
 
-				// serverGroup.GET("/stats", server.ServerStats)
+				serverGroup.GET("/status", server.ServerStatus)
 				// serverGroup.GET("/audit-logs", server.ServerAuditLogs)
 
 				serverGroup.GET("/rcon/commands", server.RconCommandList)

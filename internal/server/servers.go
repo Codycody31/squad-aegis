@@ -269,6 +269,62 @@ func (s *Server) ServerGet(c *gin.Context) {
 	responses.Success(c, "Server fetched successfully", &serverResponse)
 }
 
+// ServerStatus handles getting the status of a server
+func (s *Server) ServerStatus(c *gin.Context) {
+	serverId := c.Param("serverId")
+	if serverId == "" {
+		responses.BadRequest(c, "Server ID is required", &gin.H{"error": "Server ID is required"})
+		return
+	}
+
+	// Parse UUID
+	serverUUID, err := uuid.Parse(serverId)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID format", &gin.H{"error": "Invalid server ID format"})
+		return
+	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Get server from database
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverUUID, user)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Server not found", &gin.H{"error": "Server not found"})
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to fetch server"})
+		return
+	}
+
+	// Get server status and metrics if possible
+	serverStatus := map[string]interface{}{}
+
+	// Check if rcon is enabled
+	rconConfig := rcon.RconConfig{
+		Host:               server.IpAddress,
+		Port:               fmt.Sprintf("%d", server.RconPort),
+		Password:           server.RconPassword,
+		AutoReconnect:      false,
+		AutoReconnectDelay: 0,
+	}
+
+	rconClient, err := squadRcon.NewSquadRcon(rconConfig)
+	if err == nil {
+		serverStatus["rcon"] = true
+		defer rconClient.Close()
+	} else {
+		serverStatus["rcon"] = false
+	}
+
+	responses.Success(c, "Server status fetched successfully", &gin.H{"status": serverStatus})
+}
+
 // ServerDelete handles deleting a server
 func (s *Server) ServerDelete(c *gin.Context) {
 	user := s.getUserFromSession(c)
