@@ -93,33 +93,3 @@ lint: install-tools ## Lint code
 .PHONY: test ## Run tests
 test:
 	go test -race -cover -coverprofile server-coverage.out -timeout 60s -tags 'test' go.codycody31.dev/squad-aegis/...
-
-##@ Build
-
-build-web: ## Build Web UI
-	(cd web/; corepack enable; pnpm install --frozen-lockfile; pnpm run build)
-
-build: build-web generate-swagger ## Build server
-	CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -tags '$(TAGS)' -ldflags '${LDFLAGS}' -o ${DIST_DIR}/squad-aegis go.codycody31.dev/squad-aegis/cmd
-
-build-tarball: ## Build tar archive
-	mkdir -p ${DIST_DIR} && tar chzvf ${DIST_DIR}/squad-aegis-src.tar.gz \
-	  --exclude="*.exe" \
-	  --exclude="./.pnpm-store" \
-	  --exclude="node_modules" \
-	  --exclude="./dist" \
-	  --exclude="./data" \
-	  --exclude="./build" \
-	  --exclude="./.git" \
-	  .
-
-.PHONY: build
-build: build ## Build all binaries
-
-release: ## Create binaries for release
-	GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) CGO_ENABLED=${CGO_ENABLED} go build  -ldflags '${LDFLAGS}' -tags '$(TAGS)' -o ${DIST_DIR}/$(TARGETOS)_$(TARGETARCH)/squad-aegis go.codycody31.dev/squad-aegis/cmd
-	tar -czf ${DIST_DIR}/squad-aegis_$(TARGETOS)_$(TARGETARCH).tar.gz -C ${DIST_DIR}/$(TARGETOS)_$(TARGETARCH) squad-aegis
-
-release-checksums: ## Create checksums for all release files
-	# generate shas for tar files
-	(cd ${DIST_DIR}/; sha256sum *.* > checksums.txt)
