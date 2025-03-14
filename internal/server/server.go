@@ -123,7 +123,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.DELETE("", server.AuthIsSuperAdmin(), server.ServerDelete)
 
 				serverGroup.GET("/status", server.ServerStatus)
-				// serverGroup.GET("/audit-logs", server.ServerAuditLogs)
+				serverGroup.GET("/audit-logs", server.ServerAuditLogs)
 
 				serverGroup.GET("/rcon/commands", server.RconCommandList)
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)

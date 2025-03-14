@@ -128,6 +128,11 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:role:create", map[string]interface{}{
+		"name":        request.Name,
+		"permissions": request.Permissions,
+	})
+
 	responses.Success(c, "Role created successfully", &gin.H{
 		"roleId": roleID,
 	})
@@ -176,6 +181,17 @@ func (s *Server) ServerRolesRemove(c *gin.Context) {
 		return
 	}
 
+	// Get the role name
+	var name string
+	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+		SELECT name FROM server_roles WHERE id = $1
+	`, roleId).Scan(&name)
+
+	if err != nil {
+		responses.BadRequest(c, "Failed to get role name", &gin.H{"error": err.Error()})
+		return
+	}
+
 	// Delete the role
 	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
 		DELETE FROM server_roles
@@ -186,6 +202,10 @@ func (s *Server) ServerRolesRemove(c *gin.Context) {
 		responses.BadRequest(c, "Failed to delete role", &gin.H{"error": err.Error()})
 		return
 	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:role:delete", map[string]interface{}{
+		"name": name,
+	})
 
 	responses.Success(c, "Role deleted successfully", nil)
 }

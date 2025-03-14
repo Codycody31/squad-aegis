@@ -51,11 +51,9 @@ interface AuditLog {
   serverId: string;
   userId: string;
   username: string;
-  actionType: string;
-  actionDetails: string;
-  ipAddress: string;
-  createdAt: string;
-  metadata?: Record<string, any>;
+  action: string;
+  changes: any;
+  timestamp: string;
 }
 
 interface AuditLogsResponse {
@@ -73,6 +71,20 @@ interface AuditLogsResponse {
 // Action type options
 const actionTypes = [
   { value: "all", label: "All Actions" },
+
+  // Server Bans
+  { value: "server:ban:create", label: "Server Ban Create" },
+  { value: "server:ban:delete", label: "Server Ban Delete" },
+
+  // Server Rcon
+  { value: "server:rcon:execute", label: "Server RCON Execute" },
+  { value: "server:rcon:command:kick", label: "Server RCON Command Kick" },
+  { value: "server:rcon:command:warn", label: "Server RCON Command Warn" },
+  { value: "server:rcon:command:move", label: "Server RCON Command Move" },
+
+  // Server Roles
+  { value: "server:role:create", label: "Server Role Create" },
+  { value: "server:role:delete", label: "Server Role Delete" },
 ];
 
 // Date filter options
@@ -229,6 +241,29 @@ function formatActionType(actionType: string): string {
     .join(" ");
 }
 
+// Format changes for display
+function formatChanges(changes: any): string {
+  if (!changes) return "";
+  
+  if (typeof changes === 'string') {
+    try {
+      // Try to parse if it's a JSON string
+      const parsed = JSON.parse(changes);
+      if (parsed.description) return parsed.description;
+      return JSON.stringify(parsed);
+    } catch (e) {
+      return changes;
+    }
+  }
+  
+  if (typeof changes === 'object') {
+    if (changes.description) return changes.description;
+    return JSON.stringify(changes);
+  }
+  
+  return String(changes);
+}
+
 // Setup initial data load
 onMounted(() => {
   fetchAuditLogs();
@@ -361,18 +396,18 @@ onMounted(() => {
                 :key="log.id"
                 class="hover:bg-muted/50"
               >
-                <TableCell>{{ formatDate(log.createdAt) }}</TableCell>
+                <TableCell>{{ formatDate(log.timestamp) }}</TableCell>
                 <TableCell>{{ log.username }}</TableCell>
                 <TableCell>
                   <Badge 
                     variant="outline" 
-                    :class="getActionBadgeColor(log.actionType)"
+                    :class="getActionBadgeColor(log.action)"
                   >
-                    {{ formatActionType(log.actionType) }}
+                    {{ formatActionType(log.action) }}
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  <div class="max-w-xs truncate">{{ log.actionDetails }}</div>
+                  <div class="max-w-xs truncate">{{ formatChanges(log.changes) }}</div>
                 </TableCell>
                 <TableCell class="text-right">
                   <Button 
@@ -434,7 +469,7 @@ onMounted(() => {
           <div class="grid grid-cols-2 gap-4 mb-4">
             <div>
               <h3 class="text-sm font-medium">Time</h3>
-              <p>{{ formatDate(selectedLog.createdAt) }}</p>
+              <p>{{ formatDate(selectedLog.timestamp) }}</p>
             </div>
             <div>
               <h3 class="text-sm font-medium">User</h3>
@@ -444,25 +479,25 @@ onMounted(() => {
               <h3 class="text-sm font-medium">Action</h3>
               <Badge 
                 variant="outline" 
-                :class="getActionBadgeColor(selectedLog.actionType)"
+                :class="getActionBadgeColor(selectedLog.action)"
               >
-                {{ formatActionType(selectedLog.actionType) }}
+                {{ formatActionType(selectedLog.action) }}
               </Badge>
             </div>
             <div>
-              <h3 class="text-sm font-medium">IP Address</h3>
-              <p>{{ selectedLog.ipAddress }}</p>
+              <h3 class="text-sm font-medium">Log ID</h3>
+              <p class="text-xs truncate">{{ selectedLog.id }}</p>
             </div>
           </div>
           
           <div class="mb-4">
             <h3 class="text-sm font-medium mb-1">Details</h3>
-            <p class="text-sm">{{ selectedLog.actionDetails }}</p>
+            <p class="text-sm">{{ formatChanges(selectedLog.changes) }}</p>
           </div>
           
-          <div v-if="selectedLog.metadata">
+          <div v-if="selectedLog.changes">
             <h3 class="text-sm font-medium mb-1">Additional Data</h3>
-            <pre class="bg-muted p-2 rounded text-xs overflow-auto max-h-[200px]">{{ JSON.stringify(selectedLog.metadata, null, 2) }}</pre>
+            <pre class="bg-muted p-2 rounded text-xs overflow-auto max-h-[200px]">{{ JSON.stringify(selectedLog.changes, null, 2) }}</pre>
           </div>
         </div>
       </DialogContent>

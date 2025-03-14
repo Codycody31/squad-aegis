@@ -101,6 +101,10 @@ func (s *Server) ServerRconExecute(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:execute", map[string]interface{}{
+		"command": request.Command,
+	})
+
 	responses.Success(c, "RCON command executed successfully", &gin.H{"response": response})
 }
 
@@ -225,6 +229,11 @@ func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:kick", map[string]interface{}{
+		"steamId": request.SteamId,
+		"reason":  request.Reason,
+	})
+
 	responses.Success(c, "Player kicked successfully", &gin.H{"response": response})
 }
 
@@ -267,6 +276,11 @@ func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:warn", map[string]interface{}{
+		"steamId": request.SteamId,
+		"message": request.Message,
+	})
+
 	responses.Success(c, "Player warned successfully", &gin.H{"response": response})
 }
 
@@ -308,6 +322,10 @@ func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 		responses.BadRequest(c, "Failed to move player", &gin.H{"error": err.Error()})
 		return
 	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:move", map[string]interface{}{
+		"steamId": request.SteamId,
+	})
 
 	responses.Success(c, "Player moved successfully", &gin.H{"response": response})
 }
