@@ -386,7 +386,7 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 				Msg("Command executed successfully")
 		}
 		return response.Response, response.Error
-	case <-time.After(30 * time.Second):
+	case <-time.After(5 * time.Second):
 		log.Error().
 			Str("serverID", serverID.String()).
 			Str("command", command).
@@ -442,53 +442,6 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 					Str("command", cmd.Command).
 					Msg("Released command semaphore after disconnection")
 				continue
-			}
-
-			// FIXME: Workaround for Buffer Overflow causing the connection to crash
-			// Check if we need to recreate the command connection
-			// This ensures each command gets a fresh connection state
-			if cmd.Command != "PING_CONNECTION" {
-				log.Trace().
-					Str("serverID", serverID.String()).
-					Str("command", cmd.Command).
-					Msg("Recreating command connection for fresh state")
-
-				// Close the old connection
-				conn.CommandRcon.Close()
-
-				// Create a new connection using stored connection details
-				newCommandRcon, err := squadRcon.NewSquadRcon(rcon.RconConfig{
-					Host:               conn.host,
-					Port:               conn.port,
-					Password:           conn.password,
-					AutoReconnect:      true,
-					AutoReconnectDelay: 5,
-				})
-
-				if err != nil {
-					conn.mu.Unlock()
-					log.Error().
-						Str("serverID", serverID.String()).
-						Str("command", cmd.Command).
-						Err(err).
-						Msg("Failed to recreate command connection")
-
-					cmd.Response <- CommandResponse{
-						Response: "",
-						Error:    fmt.Errorf("failed to recreate command connection: %w", err),
-					}
-
-					// Release the semaphore
-					<-conn.cmdSemaphore
-					continue
-				}
-
-				// Update the connection
-				conn.CommandRcon = newCommandRcon
-				log.Trace().
-					Str("serverID", serverID.String()).
-					Str("command", cmd.Command).
-					Msg("Command connection recreated successfully")
 			}
 
 			conn.LastUsed = time.Now()
@@ -557,7 +510,7 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 					Str("serverID", serverID.String()).
 					Str("command", cmd.Command).
 					Msg("Received command response")
-			case <-time.After(25 * time.Second): // Slightly less than the client timeout
+			case <-time.After(5 * time.Second): // Slightly less than the client timeout
 				cmdResponse = CommandResponse{
 					Response: "",
 					Error:    errors.New("command execution timed out"),
