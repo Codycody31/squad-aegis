@@ -6,6 +6,10 @@
 
 @Codycody31
 
-### U0001f4c8 Enhancement
+### 📈 Enhancement
 
 - feat: add audit logs for most endpoints [[#4](https://github.com/Codycody31/squad-aegis/pull/4)]
+
+### Misc
+
+- refactor: update release config to drop unneeded sections [[#6](https://github.com/Codycody31/squad-aegis/pull/6)]
