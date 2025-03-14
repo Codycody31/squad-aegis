@@ -128,6 +128,48 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 		return
 	}
 
+	// Get user information for audit log
+	userUUID, err := uuid.Parse(request.UserID)
+	if err != nil {
+		responses.BadRequest(c, "Invalid user ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	targetUser, err := core.GetUserById(c.Request.Context(), s.Dependencies.DB, userUUID, &user.Id)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get user information", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get role information for audit log
+	roleUUID, err := uuid.Parse(request.ServerRoleID)
+	if err != nil {
+		responses.BadRequest(c, "Invalid role ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Find the role name from the server roles
+	roles, err := core.GetServerRoles(c.Request.Context(), s.Dependencies.DB, serverId)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server roles", &gin.H{"error": err.Error()})
+		return
+	}
+
+	roleName := ""
+	for _, role := range roles {
+		if role.Id == roleUUID {
+			roleName = role.Name
+			break
+		}
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:admin:create", map[string]interface{}{
+		"userId":   request.UserID,
+		"username": targetUser.Username,
+		"roleId":   request.ServerRoleID,
+		"roleName": roleName,
+	})
+
 	responses.Success(c, "Admin created successfully", &gin.H{
 		"adminId": adminID,
 	})
@@ -159,6 +201,31 @@ func (s *Server) ServerAdminsRemove(c *gin.Context) {
 	}
 	_ = server // Ensure server is used
 
+	// Get admin details before deletion for audit log
+	var userId uuid.UUID
+	var roleId uuid.UUID
+	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+		SELECT user_id, server_role_id FROM server_admins
+		WHERE id = $1 AND server_id = $2
+	`, adminId, serverId).Scan(&userId, &roleId)
+
+	// Store admin details for audit log
+	var username string = "Unknown"
+	var roleName string = "Unknown"
+
+	if err == nil {
+		// Get role information
+		roles, roleErr := core.GetServerRoles(c.Request.Context(), s.Dependencies.DB, serverId)
+		if roleErr == nil && roles != nil {
+			for _, role := range roles {
+				if role.Id == roleId {
+					roleName = role.Name
+					break
+				}
+			}
+		}
+	}
+
 	// Delete the admin
 	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
 		DELETE FROM server_admins
@@ -169,6 +236,16 @@ func (s *Server) ServerAdminsRemove(c *gin.Context) {
 		responses.BadRequest(c, "Failed to delete admin", &gin.H{"error": err.Error()})
 		return
 	}
+
+	// Create audit log with the information we have
+	auditData := map[string]interface{}{
+		"userId":   userId.String(),
+		"username": username,
+		"roleId":   roleId.String(),
+		"roleName": roleName,
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:admin:remove", auditData)
 
 	responses.Success(c, "Admin deleted successfully", nil)
 }
