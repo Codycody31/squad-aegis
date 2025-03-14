@@ -49,6 +49,7 @@ export default [
     to: {
       name: "servers-serverId-console",
     },
+    permissions: ["super_admin", "manageserver"],
   },
   {
     title: "Audit Logs",
@@ -56,6 +57,6 @@ export default [
     to: {
       name: "servers-serverId-audit-logs",
     },
-    permissions: ["super_admin"],
+    permissions: ["super_admin", "manageserver"],
   },
 ];
