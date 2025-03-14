@@ -17,7 +17,7 @@ var (
 )
 
 type SquadRcon struct {
-	rcon *rcon.Rcon
+	Rcon *rcon.Rcon
 }
 
 // Player represents a player in the game
@@ -297,18 +297,18 @@ func NewSquadRcon(rconConfig rcon.RconConfig) (*SquadRcon, error) {
 		return nil, err
 	}
 
-	return &SquadRcon{rcon: rcon}, nil
+	return &SquadRcon{Rcon: rcon}, nil
 }
 
 // BanPlayer bans a player from the server
 func (s *SquadRcon) BanPlayer(steamId string, duration int, reason string) error {
-	_, err := s.rcon.Execute(fmt.Sprintf("AdminBan %s %dd %s", steamId, duration, reason))
+	_, err := s.Rcon.Execute(fmt.Sprintf("AdminBan %s %dd %s", steamId, duration, reason))
 	return err
 }
 
 // GetServerPlayers gets the online and disconnected players from the server
 func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
-	playersResponse, err := s.rcon.Execute("ListPlayers")
+	playersResponse, err := s.Rcon.Execute("ListPlayers")
 	if err != nil {
 		return PlayersData{}, err
 	}
@@ -363,7 +363,7 @@ func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
 }
 
 func (s *SquadRcon) GetServerSquads() ([]Squad, []string, error) {
-	squadsResponse, err := s.rcon.Execute("ListSquads")
+	squadsResponse, err := s.Rcon.Execute("ListSquads")
 	if err != nil {
 		return []Squad{}, []string{}, err
 	}
@@ -410,7 +410,7 @@ func (s *SquadRcon) GetServerSquads() ([]Squad, []string, error) {
 }
 
 func (s *SquadRcon) GetCurrentMap() (Map, error) {
-	currentMap, err := s.rcon.Execute("ShowCurrentMap")
+	currentMap, err := s.Rcon.Execute("ShowCurrentMap")
 	if err != nil {
 		return Map{}, err
 	}
@@ -429,7 +429,7 @@ func (s *SquadRcon) GetCurrentMap() (Map, error) {
 }
 
 func (s *SquadRcon) GetNextMap() (Map, error) {
-	nextMap, err := s.rcon.Execute("ShowNextMap")
+	nextMap, err := s.Rcon.Execute("ShowNextMap")
 	if err != nil {
 		if nextMap == "Next level is not defined" {
 			return Map{}, ErrNoNextMap
@@ -453,7 +453,7 @@ func (s *SquadRcon) GetNextMap() (Map, error) {
 
 // GetAvailableMaps gets the available maps from the server
 func (s *SquadRcon) GetAvailableLayers() ([]Layer, error) {
-	availableLayers, err := s.rcon.Execute("ListLayers")
+	availableLayers, err := s.Rcon.Execute("ListLayers")
 	if err != nil {
 		return []Layer{}, err
 	}
@@ -483,7 +483,7 @@ func (s *SquadRcon) GetAvailableLayers() ([]Layer, error) {
 
 // GetServerInfo gets the server info from the server
 func (s *SquadRcon) GetServerInfo() (ServerInfo, error) {
-	serverInfo, err := s.rcon.Execute("ShowServerInfo")
+	serverInfo, err := s.Rcon.Execute("ShowServerInfo")
 	if err != nil {
 		return ServerInfo{}, err
 	}
@@ -576,5 +576,5 @@ func (s *SquadRcon) GetTeamsAndSquads() ([]Team, error) {
 }
 
 func (s *SquadRcon) Close() {
-	s.rcon.Close()
+	s.Rcon.Close()
 }
