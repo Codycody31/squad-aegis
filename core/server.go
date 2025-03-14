@@ -162,3 +162,77 @@ func GetServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UU
 
 	return admins, nil
 }
+
+// GetUserServerPermissions retrieves all servers a user has access to along with their permissions
+func GetUserServerPermissions(ctx context.Context, database db.Executor, userId uuid.UUID) (map[string][]string, error) {
+	// For super admins, we need to get all servers
+	var user *models.User
+	var err error
+
+	user, err = GetUserById(ctx, database, userId, &userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// Get all servers the user has access to
+	servers, err := GetServers(ctx, database, user)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get servers: %w", err)
+	}
+
+	// Initialize the result map
+	serverPermissions := make(map[string][]string)
+
+	// If user is super admin, they have all permissions on all servers
+	if user.SuperAdmin {
+		for _, server := range servers {
+			// Super admins have all permissions
+			serverPermissions[server.Id.String()] = []string{"*"}
+		}
+		return serverPermissions, nil
+	}
+
+	// For regular users, we need to get their roles for each server
+	for _, server := range servers {
+		// Get the user's admin record for this server
+		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+		sql, args, err := psql.Select("server_role_id").
+			From("server_admins").
+			Where(squirrel.Eq{"server_id": server.Id, "user_id": userId}).
+			ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SQL query: %w", err)
+		}
+
+		var roleId uuid.UUID
+		err = database.QueryRowContext(ctx, sql, args...).Scan(&roleId)
+		if err != nil {
+			if strings.Contains(err.Error(), "no rows") {
+				// User doesn't have a role for this server, skip
+				continue
+			}
+			return nil, fmt.Errorf("failed to get role ID: %w", err)
+		}
+
+		// Get the role's permissions
+		sql, args, err = psql.Select("permissions").
+			From("server_roles").
+			Where(squirrel.Eq{"id": roleId}).
+			ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SQL query: %w", err)
+		}
+
+		var permissionsStr string
+		err = database.QueryRowContext(ctx, sql, args...).Scan(&permissionsStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get permissions: %w", err)
+		}
+
+		// Parse permissions from comma-separated string
+		permissions := strings.Split(permissionsStr, ",")
+		serverPermissions[server.Id.String()] = permissions
+	}
+
+	return serverPermissions, nil
+}

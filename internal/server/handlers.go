@@ -3,11 +3,14 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"go.codycody31.dev/squad-aegis/core"
 
+	"github.com/Masterminds/squirrel"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/version"
 )
@@ -85,4 +88,83 @@ func (s *Server) getUserFromSession(c *gin.Context) *models.User {
 		return user
 	}
 	return nil
+}
+
+// HasServerPermission checks if a user has a specific permission for a server
+func (s *Server) HasServerPermission(c *gin.Context, user *models.User, serverId uuid.UUID, permission string) bool {
+	// Super admins have all permissions
+	if user.SuperAdmin {
+		return true
+	}
+
+	// Get the user's permissions for this server
+	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+	sql, args, err := psql.Select("sr.permissions").
+		From("server_admins sa").
+		Join("server_roles sr ON sa.server_role_id = sr.id").
+		Where(squirrel.Eq{"sa.server_id": serverId, "sa.user_id": user.Id}).
+		ToSql()
+	if err != nil {
+		return false
+	}
+
+	var permissionsStr string
+	err = s.Dependencies.DB.QueryRowContext(c.Copy(), sql, args...).Scan(&permissionsStr)
+	if err != nil {
+		return false
+	}
+
+	// Parse permissions from comma-separated string
+	permissions := strings.Split(permissionsStr, ",")
+
+	// Check if the user has the required permission
+	for _, p := range permissions {
+		if p == permission || p == "*" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// HasAnyServerPermission checks if a user has any of the specified permissions for a server
+func (s *Server) HasAnyServerPermission(c *gin.Context, user *models.User, serverId uuid.UUID, permissions ...string) bool {
+	// Super admins have all permissions
+	if user.SuperAdmin {
+		return true
+	}
+
+	// Get the user's permissions for this server
+	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+	sql, args, err := psql.Select("sr.permissions").
+		From("server_admins sa").
+		Join("server_roles sr ON sa.server_role_id = sr.id").
+		Where(squirrel.Eq{"sa.server_id": serverId, "sa.user_id": user.Id}).
+		ToSql()
+	if err != nil {
+		return false
+	}
+
+	var permissionsStr string
+	err = s.Dependencies.DB.QueryRowContext(c.Copy(), sql, args...).Scan(&permissionsStr)
+	if err != nil {
+		return false
+	}
+
+	// Parse permissions from comma-separated string
+	userPermissions := strings.Split(permissionsStr, ",")
+
+	// Check if the user has any of the required permissions
+	for _, userPerm := range userPermissions {
+		if userPerm == "*" {
+			return true
+		}
+		for _, requiredPerm := range permissions {
+			if userPerm == requiredPerm {
+				return true
+			}
+		}
+	}
+
+	return false
 }
