@@ -42,6 +42,7 @@ import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
 
+const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
 const route = useRoute();
 const serverId = route.params.serverId;
@@ -316,7 +317,7 @@ function copyBanCfgUrl() {
                 >
                     <Dialog v-model:open="showAddBanDialog">
                         <DialogTrigger asChild>
-                            <Button>Add Ban Manually</Button>
+                            <Button v-if="authStore.getServerPermissions(serverId as string).includes('ban')">Add Ban Manually</Button>
                         </DialogTrigger>
                         <DialogContent class="sm:max-w-[425px]">
                             <DialogHeader>
@@ -515,6 +516,7 @@ function copyBanCfgUrl() {
                                         size="sm"
                                         @click="removeBan(player.id)"
                                         :disabled="loading"
+                                        v-if="authStore.getServerPermissions(serverId as string).includes('ban')"
                                     >
                                         Unban
                                     </Button>

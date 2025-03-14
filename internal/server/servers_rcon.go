@@ -85,7 +85,6 @@ func (s *Server) ServerRconExecute(c *gin.Context) {
 	}
 
 	// TODO: RCON Connection should be handled in a separate goroutine and not in the main thread
-
 	// Then we just use a channel to send the response back to the client
 
 	r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})

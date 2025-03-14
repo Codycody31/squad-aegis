@@ -44,7 +44,6 @@ const servers = ref<Server[]>([]);
 const sidebar = useSidebar();
 const authStore = useAuthStore();
 const activeServer = ref<Server | null>(null);
-const userServerPermissions = ref<string[]>([]);
 const userServerRoles = ref<{ [serverId: string]: string[] }>({});
 
 // Function to close sidebar on mobile
@@ -61,20 +60,37 @@ const isSuperAdmin = computed(() => {
 
 // Check if a navigation item should be visible based on permissions
 const shouldShowNavItem = (item: NavigationItem): boolean => {
+  let passedOnePermissionCheck = false;
+
   // If it's just a heading, always show it
   if (item.heading && (!item.items || item.items.length === 0)) {
     return true;
   }
-  
-  // If the route is admin-only and user is not super admin, hide it
-  if (item.permissions?.includes("super_admin") && !isSuperAdmin.value) {
-    return false;
+
+  // If no permissions are set, show it
+  if (!item.permissions || item.permissions.length === 0) {
+    return true;
   }
 
-  // TODO: If serverId in params, check server permissions
+  // If the route is admin-only and user is not super admin, hide it
+  if (item.permissions?.includes("super_admin") && !isSuperAdmin.value) {
+    passedOnePermissionCheck = false;
+  } else if (isSuperAdmin.value) {
+    return true;
+  }
 
-  // By default, show the item
-  return true;
+  const serverPerms = authStore.getServerPermissions(activeServer.value?.id ?? "");
+  if (serverPerms) {
+    if (item.permissions?.some((perm) => serverPerms.includes(perm))) {
+      passedOnePermissionCheck = true;
+    }
+  }
+
+  if (passedOnePermissionCheck) {
+    return true;
+  }
+
+  return false;
 };
 
 // Fetch servers
@@ -100,63 +116,13 @@ const fetchServers = async () => {
     console.error("Error fetching servers:", response.error.value);
   } else {
     servers.value = response.data.value?.data?.servers ?? [];
-    
+
     // If we're on a server route, find the active server
     if (route.params.serverId) {
       const serverId = route.params.serverId as string;
-      activeServer.value = servers.value.find(server => server.id === serverId) || null;
-      
-      // If we found an active server, fetch user permissions for it
-      if (activeServer.value) {
-        await fetchUserServerRoles();
-      }
+      activeServer.value =
+        servers.value.find((server) => server.id === serverId) || null;
     }
-  }
-};
-
-// Fetch user roles for servers
-const fetchUserServerRoles = async () => {
-  if (!authStore.user) return;
-  
-  // For super admins, we don't need to fetch roles
-  if (isSuperAdmin.value) return;
-  
-  try {
-    // This would be the endpoint to get user roles for servers
-    // You may need to implement this endpoint on the backend
-    interface UserRolesResponse {
-      data?: {
-        roles: Array<{
-          serverId: string;
-          permissions: string[];
-        }>;
-      };
-    }
-
-    const response = await useFetch<UserRolesResponse>(
-      `${runtimeConfig.public.backendApi}/servers/user-roles`,
-      {
-        headers: {
-          Authorization: `Bearer ${
-            useCookie(runtimeConfig.public.sessionCookieName).value
-          }`,
-        },
-      }
-    );
-    
-    if (response.error.value) {
-      console.error("Error fetching user server roles:", response.error.value);
-    } else if (response.data.value) {
-      // Assuming the response has a structure like { serverId: string, roles: string[] }[]
-      const roles = response.data.value.data?.roles || [];
-      
-      // Convert to the format we need
-      roles.forEach((role) => {
-        userServerRoles.value[role.serverId] = role.permissions || [];
-      });
-    }
-  } catch (error) {
-    console.error("Error fetching user server roles:", error);
   }
 };
 
@@ -170,12 +136,8 @@ const logout = () => {
 watch(route, async () => {
   if (route.params.serverId) {
     const serverId = route.params.serverId as string;
-    activeServer.value = servers.value.find(server => server.id === serverId) || null;
-    
-    // If we found an active server, fetch user permissions for it
-    if (activeServer.value) {
-      await fetchUserServerRoles();
-    }
+    activeServer.value =
+      servers.value.find((server) => server.id === serverId) || null;
   } else {
     activeServer.value = null;
   }
@@ -197,13 +159,19 @@ await fetchServers();
             :key="item.title || item.heading"
           >
             <SidebarGroupLabel
-              v-if="item.heading && (!item.items || item.items.length === 0) && shouldShowNavItem(item)"
+              v-if="
+                item.heading &&
+                (!item.items || item.items.length === 0) &&
+                shouldShowNavItem(item)
+              "
             >
               {{ item.heading }}
             </SidebarGroupLabel>
 
             <Collapsible
-              v-else-if="item.items && item.items.length > 0 && shouldShowNavItem(item)"
+              v-else-if="
+                item.items && item.items.length > 0 && shouldShowNavItem(item)
+              "
               asChild
               :defaultOpen="item.isActive"
               class="group/collapsible"
@@ -233,8 +201,8 @@ await fetchServers();
                           asChild
                           :isActive="pathname === subItem.to?.name"
                         >
-                          <RouterLink 
-                            :to="subItem.to?.name || ''" 
+                          <RouterLink
+                            :to="subItem.to?.name || ''"
                             @click="closeSidebarOnMobile"
                           >
                             <Icon :name="subItem.icon" v-if="subItem.icon" />
@@ -254,7 +222,7 @@ await fetchServers();
                 :tooltip="item.title"
                 :isActive="pathname === item.to?.name"
               >
-                <RouterLink 
+                <RouterLink
                   :to="item.to ? item.to : '/'"
                   @click="closeSidebarOnMobile"
                 >
@@ -341,7 +309,14 @@ await fetchServers();
                 </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
-              <DropdownMenuItem @click="() => { closeSidebarOnMobile(); logout(); }">
+              <DropdownMenuItem
+                @click="
+                  () => {
+                    closeSidebarOnMobile();
+                    logout();
+                  }
+                "
+              >
                 <Icon name="lucide:log-out" />
                 Log out
               </DropdownMenuItem>

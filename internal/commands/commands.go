@@ -130,3 +130,13 @@ func CommandsCanExecute(permissions []string, supportsRCON bool) []CommandInfo {
 
 	return commands
 }
+
+// IsPublicCommand returns true if the command is public
+func IsPublicCommand(commandName string) bool {
+	for _, cmd := range CommandMatrix {
+		if cmd.Name == commandName {
+			return cmd.CommandType == PublicCommand
+		}
+	}
+	return false
+}

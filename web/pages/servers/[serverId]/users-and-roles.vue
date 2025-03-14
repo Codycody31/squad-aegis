@@ -65,7 +65,7 @@ const addAdminLoading = ref(false);
 const permissionCategories = [
   {
     name: "Basic Admin",
-    permissions: ["admin", "reserve", "balance", "canseeadminchat"],
+    permissions: ["reserve", "balance", "canseeadminchat", "manageserver", "teamchange"],
   },
   {
     name: "Chat",
@@ -73,7 +73,7 @@ const permissionCategories = [
   },
   {
     name: "Kick & Ban",
-    permissions: ["kick", "ban", "teamchange", "forceteamchange", "immunity"],
+    permissions: ["kick", "ban", "forceteamchange", "immune"],
   },
   {
     name: "Map Control",
@@ -84,6 +84,7 @@ const permissionCategories = [
       "private",
       "config",
       "featuretest",
+      "demos",
     ],
   },
   {

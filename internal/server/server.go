@@ -124,32 +124,30 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.DELETE("", server.AuthIsSuperAdmin(), server.ServerDelete)
 
 				serverGroup.GET("/status", server.ServerStatus)
-				serverGroup.GET("/audit-logs", server.ServerAuditLogs)
+				serverGroup.GET("/audit-logs", server.AuthHasServerPermission("manageserver"), server.ServerAuditLogs)
 
 				serverGroup.GET("/rcon/commands", server.RconCommandList)
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)
-				serverGroup.POST("/rcon/execute", server.ServerRconExecute)
+				serverGroup.POST("/rcon/execute", server.AuthHasServerPermission("manageserver"), server.ServerRconExecute)
 				serverGroup.GET("/rcon/server-population", server.ServerRconServerPopulation)
 				serverGroup.GET("/rcon/available-layers", server.ServerRconAvailableLayers)
-				// serverGroup.GET("/rcon/disconnected-players", server.ServerRconDisconnectedPlayers)
-				// serverGroup.GET("/rcon/layer", server.ServerRconLayer)
 
 				serverGroup.GET("/roles", server.ServerRolesList)
-				serverGroup.POST("/roles", server.ServerRolesAdd)
-				serverGroup.DELETE("/roles/:roleId", server.ServerRolesRemove)
+				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)
+				serverGroup.DELETE("/roles/:roleId", server.AuthIsSuperAdmin(), server.ServerRolesRemove)
 
 				serverGroup.GET("/admins", server.ServerAdminsList)
-				serverGroup.POST("/admins", server.ServerAdminsAdd)
-				serverGroup.DELETE("/admins/:adminId", server.ServerAdminsRemove)
+				serverGroup.POST("/admins", server.AuthIsSuperAdmin(), server.ServerAdminsAdd)
+				serverGroup.DELETE("/admins/:adminId", server.AuthIsSuperAdmin(), server.ServerAdminsRemove)
 
 				serverGroup.GET("/bans", server.ServerBansList)
-				serverGroup.POST("/bans", server.ServerBansAdd)
-				serverGroup.DELETE("/bans/:banId", server.ServerBansRemove)
+				serverGroup.POST("/bans", server.AuthHasAnyServerPermission("ban"), server.ServerBansAdd)
+				serverGroup.DELETE("/bans/:banId", server.AuthHasAnyServerPermission("ban"), server.ServerBansRemove)
 
 				// Player action endpoints
-				serverGroup.POST("/rcon/kick-player", server.ServerRconKickPlayer)
-				serverGroup.POST("/rcon/warn-player", server.ServerRconWarnPlayer)
-				serverGroup.POST("/rcon/move-player", server.ServerRconMovePlayer)
+				serverGroup.POST("/rcon/kick-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconKickPlayer)
+				serverGroup.POST("/rcon/warn-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconWarnPlayer)
+				serverGroup.POST("/rcon/move-player", server.AuthHasAnyServerPermission("forceteamchange"), server.ServerRconMovePlayer)
 
 				// Server info endpoints
 				serverGroup.GET("/rcon/server-info", server.ServerRconServerInfo)

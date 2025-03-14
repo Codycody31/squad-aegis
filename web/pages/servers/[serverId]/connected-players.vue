@@ -24,6 +24,7 @@ import {
 import { Textarea } from "~/components/ui/textarea";
 import { useToast } from "~/components/ui/toast";
 
+const authStore = useAuthStore();
 const route = useRoute();
 const serverId = route.params.serverId;
 const { toast } = useToast();
@@ -541,19 +542,19 @@ async function executePlayerAction() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem @click="openActionDialog(player, 'warn')">
+                        <DropdownMenuItem @click="openActionDialog(player, 'warn')" v-if="authStore.getServerPermissions(serverId as string).includes('kick')">
                           <Icon name="lucide:alert-triangle" class="mr-2 h-4 w-4 text-yellow-500" />
                           <span>Warn Player</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'move')">
+                        <DropdownMenuItem @click="openActionDialog(player, 'move')" v-if="authStore.getServerPermissions(serverId as string).includes('forceteamchange')">
                           <Icon name="lucide:move" class="mr-2 h-4 w-4 text-blue-500" />
                           <span>Move to Other Team</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'kick')">
+                        <DropdownMenuItem @click="openActionDialog(player, 'kick')" v-if="authStore.getServerPermissions(serverId as string).includes('kick')">
                           <Icon name="lucide:log-out" class="mr-2 h-4 w-4 text-orange-500" />
                           <span>Kick Player</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'ban')">
+                        <DropdownMenuItem @click="openActionDialog(player, 'ban')" v-if="authStore.getServerPermissions(serverId as string).includes('ban')">
                           <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
                           <span>Ban Player</span>
                         </DropdownMenuItem>
