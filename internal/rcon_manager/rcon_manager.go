@@ -38,12 +38,18 @@ type CommandResponse struct {
 // ServerConnection represents a connection to an RCON server
 type ServerConnection struct {
 	ServerID     uuid.UUID
-	SquadRcon    *squadRcon.SquadRcon
+	CommandRcon  *squadRcon.SquadRcon // Connection for executing commands
+	EventRcon    *squadRcon.SquadRcon // Connection for listening to events
 	CommandChan  chan RconCommand
 	EventChan    chan RconEvent
 	Disconnected bool
 	LastUsed     time.Time
 	mu           sync.Mutex
+	cmdSemaphore chan struct{}
+	// Connection details for reconnection
+	host     string
+	port     string
+	password string
 }
 
 // RconManager manages RCON connections to multiple servers
@@ -113,6 +119,14 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	log.Trace().
+		Str("serverID", serverID.String()).
+		Str("host", host).
+		Int("port", port).
+		Msg("Attempting to connect to RCON server")
+
+	portStr := strconv.Itoa(port)
+
 	// Check if connection already exists
 	if conn, exists := m.connections[serverID]; exists {
 		conn.mu.Lock()
@@ -120,61 +134,158 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 
 		// If connection is disconnected, reconnect
 		if conn.Disconnected {
-			squadRcon, err := squadRcon.NewSquadRcon(rcon.RconConfig{
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Msg("Reconnecting to disconnected RCON server")
+
+			// Create command connection
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Msg("Creating command RCON connection")
+			commandRcon, err := squadRcon.NewSquadRcon(rcon.RconConfig{
 				Host:               host,
-				Port:               strconv.Itoa(port),
+				Port:               portStr,
 				Password:           password,
 				AutoReconnect:      true,
 				AutoReconnectDelay: 5,
 			})
 			if err != nil {
-				return fmt.Errorf("failed to connect to RCON: %w", err)
+				log.Error().
+					Str("serverID", serverID.String()).
+					Err(err).
+					Msg("Failed to connect to command RCON")
+				return fmt.Errorf("failed to connect to command RCON: %w", err)
 			}
 
-			conn.SquadRcon = squadRcon
+			// Create event connection
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Msg("Creating event RCON connection")
+			eventRcon, err := squadRcon.NewSquadRcon(rcon.RconConfig{
+				Host:               host,
+				Port:               portStr,
+				Password:           password,
+				AutoReconnect:      true,
+				AutoReconnectDelay: 5,
+			})
+			if err != nil {
+				commandRcon.Close() // Close the command connection if event connection fails
+				log.Error().
+					Str("serverID", serverID.String()).
+					Err(err).
+					Msg("Failed to connect to event RCON")
+				return fmt.Errorf("failed to connect to event RCON: %w", err)
+			}
+
+			conn.CommandRcon = commandRcon
+			conn.EventRcon = eventRcon
 			conn.Disconnected = false
 			conn.LastUsed = time.Now()
+			// Store connection details
+			conn.host = host
+			conn.port = portStr
+			conn.password = password
 
 			// Start listening for events
-			go m.listenForEvents(serverID, squadRcon)
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Msg("Starting event listener")
+			go m.listenForEvents(serverID, eventRcon)
 			// Start command processor
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Msg("Starting command processor")
 			go m.processCommands(serverID, conn)
+
+			log.Info().
+				Str("serverID", serverID.String()).
+				Msg("Successfully reconnected to RCON server")
 
 			return nil
 		}
 
 		// Connection already exists and is connected
 		conn.LastUsed = time.Now()
+
+		log.Trace().
+			Str("serverID", serverID.String()).
+			Msg("RCON connection already exists and is connected")
+
 		return nil
 	}
 
-	// Create new connection
-	squadRcon, err := squadRcon.NewSquadRcon(rcon.RconConfig{
+	// Create command connection
+	log.Trace().
+		Str("serverID", serverID.String()).
+		Msg("Creating new command RCON connection")
+	commandRcon, err := squadRcon.NewSquadRcon(rcon.RconConfig{
 		Host:               host,
-		Port:               strconv.Itoa(port),
+		Port:               portStr,
 		Password:           password,
 		AutoReconnect:      true,
 		AutoReconnectDelay: 5,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to connect to RCON: %w", err)
+		log.Error().
+			Str("serverID", serverID.String()).
+			Err(err).
+			Msg("Failed to connect to command RCON")
+		return fmt.Errorf("failed to connect to command RCON: %w", err)
 	}
+
+	// Create event connection
+	log.Trace().
+		Str("serverID", serverID.String()).
+		Msg("Creating new event RCON connection")
+	eventRcon, err := squadRcon.NewSquadRcon(rcon.RconConfig{
+		Host:               host,
+		Port:               portStr,
+		Password:           password,
+		AutoReconnect:      true,
+		AutoReconnectDelay: 5,
+	})
+	if err != nil {
+		commandRcon.Close() // Close the command connection if event connection fails
+		log.Error().
+			Str("serverID", serverID.String()).
+			Err(err).
+			Msg("Failed to connect to event RCON")
+		return fmt.Errorf("failed to connect to event RCON: %w", err)
+	}
+
+	// Create a semaphore to ensure only one command executes at a time
+	cmdSemaphore := make(chan struct{}, 1)
 
 	conn := &ServerConnection{
 		ServerID:     serverID,
-		SquadRcon:    squadRcon,
+		CommandRcon:  commandRcon,
+		EventRcon:    eventRcon,
 		CommandChan:  make(chan RconCommand, 100),
 		EventChan:    make(chan RconEvent, 100),
 		Disconnected: false,
 		LastUsed:     time.Now(),
+		cmdSemaphore: cmdSemaphore,
+		host:         host,
+		port:         portStr,
+		password:     password,
 	}
 
 	m.connections[serverID] = conn
 
 	// Start listening for events
-	go m.listenForEvents(serverID, squadRcon)
+	log.Trace().
+		Str("serverID", serverID.String()).
+		Msg("Starting event listener")
+	go m.listenForEvents(serverID, eventRcon)
 	// Start command processor
+	log.Trace().
+		Str("serverID", serverID.String()).
+		Msg("Starting command processor")
 	go m.processCommands(serverID, conn)
+
+	log.Info().
+		Str("serverID", serverID.String()).
+		Msg("RCON connection created and started")
 
 	return nil
 }
@@ -196,7 +307,9 @@ func (m *RconManager) DisconnectFromServer(serverID uuid.UUID) error {
 		return errors.New("server already disconnected")
 	}
 
-	conn.SquadRcon.Close()
+	// Close both connections
+	conn.CommandRcon.Close()
+	conn.EventRcon.Close()
 	conn.Disconnected = true
 
 	return nil
@@ -228,12 +341,21 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 	conn.LastUsed = time.Now()
 	conn.mu.Unlock()
 
+	log.Trace().
+		Str("serverID", serverID.String()).
+		Str("command", command).
+		Msg("Queueing RCON command")
+
 	// Create response channel
 	responseChan := make(chan CommandResponse, 1)
 
 	// Send command to command processor
 	select {
 	case conn.CommandChan <- RconCommand{Command: command, Response: responseChan}:
+		log.Trace().
+			Str("serverID", serverID.String()).
+			Str("command", command).
+			Msg("Command queued successfully")
 	case <-time.After(5 * time.Second):
 		log.Error().
 			Str("serverID", serverID.String()).
@@ -242,9 +364,27 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 		return "", errors.New("command queue full, try again later")
 	}
 
+	log.Trace().
+		Str("serverID", serverID.String()).
+		Str("command", command).
+		Msg("Waiting for command response")
+
 	// Wait for response
 	select {
 	case response := <-responseChan:
+		if response.Error != nil {
+			log.Debug().
+				Str("serverID", serverID.String()).
+				Str("command", command).
+				Err(response.Error).
+				Msg("Command execution failed")
+		} else {
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", command).
+				Int("responseLength", len(response.Response)).
+				Msg("Command executed successfully")
+		}
 		return response.Response, response.Error
 	case <-time.After(30 * time.Second):
 		log.Error().
@@ -257,31 +397,214 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 
 // processCommands processes commands for a server
 func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection) {
+	log.Trace().
+		Str("serverID", serverID.String()).
+		Msg("Starting command processor")
+
 	for {
 		select {
 		case cmd := <-conn.CommandChan:
+			// Process the command directly in the main goroutine
+			// This ensures sequential processing without potential deadlocks
+
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Received command from queue")
+
+			// Acquire the semaphore
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Acquiring command semaphore")
+			conn.cmdSemaphore <- struct{}{}
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Acquired command semaphore")
+
+			// Check connection status
 			conn.mu.Lock()
 			if conn.Disconnected {
 				conn.mu.Unlock()
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Msg("Server disconnected, cannot execute command")
 				cmd.Response <- CommandResponse{
 					Response: "",
 					Error:    errors.New("server disconnected"),
 				}
+				// Release the semaphore
+				<-conn.cmdSemaphore
+				log.Trace().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Msg("Released command semaphore after disconnection")
 				continue
 			}
+
+			// FIXME: Workaround for Buffer Overflow causing the connection to crash
+			// Check if we need to recreate the command connection
+			// This ensures each command gets a fresh connection state
+			if cmd.Command != "PING_CONNECTION" {
+				log.Trace().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Msg("Recreating command connection for fresh state")
+
+				// Close the old connection
+				conn.CommandRcon.Close()
+
+				// Create a new connection using stored connection details
+				newCommandRcon, err := squadRcon.NewSquadRcon(rcon.RconConfig{
+					Host:               conn.host,
+					Port:               conn.port,
+					Password:           conn.password,
+					AutoReconnect:      true,
+					AutoReconnectDelay: 5,
+				})
+
+				if err != nil {
+					conn.mu.Unlock()
+					log.Error().
+						Str("serverID", serverID.String()).
+						Str("command", cmd.Command).
+						Err(err).
+						Msg("Failed to recreate command connection")
+
+					cmd.Response <- CommandResponse{
+						Response: "",
+						Error:    fmt.Errorf("failed to recreate command connection: %w", err),
+					}
+
+					// Release the semaphore
+					<-conn.cmdSemaphore
+					continue
+				}
+
+				// Update the connection
+				conn.CommandRcon = newCommandRcon
+				log.Trace().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Msg("Command connection recreated successfully")
+			}
+
 			conn.LastUsed = time.Now()
 			conn.mu.Unlock()
 
-			// Execute command
-			response, err := conn.SquadRcon.Rcon.Execute(cmd.Command)
+			// Execute command with timeout
+			responseChan := make(chan CommandResponse, 1)
 
-			// Send response
-			cmd.Response <- CommandResponse{
-				Response: response,
-				Error:    err,
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Executing command")
+
+			startTime := time.Now()
+			go func() {
+				// Execute command using the command connection
+				log.Trace().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Msg("Sending command to RCON server")
+				response, err := conn.CommandRcon.Rcon.Execute(cmd.Command)
+				execTime := time.Since(startTime)
+				if err != nil {
+					log.Debug().
+						Str("serverID", serverID.String()).
+						Str("command", cmd.Command).
+						Err(err).
+						Dur("execTime", execTime).
+						Msg("Command execution returned error")
+				} else {
+					log.Trace().
+						Str("serverID", serverID.String()).
+						Str("command", cmd.Command).
+						Int("responseLength", len(response)).
+						Dur("execTime", execTime).
+						Msg("Command execution completed")
+				}
+				select {
+				case responseChan <- CommandResponse{
+					Response: response,
+					Error:    err,
+				}:
+					log.Trace().
+						Str("serverID", serverID.String()).
+						Str("command", cmd.Command).
+						Msg("Response sent to channel")
+				default:
+					// Channel might be closed if timeout occurred
+					log.Debug().
+						Str("serverID", serverID.String()).
+						Str("command", cmd.Command).
+						Msg("Could not send response to channel, might be closed")
+				}
+			}()
+
+			// Wait for response with timeout
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Waiting for command response with timeout")
+			var cmdResponse CommandResponse
+			select {
+			case response := <-responseChan:
+				cmdResponse = response
+				log.Trace().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Msg("Received command response")
+			case <-time.After(25 * time.Second): // Slightly less than the client timeout
+				cmdResponse = CommandResponse{
+					Response: "",
+					Error:    errors.New("command execution timed out"),
+				}
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Msg("Command execution timed out internally")
+			}
+
+			// Send response back to caller
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Sending response back to caller")
+			cmd.Response <- cmdResponse
+
+			// Release the semaphore
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Releasing command semaphore")
+			<-conn.cmdSemaphore
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Released command semaphore")
+
+			// Log command execution
+			if cmdResponse.Error != nil {
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Err(cmdResponse.Error).
+					Msg("RCON command execution failed")
+			} else {
+				log.Trace().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Int("responseLength", len(cmdResponse.Response)).
+					Msg("RCON command executed successfully")
 			}
 
 		case <-m.ctx.Done():
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Msg("Stopping command processor due to context cancellation")
 			return
 		}
 	}
@@ -410,11 +733,12 @@ func (m *RconManager) cleanupIdleConnections() {
 	for serverID, conn := range m.connections {
 		conn.mu.Lock()
 		if !conn.Disconnected && now.Sub(conn.LastUsed) > idleTimeout {
-			log.Info().
+			log.Trace().
 				Str("serverID", serverID.String()).
 				Msg("Closing idle RCON connection")
 
-			conn.SquadRcon.Close()
+			conn.CommandRcon.Close()
+			conn.EventRcon.Close()
 			conn.Disconnected = true
 		}
 		conn.mu.Unlock()
@@ -429,11 +753,12 @@ func (m *RconManager) cleanupAllConnections() {
 	for serverID, conn := range m.connections {
 		conn.mu.Lock()
 		if !conn.Disconnected {
-			log.Info().
+			log.Trace().
 				Str("serverID", serverID.String()).
-				Msg("Closing RCON connection during shutdown")
+				Msg("Closing RCON connections during shutdown")
 
-			conn.SquadRcon.Close()
+			conn.CommandRcon.Close()
+			conn.EventRcon.Close()
 			conn.Disconnected = true
 		}
 		conn.mu.Unlock()
