@@ -395,3 +395,19 @@ func (s *Server) ServerDelete(c *gin.Context) {
 
 	responses.Success(c, "Server deleted successfully", nil)
 }
+
+// ServerUserRoles handles retrieving the user's permissions for all servers they have access to
+func (s *Server) ServerUserRoles(c *gin.Context) {
+	session := c.MustGet("session").(*models.Session)
+
+	// Get user's server permissions
+	serverPermissions, err := core.GetUserServerPermissions(c.Copy(), s.Dependencies.DB, session.UserId)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
+	responses.Success(c, "User server permissions fetched successfully", &gin.H{
+		"roles": serverPermissions,
+	})
+}

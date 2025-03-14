@@ -115,6 +115,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 			serversGroup.GET("", server.ServersList)
 			serversGroup.POST("", server.AuthIsSuperAdmin(), server.ServersCreate)
+			serversGroup.GET("/user-roles", server.ServerUserRoles)
 
 			serverGroup := serversGroup.Group("/:serverId")
 			{

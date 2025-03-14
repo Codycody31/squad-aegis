@@ -2,9 +2,12 @@ package server
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/Masterminds/squirrel"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
@@ -110,8 +113,16 @@ func (s *Server) AuthInitial(c *gin.Context) {
 		return
 	}
 
+	// Get user's server permissions
+	serverPermissions, err := core.GetUserServerPermissions(c.Copy(), s.Dependencies.DB, session.UserId)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
 	responses.Success(c, "User authenticated", &gin.H{
-		"user": user,
+		"user":              user,
+		"serverPermissions": serverPermissions,
 	})
 }
 
@@ -186,4 +197,174 @@ func (s *Server) UpdateUserPassword(c *gin.Context) {
 	}
 
 	responses.SimpleSuccess(c, "Password updated successfully")
+}
+
+// AuthHasServerPermission checks if the user has a specific permission for a server
+// This middleware expects the serverId to be in the URL parameters
+func (s *Server) AuthHasServerPermission(permission string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Get the user from the session
+		user := s.getUserFromSession(c)
+		if user == nil {
+			responses.Unauthorized(c, "Unauthorized", nil)
+			c.Abort()
+			return
+		}
+
+		// Super admins have all permissions
+		if user.SuperAdmin {
+			c.Next()
+			return
+		}
+
+		// Get the server ID from the URL parameters
+		serverIdString := c.Param("serverId")
+		if serverIdString == "" {
+			responses.BadRequest(c, "Server ID is required", nil)
+			c.Abort()
+			return
+		}
+
+		serverId, err := uuid.Parse(serverIdString)
+		if err != nil {
+			responses.BadRequest(c, "Invalid server ID", nil)
+			c.Abort()
+			return
+		}
+
+		// Get the user's permissions for this server
+		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+		sql, args, err := psql.Select("sr.permissions").
+			From("server_admins sa").
+			Join("server_roles sr ON sa.server_role_id = sr.id").
+			Where(squirrel.Eq{"sa.server_id": serverId, "sa.user_id": user.Id}).
+			ToSql()
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to create SQL query: %w", err), nil)
+			c.Abort()
+			return
+		}
+
+		var permissionsStr string
+		err = s.Dependencies.DB.QueryRowContext(c.Copy(), sql, args...).Scan(&permissionsStr)
+		if err != nil {
+			if strings.Contains(err.Error(), "no rows") {
+				responses.Forbidden(c, "You don't have permission to access this server", nil)
+				c.Abort()
+				return
+			}
+			responses.InternalServerError(c, fmt.Errorf("failed to get permissions: %w", err), nil)
+			c.Abort()
+			return
+		}
+
+		// Parse permissions from comma-separated string
+		permissions := strings.Split(permissionsStr, ",")
+
+		// Check if the user has the required permission
+		hasPermission := false
+		for _, p := range permissions {
+			if p == permission || p == "*" {
+				hasPermission = true
+				break
+			}
+		}
+
+		if !hasPermission {
+			responses.Forbidden(c, "You don't have the required permission", nil)
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// AuthHasAnyServerPermission checks if the user has any of the specified permissions for a server
+func (s *Server) AuthHasAnyServerPermission(permissions ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Get the user from the session
+		user := s.getUserFromSession(c)
+		if user == nil {
+			responses.Unauthorized(c, "Unauthorized", nil)
+			c.Abort()
+			return
+		}
+
+		// Super admins have all permissions
+		if user.SuperAdmin {
+			c.Next()
+			return
+		}
+
+		// Get the server ID from the URL parameters
+		serverIdString := c.Param("serverId")
+		if serverIdString == "" {
+			responses.BadRequest(c, "Server ID is required", nil)
+			c.Abort()
+			return
+		}
+
+		serverId, err := uuid.Parse(serverIdString)
+		if err != nil {
+			responses.BadRequest(c, "Invalid server ID", nil)
+			c.Abort()
+			return
+		}
+
+		// Get the user's permissions for this server
+		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+		sql, args, err := psql.Select("sr.permissions").
+			From("server_admins sa").
+			Join("server_roles sr ON sa.server_role_id = sr.id").
+			Where(squirrel.Eq{"sa.server_id": serverId, "sa.user_id": user.Id}).
+			ToSql()
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to create SQL query: %w", err), nil)
+			c.Abort()
+			return
+		}
+
+		var permissionsStr string
+		err = s.Dependencies.DB.QueryRowContext(c.Copy(), sql, args...).Scan(&permissionsStr)
+		if err != nil {
+			if strings.Contains(err.Error(), "no rows") {
+				responses.Forbidden(c, "You don't have permission to access this server", nil)
+				c.Abort()
+				return
+			}
+			responses.InternalServerError(c, fmt.Errorf("failed to get permissions: %w", err), nil)
+			c.Abort()
+			return
+		}
+
+		// Parse permissions from comma-separated string
+		userPermissions := strings.Split(permissionsStr, ",")
+
+		// Check if the user has any of the required permissions
+		hasPermission := false
+		for _, userPerm := range userPermissions {
+			if userPerm == "*" {
+				hasPermission = true
+				break
+			}
+			for _, requiredPerm := range permissions {
+				if userPerm == requiredPerm {
+					hasPermission = true
+					break
+				}
+			}
+			if hasPermission {
+				break
+			}
+		}
+
+		if !hasPermission {
+			responses.Forbidden(c, "You don't have any of the required permissions", nil)
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
 }
