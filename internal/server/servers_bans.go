@@ -158,6 +158,12 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:create", map[string]interface{}{
+		"steamId":  request.SteamID,
+		"reason":   request.Reason,
+		"duration": request.Duration,
+	})
+
 	responses.Success(c, "Ban created successfully", &gin.H{
 		"banId": banID,
 	})
@@ -236,6 +242,11 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 			_, _ = r.Execute(unbanCommand) // Ignore errors, as the ban is already removed from the database
 		}
 	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:delete", map[string]interface{}{
+		"steamId": steamIDStr,
+		"banId":   banId,
+	})
 
 	responses.Success(c, "Ban removed successfully", nil)
 }
