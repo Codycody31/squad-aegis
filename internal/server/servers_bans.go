@@ -158,11 +158,21 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:create", map[string]interface{}{
+	// Create detailed audit log
+	auditData := map[string]interface{}{
+		"banId":    banID,
 		"steamId":  request.SteamID,
 		"reason":   request.Reason,
 		"duration": request.Duration,
-	})
+	}
+
+	// Add expiry information if not permanent
+	if request.Duration > 0 {
+		expiresAt := time.Now().Add(time.Duration(request.Duration) * time.Minute)
+		auditData["expiresAt"] = expiresAt.Format(time.RFC3339)
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:create", auditData)
 
 	responses.Success(c, "Ban created successfully", &gin.H{
 		"banId": banID,
@@ -196,10 +206,14 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 
 	// Get the ban details first (to get the Steam ID for RCON unban)
 	var steamIDInt int64
+	var reason string
+	var duration int
+	var adminId uuid.UUID
+
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT steam_id FROM server_bans
+		SELECT steam_id, reason, duration, admin_id FROM server_bans
 		WHERE id = $1 AND server_id = $2
-	`, banId, serverId).Scan(&steamIDInt)
+	`, banId, serverId).Scan(&steamIDInt, &reason, &duration, &adminId)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
@@ -243,10 +257,15 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		}
 	}
 
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:delete", map[string]interface{}{
-		"steamId": steamIDStr,
-		"banId":   banId,
-	})
+	// Create detailed audit log
+	auditData := map[string]interface{}{
+		"banId":    banId.String(),
+		"steamId":  steamIDStr,
+		"reason":   reason,
+		"duration": duration,
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:delete", auditData)
 
 	responses.Success(c, "Ban removed successfully", nil)
 }

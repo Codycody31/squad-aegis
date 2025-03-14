@@ -131,6 +131,7 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:role:create", map[string]interface{}{
 		"name":        request.Name,
 		"permissions": request.Permissions,
+		"roleId":      roleID,
 	})
 
 	responses.Success(c, "Role created successfully", &gin.H{
@@ -204,7 +205,8 @@ func (s *Server) ServerRolesRemove(c *gin.Context) {
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:role:delete", map[string]interface{}{
-		"name": name,
+		"name":   name,
+		"roleId": roleId.String(),
 	})
 
 	responses.Success(c, "Role deleted successfully", nil)

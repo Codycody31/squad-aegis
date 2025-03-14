@@ -101,9 +101,12 @@ func (s *Server) ServerRconExecute(c *gin.Context) {
 		return
 	}
 
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:execute", map[string]interface{}{
+	// Create detailed audit log
+	auditData := map[string]interface{}{
 		"command": request.Command,
-	})
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:execute", auditData)
 
 	responses.Success(c, "RCON command executed successfully", &gin.H{"response": response})
 }
@@ -229,10 +232,13 @@ func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 		return
 	}
 
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:kick", map[string]interface{}{
+	// Create detailed audit log
+	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
 		"reason":  request.Reason,
-	})
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:kick", auditData)
 
 	responses.Success(c, "Player kicked successfully", &gin.H{"response": response})
 }
@@ -275,11 +281,13 @@ func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 		responses.BadRequest(c, "Failed to warn player", &gin.H{"error": err.Error()})
 		return
 	}
-
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:warn", map[string]interface{}{
+	// Create detailed audit log
+	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
 		"message": request.Message,
-	})
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:warn", auditData)
 
 	responses.Success(c, "Player warned successfully", &gin.H{"response": response})
 }
@@ -323,9 +331,12 @@ func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 		return
 	}
 
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:move", map[string]interface{}{
+	// Create detailed audit log
+	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
-	})
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:move", auditData)
 
 	responses.Success(c, "Player moved successfully", &gin.H{"response": response})
 }
