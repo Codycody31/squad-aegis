@@ -17,7 +17,9 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
+	"go.codycody31.dev/squad-aegis/internal/chat_processor"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server"
 	"go.codycody31.dev/squad-aegis/shared/config"
 	"go.codycody31.dev/squad-aegis/shared/logger"
@@ -111,19 +113,52 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
+	// Initialize RCON manager
+	rconManager := rcon_manager.NewRconManager(ctx)
+
+	// Initialize chat processor
+	chatProcessor := chat_processor.NewChatProcessor(ctx, rconManager, database)
+
 	// Initialize services
 	waitingGroup := errgroup.Group{}
 
-	// // Start job worker
-	// waitingGroup.Go(func() error {
-	// 	log.Info().Msg("starting job worker service...")
-	// 	// if err := worker.Run(ctx, database, rdb); err != nil {
-	// 	// 	go stopServerFunc(err)
-	// 	// 	return err
-	// 	// }
-	// 	log.Info().Msg("job worker service stopped")
-	// 	return nil
-	// })
+	waitingGroup.Go(func() error {
+		log.Info().Msg("Starting RCON connection manager service...")
+		go rconManager.StartConnectionManager()
+
+		// Connect to all servers with RCON enabled
+		log.Info().Msg("Connecting to all servers with RCON enabled...")
+		rconManager.ConnectToAllServers(ctx, database)
+
+		log.Info().Msg("RCON connection manager service started")
+
+		// Block until context is done
+		<-ctx.Done()
+
+		// Stop RCON connection manager
+		rconManager.Shutdown()
+
+		log.Info().Msg("RCON connection manager service stopped")
+
+		return nil
+	})
+
+	// Start chat processor in a goroutine
+	waitingGroup.Go(func() error {
+		log.Info().Msg("Starting chat processor service...")
+
+		// Start chat processor
+		chatProcessor.Start()
+
+		// Block until context is done
+		<-ctx.Done()
+
+		// Stop chat processor
+		chatProcessor.Stop()
+
+		log.Info().Msg("Chat processor service stopped")
+		return nil
+	})
 
 	// Start HTTP server
 	waitingGroup.Go(func() error {
@@ -135,7 +170,9 @@ func run(ctx context.Context) error {
 		}
 
 		deps := &server.Dependencies{
-			DB: database,
+			DB:            database,
+			RconManager:   rconManager,
+			ChatProcessor: chatProcessor,
 		}
 
 		// Initialize router

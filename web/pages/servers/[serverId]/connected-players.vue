@@ -244,7 +244,6 @@ function openActionDialog(player: Player, action: 'kick' | 'ban' | 'warn' | 'mov
   actionType.value = action;
   actionReason.value = "";
   actionDuration.value = action === 'ban' ? "1" : "";
-  targetTeamId.value = action === 'move' ? (availableTeams.value.length > 0 ? availableTeams.value[0].id : null) : null;
   showActionDialog.value = true;
 }
 
@@ -542,19 +541,19 @@ async function executePlayerAction() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem @click="openActionDialog(player, 'warn')" v-if="authStore.getServerPermissions(serverId as string).includes('kick')">
+                        <DropdownMenuItem @click="openActionDialog(player, 'warn')" v-if="authStore.getServerPermission(serverId as string, 'warn')">
                           <Icon name="lucide:alert-triangle" class="mr-2 h-4 w-4 text-yellow-500" />
                           <span>Warn Player</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'move')" v-if="authStore.getServerPermissions(serverId as string).includes('forceteamchange')">
+                        <DropdownMenuItem @click="openActionDialog(player, 'move')" v-if="authStore.getServerPermission(serverId as string, 'forceteamchange')">
                           <Icon name="lucide:move" class="mr-2 h-4 w-4 text-blue-500" />
                           <span>Move to Other Team</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'kick')" v-if="authStore.getServerPermissions(serverId as string).includes('kick')">
+                        <DropdownMenuItem @click="openActionDialog(player, 'kick')" v-if="authStore.getServerPermission(serverId as string, 'kick')">
                           <Icon name="lucide:log-out" class="mr-2 h-4 w-4 text-orange-500" />
                           <span>Kick Player</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'ban')" v-if="authStore.getServerPermissions(serverId as string).includes('ban')">
+                        <DropdownMenuItem @click="openActionDialog(player, 'ban')" v-if="authStore.getServerPermission(serverId as string, 'ban')">
                           <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
                           <span>Ban Player</span>
                         </DropdownMenuItem>
