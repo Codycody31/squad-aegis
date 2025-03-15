@@ -305,7 +305,7 @@ func NewSquadRcon(manager *rcon_manager.RconManager, serverID uuid.UUID) *SquadR
 // NewSquadRconWithConnection creates a new SquadRcon instance and connects to the server using RconManager
 func NewSquadRconWithConnection(manager *rcon_manager.RconManager, serverID uuid.UUID, host string, port int, password string) (*SquadRcon, error) {
 	// Connect to the server using RconManager
-	err := manager.ConnectToServer(serverID, host, port, password, false)
+	err := manager.ConnectToServer(serverID, host, port, password)
 	if err != nil {
 		return nil, err
 	}

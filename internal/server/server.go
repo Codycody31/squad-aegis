@@ -132,7 +132,6 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/status", server.ServerStatus)
 				serverGroup.GET("/audit-logs", server.AuthHasServerPermission("manageserver"), server.ServerAuditLogs)
 
-				serverGroup.POST("/rcon/reconnect", server.AuthHasServerPermission("manageserver"), server.ServerRconReconnect)
 				serverGroup.GET("/rcon/commands", server.RconCommandList)
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)
 				serverGroup.POST("/rcon/execute", server.AuthHasServerPermission("manageserver"), server.ServerRconExecute)

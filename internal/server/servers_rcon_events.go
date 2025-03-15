@@ -30,7 +30,7 @@ func (s *Server) ServerRconEvents(c *gin.Context) {
 	}
 
 	// Ensure server is connected to RCON manager
-	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword, false)
+	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword)
 	if err != nil {
 		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
 		return

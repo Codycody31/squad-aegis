@@ -114,7 +114,7 @@ func (m *RconManager) broadcastEvent(event RconEvent) {
 }
 
 // ConnectToServer connects to an RCON server
-func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int, password string, forceReconnect bool) error {
+func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int, password string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -131,11 +131,11 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 		conn.mu.Lock()
 		defer conn.mu.Unlock()
 
-		// If connection is disconnected or forceReconnect is true, reconnect
-		if conn.Disconnected || forceReconnect {
+		// If connection is disconnected, reconnect
+		if conn.Disconnected {
 			log.Debug().
 				Str("serverID", serverID.String()).
-				Msg("Reconnecting to RCON server")
+				Msg("Reconnecting to disconnected RCON server")
 
 			// Create command connection
 			commandRcon, err := rcon.NewRcon(rcon.RconConfig{
@@ -561,6 +561,7 @@ func (m *RconManager) cleanupIdleConnections() {
 	for serverID, conn := range m.connections {
 		conn.mu.Lock()
 		if !conn.Disconnected && now.Sub(conn.LastUsed) > idleTimeout {
+			// Debug logs for idle cleanup aren't that useful in production
 			log.Info().
 				Str("serverID", serverID.String()).
 				Dur("idleTime", now.Sub(conn.LastUsed)).
@@ -625,7 +626,7 @@ func (m *RconManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 		}
 
 		// Try to connect to the server
-		err := m.ConnectToServer(id, ipAddress, rconPort, rconPassword, false)
+		err := m.ConnectToServer(id, ipAddress, rconPort, rconPassword)
 		if err != nil {
 			log.Warn().
 				Err(err).
