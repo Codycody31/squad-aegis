@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/core"
 )
 
 // ExtensionListAvailableTypesResponse represents the response for the list available extension types endpoint
@@ -362,8 +363,19 @@ func (s *Server) CreateServerExtension(c *gin.Context) {
 			return
 		}
 
+		// Get server
+		server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, nil)
+		if err != nil {
+			log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": "Failed to get server",
+				"code":    http.StatusInternalServerError,
+			})
+			return
+		}
+
 		// Initialize the extension
-		if err := s.Dependencies.ExtensionManager.InitializeExtension(id, serverID, req.Name, req.Config); err != nil {
+		if err := s.Dependencies.ExtensionManager.InitializeExtension(id, server, req.Name, req.Config); err != nil {
 			log.Error().Err(err).Str("id", id.String()).Msg("Failed to initialize extension")
 
 			// Update database to mark as disabled
@@ -521,9 +533,20 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 		return
 	}
 
+	// Get server
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, nil)
+	if err != nil {
+		log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Failed to get server",
+			"code":    http.StatusInternalServerError,
+		})
+		return
+	}
+
 	// If we're enabling, initialize
 	if enabledChanged && newEnabled {
-		if err := s.Dependencies.ExtensionManager.InitializeExtension(eID, serverID, name, newConfig); err != nil {
+		if err := s.Dependencies.ExtensionManager.InitializeExtension(eID, server, name, newConfig); err != nil {
 			log.Error().Err(err).Str("id", eID.String()).Msg("Failed to initialize extension")
 
 			// Update database to mark as disabled
@@ -718,9 +741,20 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 		return
 	}
 
+	// Get server
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, nil)
+	if err != nil {
+		log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Failed to get server",
+			"code":    http.StatusInternalServerError,
+		})
+		return
+	}
+
 	// If we're enabling, initialize
 	if newEnabled {
-		if err := s.Dependencies.ExtensionManager.InitializeExtension(eID, serverID, name, currentConfig); err != nil {
+		if err := s.Dependencies.ExtensionManager.InitializeExtension(eID, server, name, currentConfig); err != nil {
 			log.Error().Err(err).Str("id", eID.String()).Msg("Failed to initialize extension")
 
 			// Update database to mark as disabled

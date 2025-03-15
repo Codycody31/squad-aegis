@@ -67,6 +67,31 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 }
 
 func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID, user *models.User) (*models.Server, error) {
+	if user == nil {
+		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+		sql, args, err := psql.Select("*").From("servers").Where(squirrel.Eq{"id": serverId}).ToSql()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SQL query: %w", err)
+		}
+
+		rows, err := database.QueryContext(ctx, sql, args...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute SQL query: %w", err)
+		}
+		defer rows.Close()
+
+		server := &models.Server{}
+
+		for rows.Next() {
+			err = rows.Scan(&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword, &server.CreatedAt, &server.UpdatedAt)
+			if err != nil {
+				return nil, fmt.Errorf("failed to scan row: %w", err)
+			}
+		}
+
+		return server, nil
+	}
+
 	isSuperAdmin := user.SuperAdmin
 
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)

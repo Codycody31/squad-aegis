@@ -9,7 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
+	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 )
 
@@ -33,7 +35,7 @@ type Extension interface {
 	// GetRequiredConnectors returns a list of connector types required by this extension
 	GetRequiredConnectors() []string
 	// Initialize initializes the extension with its configuration and connectors
-	Initialize(serverID uuid.UUID, config map[string]interface{}, connectors map[string]connector_manager.ConnectorInstance, rconManager *rcon_manager.RconManager) error
+	Initialize(server *models.Server, config map[string]interface{}, connectors map[string]connector_manager.ConnectorInstance, rconManager *rcon_manager.RconManager) error
 	// Shutdown gracefully shuts down the extension
 	Shutdown() error
 }
@@ -49,7 +51,7 @@ type ExtensionFactory interface {
 // ExtensionInstance represents an instantiated extension for a specific server
 type ExtensionInstance struct {
 	Extension Extension
-	ServerID  uuid.UUID
+	Server    *models.Server
 	Enabled   bool
 	Config    map[string]interface{}
 }
@@ -207,12 +209,19 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB)
 			continue
 		}
 
+		// Get server
+		server, err := core.GetServerById(ctx, db, serverID, nil)
+		if err != nil {
+			log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
+			continue
+		}
+
 		// Skip disabled extensions
 		if !enabled {
 			// Still store the extension instance but don't initialize it
 			instance := ExtensionInstance{
 				Extension: extension,
-				ServerID:  serverID,
+				Server:    server,
 				Enabled:   false,
 				Config:    config,
 			}
@@ -235,7 +244,7 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB)
 		}
 
 		// Initialize extension
-		if err := extension.Initialize(serverID, config, connectors, m.rconManager); err != nil {
+		if err := extension.Initialize(server, config, connectors, m.rconManager); err != nil {
 			log.Error().
 				Err(err).
 				Str("extension", name).
@@ -247,7 +256,7 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB)
 		// Store extension instance
 		instance := ExtensionInstance{
 			Extension: extension,
-			ServerID:  serverID,
+			Server:    server,
 			Enabled:   enabled,
 			Config:    config,
 		}
@@ -276,7 +285,7 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB)
 }
 
 // InitializeExtension initializes a specific extension
-func (m *ExtensionManager) InitializeExtension(id uuid.UUID, serverID uuid.UUID, name string, config map[string]interface{}) error {
+func (m *ExtensionManager) InitializeExtension(id uuid.UUID, server *models.Server, name string, config map[string]interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -300,7 +309,7 @@ func (m *ExtensionManager) InitializeExtension(id uuid.UUID, serverID uuid.UUID,
 	connectors := make(map[string]connector_manager.ConnectorInstance)
 
 	// Get server connectors
-	serverConnectors := m.connectorManager.GetConnectorsByServer(serverID)
+	serverConnectors := m.connectorManager.GetConnectorsByServer(server.Id)
 	for _, connector := range serverConnectors {
 		for _, required := range requiredConnectors {
 			if connector.GetType() == required {
@@ -331,7 +340,7 @@ func (m *ExtensionManager) InitializeExtension(id uuid.UUID, serverID uuid.UUID,
 		if _, ok := connectors[required]; !ok {
 			log.Error().
 				Str("extension", name).
-				Str("serverID", serverID.String()).
+				Str("serverID", server.Id.String()).
 				Str("connector", required).
 				Msg("Missing required connector for extension")
 			missingConnectors = true
@@ -343,14 +352,14 @@ func (m *ExtensionManager) InitializeExtension(id uuid.UUID, serverID uuid.UUID,
 	}
 
 	// Initialize extension
-	if err := extension.Initialize(serverID, config, connectors, m.rconManager); err != nil {
+	if err := extension.Initialize(server, config, connectors, m.rconManager); err != nil {
 		return fmt.Errorf("failed to initialize extension: %w", err)
 	}
 
 	// Store extension instance
 	instance := ExtensionInstance{
 		Extension: extension,
-		ServerID:  serverID,
+		Server:    server,
 		Enabled:   true,
 		Config:    config,
 	}
@@ -358,13 +367,13 @@ func (m *ExtensionManager) InitializeExtension(id uuid.UUID, serverID uuid.UUID,
 	m.instances[id] = instance
 
 	// Add to server extensions map
-	if _, ok := m.serverExtensions[serverID]; !ok {
-		m.serverExtensions[serverID] = []uuid.UUID{}
+	if _, ok := m.serverExtensions[server.Id]; !ok {
+		m.serverExtensions[server.Id] = []uuid.UUID{}
 	}
 
 	// Check if it's already in the list
 	found := false
-	for _, existingID := range m.serverExtensions[serverID] {
+	for _, existingID := range m.serverExtensions[server.Id] {
 		if existingID == id {
 			found = true
 			break
@@ -373,12 +382,12 @@ func (m *ExtensionManager) InitializeExtension(id uuid.UUID, serverID uuid.UUID,
 
 	// Only add if not already in the list
 	if !found {
-		m.serverExtensions[serverID] = append(m.serverExtensions[serverID], id)
+		m.serverExtensions[server.Id] = append(m.serverExtensions[server.Id], id)
 	}
 
 	log.Info().
 		Str("id", id.String()).
-		Str("serverID", serverID.String()).
+		Str("serverID", server.Id.String()).
 		Str("extension", name).
 		Msg("Initialized extension")
 
@@ -410,7 +419,7 @@ func (m *ExtensionManager) ShutdownExtension(id uuid.UUID) error {
 
 	log.Info().
 		Str("id", id.String()).
-		Str("serverID", instance.ServerID.String()).
+		Str("serverID", instance.Server.Id.String()).
 		Str("extension", instance.Extension.GetName()).
 		Msg("Shutdown extension")
 
@@ -455,7 +464,7 @@ func (m *ExtensionManager) RestartExtension(id uuid.UUID, config map[string]inte
 	connectors := make(map[string]connector_manager.ConnectorInstance)
 
 	// Get server connectors
-	serverConnectors := m.connectorManager.GetConnectorsByServer(instance.ServerID)
+	serverConnectors := m.connectorManager.GetConnectorsByServer(instance.Server.Id)
 	for _, connector := range serverConnectors {
 		for _, required := range requiredConnectors {
 			if connector.GetType() == required {
@@ -486,7 +495,7 @@ func (m *ExtensionManager) RestartExtension(id uuid.UUID, config map[string]inte
 		if _, ok := connectors[required]; !ok {
 			log.Error().
 				Str("extension", name).
-				Str("serverID", instance.ServerID.String()).
+				Str("serverID", instance.Server.Id.String()).
 				Str("connector", required).
 				Msg("Missing required connector for extension")
 			missingConnectors = true
@@ -498,21 +507,21 @@ func (m *ExtensionManager) RestartExtension(id uuid.UUID, config map[string]inte
 	}
 
 	// Initialize extension with new config
-	if err := extension.Initialize(instance.ServerID, config, connectors, m.rconManager); err != nil {
+	if err := extension.Initialize(instance.Server, config, connectors, m.rconManager); err != nil {
 		return fmt.Errorf("failed to initialize extension: %w", err)
 	}
 
 	// Store updated instance
 	m.instances[id] = ExtensionInstance{
 		Extension: extension,
-		ServerID:  instance.ServerID,
+		Server:    instance.Server,
 		Enabled:   true,
 		Config:    config,
 	}
 
 	log.Info().
 		Str("id", id.String()).
-		Str("serverID", instance.ServerID.String()).
+		Str("serverID", instance.Server.Id.String()).
 		Str("extension", name).
 		Msg("Restarted extension")
 

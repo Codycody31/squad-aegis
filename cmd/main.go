@@ -19,6 +19,7 @@ import (
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
 	"go.codycody31.dev/squad-aegis/extensions/core/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/extensions/core/discord_chat"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
@@ -135,6 +136,7 @@ func run(ctx context.Context) error {
 
 	// Register extension factories
 	extensionManager.RegisterFactory("discord_admin_request", discord_admin_request.Factory)
+	extensionManager.RegisterFactory("discord_chat", discord_chat.Factory)
 
 	// Initialize extensions from database
 	if err := extensionManager.InitializeExtensions(ctx, database); err != nil {

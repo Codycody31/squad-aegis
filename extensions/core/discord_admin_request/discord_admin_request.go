@@ -12,6 +12,7 @@ import (
 	"go.codycody31.dev/squad-aegis/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
+	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
@@ -83,7 +84,7 @@ func ConfigSchema() plug_config_schema.ConfigSchema {
 // DiscordAdminRequestExtension sends admin requests to Discord
 type DiscordAdminRequestExtension struct {
 	id            uuid.UUID
-	serverID      uuid.UUID
+	server        *models.Server
 	config        map[string]interface{}
 	discord       *discord.DiscordConnector
 	rconManager   *rcon_manager.RconManager
@@ -166,8 +167,8 @@ func (e *DiscordAdminRequestExtension) GetRequiredConnectors() []string {
 }
 
 // Initialize initializes the extension with its configuration and connectors
-func (e *DiscordAdminRequestExtension) Initialize(serverID uuid.UUID, config map[string]interface{}, connectors map[string]connector_manager.ConnectorInstance, rconManager *rcon_manager.RconManager) error {
-	e.serverID = serverID
+func (e *DiscordAdminRequestExtension) Initialize(server *models.Server, config map[string]interface{}, connectors map[string]connector_manager.ConnectorInstance, rconManager *rcon_manager.RconManager) error {
+	e.server = server
 	e.config = config
 	e.rconManager = rconManager
 
@@ -191,7 +192,7 @@ func (e *DiscordAdminRequestExtension) Initialize(serverID uuid.UUID, config map
 
 	log.Info().
 		Str("extension", e.GetName()).
-		Str("serverID", serverID.String()).
+		Str("serverID", server.Id.String()).
 		Msg("Discord Admin Request extension initialized")
 
 	return nil
@@ -206,7 +207,7 @@ func (e *DiscordAdminRequestExtension) Shutdown() error {
 // handleChatMessage handles chat messages and looks for admin requests
 func (e *DiscordAdminRequestExtension) handleChatMessage(serverID uuid.UUID, eventType string, data interface{}) error {
 	// Only process events for our server
-	if serverID != e.serverID {
+	if serverID != e.server.Id {
 		return nil
 	}
 
@@ -243,14 +244,13 @@ func (e *DiscordAdminRequestExtension) handleChatMessage(serverID uuid.UUID, eve
 	}
 	e.mu.Unlock()
 
-	// Warn the user so they know they have been heard
-	r := squadRcon.NewSquadRcon(e.rconManager, e.serverID)
+	r := squadRcon.NewSquadRcon(e.rconManager, e.server.Id)
 	_, err := r.ExecuteRaw(fmt.Sprintf("AdminWarn %s An admin has been notified of your request.", message.SteamID))
 	if err != nil {
 		log.Error().
 			Err(err).
-			Str("serverID", e.serverID.String()).
-			Msg("Failed to warn player")
+			Str("serverID", e.server.Id.String()).
+			Msg("Failed to notify player")
 	}
 
 	// Format the Discord message
@@ -290,8 +290,6 @@ func (e *DiscordAdminRequestExtension) sendDiscordMessage(playerName, steamID, r
 		color = int(colorVal)
 	}
 
-	// TODO: Include server name in embed if we don't use seperate channels for each server
-
 	// Create embed
 	embed := &discordgo.MessageEmbed{
 		Title:       "Admin Request",
@@ -301,7 +299,12 @@ func (e *DiscordAdminRequestExtension) sendDiscordMessage(playerName, steamID, r
 			{
 				Name:   "Steam ID",
 				Value:  steamID,
-				Inline: true,
+				Inline: false,
+			},
+			{
+				Name:   "Server",
+				Value:  e.server.Name,
+				Inline: false,
 			},
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
