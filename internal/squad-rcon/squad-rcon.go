@@ -8,7 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"go.codycody31.dev/squad-aegis/internal/rcon"
+	"github.com/google/uuid"
+	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 )
 
 var (
@@ -17,7 +18,9 @@ var (
 )
 
 type SquadRcon struct {
-	rcon *rcon.Rcon
+	// Replace direct Rcon reference with RconManager and serverID
+	Manager  *rcon_manager.RconManager
+	ServerID uuid.UUID
 }
 
 // Player represents a player in the game
@@ -291,24 +294,37 @@ type PlayersData struct {
 	DisconnectedPlayers []Player `json:"disconnectedPlayers"`
 }
 
-func NewSquadRcon(rconConfig rcon.RconConfig) (*SquadRcon, error) {
-	rcon, err := rcon.NewRcon(rconConfig)
+// NewSquadRcon creates a new SquadRcon instance using RconManager
+func NewSquadRcon(manager *rcon_manager.RconManager, serverID uuid.UUID) *SquadRcon {
+	return &SquadRcon{
+		Manager:  manager,
+		ServerID: serverID,
+	}
+}
+
+// NewSquadRconWithConnection creates a new SquadRcon instance and connects to the server using RconManager
+func NewSquadRconWithConnection(manager *rcon_manager.RconManager, serverID uuid.UUID, host string, port int, password string) (*SquadRcon, error) {
+	// Connect to the server using RconManager
+	err := manager.ConnectToServer(serverID, host, port, password)
 	if err != nil {
 		return nil, err
 	}
 
-	return &SquadRcon{rcon: rcon}, nil
+	return &SquadRcon{
+		Manager:  manager,
+		ServerID: serverID,
+	}, nil
 }
 
 // BanPlayer bans a player from the server
 func (s *SquadRcon) BanPlayer(steamId string, duration int, reason string) error {
-	_, err := s.rcon.Execute(fmt.Sprintf("AdminBan %s %dd %s", steamId, duration, reason))
+	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %dd %s", steamId, duration, reason))
 	return err
 }
 
 // GetServerPlayers gets the online and disconnected players from the server
 func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
-	playersResponse, err := s.rcon.Execute("ListPlayers")
+	playersResponse, err := s.Manager.ExecuteCommand(s.ServerID, "ListPlayers")
 	if err != nil {
 		return PlayersData{}, err
 	}
@@ -363,7 +379,7 @@ func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
 }
 
 func (s *SquadRcon) GetServerSquads() ([]Squad, []string, error) {
-	squadsResponse, err := s.rcon.Execute("ListSquads")
+	squadsResponse, err := s.Manager.ExecuteCommand(s.ServerID, "ListSquads")
 	if err != nil {
 		return []Squad{}, []string{}, err
 	}
@@ -410,7 +426,7 @@ func (s *SquadRcon) GetServerSquads() ([]Squad, []string, error) {
 }
 
 func (s *SquadRcon) GetCurrentMap() (Map, error) {
-	currentMap, err := s.rcon.Execute("ShowCurrentMap")
+	currentMap, err := s.Manager.ExecuteCommand(s.ServerID, "ShowCurrentMap")
 	if err != nil {
 		return Map{}, err
 	}
@@ -429,7 +445,7 @@ func (s *SquadRcon) GetCurrentMap() (Map, error) {
 }
 
 func (s *SquadRcon) GetNextMap() (Map, error) {
-	nextMap, err := s.rcon.Execute("ShowNextMap")
+	nextMap, err := s.Manager.ExecuteCommand(s.ServerID, "ShowNextMap")
 	if err != nil {
 		if nextMap == "Next level is not defined" {
 			return Map{}, ErrNoNextMap
@@ -453,7 +469,7 @@ func (s *SquadRcon) GetNextMap() (Map, error) {
 
 // GetAvailableMaps gets the available maps from the server
 func (s *SquadRcon) GetAvailableLayers() ([]Layer, error) {
-	availableLayers, err := s.rcon.Execute("ListLayers")
+	availableLayers, err := s.Manager.ExecuteCommand(s.ServerID, "ListLayers")
 	if err != nil {
 		return []Layer{}, err
 	}
@@ -483,7 +499,7 @@ func (s *SquadRcon) GetAvailableLayers() ([]Layer, error) {
 
 // GetServerInfo gets the server info from the server
 func (s *SquadRcon) GetServerInfo() (ServerInfo, error) {
-	serverInfo, err := s.rcon.Execute("ShowServerInfo")
+	serverInfo, err := s.Manager.ExecuteCommand(s.ServerID, "ShowServerInfo")
 	if err != nil {
 		return ServerInfo{}, err
 	}
@@ -575,6 +591,13 @@ func (s *SquadRcon) GetTeamsAndSquads() ([]Team, error) {
 	return ParseTeamsAndSquads(squads, teamNames, players)
 }
 
+// Close method is no longer needed as RconManager handles connections
+// But we'll keep a no-op version for API compatibility
 func (s *SquadRcon) Close() {
-	s.rcon.Close()
+	// No-op - connection management is handled by RconManager
+}
+
+// ExecuteRaw allows executing raw RCON commands directly
+func (s *SquadRcon) ExecuteRaw(command string) (string, error) {
+	return s.Manager.ExecuteCommand(s.ServerID, command)
 }

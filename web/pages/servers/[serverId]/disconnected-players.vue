@@ -385,7 +385,7 @@ async function executePlayerAction() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem @click="openActionDialog(player, 'ban')" v-if="authStore.getServerPermissions(serverId as string).includes('ban')">
+                      <DropdownMenuItem @click="openActionDialog(player, 'ban')" v-if="authStore.getServerPermission(serverId as string, 'ban')">
                         <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
                         <span>Ban Player</span>
                       </DropdownMenuItem>

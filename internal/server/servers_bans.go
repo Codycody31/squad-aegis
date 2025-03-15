@@ -151,11 +151,8 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 
 	// Also apply the ban via RCON if the server is online
 	if server != nil {
-		r, err := squadRcon.NewSquadRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
-		if err == nil {
-			defer r.Close()
-			_ = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
-		}
+		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+		_ = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
 	}
 
 	// Create detailed audit log

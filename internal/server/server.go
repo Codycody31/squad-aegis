@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"go.codycody31.dev/squad-aegis/internal/chat_processor"
+	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/shared/config"
 
 	"github.com/gin-gonic/gin"
@@ -17,7 +19,9 @@ type Server struct {
 }
 
 type Dependencies struct {
-	DB *sql.DB
+	DB            *sql.DB
+	RconManager   *rcon_manager.RconManager
+	ChatProcessor *chat_processor.ChatProcessor
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {
@@ -26,9 +30,11 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 		Dependencies: serverDependencies,
 	}
 
-	// General Middleware
-	router.Use(gin.Logger())
-	router.Use(gin.LoggerWithFormatter(server.customLoggerWithFormatter))
+	if config.Config.Log.ShowGin {
+		// General Middleware
+		router.Use(gin.Logger())
+		router.Use(gin.LoggerWithFormatter(server.customLoggerWithFormatter))
+	}
 
 	// Recovery middleware
 	router.Use(gin.CustomRecovery(server.customRecovery))
@@ -131,6 +137,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.POST("/rcon/execute", server.AuthHasServerPermission("manageserver"), server.ServerRconExecute)
 				serverGroup.GET("/rcon/server-population", server.ServerRconServerPopulation)
 				serverGroup.GET("/rcon/available-layers", server.ServerRconAvailableLayers)
+				serverGroup.GET("/rcon/events", server.AuthHasServerPermission("manageserver"), server.ServerRconEvents)
 
 				serverGroup.GET("/roles", server.ServerRolesList)
 				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)

@@ -1,14 +1,12 @@
 package server
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/internal/commands"
-	rcon "go.codycody31.dev/squad-aegis/internal/rcon"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
@@ -84,17 +82,15 @@ func (s *Server) ServerRconExecute(c *gin.Context) {
 		return
 	}
 
-	// TODO: RCON Connection should be handled in a separate goroutine and not in the main thread
-	// Then we just use a channel to send the response back to the client
-
-	r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
+	// Ensure server is connected to RCON manager
+	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword)
 	if err != nil {
 		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
 		return
 	}
-	defer r.Close()
 
-	response, err := r.Execute(request.Command)
+	// Execute command using RCON manager
+	response, err := s.Dependencies.RconManager.ExecuteCommand(serverId, request.Command)
 	if err != nil {
 		responses.BadRequest(c, "Failed to execute RCON command", &gin.H{"error": err.Error()})
 		return
@@ -111,8 +107,6 @@ func (s *Server) ServerRconExecute(c *gin.Context) {
 }
 
 func (s *Server) ServerRconServerPopulation(c *gin.Context) {
-	user := s.getUserFromSession(c)
-
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
 	if err != nil {
@@ -120,22 +114,10 @@ func (s *Server) ServerRconServerPopulation(c *gin.Context) {
 		return
 	}
 
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
-		return
-	}
-
-	r, err := squadRcon.NewSquadRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
-	if err != nil {
-		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
-		return
-	}
-	defer r.Close()
-
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 	squads, teamNames, err := r.GetServerSquads()
 	if err != nil {
-		responses.BadRequest(c, "Failed to get server squads", &gin.H{"error": err.Error()})
+		responses.BadRequest(c, "Failed to get teams and squads", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -158,8 +140,6 @@ func (s *Server) ServerRconServerPopulation(c *gin.Context) {
 }
 
 func (s *Server) ServerRconAvailableLayers(c *gin.Context) {
-	user := s.getUserFromSession(c)
-
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
 	if err != nil {
@@ -167,26 +147,14 @@ func (s *Server) ServerRconAvailableLayers(c *gin.Context) {
 		return
 	}
 
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
-		return
-	}
-
-	r, err := squadRcon.NewSquadRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
-	if err != nil {
-		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
-		return
-	}
-	defer r.Close()
-
-	availableLayers, err := r.GetAvailableLayers()
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
+	layers, err := r.GetAvailableLayers()
 	if err != nil {
 		responses.BadRequest(c, "Failed to get available layers", &gin.H{"error": err.Error()})
 		return
 	}
 
-	responses.Success(c, "Available layers fetched successfully", &gin.H{"layers": availableLayers})
+	responses.Success(c, "Available layers fetched successfully", &gin.H{"layers": layers})
 }
 
 // ServerRconKickPlayer handles kicking a player from the server
@@ -206,18 +174,7 @@ func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 		return
 	}
 
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
-		return
-	}
-
-	r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
-	if err != nil {
-		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
-		return
-	}
-	defer r.Close()
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
 	// Format the kick command
 	kickCommand := "AdminKick " + request.SteamId
@@ -225,7 +182,8 @@ func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 		kickCommand += " " + request.Reason
 	}
 
-	response, err := r.Execute(kickCommand)
+	// Execute kick command
+	response, err := r.ExecuteRaw(kickCommand)
 	if err != nil {
 		responses.BadRequest(c, "Failed to kick player", &gin.H{"error": err.Error()})
 		return
@@ -259,27 +217,13 @@ func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 		return
 	}
 
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
-		return
-	}
-
-	r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
-	if err != nil {
-		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
-		return
-	}
-	defer r.Close()
-
-	// Format the warning command
-	warnCommand := "AdminWarn " + request.SteamId + " " + request.Message
-
-	response, err := r.Execute(warnCommand)
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
+	response, err := r.ExecuteRaw("AdminWarn " + request.SteamId + " " + request.Message)
 	if err != nil {
 		responses.BadRequest(c, "Failed to warn player", &gin.H{"error": err.Error()})
 		return
 	}
+
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
@@ -291,7 +235,7 @@ func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 	responses.Success(c, "Player warned successfully", &gin.H{"response": response})
 }
 
-// ServerRconMovePlayer handles moving a player to a different team
+// ServerRconMovePlayer handles moving a player to another team
 func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 	user := s.getUserFromSession(c)
 
@@ -308,23 +252,8 @@ func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 		return
 	}
 
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
-		return
-	}
-
-	r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
-	if err != nil {
-		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
-		return
-	}
-	defer r.Close()
-
-	// Format the move command
-	moveCommand := "AdminForceTeamChange " + request.SteamId
-
-	response, err := r.Execute(moveCommand)
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
+	response, err := r.ExecuteRaw("AdminForceTeamChange " + request.SteamId)
 	if err != nil {
 		responses.BadRequest(c, "Failed to move player", &gin.H{"error": err.Error()})
 		return
@@ -340,9 +269,8 @@ func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 	responses.Success(c, "Player moved successfully", &gin.H{"response": response})
 }
 
+// ServerRconServerInfo gets the server info from the server
 func (s *Server) ServerRconServerInfo(c *gin.Context) {
-	user := s.getUserFromSession(c)
-
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
 	if err != nil {
@@ -350,19 +278,7 @@ func (s *Server) ServerRconServerInfo(c *gin.Context) {
 		return
 	}
 
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
-		return
-	}
-
-	r, err := squadRcon.NewSquadRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
-	if err != nil {
-		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
-		return
-	}
-	defer r.Close()
-
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 	serverInfo, err := r.GetServerInfo()
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server info", &gin.H{"error": err.Error()})

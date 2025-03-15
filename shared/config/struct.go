@@ -26,8 +26,9 @@ type Struct struct {
 		}
 	}
 	Log struct {
-		Level string `default:"info"`
-		File  string `default:""`
+		Level   string `default:"info"`
+		ShowGin bool   `default:"false"`
+		File    string `default:""`
 	}
 	Debug struct {
 		Pretty  bool `default:"true"`
