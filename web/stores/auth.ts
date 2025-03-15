@@ -54,6 +54,12 @@ export const useAuthStore = defineStore("auth", {
     },
     getServerPermission(serverId: string, permission: string) {
       const permissions = this.serverPermissions[serverId];
+
+      // If first permission is * then return true
+      if (permissions[0] === "*") {
+        return true;
+      }
+
       return Array.isArray(permissions) && (permissions.includes(permission) || permissions.length > 0);
     },
     setUser(user: User) {

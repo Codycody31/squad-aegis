@@ -3,7 +3,6 @@ package server
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
-	rcon "go.codycody31.dev/squad-aegis/internal/rcon"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
@@ -200,15 +198,7 @@ func (s *Server) ServerGet(c *gin.Context) {
 	var metrics map[string]interface{} = nil
 
 	// Try to connect to RCON to check if server is online
-	rconConfig := rcon.RconConfig{
-		Host:               server.IpAddress,
-		Port:               fmt.Sprintf("%d", server.RconPort),
-		Password:           server.RconPassword,
-		AutoReconnect:      false,
-		AutoReconnectDelay: 0,
-	}
-
-	rconClient, err := squadRcon.NewSquadRcon(rconConfig)
+	rconClient, err := squadRcon.NewSquadRconWithConnection(s.Dependencies.RconManager, serverUUID, server.IpAddress, server.RconPort, server.RconPassword)
 	if err == nil {
 		serverStatus["rcon"] = true
 
@@ -238,7 +228,6 @@ func (s *Server) ServerGet(c *gin.Context) {
 					"1": totalTeam1,
 					"2": totalTeam2,
 				},
-				"max": 100, // TODO: Grab somehow, maybe from server config or via Query/Game port
 			}
 		}
 
@@ -305,16 +294,7 @@ func (s *Server) ServerStatus(c *gin.Context) {
 	// Get server status and metrics if possible
 	serverStatus := map[string]interface{}{}
 
-	// Check if rcon is enabled
-	rconConfig := rcon.RconConfig{
-		Host:               server.IpAddress,
-		Port:               fmt.Sprintf("%d", server.RconPort),
-		Password:           server.RconPassword,
-		AutoReconnect:      false,
-		AutoReconnectDelay: 0,
-	}
-
-	rconClient, err := squadRcon.NewSquadRcon(rconConfig)
+	rconClient, err := squadRcon.NewSquadRconWithConnection(s.Dependencies.RconManager, serverUUID, server.IpAddress, server.RconPort, server.RconPassword)
 	if err == nil {
 		serverStatus["rcon"] = true
 		defer rconClient.Close()
@@ -341,6 +321,9 @@ func (s *Server) ServerDelete(c *gin.Context) {
 		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
 		return
 	}
+
+	// Disconnect from RCON
+	_ = s.Dependencies.RconManager.DisconnectFromServer(serverId)
 
 	// Begin transaction
 	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
