@@ -118,12 +118,6 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	log.Debug().
-		Str("serverID", serverID.String()).
-		Str("host", host).
-		Int("port", port).
-		Msg("Attempting to connect to RCON server")
-
 	portStr := strconv.Itoa(port)
 
 	// Check if connection already exists
