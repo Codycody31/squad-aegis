@@ -26,6 +26,32 @@ type MovePlayerRequest struct {
 	SteamId string `json:"steamId" binding:"required"`
 }
 
+// ServerRconReconnect handles the reconnecting of a server to RCON
+func (s *Server) ServerRconReconnect(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword, true)
+	if err != nil {
+		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "RCON connected successfully", &gin.H{"response": "RCON connected successfully"})
+}
+
 // RconCommandList handles the listing of all commands that can be executed by the server
 func (s *Server) RconCommandList(c *gin.Context) {
 	var commandsList []commands.CommandInfo
@@ -83,7 +109,7 @@ func (s *Server) ServerRconExecute(c *gin.Context) {
 	}
 
 	// Ensure server is connected to RCON manager
-	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword)
+	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword, false)
 	if err != nil {
 		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
 		return
