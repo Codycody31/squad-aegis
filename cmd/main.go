@@ -15,9 +15,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/connectors/discord"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
-	"go.codycody31.dev/squad-aegis/internal/chat_processor"
+	"go.codycody31.dev/squad-aegis/extensions/core/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/internal/connector_manager"
+	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server"
@@ -116,8 +119,27 @@ func run(ctx context.Context) error {
 	// Initialize RCON manager
 	rconManager := rcon_manager.NewRconManager(ctx)
 
-	// Initialize chat processor
-	chatProcessor := chat_processor.NewChatProcessor(ctx, rconManager, database)
+	// Initialize connector manager
+	connectorManager := connector_manager.NewConnectorManager(ctx)
+
+	// Register connector factories
+	connectorManager.RegisterFactory(discord.Factory)
+
+	// Initialize connectors from database
+	if err := connectorManager.InitializeConnectors(ctx, database); err != nil {
+		log.Error().Err(err).Msg("Failed to initialize connectors")
+	}
+
+	// Initialize extension manager
+	extensionManager := extension_manager.NewExtensionManager(ctx, connectorManager, rconManager)
+
+	// Register extension factories
+	extensionManager.RegisterFactory("discord_admin_request", discord_admin_request.Factory)
+
+	// Initialize extensions from database
+	if err := extensionManager.InitializeExtensions(ctx, database); err != nil {
+		log.Error().Err(err).Msg("Failed to initialize extensions")
+	}
 
 	// Initialize services
 	waitingGroup := errgroup.Group{}
@@ -143,20 +165,22 @@ func run(ctx context.Context) error {
 		return nil
 	})
 
-	// Start chat processor in a goroutine
+	// Start extension event listener
 	waitingGroup.Go(func() error {
-		log.Info().Msg("Starting chat processor service...")
+		log.Info().Msg("Starting extension event listener...")
 
-		// Start chat processor
-		chatProcessor.Start()
+		// Start extension event listener
+		extensionManager.StartEventListener()
+
+		log.Info().Msg("Extension event listener started")
 
 		// Block until context is done
 		<-ctx.Done()
 
-		// Stop chat processor
-		chatProcessor.Stop()
+		// Stop extension manager
+		extensionManager.Shutdown()
 
-		log.Info().Msg("Chat processor service stopped")
+		log.Info().Msg("Extension manager stopped")
 		return nil
 	})
 
@@ -170,9 +194,10 @@ func run(ctx context.Context) error {
 		}
 
 		deps := &server.Dependencies{
-			DB:            database,
-			RconManager:   rconManager,
-			ChatProcessor: chatProcessor,
+			DB:               database,
+			RconManager:      rconManager,
+			ConnectorManager: connectorManager,
+			ExtensionManager: extensionManager,
 		}
 
 		// Initialize router

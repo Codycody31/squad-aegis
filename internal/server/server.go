@@ -7,7 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"go.codycody31.dev/squad-aegis/internal/chat_processor"
+	"go.codycody31.dev/squad-aegis/internal/connector_manager"
+	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/shared/config"
 
@@ -19,9 +20,10 @@ type Server struct {
 }
 
 type Dependencies struct {
-	DB            *sql.DB
-	RconManager   *rcon_manager.RconManager
-	ChatProcessor *chat_processor.ChatProcessor
+	DB               *sql.DB
+	RconManager      *rcon_manager.RconManager
+	ConnectorManager *connector_manager.ConnectorManager
+	ExtensionManager *extension_manager.ExtensionManager
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {
@@ -164,6 +166,36 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 		// Public Routes for the server
 		apiGroup.GET("/servers/:serverId/admins/cfg", server.ServerAdminsCfg)
 		apiGroup.GET("/servers/:serverId/bans/cfg", server.ServerBansCfg)
+
+		// Connector management endpoints
+		connectorGroup := apiGroup.Group("/connectors")
+		{
+			connectorGroup.Use(server.AuthSession)
+			connectorGroup.Use(server.AuthIsSuperAdmin())
+
+			connectorGroup.GET("/types", server.ListConnectorTypes)
+			connectorGroup.GET("/global", server.ListGlobalConnectors)
+			connectorGroup.POST("/global", server.CreateGlobalConnector)
+			connectorGroup.GET("/global/:id", server.GetGlobalConnector)
+			connectorGroup.PUT("/global/:id", server.UpdateGlobalConnector)
+			connectorGroup.DELETE("/global/:id", server.DeleteGlobalConnector)
+		}
+
+		// Extension management endpoints
+		extensionGroup := apiGroup.Group("/extensions")
+		{
+			extensionGroup.Use(server.AuthSession)
+
+			extensionGroup.GET("/types", server.ListExtensionTypes)
+		}
+
+		// Server-specific extension management endpoints
+		serversGroup.GET("/:serverId/extensions", server.AuthHasServerPermission("manageserver"), server.ListServerExtensions)
+		serversGroup.POST("/:serverId/extensions", server.AuthHasServerPermission("manageserver"), server.CreateServerExtension)
+		serversGroup.GET("/:serverId/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.GetServerExtension)
+		serversGroup.PUT("/:serverId/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.UpdateServerExtension)
+		serversGroup.DELETE("/:serverId/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.DeleteServerExtension)
+		serversGroup.POST("/:serverId/extensions/:extensionId/toggle", server.AuthHasServerPermission("manageserver"), server.ToggleServerExtension)
 	}
 
 	return router
