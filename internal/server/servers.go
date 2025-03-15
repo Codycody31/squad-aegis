@@ -157,6 +157,9 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		return
 	}
 
+	// Connect to RCON
+	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, server.IpAddress, server.RconPort, server.RconPassword)
+
 	responses.Success(c, "Server created successfully", &gin.H{"server": server})
 }
 
