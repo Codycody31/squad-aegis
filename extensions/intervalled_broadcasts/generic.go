@@ -27,7 +27,7 @@ func Define() extension_manager.ExtensionDefinition {
 	return extension_manager.ExtensionDefinition{
 		ID:          "intervalled_broadcasts",
 		Name:        "Intervalled Broadcasts",
-		Description: "Sends periodic broadcast messages to the server via RCON",
+		Description: "Allows you to set broadcasts, which will be broadcasted at a set interval.",
 		Version:     "1.0.0",
 		Author:      "Squad Aegis",
 
