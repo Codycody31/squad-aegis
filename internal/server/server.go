@@ -186,7 +186,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 		{
 			extensionGroup.Use(server.AuthSession)
 
-			extensionGroup.GET("/types", server.ListExtensionTypes)
+			extensionGroup.GET("/definitions", server.ListExtensionDefinitions)
 		}
 
 		// Server-specific extension management endpoints

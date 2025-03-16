@@ -37,8 +37,8 @@ type ExtensionInstance struct {
 // ExtensionManager manages all extensions
 type ExtensionManager struct {
 	registeredExtensions map[string]ExtensionRegistrar
-	instances            map[uuid.UUID]Extension
-	serverExtensions     map[uuid.UUID][]uuid.UUID // Maps server IDs to extension instance IDs
+	instances            map[string]Extension
+	serverExtensions     map[uuid.UUID][]string // Maps server IDs to extension instance IDs
 	connectorManager     *connector_manager.ConnectorManager
 	rconManager          *rcon_manager.RconManager
 	db                   *sql.DB
@@ -52,8 +52,8 @@ func NewExtensionManager(ctx context.Context, db *sql.DB, connectorManager *conn
 	ctx, cancel := context.WithCancel(ctx)
 	return &ExtensionManager{
 		registeredExtensions: make(map[string]ExtensionRegistrar),
-		instances:            make(map[uuid.UUID]Extension),
-		serverExtensions:     make(map[uuid.UUID][]uuid.UUID),
+		instances:            make(map[string]Extension),
+		serverExtensions:     make(map[uuid.UUID][]string),
 		db:                   db,
 		connectorManager:     connectorManager,
 		rconManager:          rconManager,
@@ -200,20 +200,20 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 
 	// Initialize extensions
 	for rows.Next() {
-		var id uuid.UUID
+		var dbID string
 		var serverID uuid.UUID
 		var name string
 		var enabled bool
 		var configJSON []byte
 
-		if err := rows.Scan(&id, &serverID, &name, &enabled, &configJSON); err != nil {
+		if err := rows.Scan(&dbID, &serverID, &name, &enabled, &configJSON); err != nil {
 			log.Error().Err(err).Msg("Failed to scan server extension row")
 			continue
 		}
 
 		var config map[string]interface{}
 		if err := json.Unmarshal(configJSON, &config); err != nil {
-			log.Error().Err(err).Str("id", id.String()).Msg("Failed to unmarshal extension config")
+			log.Error().Err(err).Str("name", name).Msg("Failed to unmarshal extension config")
 			continue
 		}
 
@@ -226,6 +226,9 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 
 		// Get extension definition
 		def := registrar.Define()
+
+		// Use the ID provided by the extension
+		extensionID := def.ID
 
 		// Get server
 		server, err := core.GetServerById(ctx, m.db, serverID, nil)
@@ -251,16 +254,16 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 		// Skip disabled extensions
 		if !enabled {
 			// Store the extension instance but don't initialize it
-			m.instances[id] = instance
+			m.instances[extensionID] = instance
 
 			// Add to server extensions map
 			if _, ok := m.serverExtensions[serverID]; !ok {
-				m.serverExtensions[serverID] = []uuid.UUID{}
+				m.serverExtensions[serverID] = []string{}
 			}
-			m.serverExtensions[serverID] = append(m.serverExtensions[serverID], id)
+			m.serverExtensions[serverID] = append(m.serverExtensions[serverID], extensionID)
 
 			log.Info().
-				Str("id", id.String()).
+				Str("id", extensionID).
 				Str("serverID", serverID.String()).
 				Str("extension", name).
 				Bool("enabled", false).
@@ -279,16 +282,16 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 		}
 
 		// Store extension instance
-		m.instances[id] = instance
+		m.instances[extensionID] = instance
 
 		// Add to server extensions map
 		if _, ok := m.serverExtensions[serverID]; !ok {
-			m.serverExtensions[serverID] = []uuid.UUID{}
+			m.serverExtensions[serverID] = []string{}
 		}
-		m.serverExtensions[serverID] = append(m.serverExtensions[serverID], id)
+		m.serverExtensions[serverID] = append(m.serverExtensions[serverID], extensionID)
 
 		log.Info().
-			Str("id", id.String()).
+			Str("id", extensionID).
 			Str("serverID", serverID.String()).
 			Str("extension", name).
 			Bool("enabled", enabled).
@@ -361,7 +364,7 @@ func (m *ExtensionManager) Shutdown() {
 			def := instance.GetDefinition()
 			log.Error().
 				Err(err).
-				Str("id", id.String()).
+				Str("id", id).
 				Str("extension", def.Name).
 				Msg("Error shutting down extension")
 		}

@@ -1,7 +1,6 @@
 package extension_manager
 
 import (
-	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
 )
 
@@ -20,7 +19,7 @@ type Extension interface {
 // ExtensionDefinition contains all metadata and configuration for an extension
 type ExtensionDefinition struct {
 	// Basic metadata
-	ID          uuid.UUID
+	ID          string
 	Name        string
 	Description string
 	Version     string

@@ -3,7 +3,6 @@ package discord_chat
 import (
 	"fmt"
 
-	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
@@ -18,7 +17,7 @@ type DiscordChatExtension struct {
 // Define implements ExtensionRegistrar
 func Define() extension_manager.ExtensionDefinition {
 	return extension_manager.ExtensionDefinition{
-		ID:          uuid.New(),
+		ID:          "discord_chat",
 		Name:        "Discord Chat",
 		Description: "Will log chat messages to a Discord channel.",
 		Version:     "1.0.0",

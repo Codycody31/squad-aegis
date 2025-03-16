@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -12,11 +11,22 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
-// ExtensionListAvailableTypesResponse represents the response for the list available extension types endpoint
-type ExtensionListAvailableTypesResponse struct {
-	Types map[string]map[string]interface{} `json:"types"`
+// ExtensionDefinitionResponse represents an extension definition in the API response
+type ExtensionDefinitionResponse struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Version     string                 `json:"version"`
+	Author      string                 `json:"author"`
+	Schema      map[string]interface{} `json:"schema"`
+}
+
+// ExtensionDefinitionsResponse represents the response for the list definitions endpoint
+type ExtensionDefinitionsResponse struct {
+	Definitions []ExtensionDefinitionResponse `json:"definitions"`
 }
 
 // ExtensionResponse represents an extension in API responses
@@ -46,15 +56,14 @@ type ExtensionUpdateRequest struct {
 	Config  map[string]interface{} `json:"config"`
 }
 
-// ListExtensionTypes lists all available extension types
-func (s *Server) ListExtensionTypes(c *gin.Context) {
+// ListExtensionDefinitions lists all available extension definitions
+// Path: /definitions (previously /types)
+func (s *Server) ListExtensionDefinitions(c *gin.Context) {
 	// Get registered extensions from extension manager
 	extensions := s.Dependencies.ExtensionManager.ListExtensions()
 
-	// Build response with all schemas
-	resp := ExtensionListAvailableTypesResponse{
-		Types: make(map[string]map[string]interface{}),
-	}
+	// Build response with extension definitions
+	definitionResponses := make([]ExtensionDefinitionResponse, 0, len(extensions))
 
 	for _, extension := range extensions {
 		// Convert ConfigSchema to map
@@ -100,10 +109,20 @@ func (s *Server) ListExtensionTypes(c *gin.Context) {
 			schemaMap[field.Name] = fieldInfo
 		}
 
-		resp.Types[extension.Name] = schemaMap
+		// Create definition response
+		definitionResponses = append(definitionResponses, ExtensionDefinitionResponse{
+			ID:          extension.ID,
+			Name:        extension.Name,
+			Description: extension.Description,
+			Version:     extension.Version,
+			Author:      extension.Author,
+			Schema:      schemaMap,
+		})
 	}
 
-	c.JSON(http.StatusOK, resp)
+	responses.Success(c, "Extension definitions fetched successfully", &gin.H{
+		"definitions": definitionResponses,
+	})
 }
 
 // ListServerExtensions returns all extensions for a server
@@ -114,10 +133,21 @@ func (s *Server) ListServerExtensions(c *gin.Context) {
 	// Validate UUID
 	serverID, err := uuid.Parse(serverIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid server ID",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid server ID", nil)
+		return
+	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Check if user has access to server
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	if err != nil {
+		responses.NotFound(c, "Server not found", nil)
 		return
 	}
 
@@ -130,18 +160,13 @@ func (s *Server) ListServerExtensions(c *gin.Context) {
 	`, serverID)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query server extensions")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to query server extensions",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to query extensions"})
 		return
 	}
 	defer rows.Close()
 
 	// Build response
-	resp := ExtensionListResponse{
-		Extensions: []ExtensionResponse{},
-	}
+	extensionsList := make([]ExtensionResponse, 0)
 
 	for rows.Next() {
 		var id uuid.UUID
@@ -163,7 +188,7 @@ func (s *Server) ListServerExtensions(c *gin.Context) {
 		}
 
 		// Add to response
-		resp.Extensions = append(resp.Extensions, ExtensionResponse{
+		extensionsList = append(extensionsList, ExtensionResponse{
 			ID:       id.String(),
 			ServerID: servID.String(),
 			Name:     name,
@@ -174,9 +199,13 @@ func (s *Server) ListServerExtensions(c *gin.Context) {
 
 	if err := rows.Err(); err != nil {
 		log.Error().Err(err).Msg("Error iterating extension rows")
+		responses.InternalServerError(c, err, &gin.H{"error": "Error processing extensions"})
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	responses.Success(c, "Extensions fetched successfully", &gin.H{
+		"extensions": extensionsList,
+	})
 }
 
 // GetServerExtension returns a specific extension for a server
@@ -185,19 +214,28 @@ func (s *Server) GetServerExtension(c *gin.Context) {
 	serverIDStr := c.Param("serverId")
 	serverID, err := uuid.Parse(serverIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid server ID",
-		})
+		responses.BadRequest(c, "Invalid server ID", nil)
 		return
 	}
 
 	extensionIDStr := c.Param("extensionId")
 	eID, err := uuid.Parse(extensionIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid extension ID",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid extension ID", nil)
+		return
+	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Check if user has access to server
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	if err != nil {
+		responses.NotFound(c, "Server not found", nil)
 		return
 	}
 
@@ -215,10 +253,7 @@ func (s *Server) GetServerExtension(c *gin.Context) {
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to get extension")
-		c.JSON(http.StatusNotFound, gin.H{
-			"message": "Extension not found",
-			"code":    http.StatusNotFound,
-		})
+		responses.NotFound(c, "Extension not found", nil)
 		return
 	}
 
@@ -226,15 +261,12 @@ func (s *Server) GetServerExtension(c *gin.Context) {
 	var config map[string]interface{}
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Msg("Failed to unmarshal extension config")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to parse extension config",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to parse extension config"})
 		return
 	}
 
 	// Build response
-	resp := ExtensionResponse{
+	extension := ExtensionResponse{
 		ID:       eID.String(),
 		ServerID: servID.String(),
 		Name:     name,
@@ -242,7 +274,9 @@ func (s *Server) GetServerExtension(c *gin.Context) {
 		Config:   config,
 	}
 
-	c.JSON(http.StatusOK, resp)
+	responses.Success(c, "Extension fetched successfully", &gin.H{
+		"extension": extension,
+	})
 }
 
 // CreateServerExtension creates a new extension for a server
@@ -253,29 +287,34 @@ func (s *Server) CreateServerExtension(c *gin.Context) {
 	// Validate UUID
 	serverID, err := uuid.Parse(serverIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid server ID",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid server ID", nil)
+		return
+	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Check if user has access to server
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	if err != nil {
+		responses.NotFound(c, "Server not found", nil)
 		return
 	}
 
 	var req ExtensionCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid request body",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid request body", &gin.H{"error": err.Error()})
 		return
 	}
 
 	// Validate extension type
 	registrar, ok := s.Dependencies.ExtensionManager.GetExtension(req.Name)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid extension type",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid extension type", nil)
 		return
 	}
 
@@ -283,10 +322,7 @@ func (s *Server) CreateServerExtension(c *gin.Context) {
 	if connectorIDStr, ok := req.Config["connector_id"].(string); ok {
 		connectorID, err := uuid.Parse(connectorIDStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"message": "Invalid connector ID format",
-				"code":    http.StatusBadRequest,
-			})
+			responses.BadRequest(c, "Invalid connector ID format", nil)
 			return
 		}
 
@@ -298,18 +334,12 @@ func (s *Server) CreateServerExtension(c *gin.Context) {
 
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to check if connector exists")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Failed to validate connector",
-				"code":    http.StatusInternalServerError,
-			})
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to validate connector"})
 			return
 		}
 
 		if !exists {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"message": "Specified connector does not exist",
-				"code":    http.StatusBadRequest,
-			})
+			responses.BadRequest(c, "Specified connector does not exist", nil)
 			return
 		}
 	}
@@ -318,46 +348,38 @@ func (s *Server) CreateServerExtension(c *gin.Context) {
 	configJSON, err := json.Marshal(req.Config)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to marshal extension config")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to process extension config",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to process extension config"})
 		return
 	}
 
 	// Generate UUID for new extension
 	id := uuid.New()
 
+	// Begin transaction
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to begin transaction"})
+		return
+	}
+	defer tx.Rollback()
+
 	// Create extension in database
-	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+	_, err = tx.ExecContext(c.Request.Context(), `
 		INSERT INTO server_extensions (id, server_id, name, enabled, config)
 		VALUES ($1, $2, $3, $4, $5)
 	`, id, serverID, req.Name, req.Enabled, configJSON)
 
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create extension")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to create extension",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to create extension"})
 		return
 	}
 
 	// If enabled, initialize the extension
+	var warningMessage string
 	if req.Enabled {
 		// Get extension definition
 		extensionDef := registrar.Define()
-
-		// Get server
-		server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, nil)
-		if err != nil {
-			log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Failed to get server",
-				"code":    http.StatusInternalServerError,
-			})
-			return
-		}
 
 		// Create the extension instance
 		instance := extensionDef.CreateInstance()
@@ -368,7 +390,7 @@ func (s *Server) CreateServerExtension(c *gin.Context) {
 			log.Error().Err(err).Str("id", id.String()).Msg("Failed to create extension dependencies")
 
 			// Update database to mark as disabled
-			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
+			_, dbErr := tx.ExecContext(c.Request.Context(), `
 				UPDATE server_extensions
 				SET enabled = false
 				WHERE id = $1
@@ -377,42 +399,46 @@ func (s *Server) CreateServerExtension(c *gin.Context) {
 				log.Error().Err(dbErr).Str("id", id.String()).Msg("Failed to update extension enabled status")
 			}
 
-			c.JSON(http.StatusCreated, gin.H{
-				"id":      id.String(),
-				"message": "Extension created but not enabled: " + err.Error(),
-				"status":  "warning",
-			})
-			return
-		}
+			warningMessage = fmt.Sprintf("Extension created but not enabled: %s", err.Error())
+		} else {
+			// Initialize the extension
+			if err := instance.Initialize(req.Config, deps); err != nil {
+				log.Error().Err(err).Str("id", id.String()).Msg("Failed to initialize extension")
 
-		// Initialize the extension
-		if err := instance.Initialize(req.Config, deps); err != nil {
-			log.Error().Err(err).Str("id", id.String()).Msg("Failed to initialize extension")
+				// Update database to mark as disabled
+				_, dbErr := tx.ExecContext(c.Request.Context(), `
+					UPDATE server_extensions
+					SET enabled = false
+					WHERE id = $1
+				`, id)
+				if dbErr != nil {
+					log.Error().Err(dbErr).Str("id", id.String()).Msg("Failed to update extension enabled status")
+				}
 
-			// Update database to mark as disabled
-			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
-				UPDATE server_extensions
-				SET enabled = false
-				WHERE id = $1
-			`, id)
-			if dbErr != nil {
-				log.Error().Err(dbErr).Str("id", id.String()).Msg("Failed to update extension enabled status")
+				warningMessage = fmt.Sprintf("Extension created but failed to initialize: %s", err.Error())
 			}
-
-			c.JSON(http.StatusCreated, gin.H{
-				"id":      id.String(),
-				"message": "Extension created but failed to initialize: " + err.Error(),
-				"status":  "warning",
-			})
-			return
 		}
 	}
 
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
 	// Return success
-	c.JSON(http.StatusCreated, gin.H{
-		"id":      id.String(),
-		"message": "Extension created successfully",
-	})
+	if warningMessage != "" {
+		responses.Success(c, warningMessage, &gin.H{
+			"id":      id.String(),
+			"status":  "warning",
+			"enabled": false,
+		})
+	} else {
+		responses.Success(c, "Extension created successfully", &gin.H{
+			"id":      id.String(),
+			"enabled": req.Enabled,
+		})
+	}
 }
 
 // UpdateServerExtension updates an existing extension for a server
@@ -421,37 +447,51 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 	serverIDStr := c.Param("serverId")
 	serverID, err := uuid.Parse(serverIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid server ID",
-		})
+		responses.BadRequest(c, "Invalid server ID", nil)
 		return
 	}
 
 	extensionIDStr := c.Param("extensionId")
 	eID, err := uuid.Parse(extensionIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid extension ID",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid extension ID", nil)
+		return
+	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Check if user has access to server
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	if err != nil {
+		responses.NotFound(c, "Server not found", nil)
 		return
 	}
 
 	var req ExtensionUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid request body",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid request body", &gin.H{"error": err.Error()})
 		return
 	}
+
+	// Begin transaction
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to begin transaction"})
+		return
+	}
+	defer tx.Rollback()
 
 	// Get current extension info from database
 	var name string
 	var enabled bool
 	var configJSON []byte
 
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+	err = tx.QueryRowContext(c.Request.Context(), `
 		SELECT name, enabled, config
 		FROM server_extensions
 		WHERE id = $1 AND server_id = $2
@@ -459,10 +499,7 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to get extension")
-		c.JSON(http.StatusNotFound, gin.H{
-			"message": "Extension not found",
-			"code":    http.StatusNotFound,
-		})
+		responses.NotFound(c, "Extension not found", nil)
 		return
 	}
 
@@ -470,10 +507,7 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 	var currentConfig map[string]interface{}
 	if err := json.Unmarshal(configJSON, &currentConfig); err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Msg("Failed to unmarshal extension config")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to parse extension config",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to parse extension config"})
 		return
 	}
 
@@ -495,9 +529,8 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 
 	// If we're not changing anything, just return success
 	if !enabledChanged && !configChanged {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "No changes requested",
-		})
+		tx.Rollback() // No need to commit if no changes
+		responses.Success(c, "No changes requested", nil)
 		return
 	}
 
@@ -506,29 +539,26 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 		configJSON, err = json.Marshal(newConfig)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to marshal extension config")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Failed to process extension config",
-				"code":    http.StatusInternalServerError,
-			})
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to process extension config"})
 			return
 		}
 	}
 
 	// Update extension in database
 	if enabledChanged && configChanged {
-		_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+		_, err = tx.ExecContext(c.Request.Context(), `
 			UPDATE server_extensions
 			SET enabled = $1, config = $2
 			WHERE id = $3
 		`, newEnabled, configJSON, eID)
 	} else if enabledChanged {
-		_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+		_, err = tx.ExecContext(c.Request.Context(), `
 			UPDATE server_extensions
 			SET enabled = $1
 			WHERE id = $2
 		`, newEnabled, eID)
 	} else if configChanged {
-		_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+		_, err = tx.ExecContext(c.Request.Context(), `
 			UPDATE server_extensions
 			SET config = $1
 			WHERE id = $2
@@ -537,21 +567,7 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Msg("Failed to update extension")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to update extension",
-			"code":    http.StatusInternalServerError,
-		})
-		return
-	}
-
-	// Get server
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, nil)
-	if err != nil {
-		log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to get server",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to update extension"})
 		return
 	}
 
@@ -559,15 +575,14 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 	registrar, ok := s.Dependencies.ExtensionManager.GetExtension(name)
 	if !ok {
 		log.Error().Str("name", name).Msg("Extension registrar not found")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Extension type not found",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Extension type not found"})
 		return
 	}
 
 	// Get extension definition
 	extensionDef := registrar.Define()
+
+	var warningMessage string
 
 	// If we're enabling, initialize
 	if enabledChanged && newEnabled {
@@ -580,7 +595,7 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 			log.Error().Err(err).Str("id", eID.String()).Msg("Failed to create extension dependencies")
 
 			// Update database to mark as disabled
-			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
+			_, dbErr := tx.ExecContext(c.Request.Context(), `
 				UPDATE server_extensions
 				SET enabled = false
 				WHERE id = $1
@@ -589,52 +604,57 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 				log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
 			}
 
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Extension updated but failed to initialize: " + err.Error(),
-				"status":  "warning",
-			})
-			return
-		}
+			warningMessage = fmt.Sprintf("Extension updated but failed to initialize: %s", err.Error())
+		} else {
+			// Initialize extension
+			if err := instance.Initialize(newConfig, deps); err != nil {
+				log.Error().Err(err).Str("id", eID.String()).Msg("Failed to initialize extension")
 
-		// Initialize extension
-		if err := instance.Initialize(newConfig, deps); err != nil {
-			log.Error().Err(err).Str("id", eID.String()).Msg("Failed to initialize extension")
+				// Update database to mark as disabled
+				_, dbErr := tx.ExecContext(c.Request.Context(), `
+					UPDATE server_extensions
+					SET enabled = false
+					WHERE id = $1
+				`, eID)
+				if dbErr != nil {
+					log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
+				}
 
-			// Update database to mark as disabled
-			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
-				UPDATE server_extensions
-				SET enabled = false
-				WHERE id = $1
-			`, eID)
-			if dbErr != nil {
-				log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
+				warningMessage = fmt.Sprintf("Extension updated but failed to initialize: %s", err.Error())
 			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Extension updated but failed to initialize: " + err.Error(),
-				"status":  "warning",
-			})
-			return
 		}
 	}
 
 	// If we're disabling, shutdown
 	if enabledChanged && !newEnabled {
-		// We would shut down the extension here
+		// Attempt to shutdown the extension
+		// For now just log it, real implementation would use extension manager
 		log.Info().Str("id", eID.String()).Msg("Disabling extension")
 	}
 
-	// If we're updating config and staying enabled, restart
-	if configChanged && newEnabled {
-		// Restart would involve getting the current instance, shutting it down, and reinitializing
-		// For now, just log a message
+	// If we're updating config and staying enabled, restart the extension
+	if configChanged && newEnabled && !enabledChanged {
+		// For now just log it, real implementation would use extension manager to restart
 		log.Info().Str("id", eID.String()).Msg("Updating extension config")
 	}
 
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
 	// Return success
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Extension updated successfully",
-	})
+	if warningMessage != "" {
+		responses.Success(c, warningMessage, &gin.H{
+			"status":  "warning",
+			"enabled": false,
+		})
+	} else {
+		responses.Success(c, "Extension updated successfully", &gin.H{
+			"enabled": newEnabled,
+		})
+	}
 }
 
 // DeleteServerExtension deletes an extension from a server
@@ -643,67 +663,80 @@ func (s *Server) DeleteServerExtension(c *gin.Context) {
 	serverIDStr := c.Param("serverId")
 	serverID, err := uuid.Parse(serverIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid server ID",
-		})
+		responses.BadRequest(c, "Invalid server ID", nil)
 		return
 	}
 
 	extensionIDStr := c.Param("extensionId")
 	eID, err := uuid.Parse(extensionIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid extension ID",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid extension ID", nil)
 		return
 	}
 
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Check if user has access to server
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	if err != nil {
+		responses.NotFound(c, "Server not found", nil)
+		return
+	}
+
+	// Begin transaction
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to begin transaction"})
+		return
+	}
+	defer tx.Rollback()
+
 	// Check if extension exists
 	var exists bool
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+	err = tx.QueryRowContext(c.Request.Context(), `
 		SELECT EXISTS(SELECT 1 FROM server_extensions WHERE id = $1 AND server_id = $2)
 	`, eID, serverID).Scan(&exists)
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to check if extension exists")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to check if extension exists",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to check if extension exists"})
 		return
 	}
 
 	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{
-			"message": "Extension not found",
-			"code":    http.StatusNotFound,
-		})
+		responses.NotFound(c, "Extension not found", nil)
 		return
 	}
 
-	// For shutdown extension if it's running, we'll just log the attempt
+	// For shutdown extension if it's running
+	// Note: Real implementation would use extension manager to find and shutdown the extension
 	log.Info().Str("id", eID.String()).Msg("Shutting down extension")
 
 	// Delete extension from database
-	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+	_, err = tx.ExecContext(c.Request.Context(), `
 		DELETE FROM server_extensions
 		WHERE id = $1 AND server_id = $2
 	`, eID, serverID)
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to delete extension")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to delete extension",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete extension"})
+		return
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
 		return
 	}
 
 	// Return success
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Extension deleted successfully",
-	})
+	responses.Success(c, "Extension deleted successfully", nil)
 }
 
 // ToggleServerExtension toggles an extension's enabled status
@@ -712,28 +745,45 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 	serverIDStr := c.Param("serverId")
 	serverID, err := uuid.Parse(serverIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid server ID",
-		})
+		responses.BadRequest(c, "Invalid server ID", nil)
 		return
 	}
 
 	extensionIDStr := c.Param("extensionId")
 	eID, err := uuid.Parse(extensionIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid extension ID",
-			"code":    http.StatusBadRequest,
-		})
+		responses.BadRequest(c, "Invalid extension ID", nil)
 		return
 	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Check if user has access to server
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	if err != nil {
+		responses.NotFound(c, "Server not found", nil)
+		return
+	}
+
+	// Begin transaction
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to begin transaction"})
+		return
+	}
+	defer tx.Rollback()
 
 	// Get current extension info from database
 	var name string
 	var enabled bool
 	var configJSON []byte
 
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+	err = tx.QueryRowContext(c.Request.Context(), `
 		SELECT name, enabled, config
 		FROM server_extensions
 		WHERE id = $1 AND server_id = $2
@@ -741,10 +791,7 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to get extension")
-		c.JSON(http.StatusNotFound, gin.H{
-			"message": "Extension not found",
-			"code":    http.StatusNotFound,
-		})
+		responses.NotFound(c, "Extension not found", nil)
 		return
 	}
 
@@ -752,10 +799,7 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 	var currentConfig map[string]interface{}
 	if err := json.Unmarshal(configJSON, &currentConfig); err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Msg("Failed to unmarshal extension config")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to parse extension config",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to parse extension config"})
 		return
 	}
 
@@ -763,7 +807,7 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 	newEnabled := !enabled
 
 	// Update extension in database
-	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+	_, err = tx.ExecContext(c.Request.Context(), `
 		UPDATE server_extensions
 		SET enabled = $1
 		WHERE id = $2
@@ -771,21 +815,7 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Msg("Failed to update extension enabled status")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to update extension enabled status",
-			"code":    http.StatusInternalServerError,
-		})
-		return
-	}
-
-	// Get server
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, nil)
-	if err != nil {
-		log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to get server",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to update extension status"})
 		return
 	}
 
@@ -793,15 +823,14 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 	registrar, ok := s.Dependencies.ExtensionManager.GetExtension(name)
 	if !ok {
 		log.Error().Str("name", name).Msg("Extension registrar not found")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Extension type not found",
-			"code":    http.StatusInternalServerError,
-		})
+		responses.InternalServerError(c, err, &gin.H{"error": "Extension type not found"})
 		return
 	}
 
 	// Get extension definition
 	extensionDef := registrar.Define()
+
+	var warningMessage string
 
 	// If we're enabling, initialize
 	if newEnabled {
@@ -814,7 +843,7 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 			log.Error().Err(err).Str("id", eID.String()).Msg("Failed to create extension dependencies")
 
 			// Update database to mark as disabled
-			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
+			_, dbErr := tx.ExecContext(c.Request.Context(), `
 				UPDATE server_extensions
 				SET enabled = false
 				WHERE id = $1
@@ -823,45 +852,48 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 				log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
 			}
 
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Extension updated but failed to initialize: " + err.Error(),
-				"status":  "warning",
-			})
-			return
-		}
+			warningMessage = fmt.Sprintf("Extension not enabled: %s", err.Error())
+		} else {
+			// Initialize extension
+			if err := instance.Initialize(currentConfig, deps); err != nil {
+				log.Error().Err(err).Str("id", eID.String()).Msg("Failed to initialize extension")
 
-		// Initialize extension
-		if err := instance.Initialize(currentConfig, deps); err != nil {
-			log.Error().Err(err).Str("id", eID.String()).Msg("Failed to initialize extension")
+				// Update database to mark as disabled
+				_, dbErr := tx.ExecContext(c.Request.Context(), `
+					UPDATE server_extensions
+					SET enabled = false
+					WHERE id = $1
+				`, eID)
+				if dbErr != nil {
+					log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
+				}
 
-			// Update database to mark as disabled
-			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
-				UPDATE server_extensions
-				SET enabled = false
-				WHERE id = $1
-			`, eID)
-			if dbErr != nil {
-				log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
+				warningMessage = fmt.Sprintf("Extension not enabled: %s", err.Error())
 			}
-
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Extension updated but failed to initialize: " + err.Error(),
-				"status":  "warning",
-			})
-			return
 		}
-	}
-
-	// If we're disabling, shutdown
-	if !newEnabled {
-		// We would shut down the extension here
+	} else {
+		// Disabling the extension
+		// Real implementation would use extension manager to shut down
 		log.Info().Str("id", eID.String()).Msg("Disabling extension")
 	}
 
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
 	// Return success
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Extension updated successfully",
-	})
+	if warningMessage != "" {
+		responses.Success(c, warningMessage, &gin.H{
+			"status":  "warning",
+			"enabled": false,
+		})
+	} else {
+		responses.Success(c, "Extension "+(map[bool]string{true: "enabled", false: "disabled"})[newEnabled]+" successfully", &gin.H{
+			"enabled": newEnabled,
+		})
+	}
 }
 
 // Helper function to create extension dependencies
@@ -891,8 +923,31 @@ func (s *Server) createExtensionDependencies(def extension_manager.ExtensionDefi
 		case extension_manager.DependencyConnectors:
 			// Get server connectors
 			serverConnectors := s.Dependencies.ConnectorManager.GetConnectorsByServer(server.Id)
-			for _, connector := range serverConnectors {
-				deps.Connectors[connector.GetType()] = connector
+
+			// Add connectors to dependencies
+			for _, requiredConnector := range def.RequiredConnectors {
+				found := false
+				for _, connector := range serverConnectors {
+					if connector.GetType() == requiredConnector {
+						deps.Connectors[connector.GetType()] = connector
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					return nil, fmt.Errorf("required connector not available: %s", requiredConnector)
+				}
+			}
+
+			// Add optional connectors
+			for _, optionalConnector := range def.OptionalConnectors {
+				for _, connector := range serverConnectors {
+					if connector.GetType() == optionalConnector {
+						deps.Connectors[connector.GetType()] = connector
+						break
+					}
+				}
 			}
 		}
 	}

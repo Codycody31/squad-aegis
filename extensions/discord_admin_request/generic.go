@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
@@ -22,7 +21,7 @@ type DiscordAdminRequestExtension struct {
 // Define implements ExtensionRegistrar
 func Define() extension_manager.ExtensionDefinition {
 	return extension_manager.ExtensionDefinition{
-		ID:          uuid.New(),
+		ID:          "discord_admin_request",
 		Name:        "Discord Admin Requests",
 		Description: "Will ping admins in a Discord channel when a player requests an admin via the !admin command in in-game chat.",
 		Version:     "1.0.0",
