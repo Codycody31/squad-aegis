@@ -874,6 +874,7 @@ func (s *Server) ToggleServerExtension(c *gin.Context) {
 	} else {
 		// Disabling the extension
 		// Real implementation would use extension manager to shut down
+		// TODO: Implement disabling the extension
 		log.Info().Str("id", eID.String()).Msg("Disabling extension")
 	}
 
@@ -902,7 +903,7 @@ func (s *Server) createExtensionDependencies(def extension_manager.ExtensionDefi
 		Database:    s.Dependencies.DB,
 		Server:      server,
 		RconManager: s.Dependencies.RconManager,
-		Connectors:  make(map[string]connector_manager.ConnectorInstance),
+		Connectors:  make(map[string]connector_manager.Connector),
 	}
 
 	// Check required dependencies

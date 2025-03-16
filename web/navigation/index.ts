@@ -26,6 +26,13 @@ const navigationItems: NavigationItem[] = [
     },
     icon: "mdi:server",
   },
+  {
+    title: "Connectors",
+    to: {
+      name: "connectors",
+    },
+    icon: "mdi:server-network",
+  },
 ];
 
 export default navigationItems;

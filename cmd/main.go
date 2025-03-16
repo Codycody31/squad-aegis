@@ -127,7 +127,7 @@ func run(ctx context.Context) error {
 
 	// Initialize connector manager
 	connectorManager := connector_manager.NewConnectorManager(ctx)
-	connectorManager.RegisterFactory(discord.Factory)
+	connectorManager.RegisterConnector("discord", discord.Registrar)
 	if err := connectorManager.InitializeConnectors(ctx, database); err != nil {
 		log.Error().Err(err).Msg("Failed to initialize connectors")
 	}

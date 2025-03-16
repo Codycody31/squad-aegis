@@ -11,92 +11,57 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// ConnectorInstance represents an instantiated connector
-type ConnectorInstance interface {
-	// GetID returns the unique identifier for this connector instance
-	GetID() uuid.UUID
-	// GetType returns the type of connector
-	GetType() string
-	// GetConfig returns the configuration for this connector
-	GetConfig() map[string]interface{}
-	// Initialize initializes the connector with its configuration
-	Initialize(config map[string]interface{}) error
-	// Shutdown gracefully shuts down the connector
-	Shutdown() error
-}
-
-// ConnectorFactory creates a new connector instance
-type ConnectorFactory interface {
-	// Create creates a new connector instance
-	Create(id uuid.UUID, config map[string]interface{}) (ConnectorInstance, error)
-	// GetType returns the type of connector this factory creates
-	GetType() string
-	// ConfigSchema returns the configuration schema for this connector type
-	ConfigSchema() map[string]interface{}
-}
-
 // ConnectorManager manages all connectors
 type ConnectorManager struct {
-	factories    map[string]ConnectorFactory
-	instances    map[uuid.UUID]ConnectorInstance
-	globalConfig map[string]interface{}
-	mu           sync.RWMutex
-	ctx          context.Context
-	cancel       context.CancelFunc
+	registeredConnectors map[string]ConnectorRegistrar
+	instances            map[uuid.UUID]Connector
+	globalConfig         map[string]interface{}
+	mu                   sync.RWMutex
+	ctx                  context.Context
+	cancel               context.CancelFunc
 }
 
 // NewConnectorManager creates a new connector manager
 func NewConnectorManager(ctx context.Context) *ConnectorManager {
 	ctx, cancel := context.WithCancel(ctx)
 	return &ConnectorManager{
-		factories:    make(map[string]ConnectorFactory),
-		instances:    make(map[uuid.UUID]ConnectorInstance),
-		globalConfig: make(map[string]interface{}),
-		ctx:          ctx,
-		cancel:       cancel,
+		registeredConnectors: make(map[string]ConnectorRegistrar),
+		instances:            make(map[uuid.UUID]Connector),
+		globalConfig:         make(map[string]interface{}),
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
 }
 
-// RegisterFactory registers a connector factory
-func (m *ConnectorManager) RegisterFactory(factory ConnectorFactory) {
+// RegisterConnector registers a connector type
+func (m *ConnectorManager) RegisterConnector(name string, registrar ConnectorRegistrar) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	connectorType := factory.GetType()
-	m.factories[connectorType] = factory
-	log.Info().Str("type", connectorType).Msg("Registered connector factory")
+	m.registeredConnectors[name] = registrar
+	log.Info().Str("name", name).Msg("Registered connector type")
 }
 
-// ListFactories returns a map of all registered connector factories
-func (m *ConnectorManager) ListFactories() map[string]ConnectorFactory {
+// ListConnectors returns a list of all registered connector types and their definitions
+func (m *ConnectorManager) ListConnectors() []ConnectorDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// Create a copy of the factories map to avoid concurrent access issues
-	factories := make(map[string]ConnectorFactory)
-	for k, v := range m.factories {
-		factories[k] = v
+	definitions := make([]ConnectorDefinition, 0, len(m.registeredConnectors))
+	for _, registrar := range m.registeredConnectors {
+		definitions = append(definitions, registrar.Define())
 	}
 
-	return factories
+	return definitions
 }
 
-// GetFactory returns a connector factory by its type
-func (m *ConnectorManager) GetFactory(connectorType string) (ConnectorFactory, bool) {
+// GetConnector returns a connector registrar by its name
+func (m *ConnectorManager) GetConnector(name string) (ConnectorRegistrar, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	factory, ok := m.factories[connectorType]
-	return factory, ok
-}
-
-// RegisterInstance registers a connector instance
-func (m *ConnectorManager) RegisterInstance(id uuid.UUID, instance ConnectorInstance) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.instances[id] = instance
-	log.Info().Str("id", id.String()).Str("type", instance.GetType()).Msg("Registered connector instance")
+	registrar, ok := m.registeredConnectors[name]
+	return registrar, ok
 }
 
 // InitializeConnectors initializes all connectors from the database
@@ -131,29 +96,25 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 			continue
 		}
 
-		// Get connector type from config
-		connectorType, ok := config["type"].(string)
+		// Find registrar for this connector type
+		registrar, ok := m.registeredConnectors[name]
 		if !ok {
-			log.Error().Str("id", id.String()).Msg("Connector config missing type field")
+			log.Error().Str("name", name).Msg("No registrar found for connector type")
 			continue
 		}
 
-		// Find factory for this connector type
-		factory, ok := m.factories[connectorType]
-		if !ok {
-			log.Error().Str("type", connectorType).Msg("No factory registered for connector type")
-			continue
-		}
+		// Get connector definition
+		def := registrar.Define()
 
 		// Create and initialize connector instance
-		instance, err := factory.Create(id, config)
+		instance, err := def.CreateInstance(id, config)
 		if err != nil {
-			log.Error().Err(err).Str("id", id.String()).Str("type", connectorType).Msg("Failed to create connector instance")
+			log.Error().Err(err).Str("id", id.String()).Str("type", def.ID).Msg("Failed to create connector instance")
 			continue
 		}
 
 		m.instances[id] = instance
-		log.Info().Str("id", id.String()).Str("type", connectorType).Msg("Initialized global connector")
+		log.Info().Str("id", id.String()).Str("type", def.ID).Msg("Initialized global connector")
 	}
 
 	if err := globalRows.Err(); err != nil {
@@ -191,29 +152,25 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 		// Add server ID to config
 		config["server_id"] = serverID.String()
 
-		// Get connector type from config
-		connectorType, ok := config["type"].(string)
+		// Find registrar for this connector type
+		registrar, ok := m.registeredConnectors[name]
 		if !ok {
-			log.Error().Str("id", id.String()).Msg("Server connector config missing type field")
+			log.Error().Str("name", name).Msg("No registrar found for connector type")
 			continue
 		}
 
-		// Find factory for this connector type
-		factory, ok := m.factories[connectorType]
-		if !ok {
-			log.Error().Str("type", connectorType).Msg("No factory registered for connector type")
-			continue
-		}
+		// Get connector definition
+		def := registrar.Define()
 
 		// Create and initialize connector instance
-		instance, err := factory.Create(id, config)
+		instance, err := def.CreateInstance(id, config)
 		if err != nil {
-			log.Error().Err(err).Str("id", id.String()).Str("type", connectorType).Msg("Failed to create server connector instance")
+			log.Error().Err(err).Str("id", id.String()).Str("type", def.ID).Msg("Failed to create server connector instance")
 			continue
 		}
 
 		m.instances[id] = instance
-		log.Info().Str("id", id.String()).Str("serverID", serverID.String()).Str("type", connectorType).Msg("Initialized server connector")
+		log.Info().Str("id", id.String()).Str("serverID", serverID.String()).Str("type", def.ID).Msg("Initialized server connector")
 	}
 
 	if err := serverRows.Err(); err != nil {
@@ -224,11 +181,11 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 }
 
 // GetConnectorsByType returns all connector instances of a specific type
-func (m *ConnectorManager) GetConnectorsByType(connectorType string) ([]ConnectorInstance, error) {
+func (m *ConnectorManager) GetConnectorsByType(connectorType string) ([]Connector, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var connectors []ConnectorInstance
+	var connectors []Connector
 	for _, instance := range m.instances {
 		if instance.GetType() == connectorType {
 			connectors = append(connectors, instance)
@@ -239,11 +196,11 @@ func (m *ConnectorManager) GetConnectorsByType(connectorType string) ([]Connecto
 }
 
 // GetConnectorsByServerAndType returns all connector instances for a specific server and type
-func (m *ConnectorManager) GetConnectorsByServerAndType(serverID uuid.UUID, connectorType string) ([]ConnectorInstance, error) {
+func (m *ConnectorManager) GetConnectorsByServerAndType(serverID uuid.UUID, connectorType string) ([]Connector, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var connectors []ConnectorInstance
+	var connectors []Connector
 	for _, instance := range m.instances {
 		config := instance.GetConfig()
 		if serverIDStr, ok := config["server_id"].(string); ok {
@@ -259,7 +216,7 @@ func (m *ConnectorManager) GetConnectorsByServerAndType(serverID uuid.UUID, conn
 }
 
 // GetConnectorByID returns a connector instance by its ID
-func (m *ConnectorManager) GetConnectorByID(id uuid.UUID) (ConnectorInstance, bool) {
+func (m *ConnectorManager) GetConnectorByID(id uuid.UUID) (Connector, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -268,11 +225,11 @@ func (m *ConnectorManager) GetConnectorByID(id uuid.UUID) (ConnectorInstance, bo
 }
 
 // GetConnectorsByServer returns all connector instances for a specific server
-func (m *ConnectorManager) GetConnectorsByServer(serverID uuid.UUID) []ConnectorInstance {
+func (m *ConnectorManager) GetConnectorsByServer(serverID uuid.UUID) []Connector {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var connectors []ConnectorInstance
+	var connectors []Connector
 	for _, instance := range m.instances {
 		config := instance.GetConfig()
 		// Include server-specific connectors
@@ -305,25 +262,26 @@ func (m *ConnectorManager) RestartConnector(id uuid.UUID, config map[string]inte
 		return fmt.Errorf("failed to shutdown connector: %w", err)
 	}
 
-	// Preserve connector type
-	connectorType := instance.GetType()
-	config["type"] = connectorType
+	// Get the connector definition
+	def := instance.GetDefinition()
 
-	// Get the factory for this connector type
-	factory, ok := m.factories[connectorType]
+	// Find registrar for this connector type
+	registrarName := def.ID
+	registrar, ok := m.registeredConnectors[registrarName]
 	if !ok {
-		return fmt.Errorf("no factory registered for connector type: %s", connectorType)
+		return fmt.Errorf("no registrar found for connector type: %s", registrarName)
 	}
 
 	// Create a new instance with the updated config
-	newInstance, err := factory.Create(id, config)
+	newDef := registrar.Define()
+	newInstance, err := newDef.CreateInstance(id, config)
 	if err != nil {
 		return fmt.Errorf("failed to create new connector instance: %w", err)
 	}
 
 	// Store the new instance
 	m.instances[id] = newInstance
-	log.Info().Str("id", id.String()).Str("type", connectorType).Msg("Restarted connector")
+	log.Info().Str("id", id.String()).Str("type", def.ID).Msg("Restarted connector")
 
 	return nil
 }

@@ -26,7 +26,7 @@ type Dependencies struct {
 	Database    *sql.DB
 	Server      *models.Server
 	RconManager *rcon_manager.RconManager
-	Connectors  map[string]connector_manager.ConnectorInstance
+	Connectors  map[string]connector_manager.Connector
 }
 
 // DependencyProvider provides dependencies to extensions

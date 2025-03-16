@@ -7,11 +7,25 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
 // ConnectorListAvailableTypesResponse represents the response for the list available connector types endpoint
 type ConnectorListAvailableTypesResponse struct {
 	Types map[string]map[string]interface{} `json:"types"`
+}
+
+// ConnectorDefinitionResponse represents a connector definition in the API response
+type ConnectorDefinitionResponse struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Schema      map[string]interface{} `json:"schema"`
+}
+
+// ConnectorDefinitionsResponse represents the response for the list definitions endpoint
+type ConnectorDefinitionsResponse struct {
+	Definitions []ConnectorDefinitionResponse `json:"definitions"`
 }
 
 // ConnectorResponse represents a connector in API responses
@@ -40,18 +54,81 @@ type ConnectorUpdateRequest struct {
 	Config map[string]interface{} `json:"config"`
 }
 
-// ListConnectorTypes lists all available connector types
+// ListConnectorDefinitions lists all available connector definitions
+func (s *Server) ListConnectorDefinitions(c *gin.Context) {
+	// Get connector definitions from connector manager
+	connectorDefs := s.Dependencies.ConnectorManager.ListConnectors()
+
+	// Build response with connector definitions
+	definitionResponses := make([]ConnectorDefinitionResponse, 0, len(connectorDefs))
+
+	for _, def := range connectorDefs {
+		// Convert ConfigSchema to map
+		schemaMap := make(map[string]interface{})
+
+		// Process each field in the schema
+		for _, field := range def.ConfigSchema.Fields {
+			fieldInfo := map[string]interface{}{
+				"description": field.Description,
+				"required":    field.Required,
+				"type":        string(field.Type),
+			}
+
+			if field.Default != nil {
+				fieldInfo["default"] = field.Default
+			}
+
+			// Add options if present (assuming the same structure as extensions)
+			if len(field.Options) > 0 {
+				fieldInfo["options"] = field.Options
+			}
+
+			schemaMap[field.Name] = fieldInfo
+		}
+
+		// Create definition response
+		definitionResponses = append(definitionResponses, ConnectorDefinitionResponse{
+			ID:          def.ID,
+			Name:        def.Name,
+			Description: def.Description,
+			Schema:      schemaMap,
+		})
+	}
+
+	responses.Success(c, "Connector definitions fetched successfully", &gin.H{
+		"definitions": definitionResponses,
+	})
+}
+
+// ListConnectorTypes lists all available connector types (legacy endpoint)
 func (s *Server) ListConnectorTypes(c *gin.Context) {
-	// Get connector factories from connector manager
-	factories := s.Dependencies.ConnectorManager.ListFactories()
+	// Get connector definitions from connector manager
+	connectorDefs := s.Dependencies.ConnectorManager.ListConnectors()
 
 	// Build response with all schemas
 	resp := ConnectorListAvailableTypesResponse{
 		Types: make(map[string]map[string]interface{}),
 	}
 
-	for connType, factory := range factories {
-		resp.Types[connType] = factory.ConfigSchema()
+	for _, def := range connectorDefs {
+		// Convert the schema to map structure
+		schemaMap := make(map[string]interface{})
+
+		for _, field := range def.ConfigSchema.Fields {
+			fieldInfo := map[string]interface{}{
+				"description": field.Description,
+				"required":    field.Required,
+				"type":        string(field.Type),
+			}
+
+			if field.Default != nil {
+				fieldInfo["default"] = field.Default
+			}
+
+			schemaMap[field.Name] = fieldInfo
+		}
+
+		resp.Types[def.ID] = schemaMap
 	}
 
 	c.JSON(http.StatusOK, resp)
@@ -199,7 +276,7 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 	}
 
 	// Validate connector type
-	factory, ok := s.Dependencies.ConnectorManager.GetFactory(req.Type)
+	registrar, ok := s.Dependencies.ConnectorManager.GetConnector(req.Type)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Invalid connector type",
@@ -241,32 +318,25 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 	}
 
 	// Create and initialize connector instance
-	instance, err := factory.Create(id, req.Config)
+	def := registrar.Define()
+	instance, err := def.CreateInstance(id, req.Config)
 	if err != nil {
-		log.Error().Err(err).Str("id", id.String()).Msg("Failed to create connector instance")
-
-		// Try to clean up the database entry
-		_, cleanupErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
-			DELETE FROM connectors WHERE id = $1
-		`, id)
-		if cleanupErr != nil {
-			log.Error().Err(cleanupErr).Str("id", id.String()).Msg("Failed to clean up connector after initialization failure")
-		}
-
+		log.Error().Err(err).Msg("Failed to create connector instance")
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to initialize connector: " + err.Error(),
+			"message": "Failed to initialize connector",
 			"code":    http.StatusInternalServerError,
 		})
 		return
 	}
 
-	// Register instance with connector manager
-	s.Dependencies.ConnectorManager.RegisterInstance(id, instance)
+	// Add the connector to the manager
+	connectorType := instance.GetType()
 
-	// Return success
-	c.JSON(http.StatusCreated, gin.H{
-		"id":      id.String(),
-		"message": "Connector created successfully",
+	c.JSON(http.StatusCreated, ConnectorResponse{
+		ID:     id.String(),
+		Name:   req.Name,
+		Type:   connectorType,
+		Config: req.Config,
 	})
 }
 
@@ -321,6 +391,16 @@ func (s *Server) UpdateGlobalConnector(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": "Failed to parse connector config",
 			"code":    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	// Get the connector registrar
+	_, ok := s.Dependencies.ConnectorManager.GetConnector(connType)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message": "Invalid connector type",
+			"code":    http.StatusBadRequest,
 		})
 		return
 	}

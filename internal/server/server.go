@@ -140,6 +140,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/rcon/server-population", server.ServerRconServerPopulation)
 				serverGroup.GET("/rcon/available-layers", server.ServerRconAvailableLayers)
 				serverGroup.GET("/rcon/events", server.AuthHasServerPermission("manageserver"), server.ServerRconEvents)
+				serverGroup.POST("/rcon/force-restart", server.AuthHasServerPermission("manageserver"), server.ServerRconForceRestart)
 
 				serverGroup.GET("/roles", server.ServerRolesList)
 				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)
@@ -173,7 +174,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			connectorGroup.Use(server.AuthSession)
 			connectorGroup.Use(server.AuthIsSuperAdmin())
 
-			connectorGroup.GET("/types", server.ListConnectorTypes)
+			connectorGroup.GET("/definitions", server.ListConnectorDefinitions)
 			connectorGroup.GET("/global", server.ListGlobalConnectors)
 			connectorGroup.POST("/global", server.CreateGlobalConnector)
 			connectorGroup.GET("/global/:id", server.GetGlobalConnector)

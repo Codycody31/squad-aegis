@@ -630,7 +630,9 @@ function openEditDialog(extension: Extension) {
 
 // Function to get extension name from its ID
 function getExtensionNameById(extensionId: string): string {
-  const definition = extensionDefinitions.value.find(def => def.id === extensionId);
+  const definition = extensionDefinitions.value.find(
+    (def) => def.id === extensionId
+  );
   return definition ? definition.name : extensionId;
 }
 
@@ -692,7 +694,9 @@ function removeArrayItem(
 
 // Function to get extension detail by ID
 function getExtensionDetailById(extensionId: string, detail: string): string {
-  const definition = extensionDefinitions.value.find(def => def.id === extensionId);
+  const definition = extensionDefinitions.value.find(
+    (def) => def.id === extensionId
+  );
   if (definition) {
     if (detail === "version") {
       return definition.version;
@@ -769,7 +773,8 @@ onMounted(() => {
                 <TableCell class="font-medium">
                   <div>{{ getExtensionNameById(extension.name) }}</div>
                   <div class="text-xs text-muted-foreground">
-                    {{ getExtensionDetailById(extension.name, 'version') }} by {{ getExtensionDetailById(extension.name, 'author') }}
+                    {{ getExtensionDetailById(extension.name, "version") }} by
+                    {{ getExtensionDetailById(extension.name, "author") }}
                   </div>
                 </TableCell>
                 <TableCell>
@@ -855,6 +860,47 @@ onMounted(() => {
       </CardContent>
     </Card>
 
+    <Card class="mt-6" v-if="Object.keys(extensionDefinitions).length > 0">
+      <CardHeader>
+        <CardTitle>Available Extensions</CardTitle>
+        <CardDescription>
+          These extensions can be installed and configured for your server.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div class="space-y-4">
+          <div
+            v-for="extension in extensionDefinitions"
+            :key="extension.id"
+            class="p-4 border rounded-md hover:bg-muted/50 transition-colors"
+          >
+            <div class="flex justify-between items-start">
+              <div>
+                <h3 class="font-medium text-lg">
+                  {{ extension.name || extension.id }}
+                </h3>
+                <p class="text-sm text-muted-foreground mt-1">
+                  {{ extension.description || "No description available" }}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                @click="
+                  () => {
+                    addFormValues.name = extension.id;
+                    showAddExtensionDialog = true;
+                  }
+                "
+              >
+                Add This Extension
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
     <!-- Add Extension Dialog -->
     <Dialog
       v-model:open="showAddExtensionDialog"
@@ -899,15 +945,24 @@ onMounted(() => {
               </FormField>
 
               <!-- Selected extension details -->
-              <div v-if="addFormValues.name" class="mb-4 p-3 bg-muted rounded-md">
+              <div
+                v-if="addFormValues.name"
+                class="mb-4 p-3 bg-muted rounded-md"
+              >
                 <div class="text-sm font-medium">
                   {{ getExtensionNameById(addFormValues.name) }}
                   <span class="text-xs text-muted-foreground ml-2">
-                    v{{ getExtensionDetailById(addFormValues.name, 'version') }} by {{ getExtensionDetailById(addFormValues.name, 'author') }}
+                    v{{
+                      getExtensionDetailById(addFormValues.name, "version")
+                    }}
+                    by
+                    {{ getExtensionDetailById(addFormValues.name, "author") }}
                   </span>
                 </div>
                 <div class="text-sm mt-1">
-                  {{ getExtensionDetailById(addFormValues.name, 'description') }}
+                  {{
+                    getExtensionDetailById(addFormValues.name, "description")
+                  }}
                 </div>
               </div>
 
@@ -943,7 +998,10 @@ onMounted(() => {
                           <TooltipTrigger asChild>
                             <span class="flex items-center cursor-help">
                               {{ fieldName }}
-                              <Icon name="lucide:info" class="h-4 w-4 ml-1 text-muted-foreground" />
+                              <Icon
+                                name="lucide:info"
+                                class="h-4 w-4 ml-1 text-muted-foreground"
+                              />
                             </span>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1135,15 +1193,29 @@ onMounted(() => {
               </FormField>
 
               <!-- Selected extension details -->
-              <div v-if="selectedExtension" class="mb-4 p-3 bg-muted rounded-md">
+              <div
+                v-if="selectedExtension"
+                class="mb-4 p-3 bg-muted rounded-md"
+              >
                 <div class="text-sm font-medium">
                   {{ getExtensionNameById(selectedExtension.name) }}
                   <span class="text-xs text-muted-foreground ml-2">
-                    v{{ getExtensionDetailById(selectedExtension.name, 'version') }} by {{ getExtensionDetailById(selectedExtension.name, 'author') }}
+                    v{{
+                      getExtensionDetailById(selectedExtension.name, "version")
+                    }}
+                    by
+                    {{
+                      getExtensionDetailById(selectedExtension.name, "author")
+                    }}
                   </span>
                 </div>
                 <div class="text-sm mt-1">
-                  {{ getExtensionDetailById(selectedExtension.name, 'description') }}
+                  {{
+                    getExtensionDetailById(
+                      selectedExtension.name,
+                      "description"
+                    )
+                  }}
                 </div>
               </div>
 
@@ -1181,7 +1253,10 @@ onMounted(() => {
                           <TooltipTrigger asChild>
                             <span class="flex items-center cursor-help">
                               {{ fieldName }}
-                              <Icon name="lucide:info" class="h-4 w-4 ml-1 text-muted-foreground" />
+                              <Icon
+                                name="lucide:info"
+                                class="h-4 w-4 ml-1 text-muted-foreground"
+                              />
                             </span>
                           </TooltipTrigger>
                           <TooltipContent>
@@ -1357,7 +1432,10 @@ onMounted(() => {
           </DialogTitle>
           <DialogDescription v-if="selectedExtension">
             <span class="text-sm">
-              v{{ getExtensionDetailById(selectedExtension.name, 'version') }} by {{ getExtensionDetailById(selectedExtension.name, 'author') }}
+              v{{
+                getExtensionDetailById(selectedExtension.name, "version")
+              }}
+              by {{ getExtensionDetailById(selectedExtension.name, "author") }}
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -1366,37 +1444,68 @@ onMounted(() => {
           <div class="space-y-4">
             <!-- Extension Description -->
             <div class="mb-4">
-              <p>{{ getExtensionDetailById(selectedExtension.name, 'description') }}</p>
+              <p>
+                {{
+                  getExtensionDetailById(selectedExtension.name, "description")
+                }}
+              </p>
             </div>
 
             <!-- Configuration Schema -->
-            <div v-if="extensionTypes[selectedExtension.name]" class="border rounded-md p-4">
+            <div
+              v-if="extensionTypes[selectedExtension.name]"
+              class="border rounded-md p-4"
+            >
               <h3 class="text-lg font-medium mb-3">Configuration Options</h3>
-              
+
               <div class="space-y-4">
-                <div v-for="(field, fieldName) in extensionTypes[selectedExtension.name]" :key="fieldName" class="pb-3 border-b border-gray-100 last:border-0">
+                <div
+                  v-for="(field, fieldName) in extensionTypes[
+                    selectedExtension.name
+                  ]"
+                  :key="fieldName"
+                  class="pb-3 border-b border-gray-100 last:border-0"
+                >
                   <div class="flex items-start justify-between">
                     <div>
                       <h4 class="text-sm font-medium">{{ fieldName }}</h4>
-                      <p class="text-sm text-muted-foreground">{{ field.description }}</p>
-                      
+                      <p class="text-sm text-muted-foreground">
+                        {{ field.description }}
+                      </p>
+
                       <div class="mt-1 text-xs flex flex-wrap gap-2">
                         <Badge variant="outline">{{ field.type }}</Badge>
-                        <Badge v-if="field.required" variant="default">Required</Badge>
+                        <Badge v-if="field.required" variant="default"
+                          >Required</Badge
+                        >
                         <Badge v-else variant="outline">Optional</Badge>
                       </div>
                     </div>
-                    
+
                     <div v-if="field.default !== undefined" class="text-sm">
-                      <span class="text-xs text-muted-foreground">Default:</span> 
-                      <code class="bg-muted px-1 rounded text-xs">{{ JSON.stringify(field.default) }}</code>
+                      <span class="text-xs text-muted-foreground"
+                        >Default:</span
+                      >
+                      <code class="bg-muted px-1 rounded text-xs">{{
+                        JSON.stringify(field.default)
+                      }}</code>
                     </div>
                   </div>
 
                   <!-- Current Value -->
-                  <div v-if="selectedExtension.config && fieldName in selectedExtension.config" class="mt-2">
-                    <span class="text-xs text-muted-foreground">Current Value:</span>
-                    <code class="bg-muted px-1 rounded text-xs">{{ JSON.stringify(selectedExtension.config[fieldName]) }}</code>
+                  <div
+                    v-if="
+                      selectedExtension.config &&
+                      fieldName in selectedExtension.config
+                    "
+                    class="mt-2"
+                  >
+                    <span class="text-xs text-muted-foreground"
+                      >Current Value:</span
+                    >
+                    <code class="bg-muted px-1 rounded text-xs">{{
+                      JSON.stringify(selectedExtension.config[fieldName])
+                    }}</code>
                   </div>
                 </div>
               </div>
@@ -1411,9 +1520,12 @@ onMounted(() => {
             >
               Close
             </Button>
-            <Button 
+            <Button
               type="button"
-              @click="openEditDialog(selectedExtension); showViewDetailsDialog = false"
+              @click="
+                openEditDialog(selectedExtension);
+                showViewDetailsDialog = false;
+              "
             >
               Edit Configuration
             </Button>

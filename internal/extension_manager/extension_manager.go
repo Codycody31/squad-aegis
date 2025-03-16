@@ -94,7 +94,7 @@ func (m *ExtensionManager) startEventListener() {
 // createDependencies creates a Dependencies instance for an extension
 func (m *ExtensionManager) createDependencies(def ExtensionDefinition, server *models.Server) (*Dependencies, error) {
 	deps := &Dependencies{
-		Connectors: make(map[string]connector_manager.ConnectorInstance),
+		Connectors: make(map[string]connector_manager.Connector),
 	}
 
 	// Check required dependencies
