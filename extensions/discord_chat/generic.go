@@ -2,8 +2,6 @@ package discord_chat
 
 import (
 	"fmt"
-	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/connectors/discord"
@@ -14,9 +12,7 @@ import (
 // DiscordChatExtension sends chat messages to Discord
 type DiscordChatExtension struct {
 	extension_manager.ExtensionBase
-	discord      *discord.DiscordConnector
-	lastPingTime time.Time
-	mu           sync.Mutex
+	discord *discord.DiscordConnector
 }
 
 // Define implements ExtensionRegistrar
