@@ -18,6 +18,7 @@ import (
 	"go.codycody31.dev/squad-aegis/connectors/discord"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
+	"go.codycody31.dev/squad-aegis/extensions/discord_admin_cam_logs"
 	"go.codycody31.dev/squad-aegis/extensions/discord_admin_request"
 	"go.codycody31.dev/squad-aegis/extensions/discord_chat"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
@@ -240,6 +241,7 @@ func getExtensionRegistrars() map[string]extension_manager.ExtensionRegistrar {
 	// Add any extensions here
 	registrars["discord_chat"] = discord_chat.DiscordChatRegistrar{}
 	registrars["discord_admin_request"] = discord_admin_request.DiscordAdminRequestRegistrar{}
+	registrars["discord_admin_cam_logs"] = discord_admin_cam_logs.DiscordAdminCamLogsRegistrar{}
 
 	return registrars
 }
