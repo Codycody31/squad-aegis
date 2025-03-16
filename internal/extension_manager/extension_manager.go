@@ -18,28 +18,6 @@ import (
 // ExtensionHandler is a function that handles an event
 type ExtensionHandler func(serverID uuid.UUID, eventType string, data interface{}) error
 
-// Extension represents a loaded extension
-type Extension interface {
-	// GetID returns the unique identifier for this extension
-	GetID() uuid.UUID
-	// GetName returns the name of the extension
-	GetName() string
-	// GetDescription returns the description of the extension
-	GetDescription() string
-	// GetVersion returns the version of the extension
-	GetVersion() string
-	// GetAuthor returns the author of the extension
-	GetAuthor() string
-	// GetEventHandlers returns a map of event types to handlers
-	GetEventHandlers() map[string]ExtensionHandler
-	// GetRequiredConnectors returns a list of connector types required by this extension
-	GetRequiredConnectors() []string
-	// Initialize initializes the extension with its configuration and connectors
-	Initialize(server *models.Server, config map[string]interface{}, connectors map[string]connector_manager.ConnectorInstance, rconManager *rcon_manager.RconManager) error
-	// Shutdown gracefully shuts down the extension
-	Shutdown() error
-}
-
 // ExtensionFactory creates extension instances
 type ExtensionFactory interface {
 	// Create creates a new extension instance
@@ -58,69 +36,160 @@ type ExtensionInstance struct {
 
 // ExtensionManager manages all extensions
 type ExtensionManager struct {
-	factories        map[string]ExtensionFactory
-	instances        map[uuid.UUID]ExtensionInstance
-	serverExtensions map[uuid.UUID][]uuid.UUID // Maps server IDs to extension instance IDs
-	connectorManager *connector_manager.ConnectorManager
-	rconManager      *rcon_manager.RconManager
-	mu               sync.RWMutex
-	ctx              context.Context
-	cancel           context.CancelFunc
+	registeredExtensions map[string]ExtensionRegistrar
+	instances            map[uuid.UUID]Extension
+	serverExtensions     map[uuid.UUID][]uuid.UUID // Maps server IDs to extension instance IDs
+	connectorManager     *connector_manager.ConnectorManager
+	rconManager          *rcon_manager.RconManager
+	db                   *sql.DB
+	mu                   sync.RWMutex
+	ctx                  context.Context
+	cancel               context.CancelFunc
 }
 
 // NewExtensionManager creates a new extension manager
-func NewExtensionManager(ctx context.Context, connectorManager *connector_manager.ConnectorManager, rconManager *rcon_manager.RconManager) *ExtensionManager {
+func NewExtensionManager(ctx context.Context, db *sql.DB, connectorManager *connector_manager.ConnectorManager, rconManager *rcon_manager.RconManager) *ExtensionManager {
 	ctx, cancel := context.WithCancel(ctx)
 	return &ExtensionManager{
-		factories:        make(map[string]ExtensionFactory),
-		instances:        make(map[uuid.UUID]ExtensionInstance),
-		serverExtensions: make(map[uuid.UUID][]uuid.UUID),
-		connectorManager: connectorManager,
-		rconManager:      rconManager,
-		ctx:              ctx,
-		cancel:           cancel,
+		registeredExtensions: make(map[string]ExtensionRegistrar),
+		instances:            make(map[uuid.UUID]Extension),
+		serverExtensions:     make(map[uuid.UUID][]uuid.UUID),
+		db:                   db,
+		connectorManager:     connectorManager,
+		rconManager:          rconManager,
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
 }
 
-// RegisterFactory registers an extension factory
-func (m *ExtensionManager) RegisterFactory(name string, factory ExtensionFactory) {
+// startEventListener subscribes to RCON events and dispatches them to extensions
+// TODO: Seperate rcon event listener and the log event listener
+func (m *ExtensionManager) startEventListener() {
+	if m.rconManager == nil {
+		log.Warn().Msg("RCON manager not available, cannot listen for events")
+		return
+	}
+
+	// Subscribe to RCON events
+	eventChan := m.rconManager.SubscribeToEvents()
+
+	// Start a goroutine to process events
+	go func() {
+		for {
+			select {
+			case <-m.ctx.Done():
+				m.rconManager.UnsubscribeFromEvents(eventChan)
+				log.Info().Msg("Extension manager event listener stopped")
+				return
+			case event := <-eventChan:
+				// Map RCON event to extension event
+				m.HandleEvent(event.ServerID, event.Type, event.Data)
+			}
+		}
+	}()
+
+	log.Info().Msg("Extension manager event listener started")
+}
+
+// createDependencies creates a Dependencies instance for an extension
+func (m *ExtensionManager) createDependencies(def ExtensionDefinition, server *models.Server) (*Dependencies, error) {
+	deps := &Dependencies{
+		Connectors: make(map[string]connector_manager.ConnectorInstance),
+	}
+
+	// Check required dependencies
+	for _, depType := range def.Dependencies.Required {
+		switch depType {
+		case DependencyDatabase:
+			if m.db == nil {
+				return nil, fmt.Errorf("required dependency not available: database")
+			}
+
+			deps.Database = m.db
+		case DependencyServer:
+			if server == nil {
+				return nil, fmt.Errorf("required dependency not available: server")
+			}
+
+			deps.Server = server
+		case DependencyRconManager:
+			if m.rconManager == nil {
+				return nil, fmt.Errorf("required dependency not available: rcon_manager")
+			}
+
+			deps.RconManager = m.rconManager
+		case DependencyConnectors:
+			// Get server connectors (including global connectors)
+			serverConnectors := m.connectorManager.GetConnectorsByServer(server.Id)
+
+			// Add connectors to dependencies
+			for _, requiredConnector := range def.RequiredConnectors {
+				for _, connector := range serverConnectors {
+					if connector.GetType() == requiredConnector {
+						deps.Connectors[connector.GetType()] = connector
+						break
+					}
+				}
+
+				// Check if required connector is available
+				if _, exists := deps.Connectors[requiredConnector]; !exists {
+					return nil, fmt.Errorf("required connector not found: %s", requiredConnector)
+				}
+			}
+
+			// Add optional connectors
+			for _, optionalConnector := range def.OptionalConnectors {
+				for _, connector := range serverConnectors {
+					if connector.GetType() == optionalConnector {
+						deps.Connectors[connector.GetType()] = connector
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return deps, nil
+}
+
+// RegisterExtension registers an extension
+func (m *ExtensionManager) RegisterExtension(name string, registrar ExtensionRegistrar) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.factories[name] = factory
-	log.Info().Str("name", name).Msg("Registered extension factory")
+	m.registeredExtensions[name] = registrar
+	log.Info().Str("name", name).Msg("Registered extension")
 }
 
-// ListFactories returns a map of all registered extension factories
-func (m *ExtensionManager) ListFactories() map[string]ExtensionFactory {
+// ListExtensions returns a list of all registered extensions and their definitions
+func (m *ExtensionManager) ListExtensions() []ExtensionDefinition {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// Create a copy of the factories map to avoid concurrent access issues
-	factories := make(map[string]ExtensionFactory)
-	for k, v := range m.factories {
-		factories[k] = v
+	definitions := make([]ExtensionDefinition, 0, len(m.registeredExtensions))
+	for _, registrar := range m.registeredExtensions {
+		definitions = append(definitions, registrar.Define())
 	}
 
-	return factories
+	return definitions
 }
 
-// GetFactory returns an extension factory by its name
-func (m *ExtensionManager) GetFactory(name string) (ExtensionFactory, bool) {
+// GetExtension returns an extension registrar by its name
+func (m *ExtensionManager) GetExtension(name string) (ExtensionRegistrar, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	factory, ok := m.factories[name]
-	return factory, ok
+	registrar, ok := m.registeredExtensions[name]
+	return registrar, ok
 }
 
 // InitializeExtensions initializes all extensions from the database
-func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB) error {
+func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Query for server extensions
-	rows, err := db.QueryContext(ctx, `
+	rows, err := m.db.QueryContext(ctx, `
 		SELECT id, server_id, name, enabled, config
 		FROM server_extensions
 	`)
@@ -148,84 +217,40 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB)
 			continue
 		}
 
-		// Find factory for this extension
-		factory, ok := m.factories[name]
+		// Find registrar for this extension
+		registrar, ok := m.registeredExtensions[name]
 		if !ok {
-			log.Error().Str("name", name).Msg("No factory registered for extension")
+			log.Error().Str("name", name).Msg("No registrar found for extension")
 			continue
 		}
 
-		// Create extension
-		extension := factory.Create()
-
-		// Get required connectors
-		requiredConnectors := extension.GetRequiredConnectors()
-		connectors := make(map[string]connector_manager.ConnectorInstance)
-
-		// Get server connectors
-		serverConnectors := m.connectorManager.GetConnectorsByServer(serverID)
-		for _, connector := range serverConnectors {
-			for _, required := range requiredConnectors {
-				if connector.GetType() == required {
-					connectors[required] = connector
-					break
-				}
-			}
-		}
-
-		// Get global connectors for any missing required connectors
-		for _, required := range requiredConnectors {
-			if _, ok := connectors[required]; !ok {
-				// Try to get from global connectors
-				globalConnectors, err := m.connectorManager.GetConnectorsByType(required)
-				if err != nil {
-					log.Error().Err(err).Str("type", required).Msg("Failed to get global connectors")
-					continue
-				}
-				if len(globalConnectors) > 0 {
-					connectors[required] = globalConnectors[0]
-				}
-			}
-		}
-
-		// Check if we have all required connectors
-		missingConnectors := false
-		for _, required := range requiredConnectors {
-			if _, ok := connectors[required]; !ok {
-				log.Error().
-					Str("extension", name).
-					Str("serverID", serverID.String()).
-					Str("connector", required).
-					Msg("Missing required connector for extension")
-				missingConnectors = true
-			}
-		}
-
-		if missingConnectors {
-			log.Error().
-				Str("extension", name).
-				Str("serverID", serverID.String()).
-				Msg("Extension not loaded due to missing connectors")
-			continue
-		}
+		// Get extension definition
+		def := registrar.Define()
 
 		// Get server
-		server, err := core.GetServerById(ctx, db, serverID, nil)
+		server, err := core.GetServerById(ctx, m.db, serverID, nil)
 		if err != nil {
 			log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
 			continue
 		}
 
+		// Create dependencies
+		deps, err := m.createDependencies(def, server)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("extension", name).
+				Str("serverID", serverID.String()).
+				Msg("Failed to create dependencies")
+			continue
+		}
+
+		// Create extension instance
+		instance := def.CreateInstance()
+
 		// Skip disabled extensions
 		if !enabled {
-			// Still store the extension instance but don't initialize it
-			instance := ExtensionInstance{
-				Extension: extension,
-				Server:    server,
-				Enabled:   false,
-				Config:    config,
-			}
-
+			// Store the extension instance but don't initialize it
 			m.instances[id] = instance
 
 			// Add to server extensions map
@@ -244,7 +269,7 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB)
 		}
 
 		// Initialize extension
-		if err := extension.Initialize(server, config, connectors, m.rconManager); err != nil {
+		if err := instance.Initialize(config, deps); err != nil {
 			log.Error().
 				Err(err).
 				Str("extension", name).
@@ -254,13 +279,6 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB)
 		}
 
 		// Store extension instance
-		instance := ExtensionInstance{
-			Extension: extension,
-			Server:    server,
-			Enabled:   enabled,
-			Config:    config,
-		}
-
 		m.instances[id] = instance
 
 		// Add to server extensions map
@@ -281,254 +299,12 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context, db *sql.DB)
 		log.Error().Err(err).Msg("Error iterating extension rows")
 	}
 
-	return nil
-}
-
-// InitializeExtension initializes a specific extension
-func (m *ExtensionManager) InitializeExtension(id uuid.UUID, server *models.Server, name string, config map[string]interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Check if extension already exists and is enabled
-	if instance, ok := m.instances[id]; ok && instance.Enabled {
-		// Extension already initialized
-		return nil
-	}
-
-	// Find factory for this extension
-	factory, ok := m.factories[name]
-	if !ok {
-		return fmt.Errorf("no factory registered for extension: %s", name)
-	}
-
-	// Create extension
-	extension := factory.Create()
-
-	// Get required connectors
-	requiredConnectors := extension.GetRequiredConnectors()
-	connectors := make(map[string]connector_manager.ConnectorInstance)
-
-	// Get server connectors
-	serverConnectors := m.connectorManager.GetConnectorsByServer(server.Id)
-	for _, connector := range serverConnectors {
-		for _, required := range requiredConnectors {
-			if connector.GetType() == required {
-				connectors[required] = connector
-				break
-			}
-		}
-	}
-
-	// Get global connectors for any missing required connectors
-	for _, required := range requiredConnectors {
-		if _, ok := connectors[required]; !ok {
-			// Try to get from global connectors
-			globalConnectors, err := m.connectorManager.GetConnectorsByType(required)
-			if err != nil {
-				log.Error().Err(err).Str("type", required).Msg("Failed to get global connectors")
-				continue
-			}
-			if len(globalConnectors) > 0 {
-				connectors[required] = globalConnectors[0]
-			}
-		}
-	}
-
-	// Check if we have all required connectors
-	missingConnectors := false
-	for _, required := range requiredConnectors {
-		if _, ok := connectors[required]; !ok {
-			log.Error().
-				Str("extension", name).
-				Str("serverID", server.Id.String()).
-				Str("connector", required).
-				Msg("Missing required connector for extension")
-			missingConnectors = true
-		}
-	}
-
-	if missingConnectors {
-		return fmt.Errorf("extension not loaded due to missing connectors")
-	}
-
-	// Initialize extension
-	if err := extension.Initialize(server, config, connectors, m.rconManager); err != nil {
-		return fmt.Errorf("failed to initialize extension: %w", err)
-	}
-
-	// Store extension instance
-	instance := ExtensionInstance{
-		Extension: extension,
-		Server:    server,
-		Enabled:   true,
-		Config:    config,
-	}
-
-	m.instances[id] = instance
-
-	// Add to server extensions map
-	if _, ok := m.serverExtensions[server.Id]; !ok {
-		m.serverExtensions[server.Id] = []uuid.UUID{}
-	}
-
-	// Check if it's already in the list
-	found := false
-	for _, existingID := range m.serverExtensions[server.Id] {
-		if existingID == id {
-			found = true
-			break
-		}
-	}
-
-	// Only add if not already in the list
-	if !found {
-		m.serverExtensions[server.Id] = append(m.serverExtensions[server.Id], id)
-	}
-
-	log.Info().
-		Str("id", id.String()).
-		Str("serverID", server.Id.String()).
-		Str("extension", name).
-		Msg("Initialized extension")
+	// Start the event listener after initializing extensions
+	m.startEventListener()
 
 	return nil
 }
 
-// ShutdownExtension shuts down a specific extension
-func (m *ExtensionManager) ShutdownExtension(id uuid.UUID) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Check if extension exists
-	instance, ok := m.instances[id]
-	if !ok {
-		// Not found, nothing to do
-		return nil
-	}
-
-	// Only shutdown if it's enabled
-	if instance.Enabled {
-		if err := instance.Extension.Shutdown(); err != nil {
-			return fmt.Errorf("failed to shutdown extension: %w", err)
-		}
-
-		// Mark as disabled
-		instance.Enabled = false
-		m.instances[id] = instance
-	}
-
-	log.Info().
-		Str("id", id.String()).
-		Str("serverID", instance.Server.Id.String()).
-		Str("extension", instance.Extension.GetName()).
-		Msg("Shutdown extension")
-
-	return nil
-}
-
-// RestartExtension restarts an extension with new configuration
-func (m *ExtensionManager) RestartExtension(id uuid.UUID, config map[string]interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Get the existing instance
-	instance, ok := m.instances[id]
-	if !ok {
-		return fmt.Errorf("extension not found: %s", id)
-	}
-
-	// If it's not enabled, just update the config
-	if !instance.Enabled {
-		instance.Config = config
-		m.instances[id] = instance
-		return nil
-	}
-
-	// Shutdown the existing instance
-	if err := instance.Extension.Shutdown(); err != nil {
-		return fmt.Errorf("failed to shutdown extension: %w", err)
-	}
-
-	// Find factory for this extension
-	name := instance.Extension.GetName()
-	factory, ok := m.factories[name]
-	if !ok {
-		return fmt.Errorf("no factory registered for extension: %s", name)
-	}
-
-	// Create new extension
-	extension := factory.Create()
-
-	// Get required connectors
-	requiredConnectors := extension.GetRequiredConnectors()
-	connectors := make(map[string]connector_manager.ConnectorInstance)
-
-	// Get server connectors
-	serverConnectors := m.connectorManager.GetConnectorsByServer(instance.Server.Id)
-	for _, connector := range serverConnectors {
-		for _, required := range requiredConnectors {
-			if connector.GetType() == required {
-				connectors[required] = connector
-				break
-			}
-		}
-	}
-
-	// Get global connectors for any missing required connectors
-	for _, required := range requiredConnectors {
-		if _, ok := connectors[required]; !ok {
-			// Try to get from global connectors
-			globalConnectors, err := m.connectorManager.GetConnectorsByType(required)
-			if err != nil {
-				log.Error().Err(err).Str("type", required).Msg("Failed to get global connectors")
-				continue
-			}
-			if len(globalConnectors) > 0 {
-				connectors[required] = globalConnectors[0]
-			}
-		}
-	}
-
-	// Check if we have all required connectors
-	missingConnectors := false
-	for _, required := range requiredConnectors {
-		if _, ok := connectors[required]; !ok {
-			log.Error().
-				Str("extension", name).
-				Str("serverID", instance.Server.Id.String()).
-				Str("connector", required).
-				Msg("Missing required connector for extension")
-			missingConnectors = true
-		}
-	}
-
-	if missingConnectors {
-		return fmt.Errorf("extension not restarted due to missing connectors")
-	}
-
-	// Initialize extension with new config
-	if err := extension.Initialize(instance.Server, config, connectors, m.rconManager); err != nil {
-		return fmt.Errorf("failed to initialize extension: %w", err)
-	}
-
-	// Store updated instance
-	m.instances[id] = ExtensionInstance{
-		Extension: extension,
-		Server:    instance.Server,
-		Enabled:   true,
-		Config:    config,
-	}
-
-	log.Info().
-		Str("id", id.String()).
-		Str("serverID", instance.Server.Id.String()).
-		Str("extension", name).
-		Msg("Restarted extension")
-
-	return nil
-}
-
-// HandleEvent dispatches an event to all relevant extensions
 func (m *ExtensionManager) HandleEvent(serverID uuid.UUID, eventType string, data interface{}) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -542,51 +318,33 @@ func (m *ExtensionManager) HandleEvent(serverID uuid.UUID, eventType string, dat
 	// Process event for each extension
 	for _, id := range extensionIDs {
 		instance, ok := m.instances[id]
-		if !ok || !instance.Enabled {
-			continue
-		}
-
-		// Get event handlers for this extension
-		handlers := instance.Extension.GetEventHandlers()
-		handler, ok := handlers[eventType]
 		if !ok {
 			continue
 		}
 
-		// Handle event in a separate goroutine to avoid blocking
-		go func(ext Extension, handler ExtensionHandler, sid uuid.UUID, etype string, eventData interface{}) {
-			if err := handler(sid, etype, eventData); err != nil {
-				log.Error().
-					Err(err).
-					Str("extension", ext.GetName()).
-					Str("serverID", sid.String()).
-					Str("eventType", etype).
-					Msg("Error handling event")
-			}
-		}(instance.Extension, handler, serverID, eventType, data)
-	}
-}
+		def := instance.GetDefinition()
 
-// StartEventListener starts listening for RCON events and dispatches them to extensions
-func (m *ExtensionManager) StartEventListener() {
-	// Subscribe to RCON events
-	eventChan := m.rconManager.SubscribeToEvents()
+		// Find matching event handlers
+		for _, handler := range def.EventHandlers {
+			if handler.Name == eventType {
+				// Capture values inside the goroutine to prevent race conditions
+				handlerCopy := handler
+				instanceCopy := instance
 
-	// Start event listener
-	go func() {
-		for {
-			select {
-			case <-m.ctx.Done():
-				m.rconManager.UnsubscribeFromEvents(eventChan)
-				return
-			case event := <-eventChan:
-				// Process event
-				m.HandleEvent(event.ServerID, event.Type, event.Data)
+				go func() {
+					// 🔹 Call the method on the initialized extension instance
+					if err := handlerCopy.Handler(instanceCopy, data); err != nil {
+						log.Error().
+							Err(err).
+							Str("extension", def.Name).
+							Str("handler", handlerCopy.Name).
+							Str("description", handlerCopy.Description).
+							Msg("Error handling event")
+					}
+				}()
 			}
 		}
-	}()
-
-	log.Info().Msg("Extension event listener started")
+	}
 }
 
 // Shutdown shuts down all extensions
@@ -599,14 +357,13 @@ func (m *ExtensionManager) Shutdown() {
 
 	// Shutdown all extension instances
 	for id, instance := range m.instances {
-		if instance.Enabled {
-			if err := instance.Extension.Shutdown(); err != nil {
-				log.Error().
-					Err(err).
-					Str("id", id.String()).
-					Str("extension", instance.Extension.GetName()).
-					Msg("Error shutting down extension")
-			}
+		if err := instance.Shutdown(); err != nil {
+			def := instance.GetDefinition()
+			log.Error().
+				Err(err).
+				Str("id", id.String()).
+				Str("extension", def.Name).
+				Msg("Error shutting down extension")
 		}
 	}
 

@@ -18,8 +18,8 @@ import (
 	"go.codycody31.dev/squad-aegis/connectors/discord"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
-	"go.codycody31.dev/squad-aegis/extensions/core/discord_admin_request"
-	"go.codycody31.dev/squad-aegis/extensions/core/discord_chat"
+	"go.codycody31.dev/squad-aegis/extensions/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/extensions/discord_chat"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
@@ -119,72 +119,30 @@ func run(ctx context.Context) error {
 
 	// Initialize RCON manager
 	rconManager := rcon_manager.NewRconManager(ctx)
+	log.Info().Msg("Starting RCON connection manager service...")
+	go rconManager.StartConnectionManager()
+	log.Info().Msg("Connecting to all servers with RCON enabled...")
+	rconManager.ConnectToAllServers(ctx, database)
+	log.Info().Msg("RCON connection manager service started")
 
 	// Initialize connector manager
 	connectorManager := connector_manager.NewConnectorManager(ctx)
-
-	// Register connector factories
 	connectorManager.RegisterFactory(discord.Factory)
-
-	// Initialize connectors from database
 	if err := connectorManager.InitializeConnectors(ctx, database); err != nil {
 		log.Error().Err(err).Msg("Failed to initialize connectors")
 	}
 
 	// Initialize extension manager
-	extensionManager := extension_manager.NewExtensionManager(ctx, connectorManager, rconManager)
-
-	// Register extension factories
-	extensionManager.RegisterFactory("discord_admin_request", discord_admin_request.Factory)
-	extensionManager.RegisterFactory("discord_chat", discord_chat.Factory)
-
-	// Initialize extensions from database
-	if err := extensionManager.InitializeExtensions(ctx, database); err != nil {
+	extensionManager := extension_manager.NewExtensionManager(ctx, database, connectorManager, rconManager)
+	for name, registrar := range getExtensionRegistrars() {
+		extensionManager.RegisterExtension(name, registrar)
+	}
+	if err := extensionManager.InitializeExtensions(ctx); err != nil {
 		log.Error().Err(err).Msg("Failed to initialize extensions")
 	}
 
 	// Initialize services
 	waitingGroup := errgroup.Group{}
-
-	waitingGroup.Go(func() error {
-		log.Info().Msg("Starting RCON connection manager service...")
-		go rconManager.StartConnectionManager()
-
-		// Connect to all servers with RCON enabled
-		log.Info().Msg("Connecting to all servers with RCON enabled...")
-		rconManager.ConnectToAllServers(ctx, database)
-
-		log.Info().Msg("RCON connection manager service started")
-
-		// Block until context is done
-		<-ctx.Done()
-
-		// Stop RCON connection manager
-		rconManager.Shutdown()
-
-		log.Info().Msg("RCON connection manager service stopped")
-
-		return nil
-	})
-
-	// Start extension event listener
-	waitingGroup.Go(func() error {
-		log.Info().Msg("Starting extension event listener...")
-
-		// Start extension event listener
-		extensionManager.StartEventListener()
-
-		log.Info().Msg("Extension event listener started")
-
-		// Block until context is done
-		<-ctx.Done()
-
-		// Stop extension manager
-		extensionManager.Shutdown()
-
-		log.Info().Msg("Extension manager stopped")
-		return nil
-	})
 
 	// Start HTTP server
 	waitingGroup.Go(func() error {
@@ -273,4 +231,15 @@ func setup(database db.Executor) error {
 	log.Info().Msg("admin user registered")
 
 	return nil
+}
+
+// Helper function to get all extension registrars
+func getExtensionRegistrars() map[string]extension_manager.ExtensionRegistrar {
+	registrars := make(map[string]extension_manager.ExtensionRegistrar)
+
+	// Add any extensions here
+	registrars["discord_chat"] = discord_chat.DiscordChatRegistrar{}
+	registrars["discord_admin_request"] = discord_admin_request.DiscordAdminRequestRegistrar{}
+
+	return registrars
 }

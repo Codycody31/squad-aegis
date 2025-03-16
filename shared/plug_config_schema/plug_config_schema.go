@@ -38,3 +38,13 @@ func (c *ConfigSchema) Validate(config map[string]interface{}) error {
 
 	return nil
 }
+
+func (c *ConfigSchema) FillDefaults(config map[string]interface{}) map[string]interface{} {
+	for _, field := range c.Fields {
+		if config[field.Name] == nil {
+			config[field.Name] = field.Default
+		}
+	}
+
+	return config
+}

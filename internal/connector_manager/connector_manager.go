@@ -275,10 +275,14 @@ func (m *ConnectorManager) GetConnectorsByServer(serverID uuid.UUID) []Connector
 	var connectors []ConnectorInstance
 	for _, instance := range m.instances {
 		config := instance.GetConfig()
+		// Include server-specific connectors
 		if serverIDStr, ok := config["server_id"].(string); ok {
 			if configServerID, err := uuid.Parse(serverIDStr); err == nil && configServerID == serverID {
 				connectors = append(connectors, instance)
 			}
+		} else {
+			// Include global connectors (those without a server_id)
+			connectors = append(connectors, instance)
 		}
 	}
 
