@@ -32,7 +32,6 @@ type ConnectorDefinitionsResponse struct {
 type ConnectorResponse struct {
 	ID     string                 `json:"id"`
 	Name   string                 `json:"name"`
-	Type   string                 `json:"type"`
 	Config map[string]interface{} `json:"config"`
 }
 
@@ -44,13 +43,11 @@ type ConnectorListGlobalResponse struct {
 // ConnectorCreateRequest represents the request to create a new connector
 type ConnectorCreateRequest struct {
 	Name   string                 `json:"name" binding:"required"`
-	Type   string                 `json:"type" binding:"required"`
 	Config map[string]interface{} `json:"config" binding:"required"`
 }
 
 // ConnectorUpdateRequest represents the request to update a connector
 type ConnectorUpdateRequest struct {
-	Name   string                 `json:"name"`
 	Config map[string]interface{} `json:"config"`
 }
 
@@ -126,7 +123,6 @@ func (s *Server) ListGlobalConnectors(c *gin.Context) {
 	for rows.Next() {
 		var id uuid.UUID
 		var name string
-		var connType string
 		var configJSON []byte
 
 		if err := rows.Scan(&id, &name, &configJSON); err != nil {
@@ -143,7 +139,7 @@ func (s *Server) ListGlobalConnectors(c *gin.Context) {
 
 		// Remove sensitive data from config
 		// For Discord, remove token
-		if connType == "discord" {
+		if name == "discord" {
 			if _, ok := config["token"]; ok {
 				config["token"] = "********"
 			}
@@ -153,7 +149,6 @@ func (s *Server) ListGlobalConnectors(c *gin.Context) {
 		resp.Connectors = append(resp.Connectors, ConnectorResponse{
 			ID:     id.String(),
 			Name:   name,
-			Type:   connType,
 			Config: config,
 		})
 	}
@@ -184,14 +179,13 @@ func (s *Server) GetGlobalConnector(c *gin.Context) {
 
 	// Get connector from database
 	var name string
-	var connType string
 	var configJSON []byte
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT name, type, config
+		SELECT name, config
 		FROM connectors
 		WHERE id = $1
-	`, id).Scan(&name, &connType, &configJSON)
+	`, id).Scan(&name, &configJSON)
 
 	if err != nil {
 		log.Error().Err(err).Str("id", id.String()).Msg("Failed to get connector")
@@ -215,7 +209,7 @@ func (s *Server) GetGlobalConnector(c *gin.Context) {
 
 	// Remove sensitive data from config
 	// For Discord, remove token
-	if connType == "discord" {
+	if name == "discord" {
 		if _, ok := config["token"]; ok {
 			config["token"] = "********"
 		}
@@ -225,7 +219,6 @@ func (s *Server) GetGlobalConnector(c *gin.Context) {
 	resp := ConnectorResponse{
 		ID:     id.String(),
 		Name:   name,
-		Type:   connType,
 		Config: config,
 	}
 
@@ -245,18 +238,15 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 		return
 	}
 
-	// Validate connector type
-	registrar, ok := s.Dependencies.ConnectorManager.GetConnector(req.Type)
+	// Validate connector type using name
+	registrar, ok := s.Dependencies.ConnectorManager.GetConnector(req.Name)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid connector type",
+			"message": "Invalid connector name",
 			"code":    http.StatusBadRequest,
 		})
 		return
 	}
-
-	// Add type to config
-	req.Config["type"] = req.Type
 
 	// Convert config to JSON
 	configJSON, err := json.Marshal(req.Config)
@@ -274,9 +264,9 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 
 	// Create connector in database
 	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
-		INSERT INTO connectors (id, name, type, config)
-		VALUES ($1, $2, $3, $4)
-	`, id, req.Name, req.Type, configJSON)
+		INSERT INTO connectors (id, name, config)
+		VALUES ($1, $2, $3)
+	`, id, req.Name, configJSON)
 
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create connector")
@@ -289,7 +279,7 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 
 	// Create and initialize connector instance
 	def := registrar.Define()
-	instance, err := def.CreateInstance(id, req.Config)
+	_, err = def.CreateInstance(id, req.Config)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create connector instance")
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -298,9 +288,6 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 		})
 		return
 	}
-
-	// Add the connector to the manager
-	connectorType := instance.GetType()
 
 	// Get user from session
 	user := s.getUserFromSession(c)
@@ -313,7 +300,6 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 	auditData := map[string]interface{}{
 		"connectorId": id.String(),
 		"name":        req.Name,
-		"type":        req.Type,
 		"config":      req.Config,
 	}
 	s.CreateAuditLog(c.Request.Context(), nil, &user.Id, "connector:create", auditData)
@@ -322,168 +308,9 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 		"connector": ConnectorResponse{
 			ID:     id.String(),
 			Name:   req.Name,
-			Type:   connectorType,
 			Config: req.Config,
 		},
 	})
-}
-
-// UpdateGlobalConnector updates an existing global connector
-func (s *Server) UpdateGlobalConnector(c *gin.Context) {
-	// Get connector ID from URL
-	idStr := c.Param("id")
-
-	// Validate UUID
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid connector ID",
-			"code":    http.StatusBadRequest,
-		})
-		return
-	}
-
-	var req ConnectorUpdateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid request body",
-			"code":    http.StatusBadRequest,
-		})
-		return
-	}
-
-	// Get current connector info from database
-	var currentName string
-	var connType string
-	var currentConfigJSON []byte
-
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT name, type, config
-		FROM connectors
-		WHERE id = $1
-	`, id).Scan(&currentName, &connType, &currentConfigJSON)
-
-	if err != nil {
-		log.Error().Err(err).Str("id", id.String()).Msg("Failed to get connector")
-		c.JSON(http.StatusNotFound, gin.H{
-			"message": "Connector not found",
-			"code":    http.StatusNotFound,
-		})
-		return
-	}
-
-	// Parse current config JSON
-	var currentConfig map[string]interface{}
-	if err := json.Unmarshal(currentConfigJSON, &currentConfig); err != nil {
-		log.Error().Err(err).Str("id", id.String()).Msg("Failed to unmarshal connector config")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"message": "Failed to parse connector config",
-			"code":    http.StatusInternalServerError,
-		})
-		return
-	}
-
-	// Get the connector registrar
-	_, ok := s.Dependencies.ConnectorManager.GetConnector(connType)
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Invalid connector type",
-			"code":    http.StatusBadRequest,
-		})
-		return
-	}
-
-	// Update config if provided
-	if req.Config != nil {
-		// Preserve type field
-		req.Config["type"] = connType
-
-		// Convert updated config to JSON
-		configJSON, err := json.Marshal(req.Config)
-		if err != nil {
-			log.Error().Err(err).Msg("Failed to marshal connector config")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Failed to process connector config",
-				"code":    http.StatusInternalServerError,
-			})
-			return
-		}
-
-		// Update connector in database
-		if req.Name != "" {
-			_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
-				UPDATE connectors
-				SET name = $1, config = $2
-				WHERE id = $3
-			`, req.Name, configJSON, id)
-		} else {
-			_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
-				UPDATE connectors
-				SET config = $1
-				WHERE id = $2
-			`, configJSON, id)
-		}
-
-		if err != nil {
-			log.Error().Err(err).Str("id", id.String()).Msg("Failed to update connector")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Failed to update connector",
-				"code":    http.StatusInternalServerError,
-			})
-			return
-		}
-
-		// Restart connector instance
-		if err := s.Dependencies.ConnectorManager.RestartConnector(id, req.Config); err != nil {
-			log.Error().Err(err).Str("id", id.String()).Msg("Failed to restart connector")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Connector updated but failed to restart: " + err.Error(),
-				"code":    http.StatusInternalServerError,
-			})
-			return
-		}
-	} else if req.Name != "" {
-		// Only update name
-		_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
-			UPDATE connectors
-			SET name = $1
-			WHERE id = $2
-		`, req.Name, id)
-
-		if err != nil {
-			log.Error().Err(err).Str("id", id.String()).Msg("Failed to update connector name")
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Failed to update connector name",
-				"code":    http.StatusInternalServerError,
-			})
-			return
-		}
-	}
-
-	// Get user from session
-	user := s.getUserFromSession(c)
-	if user == nil {
-		responses.Unauthorized(c, "Unauthorized", nil)
-		return
-	}
-
-	// Create audit log entry
-	auditData := map[string]interface{}{
-		"connectorId": id.String(),
-		"type":        connType,
-	}
-	if req.Name != "" {
-		auditData["nameChanged"] = true
-		auditData["newName"] = req.Name
-	}
-	if req.Config != nil {
-		auditData["configChanged"] = true
-		auditData["newConfig"] = req.Config
-	}
-	s.CreateAuditLog(c.Request.Context(), nil, &user.Id, "connector:update", auditData)
-
-	// Return success
-	responses.Success(c, "Global connector updated successfully", nil)
 }
 
 // DeleteGlobalConnector deletes a global connector
