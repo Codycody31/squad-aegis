@@ -437,3 +437,104 @@ func (m *ExtensionManager) ShutdownExtension(serverID uuid.UUID, extensionID str
 
 	return fmt.Errorf("extension with ID %s not found for server %s", extensionID, serverID.String())
 }
+
+// EnableExtension enables or reinitializes an extension for a specific server
+func (m *ExtensionManager) EnableExtension(ctx context.Context, serverID uuid.UUID, extensionName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Query for the specific extension
+	var dbID string
+	var enabled bool
+	var configJSON []byte
+
+	err := m.db.QueryRowContext(ctx, `
+		SELECT id, enabled, config
+		FROM server_extensions
+		WHERE server_id = $1 AND name = $2
+	`, serverID, extensionName).Scan(&dbID, &enabled, &configJSON)
+
+	if err != nil {
+		return fmt.Errorf("failed to query server extension: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		return fmt.Errorf("failed to unmarshal extension config: %w", err)
+	}
+
+	// Find registrar for this extension
+	registrar, ok := m.registeredExtensions[extensionName]
+	if !ok {
+		return fmt.Errorf("no registrar found for extension: %s", extensionName)
+	}
+
+	// Get extension definition
+	def := registrar.Define()
+	extensionID := def.ID
+
+	// Get server
+	server, err := core.GetServerById(ctx, m.db, serverID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to get server: %w", err)
+	}
+
+	// Check if this extension is already initialized and enabled
+	if instance, exists := m.instances[extensionID]; exists {
+		// Shutdown the existing instance first
+		if err := instance.Shutdown(); err != nil {
+			log.Warn().
+				Err(err).
+				Str("extension", extensionName).
+				Str("serverID", serverID.String()).
+				Msg("Error shutting down existing extension instance")
+		}
+
+		// Remove from instances
+		delete(m.instances, extensionID)
+	}
+
+	// Create dependencies
+	deps, err := m.createDependencies(def, server)
+	if err != nil {
+		return fmt.Errorf("failed to create dependencies: %w", err)
+	}
+
+	// Create extension instance
+	instance := def.CreateInstance()
+
+	// Initialize extension
+	if err := instance.Initialize(config, deps); err != nil {
+		return fmt.Errorf("failed to initialize extension: %w", err)
+	}
+
+	// Store extension instance
+	m.instances[extensionID] = instance
+
+	// Add to server extensions map if not already there
+	if _, ok := m.serverExtensions[serverID]; !ok {
+		m.serverExtensions[serverID] = []string{}
+	}
+
+	// Check if the extension ID is already in the server extensions list
+	found := false
+	for _, id := range m.serverExtensions[serverID] {
+		if id == extensionID {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		m.serverExtensions[serverID] = append(m.serverExtensions[serverID], extensionID)
+	}
+
+	log.Info().
+		Str("id", extensionID).
+		Str("serverID", serverID.String()).
+		Str("extension", extensionName).
+		Bool("enabled", true).
+		Msg("Extension enabled and initialized")
+
+	return nil
+}

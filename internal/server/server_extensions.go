@@ -167,6 +167,9 @@ func (s *Server) ServerExtensionGet(c *gin.Context) {
 		return
 	}
 
+	// We only need server for the access check, we don't use it directly because
+	// the ExtensionManager.EnableExtension method fetches the server internally
+
 	// Get extension from database
 	var servID uuid.UUID
 	var name string
@@ -239,7 +242,7 @@ func (s *Server) ServerExtensionCreate(c *gin.Context) {
 	}
 
 	// Check if user has access to server
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
 	if err != nil {
 		responses.NotFound(c, "Server not found", nil)
 		return
@@ -339,22 +342,21 @@ func (s *Server) ServerExtensionCreate(c *gin.Context) {
 		return
 	}
 
-	// If enabled, initialize the extension
+	// Commit the transaction first so the extension exists in database
+	if err := tx.Commit(); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
+	// If enabled, initialize the extension using the Extension Manager
 	var warningMessage string
 	if req.Enabled {
-		// Get extension definition
-		extensionDef := registrar.Define()
+		// Use the extension manager to enable the extension
+		if err := s.Dependencies.ExtensionManager.EnableExtension(c.Request.Context(), serverID, req.Name); err != nil {
+			log.Error().Err(err).Str("id", id.String()).Msg("Failed to enable extension")
 
-		// Create the extension instance
-		instance := extensionDef.CreateInstance()
-
-		// Create dependencies
-		deps, err := s.createExtensionDependencies(extensionDef, server)
-		if err != nil {
-			log.Error().Err(err).Str("id", id.String()).Msg("Failed to create extension dependencies")
-
-			// Update database to mark as disabled
-			_, dbErr := tx.ExecContext(c.Request.Context(), `
+			// Update database to mark as disabled since we couldn't enable it
+			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
 				UPDATE server_extensions
 				SET enabled = false
 				WHERE id = $1
@@ -364,30 +366,7 @@ func (s *Server) ServerExtensionCreate(c *gin.Context) {
 			}
 
 			warningMessage = fmt.Sprintf("Extension created but not enabled: %s", err.Error())
-		} else {
-			// Initialize the extension
-			if err := instance.Initialize(req.Config, deps); err != nil {
-				log.Error().Err(err).Str("id", id.String()).Msg("Failed to initialize extension")
-
-				// Update database to mark as disabled
-				_, dbErr := tx.ExecContext(c.Request.Context(), `
-					UPDATE server_extensions
-					SET enabled = false
-					WHERE id = $1
-				`, id)
-				if dbErr != nil {
-					log.Error().Err(dbErr).Str("id", id.String()).Msg("Failed to update extension enabled status")
-				}
-
-				warningMessage = fmt.Sprintf("Extension created but failed to initialize: %s", err.Error())
-			}
 		}
-	}
-
-	// Commit the transaction
-	if err := tx.Commit(); err != nil {
-		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
-		return
 	}
 
 	// Create audit log entry
@@ -439,7 +418,7 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 	}
 
 	// Check if user has access to server
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
 	if err != nil {
 		responses.NotFound(c, "Server not found", nil)
 		return
@@ -557,55 +536,134 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 
 	var warningMessage string
 
-	// If we're enabling, initialize
-	if enabledChanged && newEnabled {
-		// Create the extension instance
-		instance := extensionDef.CreateInstance()
+	// For config change but keeping enabled, we need to commit the transaction
+	// before restarting the extension so it reads the new config
+	if configChanged && newEnabled && !enabledChanged {
+		// Get extension definition ID
+		extensionID := extensionDef.ID
 
-		// Create dependencies
-		deps, err := s.createExtensionDependencies(extensionDef, server)
-		if err != nil {
-			log.Error().Err(err).Str("id", eID.String()).Msg("Failed to create extension dependencies")
+		// First, shut down the extension
+		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
+			log.Info().
+				Err(err).
+				Str("id", eID.String()).
+				Str("extension", name).
+				Str("serverID", serverID.String()).
+				Msg("Error shutting down extension before update, continuing anyway")
+		}
 
-			// Update database to mark as disabled
-			_, dbErr := tx.ExecContext(c.Request.Context(), `
+		// IMPORTANT: Commit the transaction BEFORE restarting the extension
+		// so the extension reads the updated config from the database
+		if err := tx.Commit(); err != nil {
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
+			return
+		}
+
+		// Then re-enable with new config
+		if err := s.Dependencies.ExtensionManager.EnableExtension(c.Request.Context(), serverID, name); err != nil {
+			log.Warn().Err(err).Str("id", eID.String()).Msg("Failed to reinitialize extension with new config")
+			warningMessage = fmt.Sprintf("Extension config updated but failed to apply changes: %s", err.Error())
+
+			// Update database to mark as disabled since we couldn't re-enable it
+			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
 				UPDATE server_extensions
 				SET enabled = false
 				WHERE id = $1
 			`, eID)
 			if dbErr != nil {
-				log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
+				log.Warn().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
+			}
+		} else {
+			log.Info().Str("id", eID.String()).Msg("Extension successfully reinitialized with updated config")
+		}
+
+		// Create audit log entry
+		auditData := map[string]interface{}{
+			"extensionId":   eID.String(),
+			"name":          name,
+			"configChanged": true,
+			"newConfig":     newConfig,
+		}
+		s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:update", auditData)
+
+		// Return success
+		if warningMessage != "" {
+			responses.Success(c, warningMessage, &gin.H{
+				"status":  "warning",
+				"enabled": false,
+			})
+		} else {
+			responses.Success(c, "Extension updated successfully", &gin.H{
+				"enabled": newEnabled,
+			})
+		}
+
+		// Transaction is already committed in this case
+		return
+	}
+
+	// If we're enabling, initialize
+	if enabledChanged && newEnabled {
+		// Log the server ID for debugging
+		log.Debug().Str("serverID", serverID.String()).Msg("Enabling extension for server")
+
+		// COMMIT TRANSACTION BEFORE ENABLING so it reads the latest config
+		if err := tx.Commit(); err != nil {
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
+			return
+		}
+
+		if err := s.Dependencies.ExtensionManager.EnableExtension(c.Request.Context(), serverID, name); err != nil {
+			log.Warn().Err(err).Str("id", eID.String()).Msg("Failed to enable extension")
+
+			// Update database to mark as disabled
+			_, dbErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
+				UPDATE server_extensions
+				SET enabled = false
+				WHERE id = $1
+			`, eID)
+			if dbErr != nil {
+				log.Warn().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
 			}
 
 			warningMessage = fmt.Sprintf("Extension updated but failed to initialize: %s", err.Error())
-		} else {
-			// Initialize extension
-			if err := instance.Initialize(newConfig, deps); err != nil {
-				log.Error().Err(err).Str("id", eID.String()).Msg("Failed to initialize extension")
-
-				// Update database to mark as disabled
-				_, dbErr := tx.ExecContext(c.Request.Context(), `
-					UPDATE server_extensions
-					SET enabled = false
-					WHERE id = $1
-				`, eID)
-				if dbErr != nil {
-					log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
-				}
-
-				warningMessage = fmt.Sprintf("Extension updated but failed to initialize: %s", err.Error())
-			}
 		}
-	}
 
-	// If we're disabling, shutdown
-	if enabledChanged && !newEnabled {
+		// Create audit log entry
+		auditData := map[string]interface{}{
+			"extensionId":    eID.String(),
+			"name":           name,
+			"enabledChanged": true,
+			"newEnabled":     newEnabled,
+		}
+		if configChanged {
+			auditData["configChanged"] = true
+			auditData["newConfig"] = newConfig
+		}
+		s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:update", auditData)
+
+		// Return success
+		if warningMessage != "" {
+			responses.Success(c, warningMessage, &gin.H{
+				"status":  "warning",
+				"enabled": false,
+			})
+		} else {
+			responses.Success(c, "Extension updated successfully", &gin.H{
+				"enabled": newEnabled,
+			})
+		}
+
+		// Transaction already committed
+		return
+	} else if enabledChanged && !newEnabled {
+		// Disabling the extension
 		// Get extension definition ID
 		extensionID := extensionDef.ID
 
 		// Use the extension manager to shut down the extension
 		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
-			log.Error().
+			log.Info().
 				Err(err).
 				Str("id", eID.String()).
 				Str("extension", name).
@@ -615,19 +673,13 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 		}
 	}
 
-	// If we're updating config and staying enabled, restart the extension
-	if configChanged && newEnabled && !enabledChanged {
-		// For now just log it, real implementation would use extension manager to restart
-		log.Info().Str("id", eID.String()).Msg("Updating extension config")
-	}
-
-	// Commit the transaction
+	// Commit the transaction for remaining cases
 	if err := tx.Commit(); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
 		return
 	}
 
-	// Create audit log entry
+	// Create audit log entry for remaining cases
 	auditData := map[string]interface{}{
 		"extensionId": eID.String(),
 		"name":        name,
@@ -712,8 +764,40 @@ func (s *Server) ServerExtensionDelete(c *gin.Context) {
 	}
 
 	// For shutdown extension if it's running
-	// Note: Real implementation would use extension manager to find and shutdown the extension
-	log.Info().Str("id", eID.String()).Msg("Shutting down extension")
+	// Get extension name from database
+	var name string
+	var enabled bool
+	var configJSON []byte
+
+	err = tx.QueryRowContext(c.Request.Context(), `
+		SELECT name, enabled, config
+		FROM server_extensions
+		WHERE id = $1 AND server_id = $2
+	`, eID, serverID).Scan(&name, &enabled, &configJSON)
+
+	if err != nil {
+		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to get extension name")
+	} else if enabled {
+		// Get extension registrar
+		registrar, ok := s.Dependencies.ExtensionManager.GetExtension(name)
+		if ok {
+			// Get extension definition
+			extensionDef := registrar.Define()
+			extensionID := extensionDef.ID
+
+			// Try to shut down the extension
+			if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
+				log.Info().
+					Err(err).
+					Str("id", eID.String()).
+					Str("extension", name).
+					Str("serverID", serverID.String()).
+					Msg("Error shutting down extension before delete, continuing anyway")
+			} else {
+				log.Info().Str("id", eID.String()).Msg("Extension shut down before deletion")
+			}
+		}
+	}
 
 	// Delete extension from database
 	_, err = tx.ExecContext(c.Request.Context(), `
@@ -768,11 +852,14 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 	}
 
 	// Check if user has access to server
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
 	if err != nil {
 		responses.NotFound(c, "Server not found", nil)
 		return
 	}
+
+	// We only need server for the access check, we don't use it directly because
+	// the ExtensionManager.EnableExtension method fetches the server internally
 
 	// Begin transaction
 	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
@@ -838,13 +925,11 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 
 	// If we're enabling, initialize
 	if newEnabled {
-		// Create the extension instance
-		instance := extensionDef.CreateInstance()
+		// Log the server ID for debugging
+		log.Debug().Str("serverID", serverID.String()).Msg("Enabling extension for server")
 
-		// Create dependencies
-		deps, err := s.createExtensionDependencies(extensionDef, server)
-		if err != nil {
-			log.Error().Err(err).Str("id", eID.String()).Msg("Failed to create extension dependencies")
+		if err := s.Dependencies.ExtensionManager.EnableExtension(c.Request.Context(), serverID, name); err != nil {
+			log.Warn().Err(err).Str("id", eID.String()).Msg("Failed to enable extension")
 
 			// Update database to mark as disabled
 			_, dbErr := tx.ExecContext(c.Request.Context(), `
@@ -853,27 +938,10 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 				WHERE id = $1
 			`, eID)
 			if dbErr != nil {
-				log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
+				log.Warn().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
 			}
 
 			warningMessage = fmt.Sprintf("Extension not enabled: %s", err.Error())
-		} else {
-			// Initialize extension
-			if err := instance.Initialize(currentConfig, deps); err != nil {
-				log.Error().Err(err).Str("id", eID.String()).Msg("Failed to initialize extension")
-
-				// Update database to mark as disabled
-				_, dbErr := tx.ExecContext(c.Request.Context(), `
-					UPDATE server_extensions
-					SET enabled = false
-					WHERE id = $1
-				`, eID)
-				if dbErr != nil {
-					log.Error().Err(dbErr).Str("id", eID.String()).Msg("Failed to update extension enabled status")
-				}
-
-				warningMessage = fmt.Sprintf("Extension not enabled: %s", err.Error())
-			}
 		}
 	} else {
 		// Disabling the extension
@@ -882,7 +950,7 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 
 		// Use the extension manager to shut down the extension
 		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
-			log.Error().
+			log.Info().
 				Err(err).
 				Str("id", eID.String()).
 				Str("extension", name).
