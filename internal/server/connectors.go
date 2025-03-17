@@ -328,6 +328,20 @@ func (s *Server) DeleteGlobalConnector(c *gin.Context) {
 		return
 	}
 
+	// Get connector to determine its type
+	connector, exists := s.Dependencies.ConnectorManager.GetConnectorByID(id)
+	if !exists {
+		log.Error().Str("id", id.String()).Msg("Connector not found")
+		c.JSON(http.StatusNotFound, gin.H{
+			"message": "Connector not found",
+			"code":    http.StatusNotFound,
+		})
+		return
+	}
+
+	// Get the connector type from the connector instance
+	connectorType := connector.GetType()
+
 	// Check if connector is in use by any extensions
 	var extensionCount int
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
@@ -351,6 +365,102 @@ func (s *Server) DeleteGlobalConnector(c *gin.Context) {
 			"code":    http.StatusBadRequest,
 		})
 		return
+	}
+
+	// Find all server extensions that require this connector type
+	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
+		SELECT id, server_id, name, enabled
+		FROM server_extensions
+	`)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to query server extensions")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Failed to check connector dependencies",
+			"code":    http.StatusInternalServerError,
+		})
+		return
+	}
+	defer rows.Close()
+
+	// Track extensions that will be disabled
+	disabledExtensions := []map[string]interface{}{}
+
+	// Process each extension to check if it requires the connector type
+	for rows.Next() {
+		var extID uuid.UUID
+		var serverID uuid.UUID
+		var extName string
+		var enabled bool
+
+		if err := rows.Scan(&extID, &serverID, &extName, &enabled); err != nil {
+			log.Error().Err(err).Msg("Failed to scan extension row")
+			continue
+		}
+
+		// Skip already disabled extensions
+		if !enabled {
+			continue
+		}
+
+		// Get extension registrar
+		registrar, ok := s.Dependencies.ExtensionManager.GetExtension(extName)
+		if !ok {
+			log.Warn().Str("extension", extName).Msg("Extension registrar not found")
+			continue
+		}
+
+		// Get extension definition
+		def := registrar.Define()
+
+		// Check if this extension requires the connector type being deleted
+		requiresConnector := false
+		for _, reqConnector := range def.RequiredConnectors {
+			if reqConnector == connectorType {
+				requiresConnector = true
+				break
+			}
+		}
+
+		// If extension requires the connector, disable it
+		if requiresConnector {
+			// Try to shut down the extension first
+			err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, def.ID)
+			if err != nil {
+				log.Warn().
+					Err(err).
+					Str("extension", extName).
+					Str("serverID", serverID.String()).
+					Msg("Error shutting down extension that depends on connector")
+			}
+
+			// Update the database to mark extension as disabled
+			_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+				UPDATE server_extensions
+				SET enabled = false
+				WHERE id = $1
+			`, extID)
+
+			if err != nil {
+				log.Error().
+					Err(err).
+					Str("extension", extName).
+					Str("serverID", serverID.String()).
+					Msg("Failed to disable extension that depends on connector")
+			} else {
+				// Track disabled extensions for audit log
+				disabledExtensions = append(disabledExtensions, map[string]interface{}{
+					"id":        extID.String(),
+					"name":      extName,
+					"server_id": serverID.String(),
+				})
+
+				log.Info().
+					Str("extension", extName).
+					Str("serverID", serverID.String()).
+					Str("connectorType", connectorType).
+					Msg("Disabled extension that depends on connector")
+			}
+		}
 	}
 
 	// Delete connector from database
@@ -387,9 +497,18 @@ func (s *Server) DeleteGlobalConnector(c *gin.Context) {
 
 	// Create audit log entry
 	auditData := map[string]interface{}{
-		"connectorId": id.String(),
+		"connectorId":        id.String(),
+		"connectorType":      connectorType,
+		"disabledExtensions": disabledExtensions,
 	}
 	s.CreateAuditLog(c.Request.Context(), nil, &user.Id, "connector:delete", auditData)
 
-	responses.Success(c, "Global connector deleted successfully", nil)
+	// Return success with information about disabled extensions
+	if len(disabledExtensions) > 0 {
+		responses.Success(c, "Global connector deleted successfully. Some extensions were disabled.", &gin.H{
+			"disabled_extensions": disabledExtensions,
+		})
+	} else {
+		responses.Success(c, "Global connector deleted successfully", nil)
+	}
 }
