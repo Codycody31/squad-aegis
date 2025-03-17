@@ -747,6 +747,12 @@ function isExtensionInUse(extensionId: string): boolean {
   return extensions.value.some((extension) => extension.name === extensionId);
 }
 
+// Function to check if an extension has a non-empty configuration schema
+function hasConfigSchema(extensionId: string): boolean {
+  const schema = extensionTypes.value[extensionId];
+  return schema && Object.keys(schema).length > 0;
+}
+
 // Function to check if an extension can be added
 function canAddExtension(extensionId: string): boolean {
   const definition = extensionDefinitions.value.find((def) => def.id === extensionId);
@@ -854,6 +860,7 @@ onMounted(() => {
                       Details
                     </Button>
                     <Button
+                      v-if="hasConfigSchema(extension.name)"
                       variant="outline"
                       size="sm"
                       @click="openEditDialog(extension)"
@@ -1528,7 +1535,7 @@ onMounted(() => {
 
             <!-- Configuration Schema -->
             <div
-              v-if="extensionTypes[selectedExtension.name]"
+              v-if="extensionTypes[selectedExtension.name] && hasConfigSchema(selectedExtension.name)"
               class="border rounded-md p-4"
             >
               <h3 class="text-lg font-medium mb-3">Configuration Options</h3>
@@ -1596,6 +1603,7 @@ onMounted(() => {
               Close
             </Button>
             <Button
+              v-if="hasConfigSchema(selectedExtension.name)"
               type="button"
               @click="
                 openEditDialog(selectedExtension);
