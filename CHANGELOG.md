@@ -10,6 +10,10 @@
 
 - Server Connectors & Extensions [[#14](https://github.com/Codycody31/squad-aegis/pull/14)]
 
+### 🐛 Bug Fixes
+
+- Fix broken connector add logic [[#16](https://github.com/Codycody31/squad-aegis/pull/16)]
+
 ### 📈 Enhancement
 
 - RCON Manager [[#12](https://github.com/Codycody31/squad-aegis/pull/12)]
