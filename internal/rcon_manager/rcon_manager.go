@@ -446,6 +446,17 @@ func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
 		m.broadcastEvent(event)
 	})
 
+	sr.Emitter.On("CHAT_COMMAND", func(data interface{}) {
+		event := RconEvent{
+			ServerID: serverID,
+			Type:     "CHAT_COMMAND",
+			Data:     data,
+			Time:     time.Now(),
+		}
+
+		m.broadcastEvent(event)
+	})
+
 	sr.Emitter.On("PLAYER_WARNED", func(data interface{}) {
 		event := RconEvent{
 			ServerID: serverID,

@@ -6,7 +6,6 @@ type Struct struct {
 		WebUiProxy    string `default:""`
 		Port          string `default:"3113"`
 		Url           string `default:"http://localhost:3113"`
-		EncryptionKey string `default:""` // For encryption of sensitive data
 		InContainer   bool   `default:"false"`
 	}
 	Initial struct {

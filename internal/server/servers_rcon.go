@@ -287,3 +287,43 @@ func (s *Server) ServerRconServerInfo(c *gin.Context) {
 
 	responses.Success(c, "Server info fetched successfully", &gin.H{"serverInfo": serverInfo})
 }
+
+// ServerRconForceRestart forces a restart of the RCON connection for a server
+func (s *Server) ServerRconForceRestart(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// First disconnect from the server
+	err = s.Dependencies.RconManager.DisconnectFromServer(serverId)
+	if err != nil && err.Error() != "server not connected" && err.Error() != "server already disconnected" {
+		responses.BadRequest(c, "Failed to disconnect from RCON", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Then reconnect to the server
+	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword)
+	if err != nil {
+		responses.BadRequest(c, "Failed to reconnect to RCON", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create audit log for the action
+	auditData := map[string]interface{}{
+		"server_id": serverId.String(),
+	}
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:force_restart", auditData)
+
+	responses.Success(c, "RCON connection restarted successfully", nil)
+}
