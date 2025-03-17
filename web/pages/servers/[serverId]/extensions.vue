@@ -1062,7 +1062,7 @@ onMounted(() => {
 
               <!-- Dynamic config fields based on selected extension type -->
               <div
-                v-if="addFormValues.name && extensionTypes[addFormValues.name]"
+                v-if="addFormValues.name && extensionTypes[addFormValues.name] && hasConfigSchema(addFormValues.name)"
                 class="mt-6"
               >
                 <h3 class="font-medium mb-4">Configuration</h3>
