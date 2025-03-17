@@ -14,21 +14,6 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
-// ExtensionDefinitionResponse represents an extension definition in the API response
-type ExtensionDefinitionResponse struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Version     string                 `json:"version"`
-	Author      string                 `json:"author"`
-	Schema      map[string]interface{} `json:"schema"`
-}
-
-// ExtensionDefinitionsResponse represents the response for the list definitions endpoint
-type ExtensionDefinitionsResponse struct {
-	Definitions []ExtensionDefinitionResponse `json:"definitions"`
-}
-
 // ExtensionResponse represents an extension in API responses
 type ExtensionResponse struct {
 	ID       string                 `json:"id"`
@@ -56,77 +41,8 @@ type ExtensionUpdateRequest struct {
 	Config  map[string]interface{} `json:"config"`
 }
 
-// ListExtensionDefinitions lists all available extension definitions
-// Path: /definitions (previously /types)
-func (s *Server) ListExtensionDefinitions(c *gin.Context) {
-	// Get registered extensions from extension manager
-	extensions := s.Dependencies.ExtensionManager.ListExtensions()
-
-	// Build response with extension definitions
-	definitionResponses := make([]ExtensionDefinitionResponse, 0, len(extensions))
-
-	for _, extension := range extensions {
-		// Convert ConfigSchema to map
-		schemaMap := make(map[string]interface{})
-
-		// Process each field in the schema
-		for _, field := range extension.ConfigSchema.Fields {
-			fieldInfo := map[string]interface{}{
-				"description": field.Description,
-				"required":    field.Required,
-				"type":        string(field.Type),
-			}
-
-			if field.Default != nil {
-				fieldInfo["default"] = field.Default
-			}
-
-			// Add options if present
-			if len(field.Options) > 0 {
-				fieldInfo["options"] = field.Options
-			}
-
-			// Add nested fields if present
-			if len(field.Nested) > 0 {
-				nestedFields := []map[string]interface{}{}
-				for _, nestedField := range field.Nested {
-					nestedFieldInfo := map[string]interface{}{
-						"name":        nestedField.Name,
-						"description": nestedField.Description,
-						"required":    nestedField.Required,
-						"type":        string(nestedField.Type),
-					}
-
-					if nestedField.Default != nil {
-						nestedFieldInfo["default"] = nestedField.Default
-					}
-
-					nestedFields = append(nestedFields, nestedFieldInfo)
-				}
-				fieldInfo["nested"] = nestedFields
-			}
-
-			schemaMap[field.Name] = fieldInfo
-		}
-
-		// Create definition response
-		definitionResponses = append(definitionResponses, ExtensionDefinitionResponse{
-			ID:          extension.ID,
-			Name:        extension.Name,
-			Description: extension.Description,
-			Version:     extension.Version,
-			Author:      extension.Author,
-			Schema:      schemaMap,
-		})
-	}
-
-	responses.Success(c, "Extension definitions fetched successfully", &gin.H{
-		"definitions": definitionResponses,
-	})
-}
-
-// ListServerExtensions returns all extensions for a server
-func (s *Server) ListServerExtensions(c *gin.Context) {
+// ServerExtensionsList returns all extensions for a server
+func (s *Server) ServerExtensionsList(c *gin.Context) {
 	// Get server ID from URL
 	serverIDStr := c.Param("serverId")
 
@@ -208,8 +124,8 @@ func (s *Server) ListServerExtensions(c *gin.Context) {
 	})
 }
 
-// GetServerExtension returns a specific extension for a server
-func (s *Server) GetServerExtension(c *gin.Context) {
+// ServerExtensionGet returns a specific extension for a server
+func (s *Server) ServerExtensionGet(c *gin.Context) {
 	// Get server ID and extension ID from URL
 	serverIDStr := c.Param("serverId")
 	serverID, err := uuid.Parse(serverIDStr)
@@ -279,8 +195,8 @@ func (s *Server) GetServerExtension(c *gin.Context) {
 	})
 }
 
-// CreateServerExtension creates a new extension for a server
-func (s *Server) CreateServerExtension(c *gin.Context) {
+// ServerExtensionCreate creates a new extension for a server
+func (s *Server) ServerExtensionCreate(c *gin.Context) {
 	// Get server ID from URL
 	serverIDStr := c.Param("serverId")
 
@@ -441,8 +357,8 @@ func (s *Server) CreateServerExtension(c *gin.Context) {
 	}
 }
 
-// UpdateServerExtension updates an existing extension for a server
-func (s *Server) UpdateServerExtension(c *gin.Context) {
+// ServerExtensionUpdate updates an existing extension for a server
+func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 	// Get server ID and extension ID from URL
 	serverIDStr := c.Param("serverId")
 	serverID, err := uuid.Parse(serverIDStr)
@@ -657,8 +573,8 @@ func (s *Server) UpdateServerExtension(c *gin.Context) {
 	}
 }
 
-// DeleteServerExtension deletes an extension from a server
-func (s *Server) DeleteServerExtension(c *gin.Context) {
+// ServerExtensionDelete deletes an extension from a server
+func (s *Server) ServerExtensionDelete(c *gin.Context) {
 	// Get server ID and extension ID from URL
 	serverIDStr := c.Param("serverId")
 	serverID, err := uuid.Parse(serverIDStr)
@@ -739,8 +655,8 @@ func (s *Server) DeleteServerExtension(c *gin.Context) {
 	responses.Success(c, "Extension deleted successfully", nil)
 }
 
-// ToggleServerExtension toggles an extension's enabled status
-func (s *Server) ToggleServerExtension(c *gin.Context) {
+// ServerExtensionToggle toggles an extension's enabled status
+func (s *Server) ServerExtensionToggle(c *gin.Context) {
 	// Get server ID and extension ID from URL
 	serverIDStr := c.Param("serverId")
 	serverID, err := uuid.Parse(serverIDStr)

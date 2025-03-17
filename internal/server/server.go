@@ -161,6 +161,14 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				// Server info endpoints
 				serverGroup.GET("/rcon/server-info", server.ServerRconServerInfo)
+
+				// Server-specific extension management endpoints
+				serverGroup.GET("/extensions", server.AuthHasServerPermission("manageserver"), server.ServerExtensionsList)
+				serverGroup.POST("/extensions", server.AuthHasServerPermission("manageserver"), server.ServerExtensionCreate)
+				serverGroup.GET("/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.ServerExtensionGet)
+				serverGroup.PUT("/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.ServerExtensionUpdate)
+				serverGroup.DELETE("/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.ServerExtensionDelete)
+				serverGroup.POST("/extensions/:extensionId/toggle", server.AuthHasServerPermission("manageserver"), server.ServerExtensionToggle)
 			}
 		}
 
@@ -189,14 +197,6 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 			extensionGroup.GET("/definitions", server.ListExtensionDefinitions)
 		}
-
-		// Server-specific extension management endpoints
-		serversGroup.GET("/:serverId/extensions", server.AuthHasServerPermission("manageserver"), server.ListServerExtensions)
-		serversGroup.POST("/:serverId/extensions", server.AuthHasServerPermission("manageserver"), server.CreateServerExtension)
-		serversGroup.GET("/:serverId/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.GetServerExtension)
-		serversGroup.PUT("/:serverId/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.UpdateServerExtension)
-		serversGroup.DELETE("/:serverId/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.DeleteServerExtension)
-		serversGroup.POST("/:serverId/extensions/:extensionId/toggle", server.AuthHasServerPermission("manageserver"), server.ToggleServerExtension)
 	}
 
 	return router

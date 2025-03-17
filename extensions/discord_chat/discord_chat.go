@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/rcon"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
+	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
 )
 
 // handleChatMessage handles chat messages and looks for admin requests
@@ -18,11 +19,9 @@ func (e *DiscordChatExtension) handleChatMessage(data interface{}) error {
 		return fmt.Errorf("invalid data type for chat message")
 	}
 
-	if e.Config["ignore_chats"] != nil {
-		ignoreChats := e.Config["ignore_chats"].([]string)
-		if slices.Contains(ignoreChats, message.ChatType) {
-			return nil
-		}
+	ignoreChats := plug_config_schema.GetArrayStringValue(e.Config, "ignore_chats")
+	if slices.Contains(ignoreChats, message.ChatType) {
+		return nil
 	}
 
 	team := 0

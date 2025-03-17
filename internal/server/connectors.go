@@ -100,40 +100,6 @@ func (s *Server) ListConnectorDefinitions(c *gin.Context) {
 	})
 }
 
-// ListConnectorTypes lists all available connector types (legacy endpoint)
-func (s *Server) ListConnectorTypes(c *gin.Context) {
-	// Get connector definitions from connector manager
-	connectorDefs := s.Dependencies.ConnectorManager.ListConnectors()
-
-	// Build response with all schemas
-	resp := ConnectorListAvailableTypesResponse{
-		Types: make(map[string]map[string]interface{}),
-	}
-
-	for _, def := range connectorDefs {
-		// Convert the schema to map structure
-		schemaMap := make(map[string]interface{})
-
-		for _, field := range def.ConfigSchema.Fields {
-			fieldInfo := map[string]interface{}{
-				"description": field.Description,
-				"required":    field.Required,
-				"type":        string(field.Type),
-			}
-
-			if field.Default != nil {
-				fieldInfo["default"] = field.Default
-			}
-
-			schemaMap[field.Name] = fieldInfo
-		}
-
-		resp.Types[def.ID] = schemaMap
-	}
-
-	c.JSON(http.StatusOK, resp)
-}
-
 // ListGlobalConnectors lists all global connectors
 func (s *Server) ListGlobalConnectors(c *gin.Context) {
 	// Get connectors from database
@@ -196,7 +162,9 @@ func (s *Server) ListGlobalConnectors(c *gin.Context) {
 		log.Error().Err(err).Msg("Error iterating connector rows")
 	}
 
-	c.JSON(http.StatusOK, resp)
+	responses.Success(c, "Global connectors fetched successfully", &gin.H{
+		"connectors": resp.Connectors,
+	})
 }
 
 // GetGlobalConnector returns a specific global connector
@@ -261,7 +229,9 @@ func (s *Server) GetGlobalConnector(c *gin.Context) {
 		Config: config,
 	}
 
-	c.JSON(http.StatusOK, resp)
+	responses.Success(c, "Global connector fetched successfully", &gin.H{
+		"connector": resp,
+	})
 }
 
 // CreateGlobalConnector creates a new global connector
@@ -332,11 +302,13 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 	// Add the connector to the manager
 	connectorType := instance.GetType()
 
-	c.JSON(http.StatusCreated, ConnectorResponse{
-		ID:     id.String(),
-		Name:   req.Name,
-		Type:   connectorType,
-		Config: req.Config,
+	responses.Success(c, "Global connector created successfully", &gin.H{
+		"connector": ConnectorResponse{
+			ID:     id.String(),
+			Name:   req.Name,
+			Type:   connectorType,
+			Config: req.Config,
+		},
 	})
 }
 
@@ -473,9 +445,7 @@ func (s *Server) UpdateGlobalConnector(c *gin.Context) {
 	}
 
 	// Return success
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Connector updated successfully",
-	})
+	responses.Success(c, "Global connector updated successfully", nil)
 }
 
 // DeleteGlobalConnector deletes a global connector
@@ -543,8 +513,5 @@ func (s *Server) DeleteGlobalConnector(c *gin.Context) {
 		return
 	}
 
-	// Return success
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Connector deleted successfully",
-	})
+	responses.Success(c, "Global connector deleted successfully", nil)
 }

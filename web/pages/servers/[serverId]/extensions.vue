@@ -152,8 +152,12 @@ const createExtensionFormSchema = computed(() => {
           : z.number({ coerce: true }).optional();
       } else if (field.type === "boolean") {
         fieldSchema = z.boolean().default(!!field.default);
-      } else if (field.type === "array") {
+      } else if (field.type === "array" || field.type === "arraystring") {
         fieldSchema = z.array(z.string()).default([]);
+      } else if (field.type === "arrayint") {
+        fieldSchema = z.array(z.number({ coerce: true })).default([]);
+      } else if (field.type === "arraybool") {
+        fieldSchema = z.array(z.boolean()).default([]);
       } else if (field.type === "object") {
         fieldSchema = z.record(z.string(), z.any()).default({});
       }
@@ -419,7 +423,8 @@ watch(
           newConfig[fieldName] = 0;
         } else if (field.type === "string") {
           newConfig[fieldName] = "";
-        } else if (field.type === "array" || field.type.startsWith("array")) {
+        } else if (isArrayType(field.type)) {
+          // Initialize with empty array
           newConfig[fieldName] = [];
         } else if (field.type === "object") {
           newConfig[fieldName] = {};
@@ -615,7 +620,7 @@ function openEditDialog(extension: Extension) {
         newConfig[fieldName] = 0;
       } else if (field.type === "string") {
         newConfig[fieldName] = "";
-      } else if (field.type === "array" || field.type.startsWith("array")) {
+      } else if (isArrayType(field.type)) {
         newConfig[fieldName] = [];
       } else if (field.type === "object") {
         newConfig[fieldName] = {};
@@ -646,28 +651,48 @@ function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleString();
 }
 
+// Function to check if a field is of array type
+function isArrayType(fieldType: string): boolean {
+  return (
+    fieldType === "array" ||
+    fieldType === "arraystring" ||
+    fieldType === "arrayint" ||
+    fieldType === "arraybool" ||
+    fieldType.startsWith("array")
+  );
+}
+
 // Function to get the array item type from an array field type
 function getArrayItemType(fieldType: string): string {
+  if (fieldType === "arraystring") return "string";
+  if (fieldType === "arrayint") return "int";
+  if (fieldType === "arraybool") return "bool";
+
+  // For custom "array<type>" format or backward compatibility
   if (fieldType.startsWith("array")) {
-    const subType = fieldType.substring(5).toLowerCase(); // Remove 'array' prefix
+    const subType = fieldType.substring(5).toLowerCase();
     if (subType === "string" || subType === "int" || subType === "bool") {
       return subType;
     }
   }
-  return "string"; // Default to string if no specific type is found
+
+  // Default to string
+  return "string";
 }
 
 // Function to handle array item addition
 function addArrayItem(
   config: Record<string, any>,
   fieldName: string,
-  itemType: string
+  fieldType: string
 ) {
   if (!Array.isArray(config[fieldName])) {
     config[fieldName] = [];
   }
 
+  const itemType = getArrayItemType(fieldType);
   let newValue: any = "";
+  
   if (itemType === "int") {
     newValue = 0;
   } else if (itemType === "bool") {
@@ -1043,8 +1068,7 @@ onMounted(() => {
                       <!-- Array input -->
                       <div
                         v-else-if="
-                          field.type === 'array' ||
-                          field.type.startsWith('array')
+                          isArrayType(field.type)
                         "
                         class="space-y-2"
                       >
@@ -1091,8 +1115,9 @@ onMounted(() => {
                           <!-- Remove item button -->
                           <Button
                             type="button"
-                            variant="outline"
-                            size="sm"
+                            variant="destructive"
+                            size="icon"
+                            class="shrink-0"
                             @click="
                               removeArrayItem(
                                 addFormValues.config,
@@ -1101,25 +1126,25 @@ onMounted(() => {
                               )
                             "
                           >
-                            <Icon name="lucide:trash-2" />
+                            <Icon name="lucide:trash-2" class="h-4 w-4" />
                           </Button>
                         </div>
 
-                        <!-- Add item button -->
+                        <!-- Add array item button -->
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
+                          class="mt-2"
                           @click="
                             addArrayItem(
                               addFormValues.config,
                               fieldName,
-                              getArrayItemType(field.type)
+                              field.type
                             )
                           "
-                          class="mt-2"
                         >
-                          <Icon name="lucide:plus" />
+                          <Icon name="lucide:plus" class="h-4 w-4 mr-2" />
                           Add Item
                         </Button>
                       </div>
@@ -1298,8 +1323,7 @@ onMounted(() => {
                       <!-- Array input -->
                       <div
                         v-else-if="
-                          field.type === 'array' ||
-                          field.type.startsWith('array')
+                          isArrayType(field.type)
                         "
                         class="space-y-2"
                       >
@@ -1346,8 +1370,9 @@ onMounted(() => {
                           <!-- Remove item button -->
                           <Button
                             type="button"
-                            variant="outline"
-                            size="sm"
+                            variant="destructive"
+                            size="icon"
+                            class="shrink-0"
                             @click="
                               removeArrayItem(
                                 editFormValues.config,
@@ -1356,25 +1381,25 @@ onMounted(() => {
                               )
                             "
                           >
-                            <Icon name="lucide:trash" />
+                            <Icon name="lucide:trash-2" class="h-4 w-4" />
                           </Button>
                         </div>
 
-                        <!-- Add item button -->
+                        <!-- Add array item button -->
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
+                          class="mt-2"
                           @click="
                             addArrayItem(
                               editFormValues.config,
                               fieldName,
-                              getArrayItemType(field.type)
+                              field.type
                             )
                           "
-                          class="mt-2"
                         >
-                          <Icon name="lucide:plus" />
+                          <Icon name="lucide:plus" class="h-4 w-4 mr-2" />
                           Add Item
                         </Button>
                       </div>

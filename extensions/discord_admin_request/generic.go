@@ -51,14 +51,15 @@ func Define() extension_manager.ExtensionDefinition {
 					Name:        "ignore_chats",
 					Description: "A list of chat names to ignore.",
 					Required:    false,
-					Type:        plug_config_schema.FieldTypeArray,
-					Default:     []string{"ChatSquad"},
+					Type:        plug_config_schema.FieldTypeArrayString,
+					Default:     []interface{}{"ChatSquad"},
 				},
 				{
 					Name:        "ping_groups",
 					Description: "A list of Discord role IDs to ping.",
 					Required:    false,
-					Type:        plug_config_schema.FieldTypeArray,
+					Type:        plug_config_schema.FieldTypeArrayString,
+					Default:     []interface{}{},
 				},
 				{
 					Name:        "ping_here",
