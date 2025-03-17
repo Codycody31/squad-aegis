@@ -302,6 +302,22 @@ func (s *Server) CreateGlobalConnector(c *gin.Context) {
 	// Add the connector to the manager
 	connectorType := instance.GetType()
 
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Create audit log entry
+	auditData := map[string]interface{}{
+		"connectorId": id.String(),
+		"name":        req.Name,
+		"type":        req.Type,
+		"config":      req.Config,
+	}
+	s.CreateAuditLog(c.Request.Context(), nil, &user.Id, "connector:create", auditData)
+
 	responses.Success(c, "Global connector created successfully", &gin.H{
 		"connector": ConnectorResponse{
 			ID:     id.String(),
@@ -444,6 +460,28 @@ func (s *Server) UpdateGlobalConnector(c *gin.Context) {
 		}
 	}
 
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Create audit log entry
+	auditData := map[string]interface{}{
+		"connectorId": id.String(),
+		"type":        connType,
+	}
+	if req.Name != "" {
+		auditData["nameChanged"] = true
+		auditData["newName"] = req.Name
+	}
+	if req.Config != nil {
+		auditData["configChanged"] = true
+		auditData["newConfig"] = req.Config
+	}
+	s.CreateAuditLog(c.Request.Context(), nil, &user.Id, "connector:update", auditData)
+
 	// Return success
 	responses.Success(c, "Global connector updated successfully", nil)
 }
@@ -512,6 +550,19 @@ func (s *Server) DeleteGlobalConnector(c *gin.Context) {
 		})
 		return
 	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Create audit log entry
+	auditData := map[string]interface{}{
+		"connectorId": id.String(),
+	}
+	s.CreateAuditLog(c.Request.Context(), nil, &user.Id, "connector:delete", auditData)
 
 	responses.Success(c, "Global connector deleted successfully", nil)
 }

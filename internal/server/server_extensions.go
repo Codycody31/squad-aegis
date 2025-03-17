@@ -390,6 +390,15 @@ func (s *Server) ServerExtensionCreate(c *gin.Context) {
 		return
 	}
 
+	// Create audit log entry
+	auditData := map[string]interface{}{
+		"extensionId": id.String(),
+		"name":        req.Name,
+		"enabled":     req.Enabled,
+		"config":      req.Config,
+	}
+	s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:create", auditData)
+
 	// Return success
 	if warningMessage != "" {
 		responses.Success(c, warningMessage, &gin.H{
@@ -618,6 +627,21 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 		return
 	}
 
+	// Create audit log entry
+	auditData := map[string]interface{}{
+		"extensionId": eID.String(),
+		"name":        name,
+	}
+	if enabledChanged {
+		auditData["enabledChanged"] = true
+		auditData["newEnabled"] = newEnabled
+	}
+	if configChanged {
+		auditData["configChanged"] = true
+		auditData["newConfig"] = newConfig
+	}
+	s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:update", auditData)
+
 	// Return success
 	if warningMessage != "" {
 		responses.Success(c, warningMessage, &gin.H{
@@ -708,6 +732,12 @@ func (s *Server) ServerExtensionDelete(c *gin.Context) {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
 		return
 	}
+
+	// Create audit log entry
+	auditData := map[string]interface{}{
+		"extensionId": eID.String(),
+	}
+	s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:delete", auditData)
 
 	// Return success
 	responses.Success(c, "Extension deleted successfully", nil)
@@ -867,6 +897,14 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
 		return
 	}
+
+	// Create audit log entry
+	auditData := map[string]interface{}{
+		"extensionId": eID.String(),
+		"name":        name,
+		"enabled":     newEnabled,
+	}
+	s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:toggle", auditData)
 
 	// Return success
 	if warningMessage != "" {
