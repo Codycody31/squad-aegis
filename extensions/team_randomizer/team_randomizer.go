@@ -29,6 +29,11 @@ func (e *TeamRandomizerExtension) handleTeamRandomizationRequest(data interface{
 		return fmt.Errorf("failed to get server players: %w", err)
 	}
 
+	_, err = r.ExecuteRaw(fmt.Sprintf("AdminWarn %s Team Randomizer started", message.SteamID))
+	if err != nil {
+		return fmt.Errorf("failed to send admin warn: %w", err)
+	}
+
 	players := serverPlayers.OnlinePlayers
 
 	// Shuffle players

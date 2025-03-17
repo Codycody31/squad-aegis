@@ -25,6 +25,7 @@ func Define() extension_manager.ExtensionDefinition {
 
 		Dependencies: extension_manager.ExtensionDependencies{
 			Required: []extension_manager.DependencyType{
+				extension_manager.DependencyServer,
 				extension_manager.DependencyRconManager,
 			},
 		},
