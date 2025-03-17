@@ -20,6 +20,7 @@ import (
 	"go.codycody31.dev/squad-aegis/db"
 	"go.codycody31.dev/squad-aegis/extensions/discord_admin_cam_logs"
 	"go.codycody31.dev/squad-aegis/extensions/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/extensions/discord_cbl_info"
 	"go.codycody31.dev/squad-aegis/extensions/discord_chat"
 	"go.codycody31.dev/squad-aegis/extensions/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/extensions/team_randomizer"
@@ -244,6 +245,7 @@ func getExtensionRegistrars() map[string]extension_manager.ExtensionRegistrar {
 	registrars["discord_chat"] = discord_chat.DiscordChatRegistrar{}
 	registrars["discord_admin_request"] = discord_admin_request.DiscordAdminRequestRegistrar{}
 	registrars["discord_admin_cam_logs"] = discord_admin_cam_logs.DiscordAdminCamLogsRegistrar{}
+	registrars["discord_cbl_info"] = discord_cbl_info.DiscordCBLInfoRegistrar{}
 	registrars["intervalled_broadcasts"] = intervalled_broadcasts.IntervalledBroadcastsRegistrar{}
 	registrars["team_randomizer"] = team_randomizer.TeamRandomizerRegistrar{}
 
