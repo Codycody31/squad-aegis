@@ -1,10 +1,14 @@
 # Changelog
 
-## [1.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/v1.2.0) - 2025-03-15
+## [1.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/v1.2.0) - 2025-03-17
 
 ### ❤️ Thanks to all contributors! ❤️
 
 @Codycody31
+
+### ✨ Features
+
+- Server Connectors & Extensions [[#14](https://github.com/Codycody31/squad-aegis/pull/14)]
 
 ### 📈 Enhancement
 
