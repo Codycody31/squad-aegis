@@ -66,6 +66,10 @@ func (s *Server) ListExtensionDefinitions(c *gin.Context) {
 						nestedFieldInfo["default"] = nestedField.Default
 					}
 
+					if len(nestedField.Options) > 0 {
+						nestedFieldInfo["options"] = nestedField.Options
+					}
+
 					nestedFields = append(nestedFields, nestedFieldInfo)
 				}
 				fieldInfo["nested"] = nestedFields

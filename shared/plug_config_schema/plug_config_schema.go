@@ -20,6 +20,7 @@ const (
 	FieldTypeArrayString = "arraystring" // array of strings
 	FieldTypeArrayInt    = "arrayint"    // array of integers
 	FieldTypeArrayBool   = "arraybool"   // array of booleans
+	FieldTypeArrayObject = "arrayobject" // array of objects
 )
 
 // ConfigField represents a single configuration field
@@ -43,6 +44,7 @@ func IsArrayType(fieldType FieldType) bool {
 	return fieldType == FieldTypeArrayString ||
 		fieldType == FieldTypeArrayInt ||
 		fieldType == FieldTypeArrayBool ||
+		fieldType == FieldTypeArrayObject ||
 		strings.HasPrefix(string(fieldType), "array") // For backward compatibility
 }
 
@@ -60,6 +62,10 @@ func GetArrayItemType(fieldType FieldType) FieldType {
 		return FieldTypeBool
 	}
 
+	if fieldType == FieldTypeArrayObject {
+		return FieldTypeObject
+	}
+
 	// For custom "array<type>" format or backward compatibility
 	if strings.HasPrefix(string(fieldType), "array") {
 		subType := strings.ToLower(string(fieldType)[5:])
@@ -70,6 +76,8 @@ func GetArrayItemType(fieldType FieldType) FieldType {
 			return FieldTypeInt
 		case "bool":
 			return FieldTypeBool
+		case "object":
+			return FieldTypeObject
 		default:
 			return FieldTypeString // Default to string
 		}
@@ -128,6 +136,20 @@ func GetArrayBoolValue(config map[string]interface{}, fieldName string) []bool {
 	for _, item := range arr {
 		if b, ok := item.(bool); ok {
 			result = append(result, b)
+		}
+	}
+
+	return result
+}
+
+// GetArrayObjectValue retrieves an array of objects from config
+func GetArrayObjectValue(config map[string]interface{}, fieldName string) []map[string]interface{} {
+	arr := GetArrayValue(config, fieldName)
+	result := make([]map[string]interface{}, 0, len(arr))
+
+	for _, item := range arr {
+		if obj, ok := item.(map[string]interface{}); ok {
+			result = append(result, obj)
 		}
 	}
 
@@ -226,6 +248,19 @@ func (c *ConfigSchema) Validate(config map[string]interface{}) error {
 				case FieldTypeBool:
 					if _, ok := item.(bool); !ok {
 						return fmt.Errorf("array item %d in field %s should be a boolean", i, field.Name)
+					}
+				case FieldTypeObject:
+					if _, ok := item.(map[string]interface{}); !ok {
+						return fmt.Errorf("array item %d in field %s should be an object", i, field.Name)
+					}
+					// If the field has nested fields defined, validate them
+					if len(field.Nested) > 0 {
+						if obj, ok := item.(map[string]interface{}); ok {
+							nestedSchema := &ConfigSchema{Fields: field.Nested}
+							if err := nestedSchema.Validate(obj); err != nil {
+								return fmt.Errorf("array item %d in field %s: %v", i, field.Name, err)
+							}
+						}
 					}
 				}
 			}

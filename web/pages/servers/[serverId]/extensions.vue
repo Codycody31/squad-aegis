@@ -660,6 +660,7 @@ function isArrayType(fieldType: string): boolean {
     fieldType === "arraystring" ||
     fieldType === "arrayint" ||
     fieldType === "arraybool" ||
+    fieldType === "arrayobject" ||
     fieldType.startsWith("array")
   );
 }
@@ -669,11 +670,12 @@ function getArrayItemType(fieldType: string): string {
   if (fieldType === "arraystring") return "string";
   if (fieldType === "arrayint") return "int";
   if (fieldType === "arraybool") return "bool";
+  if (fieldType === "arrayobject") return "object";
 
   // For custom "array<type>" format or backward compatibility
   if (fieldType.startsWith("array")) {
     const subType = fieldType.substring(5).toLowerCase();
-    if (subType === "string" || subType === "int" || subType === "bool") {
+    if (subType === "string" || subType === "int" || subType === "bool" || subType === "object") {
       return subType;
     }
   }
@@ -686,7 +688,8 @@ function getArrayItemType(fieldType: string): string {
 function addArrayItem(
   config: Record<string, any>,
   fieldName: string,
-  fieldType: string
+  fieldType: string,
+  nestedFields?: { name: string; type: string; default?: any }[]
 ) {
   if (!Array.isArray(config[fieldName])) {
     config[fieldName] = [];
@@ -699,6 +702,24 @@ function addArrayItem(
     newValue = 0;
   } else if (itemType === "bool") {
     newValue = false;
+  } else if (itemType === "object" && nestedFields) {
+    // Initialize a new object with default values for each nested field
+    newValue = {};
+    for (const nestedField of nestedFields) {
+      if (nestedField.default !== undefined) {
+        newValue[nestedField.name] = nestedField.default;
+      } else if (nestedField.type === "string") {
+        newValue[nestedField.name] = "";
+      } else if (nestedField.type === "number" || nestedField.type === "int") {
+        newValue[nestedField.name] = 0;
+      } else if (nestedField.type === "boolean" || nestedField.type === "bool") {
+        newValue[nestedField.name] = false;
+      } else if (nestedField.type === "arraystring") {
+        newValue[nestedField.name] = [];
+      } else {
+        newValue[nestedField.name] = null;
+      }
+    }
   }
 
   config[fieldName].push(newValue);
@@ -1169,8 +1190,153 @@ onMounted(() => {
                             }}</span>
                           </div>
 
+                          <!-- Object array item -->
+                          <div
+                            v-else-if="getArrayItemType(field.type) === 'object' && field.nested"
+                            class="w-full border rounded-md p-3 mb-2"
+                          >
+                            <div class="flex justify-between items-center mb-2">
+                              <h5 class="text-sm font-medium">Item {{ index + 1 }}</h5>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="icon"
+                                class="h-6 w-6"
+                                @click="
+                                  removeArrayItem(
+                                    addFormValues.config,
+                                    fieldName,
+                                    index
+                                  )
+                                "
+                              >
+                                <Icon name="lucide:trash-2" class="h-3 w-3" />
+                              </Button>
+                            </div>
+                            
+                            <div class="space-y-3">
+                              <div
+                                v-for="nestedField in field.nested"
+                                :key="`${fieldName}-${index}-${nestedField.name}`"
+                                class="space-y-1"
+                              >
+                                <FormLabel class="text-xs">{{ nestedField.name }}</FormLabel>
+                                
+                                <!-- String nested field -->
+                                <Input
+                                  v-if="nestedField.type === 'string' && (!nestedField.options || !nestedField.options.length)"
+                                  v-model="addFormValues.config[fieldName][index][nestedField.name]"
+                                  :placeholder="`Enter ${nestedField.name}`"
+                                  class="h-8 text-sm"
+                                />
+                                
+                                <!-- Select input for string options -->
+                                <Select
+                                  v-else-if="nestedField.type === 'string' && nestedField.options && nestedField.options.length"
+                                  v-model="addFormValues.config[fieldName][index][nestedField.name]"
+                                >
+                                  <SelectTrigger class="w-full h-8 text-sm">
+                                    <SelectValue :placeholder="`Select ${nestedField.name}`" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem
+                                      v-for="option in nestedField.options"
+                                      :key="option"
+                                      :value="option"
+                                    >
+                                      {{ option }}
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                
+                                <!-- Number nested field -->
+                                <Input
+                                  v-else-if="(nestedField.type === 'number' || nestedField.type === 'int') && (!nestedField.options || !nestedField.options.length)"
+                                  v-model.number="addFormValues.config[fieldName][index][nestedField.name]"
+                                  type="number"
+                                  class="h-8 text-sm"
+                                />
+                                
+                                <!-- Select input for number options -->
+                                <Select
+                                  v-else-if="(nestedField.type === 'number' || nestedField.type === 'int') && nestedField.options && nestedField.options.length"
+                                  v-model="addFormValues.config[fieldName][index][nestedField.name]"
+                                >
+                                  <SelectTrigger class="w-full h-8 text-sm">
+                                    <SelectValue :placeholder="`Select ${nestedField.name}`" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem
+                                      v-for="option in nestedField.options"
+                                      :key="option"
+                                      :value="option"
+                                    >
+                                      {{ option }}
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                
+                                <!-- Boolean nested field -->
+                                <div
+                                  v-else-if="nestedField.type === 'boolean' || nestedField.type === 'bool'"
+                                  class="flex items-center space-x-2"
+                                >
+                                  <Switch v-model="addFormValues.config[fieldName][index][nestedField.name]" />
+                                  <span class="text-sm">{{
+                                    addFormValues.config[fieldName][index][nestedField.name] ? "Yes" : "No"
+                                  }}</span>
+                                </div>
+                                
+                                <!-- Array nested field -->
+                                <div
+                                  v-else-if="nestedField.type === 'arraystring'"
+                                  class="space-y-2"
+                                >
+                                  <div
+                                    v-for="(nestedItem, nestedIndex) in addFormValues.config[fieldName][index][nestedField.name] || []"
+                                    :key="`${fieldName}-${index}-${nestedField.name}-${nestedIndex}`"
+                                    class="flex items-center space-x-2"
+                                  >
+                                    <Input
+                                      v-model="addFormValues.config[fieldName][index][nestedField.name][nestedIndex]"
+                                      :placeholder="`Enter ${nestedField.name} item ${nestedIndex + 1}`"
+                                      class="h-8 text-sm flex-grow"
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="destructive"
+                                      size="icon"
+                                      class="h-6 w-6 shrink-0"
+                                      @click="addFormValues.config[fieldName][index][nestedField.name].splice(nestedIndex, 1)"
+                                    >
+                                      <Icon name="lucide:trash-2" class="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    class="text-xs h-7"
+                                    @click="
+                                      {
+                                        if (!Array.isArray(addFormValues.config[fieldName][index][nestedField.name])) {
+                                          addFormValues.config[fieldName][index][nestedField.name] = [];
+                                        }
+                                        addFormValues.config[fieldName][index][nestedField.name].push('');
+                                      }
+                                    "
+                                  >
+                                    <Icon name="lucide:plus" class="h-3 w-3 mr-1" />
+                                    Add {{ nestedField.name }} Item
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
                           <!-- Remove item button -->
                           <Button
+                            v-if="getArrayItemType(field.type) !== 'object'"
                             type="button"
                             variant="destructive"
                             size="icon"
@@ -1197,7 +1363,8 @@ onMounted(() => {
                             addArrayItem(
                               addFormValues.config,
                               fieldName,
-                              field.type
+                              field.type,
+                              field.nested
                             )
                           "
                         >
@@ -1424,8 +1591,153 @@ onMounted(() => {
                             }}</span>
                           </div>
 
+                          <!-- Object array item -->
+                          <div
+                            v-else-if="getArrayItemType(field.type) === 'object' && field.nested"
+                            class="w-full border rounded-md p-3 mb-2"
+                          >
+                            <div class="flex justify-between items-center mb-2">
+                              <h5 class="text-sm font-medium">Item {{ index + 1 }}</h5>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="icon"
+                                class="h-6 w-6"
+                                @click="
+                                  removeArrayItem(
+                                    editFormValues.config,
+                                    fieldName,
+                                    index
+                                  )
+                                "
+                              >
+                                <Icon name="lucide:trash-2" class="h-3 w-3" />
+                              </Button>
+                            </div>
+                            
+                            <div class="space-y-3">
+                              <div
+                                v-for="nestedField in field.nested"
+                                :key="`${fieldName}-${index}-${nestedField.name}`"
+                                class="space-y-1"
+                              >
+                                <FormLabel class="text-xs">{{ nestedField.name }}</FormLabel>
+                                
+                                <!-- String nested field -->
+                                <Input
+                                  v-if="nestedField.type === 'string' && (!nestedField.options || !nestedField.options.length)"
+                                  v-model="editFormValues.config[fieldName][index][nestedField.name]"
+                                  :placeholder="`Enter ${nestedField.name}`"
+                                  class="h-8 text-sm"
+                                />
+                                
+                                <!-- Select input for string options -->
+                                <Select
+                                  v-else-if="nestedField.type === 'string' && nestedField.options && nestedField.options.length"
+                                  v-model="editFormValues.config[fieldName][index][nestedField.name]"
+                                >
+                                  <SelectTrigger class="w-full h-8 text-sm">
+                                    <SelectValue :placeholder="`Select ${nestedField.name}`" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem
+                                      v-for="option in nestedField.options"
+                                      :key="option"
+                                      :value="option"
+                                    >
+                                      {{ option }}
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                
+                                <!-- Number nested field -->
+                                <Input
+                                  v-else-if="(nestedField.type === 'number' || nestedField.type === 'int') && (!nestedField.options || !nestedField.options.length)"
+                                  v-model.number="editFormValues.config[fieldName][index][nestedField.name]"
+                                  type="number"
+                                  class="h-8 text-sm"
+                                />
+                                
+                                <!-- Select input for number options -->
+                                <Select
+                                  v-else-if="(nestedField.type === 'number' || nestedField.type === 'int') && nestedField.options && nestedField.options.length"
+                                  v-model="editFormValues.config[fieldName][index][nestedField.name]"
+                                >
+                                  <SelectTrigger class="w-full h-8 text-sm">
+                                    <SelectValue :placeholder="`Select ${nestedField.name}`" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem
+                                      v-for="option in nestedField.options"
+                                      :key="option"
+                                      :value="option"
+                                    >
+                                      {{ option }}
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                
+                                <!-- Boolean nested field -->
+                                <div
+                                  v-else-if="nestedField.type === 'boolean' || nestedField.type === 'bool'"
+                                  class="flex items-center space-x-2"
+                                >
+                                  <Switch v-model="editFormValues.config[fieldName][index][nestedField.name]" />
+                                  <span class="text-sm">{{
+                                    editFormValues.config[fieldName][index][nestedField.name] ? "Yes" : "No"
+                                  }}</span>
+                                </div>
+                                
+                                <!-- Array nested field -->
+                                <div
+                                  v-else-if="nestedField.type === 'arraystring'"
+                                  class="space-y-2"
+                                >
+                                  <div
+                                    v-for="(nestedItem, nestedIndex) in editFormValues.config[fieldName][index][nestedField.name] || []"
+                                    :key="`${fieldName}-${index}-${nestedField.name}-${nestedIndex}`"
+                                    class="flex items-center space-x-2"
+                                  >
+                                    <Input
+                                      v-model="editFormValues.config[fieldName][index][nestedField.name][nestedIndex]"
+                                      :placeholder="`Enter ${nestedField.name} item ${nestedIndex + 1}`"
+                                      class="h-8 text-sm flex-grow"
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="destructive"
+                                      size="icon"
+                                      class="h-6 w-6 shrink-0"
+                                      @click="editFormValues.config[fieldName][index][nestedField.name].splice(nestedIndex, 1)"
+                                    >
+                                      <Icon name="lucide:trash-2" class="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    class="text-xs h-7"
+                                    @click="
+                                      {
+                                        if (!Array.isArray(editFormValues.config[fieldName][index][nestedField.name])) {
+                                          editFormValues.config[fieldName][index][nestedField.name] = [];
+                                        }
+                                        editFormValues.config[fieldName][index][nestedField.name].push('');
+                                      }
+                                    "
+                                  >
+                                    <Icon name="lucide:plus" class="h-3 w-3 mr-1" />
+                                    Add {{ nestedField.name }} Item
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
                           <!-- Remove item button -->
                           <Button
+                            v-if="getArrayItemType(field.type) !== 'object'"
                             type="button"
                             variant="destructive"
                             size="icon"
@@ -1452,7 +1764,8 @@ onMounted(() => {
                             addArrayItem(
                               editFormValues.config,
                               fieldName,
-                              field.type
+                              field.type,
+                              field.nested
                             )
                           "
                         >
