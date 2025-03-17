@@ -372,3 +372,47 @@ func (m *ExtensionManager) Shutdown() {
 
 	log.Info().Msg("All extensions shut down")
 }
+
+// ShutdownExtension shuts down a specific extension for a server
+func (m *ExtensionManager) ShutdownExtension(serverID uuid.UUID, extensionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Get all extensions for this server
+	extensionIDs, ok := m.serverExtensions[serverID]
+	if !ok {
+		return fmt.Errorf("no extensions found for server %s", serverID.String())
+	}
+
+	// Find the extension instance
+	for _, id := range extensionIDs {
+		if id == extensionID {
+			instance, instanceOk := m.instances[id]
+			if !instanceOk {
+				return fmt.Errorf("extension instance not found for ID: %s", id)
+			}
+
+			// Shutdown the extension
+			def := instance.GetDefinition()
+			if err := instance.Shutdown(); err != nil {
+				log.Error().
+					Err(err).
+					Str("id", id).
+					Str("extension", def.Name).
+					Str("serverID", serverID.String()).
+					Msg("Error shutting down extension")
+				return err
+			}
+
+			log.Info().
+				Str("id", id).
+				Str("extension", def.Name).
+				Str("serverID", serverID.String()).
+				Msg("Extension successfully shut down")
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("extension with ID %s not found for server %s", extensionID, serverID.String())
+}

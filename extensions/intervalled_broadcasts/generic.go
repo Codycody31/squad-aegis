@@ -190,8 +190,16 @@ func (e *IntervalledBroadcastsExtension) Shutdown() error {
 
 	// Stop the ticker if it's running
 	if e.ticker != nil {
-		close(e.stopChan)
+		// Stop the ticker first
+		e.ticker.Stop()
+
+		// Then signal the goroutine to exit
+		if e.stopChan != nil {
+			close(e.stopChan)
+		}
+
 		e.ticker = nil
+		e.stopChan = nil
 	}
 
 	log.Info().

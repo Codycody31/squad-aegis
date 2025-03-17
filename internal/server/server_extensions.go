@@ -543,9 +543,19 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 
 	// If we're disabling, shutdown
 	if enabledChanged && !newEnabled {
-		// Attempt to shutdown the extension
-		// For now just log it, real implementation would use extension manager
-		log.Info().Str("id", eID.String()).Msg("Disabling extension")
+		// Get extension definition ID
+		extensionID := extensionDef.ID
+
+		// Use the extension manager to shut down the extension
+		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
+			log.Error().
+				Err(err).
+				Str("id", eID.String()).
+				Str("extension", name).
+				Str("serverID", serverID.String()).
+				Msg("Error shutting down extension")
+			// Continue with database update even if shutdown fails
+		}
 	}
 
 	// If we're updating config and staying enabled, restart the extension
@@ -789,9 +799,19 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 		}
 	} else {
 		// Disabling the extension
-		// Real implementation would use extension manager to shut down
-		// TODO: Implement disabling the extension
-		log.Info().Str("id", eID.String()).Msg("Disabling extension")
+		// Get extension definition ID
+		extensionID := extensionDef.ID
+
+		// Use the extension manager to shut down the extension
+		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
+			log.Error().
+				Err(err).
+				Str("id", eID.String()).
+				Str("extension", name).
+				Str("serverID", serverID.String()).
+				Msg("Error shutting down extension")
+			// Continue with database update even if shutdown fails
+		}
 	}
 
 	// Commit the transaction
