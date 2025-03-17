@@ -75,7 +75,6 @@ const actionLoading = ref(false);
 interface Connector {
   id: string;
   name: string;
-  type: string;
   config: Record<string, any>;
 }
 
@@ -104,11 +103,6 @@ interface ConnectorDefinitionResponse {
 // Initial form values
 const addFormValues = ref({
   type: "",
-  config: {} as Record<string, any>,
-});
-
-const editFormValues = ref({
-  name: "",
   config: {} as Record<string, any>,
 });
 
@@ -271,13 +265,9 @@ async function fetchConnectors() {
     }
 
     if (data.value) {
-      // Ensure all connectors have type information
+      // Ensure all connectors have the required information
       const processedConnectors = (data.value.data.connectors || []).map(
         (connector) => {
-          // If type is missing in the main object, try to get it from config
-          if (!connector.type && connector.config && connector.config.type) {
-            connector.type = connector.config.type;
-          }
           return connector;
         }
       );
@@ -309,19 +299,13 @@ async function addConnector(values: any) {
     return;
   }
 
-  // Get connector display name
-  const connectorType = values.type as string;
-  const connectorName =
-    connectorInfo.value[connectorType]?.name || connectorType;
-
   try {
     const { data, error: fetchError } = await useFetch(
       `${runtimeConfig.public.backendApi}/connectors/global`,
       {
         method: "POST",
         body: {
-          name: connectorName,
-          type: values.type,
+          name: values.type,
           config: values.config || {},
         },
         headers: {
@@ -347,63 +331,6 @@ async function addConnector(values: any) {
     fetchConnectors();
   } catch (err: any) {
     error.value = err.message || "An error occurred while adding the connector";
-    console.error(err);
-  } finally {
-    actionLoading.value = false;
-  }
-}
-
-// Function to update connector
-async function updateConnector(values: any) {
-  if (!selectedConnector.value) return;
-
-  actionLoading.value = true;
-  error.value = null;
-
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    actionLoading.value = false;
-    return;
-  }
-
-  try {
-    const { data, error: fetchError } = await useFetch(
-      `${runtimeConfig.public.backendApi}/connectors/global/${selectedConnector.value.id}`,
-      {
-        method: "PUT",
-        body: {
-          config: values.config || {},
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-
-    if (fetchError.value) {
-      throw new Error(
-        fetchError.value.data?.message || fetchError.value.message
-      );
-    }
-
-    // Reset form and close dialog
-    editFormValues.value = {
-      config: {},
-    };
-    showEditConnectorDialog.value = false;
-    selectedConnector.value = null;
-
-    // Refresh the connectors list
-    fetchConnectors();
-  } catch (err: any) {
-    error.value =
-      err.message || "An error occurred while updating the connector";
     console.error(err);
   } finally {
     actionLoading.value = false;
@@ -457,36 +384,6 @@ async function deleteConnector(connectorId: string) {
   } finally {
     loading.value.connectors = false;
   }
-}
-
-// Function to open edit dialog
-function openEditDialog(connector: Connector) {
-  selectedConnector.value = connector;
-
-  // Set form values with deep copy to ensure reactivity
-  // Handle sensitive fields - keep token values unless they've been masked
-  const configCopy = { ...connector.config };
-
-  // For each sensitive field, if it shows as masked (********), remove it so it doesn't get sent to the server
-  // This allows the server to retain the original value if a new one is not provided
-  for (const key in configCopy) {
-    if (
-      (key.includes("token") ||
-        key.includes("password") ||
-        key.includes("secret") ||
-        key.includes("key")) &&
-      configCopy[key] === "********"
-    ) {
-      // Set to empty string to clear the masked value in the UI
-      configCopy[key] = "";
-    }
-  }
-
-  editFormValues.value = {
-    config: configCopy,
-  };
-
-  showEditConnectorDialog.value = true;
 }
 
 // Function to open view details dialog
@@ -660,11 +557,11 @@ onMounted(() => {
               >
                 <TableCell class="font-medium">
                   <div>
-                    {{ connectorInfo[connector.type]?.name || connector.type }}
+                    {{ connectorInfo[connector.name]?.name || connector.name }}
                   </div>
                   <div class="text-xs text-muted-foreground truncate max-w-md">
                     {{
-                      connectorInfo[connector.type]?.description ||
+                      connectorInfo[connector.name]?.description ||
                       "No description available"
                     }}
                   </div>
@@ -683,14 +580,6 @@ onMounted(() => {
                       :disabled="loading.connectors"
                     >
                       Details
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      @click="openEditDialog(connector)"
-                      :disabled="loading.connectors"
-                    >
-                      Edit
                     </Button>
                     <Button
                       variant="destructive"
@@ -819,7 +708,7 @@ onMounted(() => {
                   </Select>
                 </FormControl>
                 <FormDescription>
-                  Choose the type of connector to install
+                  Choose the type of connector to install (this will be used as the connector's identifier)
                 </FormDescription>
               </FormField>
 
@@ -1038,245 +927,15 @@ onMounted(() => {
       </DialogContent>
     </Dialog>
 
-    <!-- Edit Connector Dialog -->
-    <Dialog v-model:open="showEditConnectorDialog">
-      <DialogContent class="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Edit Connector</DialogTitle>
-          <DialogDescription v-if="selectedConnector">
-            Update the configuration for {{ selectedConnector.name }}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div class="py-4" v-if="selectedConnector">
-          <form @submit.prevent="updateConnector(editFormValues)">
-            <div class="space-y-4">
-              <!-- Selected connector details -->
-              <div
-                v-if="selectedConnector"
-                class="mb-4 p-3 bg-muted rounded-md"
-              >
-                <div class="text-sm font-medium">
-                  {{
-                    connectorInfo[selectedConnector.type]?.name ||
-                    selectedConnector.type
-                  }}
-                </div>
-                <div class="text-sm mt-1 text-muted-foreground">
-                  {{
-                    connectorInfo[selectedConnector.type]?.description ||
-                    "Update the configuration for this connector."
-                  }}
-                </div>
-              </div>
-
-              <!-- Dynamic config fields based on connector type -->
-              <div
-                v-if="
-                  selectedConnector && connectorTypes[selectedConnector.type]
-                "
-                class="mt-6"
-              >
-                <h3 class="font-medium mb-4">Configuration</h3>
-                <div class="space-y-4 border p-4 rounded-md">
-                  <FormField
-                    v-for="(field, fieldName) in connectorTypes[
-                      selectedConnector.type
-                    ]"
-                    :key="fieldName"
-                    :name="`config.${fieldName}`"
-                  >
-                    <FormLabel>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span class="flex items-center cursor-help">
-                              {{ fieldName }}
-                              <Icon
-                                name="lucide:info"
-                                class="h-4 w-4 ml-1 text-muted-foreground"
-                              />
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p class="max-w-xs">{{ field.description }}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </FormLabel>
-                    <FormControl>
-                      <!-- String input -->
-                      <Input
-                        v-if="field.type === 'string'"
-                        v-model="editFormValues.config[fieldName]"
-                        :placeholder="`Enter ${fieldName}`"
-                        :type="
-                          fieldName.includes('password') ||
-                          fieldName.includes('token') ||
-                          fieldName.includes('secret') ||
-                          fieldName.includes('key')
-                            ? 'password'
-                            : 'text'
-                        "
-                      />
-
-                      <!-- Number input -->
-                      <Input
-                        v-else-if="
-                          field.type === 'int' || field.type === 'number'
-                        "
-                        v-model.number="editFormValues.config[fieldName]"
-                        type="number"
-                      />
-
-                      <!-- Boolean input -->
-                      <div
-                        v-else-if="
-                          field.type === 'bool' || field.type === 'boolean'
-                        "
-                        class="flex items-center space-x-2"
-                      >
-                        <Switch v-model="editFormValues.config[fieldName]" />
-                        <span>{{
-                          editFormValues.config[fieldName] ? "Yes" : "No"
-                        }}</span>
-                      </div>
-
-                      <!-- Array input -->
-                      <div
-                        v-else-if="isArrayType(field.type)"
-                        class="space-y-2"
-                      >
-                        <div
-                          v-for="(item, index) in editFormValues.config[
-                            fieldName
-                          ] || []"
-                          :key="`${fieldName}-${index}`"
-                          class="flex items-center space-x-2"
-                        >
-                          <!-- String array item -->
-                          <Input
-                            v-if="getArrayItemType(field.type) === 'string'"
-                            v-model="editFormValues.config[fieldName][index]"
-                            :placeholder="`Enter item ${index + 1}`"
-                            class="flex-grow"
-                          />
-
-                          <!-- Number array item -->
-                          <Input
-                            v-else-if="getArrayItemType(field.type) === 'int'"
-                            v-model.number="
-                              editFormValues.config[fieldName][index]
-                            "
-                            type="number"
-                            class="flex-grow"
-                          />
-
-                          <!-- Boolean array item -->
-                          <div
-                            v-else-if="getArrayItemType(field.type) === 'bool'"
-                            class="flex items-center space-x-2 flex-grow"
-                          >
-                            <Switch
-                              v-model="editFormValues.config[fieldName][index]"
-                            />
-                            <span>{{
-                              editFormValues.config[fieldName][index]
-                                ? "Yes"
-                                : "No"
-                            }}</span>
-                          </div>
-
-                          <!-- Remove item button -->
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            size="icon"
-                            class="shrink-0"
-                            @click="
-                              removeArrayItem(
-                                editFormValues.config,
-                                fieldName,
-                                index
-                              )
-                            "
-                          >
-                            <Icon name="lucide:minus" class="h-4 w-4" />
-                          </Button>
-                        </div>
-
-                        <!-- Add array item button -->
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          class="mt-2"
-                          @click="
-                            addArrayItem(
-                              editFormValues.config,
-                              fieldName,
-                              field.type
-                            )
-                          "
-                        >
-                          <Icon name="lucide:plus" class="h-4 w-4 mr-2" />
-                          Add Item
-                        </Button>
-                      </div>
-
-                      <!-- Select input for options -->
-                      <Select
-                        v-else-if="field.options && field.options.length"
-                        v-model="editFormValues.config[fieldName]"
-                      >
-                        <SelectTrigger class="w-full">
-                          <SelectValue :placeholder="`Select ${fieldName}`" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem
-                            v-for="option in field.options"
-                            :key="option"
-                            :value="option"
-                          >
-                            {{ option }}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </FormControl>
-                    <FormDescription v-if="field.description">
-                      {{ field.description }}
-                    </FormDescription>
-                  </FormField>
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter class="mt-6">
-              <Button
-                type="button"
-                variant="outline"
-                @click="showEditConnectorDialog = false"
-              >
-                Cancel
-              </Button>
-              <Button type="submit" :disabled="actionLoading">
-                {{ actionLoading ? "Updating..." : "Update Connector" }}
-              </Button>
-            </DialogFooter>
-          </form>
-        </div>
-      </DialogContent>
-    </Dialog>
-
     <!-- View Details Dialog -->
     <Dialog v-model:open="showViewDetailsDialog">
       <DialogContent class="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle v-if="selectedConnector">
+          <DialogTitle>
             {{ selectedConnector.name }}
           </DialogTitle>
-          <DialogDescription v-if="selectedConnector">
-            <Badge>{{ selectedConnector.type }}</Badge>
+          <DialogDescription>
+            <Badge>{{ selectedConnector.name }}</Badge>
           </DialogDescription>
         </DialogHeader>
 
@@ -1287,13 +946,13 @@ onMounted(() => {
               <h3 class="text-lg font-medium mb-1">Connector Type</h3>
               <p class="font-medium">
                 {{
-                  connectorInfo[selectedConnector.type]?.name ||
-                  selectedConnector.type
+                  connectorInfo[selectedConnector.name]?.name ||
+                  selectedConnector.name
                 }}
               </p>
               <p class="text-sm text-muted-foreground mt-2">
                 {{
-                  connectorInfo[selectedConnector.type]?.description ||
+                  connectorInfo[selectedConnector.name]?.description ||
                   "Connector for external service integration."
                 }}
               </p>
@@ -1301,7 +960,7 @@ onMounted(() => {
 
             <!-- Configuration Schema -->
             <div
-              v-if="connectorTypes[selectedConnector.type]"
+              v-if="connectorTypes[selectedConnector.name]"
               class="border rounded-md p-4"
             >
               <h3 class="text-lg font-medium mb-3">Configuration Options</h3>
@@ -1309,7 +968,7 @@ onMounted(() => {
               <div class="space-y-4">
                 <div
                   v-for="(field, fieldName) in connectorTypes[
-                    selectedConnector.type
+                    selectedConnector.name
                   ]"
                   :key="fieldName"
                   class="pb-3 border-b border-gray-100 last:border-0"
@@ -1374,15 +1033,6 @@ onMounted(() => {
               @click="showViewDetailsDialog = false"
             >
               Close
-            </Button>
-            <Button
-              type="button"
-              @click="
-                openEditDialog(selectedConnector);
-                showViewDetailsDialog = false;
-              "
-            >
-              Edit Configuration
             </Button>
           </DialogFooter>
         </div>

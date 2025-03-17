@@ -186,7 +186,6 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			connectorGroup.GET("/global", server.ListGlobalConnectors)
 			connectorGroup.POST("/global", server.CreateGlobalConnector)
 			connectorGroup.GET("/global/:id", server.GetGlobalConnector)
-			connectorGroup.PUT("/global/:id", server.UpdateGlobalConnector)
 			connectorGroup.DELETE("/global/:id", server.DeleteGlobalConnector)
 		}
 
