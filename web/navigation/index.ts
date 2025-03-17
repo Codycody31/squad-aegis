@@ -27,6 +27,13 @@ const navigationItems: NavigationItem[] = [
     icon: "mdi:server",
   },
   {
+    title: "Admin Chat",
+    to: {
+      name: "admin-chat",
+    },
+    icon: "mdi:message",
+  },
+  {
     title: "Connectors",
     to: {
       name: "connectors",
