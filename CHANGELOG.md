@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feat(admin-chat): add admin chat functionality and endpoints [[#21](https://github.com/Codycody31/squad-aegis/pull/21)]
 - Server Connectors & Extensions [[#14](https://github.com/Codycody31/squad-aegis/pull/14)]
 
 ### 📚 Documentation
