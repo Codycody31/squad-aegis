@@ -25,11 +25,12 @@ type IntervalledBroadcastsExtension struct {
 // Define implements ExtensionRegistrar
 func Define() extension_manager.ExtensionDefinition {
 	return extension_manager.ExtensionDefinition{
-		ID:          "intervalled_broadcasts",
-		Name:        "Intervalled Broadcasts",
-		Description: "Allows you to set broadcasts, which will be broadcasted at a set interval.",
-		Version:     "1.0.0",
-		Author:      "Squad Aegis",
+		ID:                     "intervalled_broadcasts",
+		Name:                   "Intervalled Broadcasts",
+		Description:            "Allows you to set broadcasts, which will be broadcasted at a set interval.",
+		Version:                "1.0.0",
+		Author:                 "Squad Aegis",
+		AllowMultipleInstances: false,
 
 		Dependencies: extension_manager.ExtensionDependencies{
 			Required: []extension_manager.DependencyType{

@@ -7,12 +7,13 @@ import (
 
 // ExtensionDefinitionResponse represents an extension definition in the API response
 type ExtensionDefinitionResponse struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Version     string                 `json:"version"`
-	Author      string                 `json:"author"`
-	Schema      map[string]interface{} `json:"schema"`
+	ID                     string                 `json:"id"`
+	Name                   string                 `json:"name"`
+	Description            string                 `json:"description"`
+	Version                string                 `json:"version"`
+	Author                 string                 `json:"author"`
+	Schema                 map[string]interface{} `json:"schema"`
+	AllowMultipleInstances bool                   `json:"allow_multiple_instances"`
 }
 
 // ExtensionDefinitionsResponse represents the response for the list definitions endpoint
@@ -75,12 +76,13 @@ func (s *Server) ListExtensionDefinitions(c *gin.Context) {
 
 		// Create definition response
 		definitionResponses = append(definitionResponses, ExtensionDefinitionResponse{
-			ID:          extension.ID,
-			Name:        extension.Name,
-			Description: extension.Description,
-			Version:     extension.Version,
-			Author:      extension.Author,
-			Schema:      schemaMap,
+			ID:                     extension.ID,
+			Name:                   extension.Name,
+			Description:            extension.Description,
+			Version:                extension.Version,
+			Author:                 extension.Author,
+			Schema:                 schemaMap,
+			AllowMultipleInstances: extension.AllowMultipleInstances,
 		})
 	}
 

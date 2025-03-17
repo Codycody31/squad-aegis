@@ -81,6 +81,7 @@ interface Extension {
   name: string;
   enabled: boolean;
   config: Record<string, any>;
+  allow_multiple_instances: boolean;
 }
 
 interface ExtensionConfigField {
@@ -107,6 +108,7 @@ interface ExtensionDefinition {
   version: string;
   author: string;
   schema: ExtensionConfigSchema;
+  allow_multiple_instances: boolean;
 }
 
 interface ExtensionDefinitionsResponse {
@@ -740,6 +742,24 @@ function openViewDetails(extension: Extension) {
   showViewDetailsDialog.value = true;
 }
 
+// Function to check if an extension is already in use
+function isExtensionInUse(extensionId: string): boolean {
+  return extensions.value.some((extension) => extension.name === extensionId);
+}
+
+// Function to check if an extension can be added
+function canAddExtension(extensionId: string): boolean {
+  const definition = extensionDefinitions.value.find((def) => def.id === extensionId);
+  
+  // If the extension allows multiple instances, it can always be added
+  if (definition && definition.allow_multiple_instances) {
+    return true;
+  }
+  
+  // If the extension doesn't allow multiple instances, check if it's already in use
+  return !isExtensionInUse(extensionId);
+}
+
 // Setup initial data load
 onMounted(() => {
   fetchExtensionTypes();
@@ -903,12 +923,38 @@ onMounted(() => {
               <div>
                 <h3 class="font-medium text-lg">
                   {{ extension.name || extension.id }}
+                  <span v-if="!extension.allow_multiple_instances" class="text-xs text-muted-foreground ml-1">
+                    (Single Instance)
+                  </span>
                 </h3>
                 <p class="text-sm text-muted-foreground mt-1">
                   {{ extension.description || "No description available" }}
                 </p>
               </div>
+              <TooltipProvider v-if="!canAddExtension(extension.id)">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      @click="
+                        () => {
+                          addFormValues.name = extension.id;
+                          showAddExtensionDialog = true;
+                        }
+                      "
+                      :disabled="!canAddExtension(extension.id)"
+                    >
+                      {{ canAddExtension(extension.id) ? "Add This Extension" : "Already in Use" }}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>This extension doesn't allow multiple instances on the same server.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               <Button
+                v-else
                 variant="outline"
                 size="sm"
                 @click="
@@ -958,8 +1004,12 @@ onMounted(() => {
                         v-for="def in extensionDefinitions"
                         :key="def.id"
                         :value="def.id"
+                        :disabled="!canAddExtension(def.id)"
                       >
                         {{ def.name }}
+                        <span v-if="!canAddExtension(def.id)" class="text-xs text-destructive ml-2">
+                          (Already in use)
+                        </span>
                       </SelectItem>
                     </SelectContent>
                   </Select>

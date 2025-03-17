@@ -16,11 +16,12 @@ type TeamRandomizerExtension struct {
 // Define implements ExtensionRegistrar
 func Define() extension_manager.ExtensionDefinition {
 	return extension_manager.ExtensionDefinition{
-		ID:          "team_randomizer",
-		Name:        "Team Randomizer",
-		Description: "Used to randomize teams. It's great for destroying clan stacks or for social events. It can be run by typing !randomize< into in-game admin cha.",
-		Version:     "1.0.0",
-		Author:      "Squad Aegis",
+		ID:                     "team_randomizer",
+		Name:                   "Team Randomizer",
+		Description:            "Used to randomize teams. It's great for destroying clan stacks or for social events. It can be run by typing !randomize into in-game admin chat.",
+		Version:                "1.0.0",
+		Author:                 "Squad Aegis",
+		AllowMultipleInstances: false,
 
 		Dependencies: extension_manager.ExtensionDependencies{
 			Required: []extension_manager.DependencyType{

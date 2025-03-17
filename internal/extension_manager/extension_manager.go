@@ -198,6 +198,9 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 	}
 	defer rows.Close()
 
+	// Track which extensions are used by each server
+	serverExtensionTypes := make(map[uuid.UUID]map[string]bool)
+
 	// Initialize extensions
 	for rows.Next() {
 		var dbID string
@@ -226,6 +229,24 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 
 		// Get extension definition
 		def := registrar.Define()
+
+		// Check if this extension type is already in use for this server and doesn't allow multiple instances
+		if !def.AllowMultipleInstances {
+			if _, exists := serverExtensionTypes[serverID]; !exists {
+				serverExtensionTypes[serverID] = make(map[string]bool)
+			}
+
+			if serverExtensionTypes[serverID][def.ID] {
+				log.Warn().
+					Str("extension", name).
+					Str("serverID", serverID.String()).
+					Msg("Extension doesn't allow multiple instances and is already in use for this server. Skipping.")
+				continue
+			}
+
+			// Mark this extension type as in use for this server
+			serverExtensionTypes[serverID][def.ID] = true
+		}
 
 		// Use the ID provided by the extension
 		extensionID := def.ID

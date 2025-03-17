@@ -17,11 +17,12 @@ type DiscordChatExtension struct {
 // Define implements ExtensionRegistrar
 func Define() extension_manager.ExtensionDefinition {
 	return extension_manager.ExtensionDefinition{
-		ID:          "discord_chat",
-		Name:        "Discord Chat",
-		Description: "Will log chat messages to a Discord channel.",
-		Version:     "1.0.0",
-		Author:      "Squad Aegis",
+		ID:                     "discord_chat",
+		Name:                   "Discord Chat",
+		Description:            "Will log chat messages to a Discord channel.",
+		Version:                "1.0.0",
+		Author:                 "Squad Aegis",
+		AllowMultipleInstances: true,
 
 		Dependencies: extension_manager.ExtensionDependencies{
 			Required: []extension_manager.DependencyType{

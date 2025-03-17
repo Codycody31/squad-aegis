@@ -21,11 +21,12 @@ type DiscordAdminRequestExtension struct {
 // Define implements ExtensionRegistrar
 func Define() extension_manager.ExtensionDefinition {
 	return extension_manager.ExtensionDefinition{
-		ID:          "discord_admin_request",
-		Name:        "Discord Admin Requests",
-		Description: "Will ping admins in a Discord channel when a player requests an admin via the !admin command in in-game chat.",
-		Version:     "1.0.0",
-		Author:      "Squad Aegis",
+		ID:                     "discord_admin_request",
+		Name:                   "Discord Admin Requests",
+		Description:            "Will ping admins in a Discord channel when a player requests an admin via the !admin command in in-game chat.",
+		Version:                "1.0.0",
+		Author:                 "Squad Aegis",
+		AllowMultipleInstances: false,
 
 		Dependencies: extension_manager.ExtensionDependencies{
 			Required: []extension_manager.DependencyType{

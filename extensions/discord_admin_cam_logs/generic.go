@@ -17,11 +17,12 @@ type DiscordAdminCamLogsExtension struct {
 // Define implements ExtensionRegistrar
 func Define() extension_manager.ExtensionDefinition {
 	return extension_manager.ExtensionDefinition{
-		ID:          "discord_admin_cam_logs",
-		Name:        "Discord Admin Cam Logs",
-		Description: "Will log in game admin camera usage to a Discord channel.",
-		Version:     "1.0.0",
-		Author:      "Squad Aegis",
+		ID:                     "discord_admin_cam_logs",
+		Name:                   "Discord Admin Cam Logs",
+		Description:            "Will log in game admin camera usage to a Discord channel.",
+		Version:                "1.0.0",
+		Author:                 "Squad Aegis",
+		AllowMultipleInstances: true,
 
 		Dependencies: extension_manager.ExtensionDependencies{
 			Required: []extension_manager.DependencyType{

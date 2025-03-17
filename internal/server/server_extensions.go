@@ -16,11 +16,12 @@ import (
 
 // ExtensionResponse represents an extension in API responses
 type ExtensionResponse struct {
-	ID       string                 `json:"id"`
-	ServerID string                 `json:"server_id"`
-	Name     string                 `json:"name"`
-	Enabled  bool                   `json:"enabled"`
-	Config   map[string]interface{} `json:"config"`
+	ID                     string                 `json:"id"`
+	ServerID               string                 `json:"server_id"`
+	Name                   string                 `json:"name"`
+	Enabled                bool                   `json:"enabled"`
+	Config                 map[string]interface{} `json:"config"`
+	AllowMultipleInstances bool                   `json:"allow_multiple_instances"`
 }
 
 // ExtensionListResponse represents the response for the list extensions endpoint
@@ -103,13 +104,24 @@ func (s *Server) ServerExtensionsList(c *gin.Context) {
 			continue
 		}
 
+		// Get the extension registrar to access definition
+		registrar, ok := s.Dependencies.ExtensionManager.GetExtension(name)
+		if !ok {
+			log.Error().Str("name", name).Msg("Extension registrar not found")
+			continue
+		}
+
+		// Get extension definition to access AllowMultipleInstances field
+		extensionDef := registrar.Define()
+
 		// Add to response
 		extensionsList = append(extensionsList, ExtensionResponse{
-			ID:       id.String(),
-			ServerID: servID.String(),
-			Name:     name,
-			Enabled:  enabled,
-			Config:   config,
+			ID:                     id.String(),
+			ServerID:               servID.String(),
+			Name:                   name,
+			Enabled:                enabled,
+			Config:                 config,
+			AllowMultipleInstances: extensionDef.AllowMultipleInstances,
 		})
 	}
 
@@ -181,13 +193,25 @@ func (s *Server) ServerExtensionGet(c *gin.Context) {
 		return
 	}
 
+	// Get the extension registrar to access definition
+	registrar, ok := s.Dependencies.ExtensionManager.GetExtension(name)
+	if !ok {
+		log.Error().Str("name", name).Msg("Extension registrar not found")
+		responses.InternalServerError(c, fmt.Errorf("extension type not found"), &gin.H{"error": "Extension type not found"})
+		return
+	}
+
+	// Get extension definition to access AllowMultipleInstances field
+	extensionDef := registrar.Define()
+
 	// Build response
 	extension := ExtensionResponse{
-		ID:       eID.String(),
-		ServerID: servID.String(),
-		Name:     name,
-		Enabled:  enabled,
-		Config:   config,
+		ID:                     eID.String(),
+		ServerID:               servID.String(),
+		Name:                   name,
+		Enabled:                enabled,
+		Config:                 config,
+		AllowMultipleInstances: extensionDef.AllowMultipleInstances,
 	}
 
 	responses.Success(c, "Extension fetched successfully", &gin.H{
@@ -232,6 +256,30 @@ func (s *Server) ServerExtensionCreate(c *gin.Context) {
 	if !ok {
 		responses.BadRequest(c, "Invalid extension type", nil)
 		return
+	}
+
+	// Get extension definition
+	extensionDef := registrar.Define()
+
+	// Check if extension allows multiple instances
+	if !extensionDef.AllowMultipleInstances {
+		// Check if this extension is already in use for this server
+		var count int
+		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+			SELECT COUNT(*) FROM server_extensions 
+			WHERE server_id = $1 AND name = $2
+		`, serverID, req.Name).Scan(&count)
+
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to check existing extensions")
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to validate extension constraints"})
+			return
+		}
+
+		if count > 0 {
+			responses.BadRequest(c, "This extension type does not allow multiple instances on the same server", nil)
+			return
+		}
 	}
 
 	// Check if a connector_id is specified and verify it exists

@@ -37,6 +37,9 @@ type ExtensionDefinition struct {
 	// Configuration schema for this extension
 	ConfigSchema plug_config_schema.ConfigSchema
 
+	// Controls whether multiple instances of this extension can be used on a single server
+	AllowMultipleInstances bool
+
 	// Event handlers this extension provides
 	EventHandlers []EventHandler
 
