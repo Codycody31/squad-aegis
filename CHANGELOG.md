@@ -10,14 +10,19 @@
 
 - Server Connectors & Extensions [[#14](https://github.com/Codycody31/squad-aegis/pull/14)]
 
+### 📚 Documentation
+
+- docs: update README with features and extensibility details [[#20](https://github.com/Codycody31/squad-aegis/pull/20)]
+
+### 🐛 Bug Fixes
+
+- fix(docker): add ca-certificates to final image dependencies [[#19](https://github.com/Codycody31/squad-aegis/pull/19)]
+- Fix broken connector add logic [[#16](https://github.com/Codycody31/squad-aegis/pull/16)]
+
 ### 📈 Enhancement
 
 - enhancement(connector): global connector deletion process [[#18](https://github.com/Codycody31/squad-aegis/pull/18)]
 - RCON Manager [[#12](https://github.com/Codycody31/squad-aegis/pull/12)]
-
-### 🐛 Bug Fixes
-
-- Fix broken connector add logic [[#16](https://github.com/Codycody31/squad-aegis/pull/16)]
 
 ### 📦️ Dependency
 
