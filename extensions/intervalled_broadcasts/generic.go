@@ -175,7 +175,9 @@ func (e *IntervalledBroadcastsExtension) startBroadcasts() error {
 						Msg("Sent broadcast message")
 				}
 			case <-e.stopChan:
-				e.ticker.Stop()
+				if e.ticker != nil {
+					e.ticker.Stop()
+				}
 				return
 			}
 		}
