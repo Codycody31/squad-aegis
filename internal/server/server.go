@@ -117,6 +117,15 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			usersGroup.DELETE("/:userId", server.UserDelete)
 		}
 
+		// Admin chat endpoints
+		adminChatGroup := apiGroup.Group("/admin-chat")
+		{
+			adminChatGroup.Use(server.AuthSession)
+
+			adminChatGroup.GET("", server.AdminChatList)
+			adminChatGroup.POST("", server.AdminChatCreate)
+		}
+
 		serversGroup := apiGroup.Group("/servers")
 		{
 			serversGroup.Use(server.AuthSession)
@@ -133,6 +142,10 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				serverGroup.GET("/status", server.ServerStatus)
 				serverGroup.GET("/audit-logs", server.AuthHasServerPermission("manageserver"), server.ServerAuditLogs)
+
+				// Server admin chat endpoints
+				serverGroup.GET("/admin-chat", server.AuthHasServerPermission("canseeadminchat"), server.ServerAdminChatList)
+				serverGroup.POST("/admin-chat", server.AuthHasServerPermission("canseeadminchat"), server.ServerAdminChatCreate)
 
 				serverGroup.GET("/rcon/commands", server.RconCommandList)
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)
