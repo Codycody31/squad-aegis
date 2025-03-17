@@ -18,6 +18,10 @@
 
 - RCON Manager [[#12](https://github.com/Codycody31/squad-aegis/pull/12)]
 
+### 📦️ Dependency
+
+- chore(deps): bump golang.org/x/net from 0.33.0 to 0.36.0 [[#17](https://github.com/Codycody31/squad-aegis/pull/17)]
+
 ## [1.1.0](https://github.com/Codycody31/squad-aegis/releases/tag/v1.1.0) - 2025-03-14
 
 ### ❤️ Thanks to all contributors! ❤️
