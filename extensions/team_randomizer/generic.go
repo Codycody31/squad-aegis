@@ -32,7 +32,7 @@ func Define() extension_manager.ExtensionDefinition {
 		EventHandlers: []extension_manager.EventHandler{
 			{
 				Source:      extension_manager.EventHandlerSourceRCON,
-				Name:        "CHAT_MESSAGE",
+				Name:        "CHAT_COMMAND",
 				Description: "Handles team randomization requests from in-game chat",
 				Handler: func(e extension_manager.Extension, data interface{}) error {
 					return e.(*TeamRandomizerExtension).handleTeamRandomizationRequest(data)

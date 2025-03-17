@@ -18,7 +18,7 @@ import (
 
 // handleChatMessage handles chat messages and looks for admin requests
 func (e *DiscordAdminRequestExtension) handleChatMessage(data interface{}) error {
-	message, ok := data.(rcon.Message)
+	message, ok := data.(rcon.CommandMessage)
 	if !ok {
 		return fmt.Errorf("invalid data type for chat message")
 	}
@@ -28,16 +28,12 @@ func (e *DiscordAdminRequestExtension) handleChatMessage(data interface{}) error
 		return nil
 	}
 
-	command := "admin" // default to "admin" if not configured
-
-	// Check if this is an admin request
-	commandPrefix := "!" + command
-	if !strings.HasPrefix(message.Message, commandPrefix) {
+	if message.Command != "admin" {
 		return nil
 	}
 
 	// Extract reason (everything after the command)
-	reason := strings.TrimSpace(strings.TrimPrefix(message.Message, commandPrefix))
+	reason := strings.TrimSpace(message.Args)
 
 	if reason == "" {
 		r := squadRcon.NewSquadRcon(e.Deps.RconManager, e.Deps.Server.Id)

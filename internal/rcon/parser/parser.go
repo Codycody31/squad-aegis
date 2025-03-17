@@ -37,6 +37,15 @@ type Message struct {
 	Message    string
 }
 
+type CommandMessage struct {
+	ChatType   string
+	EosID      string
+	SteamID    string
+	PlayerName string
+	Command    string
+	Args       string
+}
+
 type PosAdminCam struct {
 	EosID     string
 	SteamID   string
@@ -91,6 +100,26 @@ func ChatParser(str string) interface{} {
 	matches = re.FindStringSubmatch(str)
 
 	if matches != nil {
+		// Check if this is a command message (starts with !)
+		if len(matches[5]) > 0 && matches[5][0] == '!' {
+			commandText := matches[5][1:] // Remove the ! prefix
+			parts := strings.SplitN(commandText, " ", 2)
+			command := parts[0]
+			args := ""
+			if len(parts) > 1 {
+				args = parts[1]
+			}
+
+			return CommandMessage{
+				ChatType:   matches[1],
+				EosID:      matches[2],
+				SteamID:    matches[3],
+				PlayerName: matches[4],
+				Command:    command,
+				Args:       args,
+			}
+		}
+
 		return Message{
 			ChatType:   matches[1],
 			EosID:      matches[2],

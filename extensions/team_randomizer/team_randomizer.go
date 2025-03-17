@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
-	"strings"
 
 	"go.codycody31.dev/squad-aegis/internal/rcon"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
 func (e *TeamRandomizerExtension) handleTeamRandomizationRequest(data interface{}) error {
-	message, ok := data.(rcon.Message)
+	message, ok := data.(rcon.CommandMessage)
 	if !ok {
 		return fmt.Errorf("invalid data type for chat message")
 	}
@@ -20,7 +19,7 @@ func (e *TeamRandomizerExtension) handleTeamRandomizationRequest(data interface{
 		return nil
 	}
 
-	if !strings.HasPrefix(message.Message, "!randomize") {
+	if message.Command != "randomize" {
 		return nil
 	}
 
