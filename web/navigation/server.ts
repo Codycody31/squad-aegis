@@ -59,4 +59,12 @@ export default [
     },
     permissions: ["super_admin", "manageserver"],
   },
+  {
+    title: "Extensions",
+    icon: "mdi:extension",
+    to: {
+      name: "servers-serverId-extensions",
+    },
+    permissions: ["super_admin", "manageserver"],
+  },
 ];

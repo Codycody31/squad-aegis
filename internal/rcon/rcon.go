@@ -29,6 +29,7 @@ const (
 type Warn p.Warn
 type Kick p.Kick
 type Message p.Message
+type CommandMessage p.CommandMessage
 type PosAdminCam p.PosAdminCam
 type UnposAdminCam p.UnposAdminCam
 type SquadCreated p.SquadCreated
@@ -300,6 +301,10 @@ func (r *Rcon) byteParser(b byte) {
 				case p.Message:
 					{
 						r.Emitter.Emit("CHAT_MESSAGE", Message(data))
+					}
+				case p.CommandMessage:
+					{
+						r.Emitter.Emit("CHAT_COMMAND", CommandMessage(data))
 					}
 				case p.PosAdminCam:
 					{

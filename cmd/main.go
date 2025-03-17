@@ -15,9 +15,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/connectors/discord"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
-	"go.codycody31.dev/squad-aegis/internal/chat_processor"
+	"go.codycody31.dev/squad-aegis/extensions/chat_commands"
+	"go.codycody31.dev/squad-aegis/extensions/discord_admin_cam_logs"
+	"go.codycody31.dev/squad-aegis/extensions/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/extensions/discord_cbl_info"
+	"go.codycody31.dev/squad-aegis/extensions/discord_chat"
+	"go.codycody31.dev/squad-aegis/extensions/discord_squad_created"
+	"go.codycody31.dev/squad-aegis/extensions/intervalled_broadcasts"
+	"go.codycody31.dev/squad-aegis/extensions/team_randomizer"
+	"go.codycody31.dev/squad-aegis/internal/connector_manager"
+	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server"
@@ -115,50 +125,30 @@ func run(ctx context.Context) error {
 
 	// Initialize RCON manager
 	rconManager := rcon_manager.NewRconManager(ctx)
+	log.Info().Msg("Starting RCON connection manager service...")
+	go rconManager.StartConnectionManager()
+	log.Info().Msg("Connecting to all servers with RCON enabled...")
+	rconManager.ConnectToAllServers(ctx, database)
+	log.Info().Msg("RCON connection manager service started")
 
-	// Initialize chat processor
-	chatProcessor := chat_processor.NewChatProcessor(ctx, rconManager, database)
+	// Initialize connector manager
+	connectorManager := connector_manager.NewConnectorManager(ctx)
+	connectorManager.RegisterConnector("discord", discord.Registrar)
+	if err := connectorManager.InitializeConnectors(ctx, database); err != nil {
+		log.Error().Err(err).Msg("Failed to initialize connectors")
+	}
+
+	// Initialize extension manager
+	extensionManager := extension_manager.NewExtensionManager(ctx, database, connectorManager, rconManager)
+	for name, registrar := range getExtensionRegistrars() {
+		extensionManager.RegisterExtension(name, registrar)
+	}
+	if err := extensionManager.InitializeExtensions(ctx); err != nil {
+		log.Error().Err(err).Msg("Failed to initialize extensions")
+	}
 
 	// Initialize services
 	waitingGroup := errgroup.Group{}
-
-	waitingGroup.Go(func() error {
-		log.Info().Msg("Starting RCON connection manager service...")
-		go rconManager.StartConnectionManager()
-
-		// Connect to all servers with RCON enabled
-		log.Info().Msg("Connecting to all servers with RCON enabled...")
-		rconManager.ConnectToAllServers(ctx, database)
-
-		log.Info().Msg("RCON connection manager service started")
-
-		// Block until context is done
-		<-ctx.Done()
-
-		// Stop RCON connection manager
-		rconManager.Shutdown()
-
-		log.Info().Msg("RCON connection manager service stopped")
-
-		return nil
-	})
-
-	// Start chat processor in a goroutine
-	waitingGroup.Go(func() error {
-		log.Info().Msg("Starting chat processor service...")
-
-		// Start chat processor
-		chatProcessor.Start()
-
-		// Block until context is done
-		<-ctx.Done()
-
-		// Stop chat processor
-		chatProcessor.Stop()
-
-		log.Info().Msg("Chat processor service stopped")
-		return nil
-	})
 
 	// Start HTTP server
 	waitingGroup.Go(func() error {
@@ -170,9 +160,10 @@ func run(ctx context.Context) error {
 		}
 
 		deps := &server.Dependencies{
-			DB:            database,
-			RconManager:   rconManager,
-			ChatProcessor: chatProcessor,
+			DB:               database,
+			RconManager:      rconManager,
+			ConnectorManager: connectorManager,
+			ExtensionManager: extensionManager,
 		}
 
 		// Initialize router
@@ -246,4 +237,20 @@ func setup(database db.Executor) error {
 	log.Info().Msg("admin user registered")
 
 	return nil
+}
+
+// Helper function to get all extension registrars
+func getExtensionRegistrars() map[string]extension_manager.ExtensionRegistrar {
+	registrars := make(map[string]extension_manager.ExtensionRegistrar)
+
+	// Add any extensions here
+	registrars["discord_chat"] = discord_chat.DiscordChatRegistrar{}
+	registrars["discord_admin_request"] = discord_admin_request.DiscordAdminRequestRegistrar{}
+	registrars["discord_admin_cam_logs"] = discord_admin_cam_logs.DiscordAdminCamLogsRegistrar{}
+	registrars["discord_cbl_info"] = discord_cbl_info.DiscordCBLInfoRegistrar{}
+	registrars["intervalled_broadcasts"] = intervalled_broadcasts.IntervalledBroadcastsRegistrar{}
+	registrars["team_randomizer"] = team_randomizer.TeamRandomizerRegistrar{}
+	registrars["chat_commands"] = chat_commands.ChatCommandsRegistrar{}
+	registrars["discord_squad_created"] = discord_squad_created.DiscordSquadCreatedRegistrar{}
+	return registrars
 }
