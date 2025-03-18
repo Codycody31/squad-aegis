@@ -21,6 +21,7 @@ type ExtensionResponse struct {
 	Name                   string                 `json:"name"`
 	Enabled                bool                   `json:"enabled"`
 	Config                 map[string]interface{} `json:"config"`
+	Notes                  *string                `json:"notes"`
 	AllowMultipleInstances bool                   `json:"allow_multiple_instances"`
 }
 
@@ -34,12 +35,14 @@ type ExtensionCreateRequest struct {
 	Name    string                 `json:"name" binding:"required"`
 	Enabled bool                   `json:"enabled"`
 	Config  map[string]interface{} `json:"config" binding:"required"`
+	Notes   *string                `json:"notes"`
 }
 
 // ExtensionUpdateRequest represents the request to update an extension
 type ExtensionUpdateRequest struct {
 	Enabled *bool                  `json:"enabled"`
 	Config  map[string]interface{} `json:"config"`
+	Notes   *string                `json:"notes"`
 }
 
 // ServerExtensionsList returns all extensions for a server
@@ -70,7 +73,7 @@ func (s *Server) ServerExtensionsList(c *gin.Context) {
 
 	// Get extensions from database
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT id, server_id, name, enabled, config
+		SELECT id, server_id, name, enabled, config, notes
 		FROM server_extensions
 		WHERE server_id = $1
 		ORDER BY name
@@ -91,8 +94,9 @@ func (s *Server) ServerExtensionsList(c *gin.Context) {
 		var name string
 		var enabled bool
 		var configJSON []byte
+		var notes *string
 
-		if err := rows.Scan(&id, &servID, &name, &enabled, &configJSON); err != nil {
+		if err := rows.Scan(&id, &servID, &name, &enabled, &configJSON, &notes); err != nil {
 			log.Error().Err(err).Msg("Failed to scan extension row")
 			continue
 		}
@@ -121,6 +125,7 @@ func (s *Server) ServerExtensionsList(c *gin.Context) {
 			Name:                   name,
 			Enabled:                enabled,
 			Config:                 config,
+			Notes:                  notes,
 			AllowMultipleInstances: extensionDef.AllowMultipleInstances,
 		})
 	}
@@ -175,12 +180,13 @@ func (s *Server) ServerExtensionGet(c *gin.Context) {
 	var name string
 	var enabled bool
 	var configJSON []byte
+	var notes *string
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT server_id, name, enabled, config
+		SELECT server_id, name, enabled, config, notes
 		FROM server_extensions
 		WHERE id = $1 AND server_id = $2
-	`, eID, serverID).Scan(&servID, &name, &enabled, &configJSON)
+	`, eID, serverID).Scan(&servID, &name, &enabled, &configJSON, &notes)
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to get extension")
@@ -214,6 +220,7 @@ func (s *Server) ServerExtensionGet(c *gin.Context) {
 		Name:                   name,
 		Enabled:                enabled,
 		Config:                 config,
+		Notes:                  notes,
 		AllowMultipleInstances: extensionDef.AllowMultipleInstances,
 	}
 
@@ -332,9 +339,9 @@ func (s *Server) ServerExtensionCreate(c *gin.Context) {
 
 	// Create extension in database
 	_, err = tx.ExecContext(c.Request.Context(), `
-		INSERT INTO server_extensions (id, server_id, name, enabled, config)
-		VALUES ($1, $2, $3, $4, $5)
-	`, id, serverID, req.Name, req.Enabled, configJSON)
+		INSERT INTO server_extensions (id, server_id, name, enabled, config, notes)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, id, serverID, req.Name, req.Enabled, configJSON, req.Notes)
 
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create extension")
@@ -375,6 +382,7 @@ func (s *Server) ServerExtensionCreate(c *gin.Context) {
 		"name":        req.Name,
 		"enabled":     req.Enabled,
 		"config":      req.Config,
+		"notes":       req.Notes,
 	}
 	s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:create", auditData)
 
@@ -442,12 +450,13 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 	var name string
 	var enabled bool
 	var configJSON []byte
+	var notes *string
 
 	err = tx.QueryRowContext(c.Request.Context(), `
-		SELECT name, enabled, config
+		SELECT name, enabled, config, notes
 		FROM server_extensions
 		WHERE id = $1 AND server_id = $2
-	`, eID, serverID).Scan(&name, &enabled, &configJSON)
+	`, eID, serverID).Scan(&name, &enabled, &configJSON, &notes)
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to get extension")
@@ -479,8 +488,16 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 		newConfig = req.Config
 	}
 
+	// Update notes if provided
+	notesChanged := false
+	newNotes := notes
+	if req.Notes != nil && (notes == nil || *req.Notes != *notes) {
+		notesChanged = true
+		newNotes = req.Notes
+	}
+
 	// If we're not changing anything, just return success
-	if !enabledChanged && !configChanged {
+	if !enabledChanged && !configChanged && !notesChanged {
 		tx.Rollback() // No need to commit if no changes
 		responses.Success(c, "No changes requested", nil)
 		return
@@ -497,12 +514,30 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 	}
 
 	// Update extension in database
-	if enabledChanged && configChanged {
+	if enabledChanged && configChanged && notesChanged {
+		_, err = tx.ExecContext(c.Request.Context(), `
+			UPDATE server_extensions
+			SET enabled = $1, config = $2, notes = $3
+			WHERE id = $4
+		`, newEnabled, configJSON, newNotes, eID)
+	} else if enabledChanged && configChanged {
 		_, err = tx.ExecContext(c.Request.Context(), `
 			UPDATE server_extensions
 			SET enabled = $1, config = $2
 			WHERE id = $3
 		`, newEnabled, configJSON, eID)
+	} else if enabledChanged && notesChanged {
+		_, err = tx.ExecContext(c.Request.Context(), `
+			UPDATE server_extensions
+			SET enabled = $1, notes = $2
+			WHERE id = $3
+		`, newEnabled, newNotes, eID)
+	} else if configChanged && notesChanged {
+		_, err = tx.ExecContext(c.Request.Context(), `
+			UPDATE server_extensions
+			SET config = $1, notes = $2
+			WHERE id = $3
+		`, configJSON, newNotes, eID)
 	} else if enabledChanged {
 		_, err = tx.ExecContext(c.Request.Context(), `
 			UPDATE server_extensions
@@ -515,6 +550,12 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 			SET config = $1
 			WHERE id = $2
 		`, configJSON, eID)
+	} else if notesChanged {
+		_, err = tx.ExecContext(c.Request.Context(), `
+			UPDATE server_extensions
+			SET notes = $1
+			WHERE id = $2
+		`, newNotes, eID)
 	}
 
 	if err != nil {
@@ -583,6 +624,10 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 			"name":          name,
 			"configChanged": true,
 			"newConfig":     newConfig,
+		}
+		if notesChanged {
+			auditData["notesChanged"] = true
+			auditData["newNotes"] = newNotes
 		}
 		s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:update", auditData)
 
@@ -691,6 +736,10 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 	if configChanged {
 		auditData["configChanged"] = true
 		auditData["newConfig"] = newConfig
+	}
+	if notesChanged {
+		auditData["notesChanged"] = true
+		auditData["newNotes"] = newNotes
 	}
 	s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "extension:update", auditData)
 
@@ -873,12 +922,13 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 	var name string
 	var enabled bool
 	var configJSON []byte
+	var notes *string
 
 	err = tx.QueryRowContext(c.Request.Context(), `
-		SELECT name, enabled, config
+		SELECT name, enabled, config, notes
 		FROM server_extensions
 		WHERE id = $1 AND server_id = $2
-	`, eID, serverID).Scan(&name, &enabled, &configJSON)
+	`, eID, serverID).Scan(&name, &enabled, &configJSON, &notes)
 
 	if err != nil {
 		log.Error().Err(err).Str("id", eID.String()).Str("serverID", serverID.String()).Msg("Failed to get extension")
