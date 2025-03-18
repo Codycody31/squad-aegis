@@ -81,6 +81,7 @@ interface Extension {
   name: string;
   enabled: boolean;
   config: Record<string, any>;
+  notes?: string;
   allow_multiple_instances: boolean;
 }
 
@@ -119,83 +120,37 @@ interface ExtensionListResponse {
   extensions: Extension[];
 }
 
-// Dynamic form schema based on selected extension type
-const createExtensionFormSchema = computed(() => {
-  const baseSchema = {
-    name: z.string().min(1, "Extension type is required"),
-    enabled: z.boolean().default(true),
-    config: z.record(z.string(), z.any()).default({}),
-  };
-
-  // If a type is selected, add config fields based on the schema
-  if (extensionAction.value === "add" && addFormValues.value.name) {
-    const selectedType = addFormValues.value.name;
-    const typeSchema = extensionTypes.value[selectedType];
-
-    if (!typeSchema) {
-      return z.object(baseSchema);
-    }
-
-    const configSchema: Record<string, any> = {};
-
-    // Add each config field to the schema
-    for (const [fieldName, field] of Object.entries(typeSchema)) {
-      let fieldSchema: z.ZodTypeAny = z.any();
-
-      if (field.type === "string") {
-        fieldSchema = field.required
-          ? z.string().min(1, `${fieldName} is required`)
-          : z.string().optional();
-      } else if (field.type === "number") {
-        fieldSchema = field.required
-          ? z
-              .number({ coerce: true })
-              .min(0, `${fieldName} must be a positive number`)
-          : z.number({ coerce: true }).optional();
-      } else if (field.type === "boolean") {
-        fieldSchema = z.boolean().default(!!field.default);
-      } else if (field.type === "array" || field.type === "arraystring") {
-        fieldSchema = z.array(z.string()).default([]);
-      } else if (field.type === "arrayint") {
-        fieldSchema = z.array(z.number({ coerce: true })).default([]);
-      } else if (field.type === "arraybool") {
-        fieldSchema = z.array(z.boolean()).default([]);
-      } else if (field.type === "object") {
-        fieldSchema = z.record(z.string(), z.any()).default({});
-      }
-
-      // Apply default values if they exist
-      if (field.default !== undefined && field.type !== "boolean") {
-        fieldSchema = fieldSchema.default(field.default);
-      }
-
-      configSchema[fieldName] = fieldSchema;
-    }
-
-    return z.object({
-      ...baseSchema,
-      config: z.object(configSchema).default({}),
-    });
-  } else if (extensionAction.value === "edit") {
-    // For edit form, we don't require name since it's pre-selected
-    return z.object(baseSchema);
-  }
-
-  // Default basic schema
-  return z.object(baseSchema);
-});
-
 // Initial form values
 const addFormValues = ref({
   name: "",
   enabled: true,
+  notes: "",
   config: {} as Record<string, any>,
 });
 
 const editFormValues = ref({
   name: "",
   enabled: true,
+  notes: "",
   config: {} as Record<string, any>,
+});
+
+// Base schema for add/edit forms
+const baseSchema: Record<string, z.ZodTypeAny> = {
+  name: z.string({ required_error: "Extension type is required" }),
+  enabled: z.boolean().default(true),
+  notes: z.string().optional(),
+};
+
+// Set up VeeValidate forms with basic schema
+const addForm = useForm({
+  validationSchema: toTypedSchema(z.object(baseSchema)),
+  initialValues: addFormValues,
+});
+
+const editForm = useForm({
+  validationSchema: toTypedSchema(z.object(baseSchema)),
+  initialValues: editFormValues,
 });
 
 // Extension field config for AutoForm
@@ -215,6 +170,11 @@ const extensionFieldConfig = computed(() => {
     enabled: {
       label: "Enable Extension",
       description: "Enable the extension immediately after installation",
+    },
+    notes: {
+      label: "Notes",
+      description:
+        "Add notes to help identify the purpose of this extension (optional)",
     },
   };
 
@@ -351,7 +311,7 @@ async function fetchExtensions() {
 }
 
 // Function to add extension
-async function addExtension(values: any) {
+async function addExtension(values: Record<string, any>) {
   actionLoading.value = true;
   error.value = null;
 
@@ -368,15 +328,18 @@ async function addExtension(values: any) {
   }
 
   try {
+    const requestBody = {
+      name: values.name,
+      enabled: values.enabled,
+      notes: values.notes || null,
+      config: values.config || {},
+    };
+
     const { data, error: fetchError } = await useFetch(
       `${runtimeConfig.public.backendApi}/servers/${serverId}/extensions`,
       {
         method: "POST",
-        body: {
-          name: values.name,
-          enabled: values.enabled,
-          config: values.config || {},
-        },
+        body: requestBody,
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -393,6 +356,7 @@ async function addExtension(values: any) {
     addFormValues.value = {
       name: "",
       enabled: true,
+      notes: "",
       config: {},
     };
     showAddExtensionDialog.value = false;
@@ -441,7 +405,7 @@ watch(
 );
 
 // Function to update extension
-async function updateExtension(values: any) {
+async function updateExtension(values: Record<string, any>) {
   if (!selectedExtension.value) return;
 
   actionLoading.value = true;
@@ -460,14 +424,33 @@ async function updateExtension(values: any) {
   }
 
   try {
+    const updateData: Record<string, any> = {};
+
+    // Check what fields have changed
+    if (values.enabled !== selectedExtension.value.enabled) {
+      updateData.enabled = values.enabled;
+    }
+
+    if (values.notes !== (selectedExtension.value.notes || "")) {
+      updateData.notes = values.notes || null;
+    }
+
+    if (values.config && Object.keys(values.config).length > 0) {
+      updateData.config = values.config;
+    }
+
+    // If nothing changed, skip update
+    if (Object.keys(updateData).length === 0) {
+      showEditExtensionDialog.value = false;
+      actionLoading.value = false;
+      return;
+    }
+
     const { data, error: fetchError } = await useFetch(
       `${runtimeConfig.public.backendApi}/servers/${serverId}/extensions/${selectedExtension.value.id}`,
       {
         method: "PUT",
-        body: {
-          enabled: values.enabled,
-          config: values.config || {},
-        },
+        body: updateData,
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -484,6 +467,7 @@ async function updateExtension(values: any) {
     editFormValues.value = {
       name: "",
       enabled: true,
+      notes: "",
       config: {},
     };
     showEditExtensionDialog.value = false;
@@ -603,6 +587,7 @@ function openEditDialog(extension: Extension) {
   editFormValues.value = {
     name: extension.name,
     enabled: extension.enabled,
+    notes: extension.notes || "",
     config: {},
   };
 
@@ -675,7 +660,12 @@ function getArrayItemType(fieldType: string): string {
   // For custom "array<type>" format or backward compatibility
   if (fieldType.startsWith("array")) {
     const subType = fieldType.substring(5).toLowerCase();
-    if (subType === "string" || subType === "int" || subType === "bool" || subType === "object") {
+    if (
+      subType === "string" ||
+      subType === "int" ||
+      subType === "bool" ||
+      subType === "object"
+    ) {
       return subType;
     }
   }
@@ -697,7 +687,7 @@ function addArrayItem(
 
   const itemType = getArrayItemType(fieldType);
   let newValue: any = "";
-  
+
   if (itemType === "int") {
     newValue = 0;
   } else if (itemType === "bool") {
@@ -712,7 +702,10 @@ function addArrayItem(
         newValue[nestedField.name] = "";
       } else if (nestedField.type === "number" || nestedField.type === "int") {
         newValue[nestedField.name] = 0;
-      } else if (nestedField.type === "boolean" || nestedField.type === "bool") {
+      } else if (
+        nestedField.type === "boolean" ||
+        nestedField.type === "bool"
+      ) {
         newValue[nestedField.name] = false;
       } else if (nestedField.type === "arraystring") {
         newValue[nestedField.name] = [];
@@ -776,13 +769,15 @@ function hasConfigSchema(extensionId: string): boolean {
 
 // Function to check if an extension can be added
 function canAddExtension(extensionId: string): boolean {
-  const definition = extensionDefinitions.value.find((def) => def.id === extensionId);
-  
+  const definition = extensionDefinitions.value.find(
+    (def) => def.id === extensionId
+  );
+
   // If the extension allows multiple instances, it can always be added
   if (definition && definition.allow_multiple_instances) {
     return true;
   }
-  
+
   // If the extension doesn't allow multiple instances, check if it's already in use
   return !isExtensionInUse(extensionId);
 }
@@ -832,7 +827,7 @@ onMounted(() => {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Configuration</TableHead>
+                <TableHead>Notes</TableHead>
                 <TableHead class="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -858,9 +853,12 @@ onMounted(() => {
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  <code class="text-xs block max-h-32 overflow-y-auto">
-                    {{ formatConfig(extension.config) }}
-                  </code>
+                  <span v-if="extension.notes" class="text-sm">{{
+                    extension.notes
+                  }}</span>
+                  <span v-else class="text-xs text-muted-foreground italic"
+                    >No notes</span
+                  >
                 </TableCell>
                 <TableCell class="text-right">
                   <div class="flex space-x-2 justify-end">
@@ -951,7 +949,10 @@ onMounted(() => {
               <div>
                 <h3 class="font-medium text-lg">
                   {{ extension.name || extension.id }}
-                  <span v-if="!extension.allow_multiple_instances" class="text-xs text-muted-foreground ml-1">
+                  <span
+                    v-if="!extension.allow_multiple_instances"
+                    class="text-xs text-muted-foreground ml-1"
+                  >
                     (Single Instance)
                   </span>
                 </h3>
@@ -973,11 +974,18 @@ onMounted(() => {
                       "
                       :disabled="!canAddExtension(extension.id)"
                     >
-                      {{ canAddExtension(extension.id) ? "Add This Extension" : "Already in Use" }}
+                      {{
+                        canAddExtension(extension.id)
+                          ? "Add This Extension"
+                          : "Already in Use"
+                      }}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>This extension doesn't allow multiple instances on the same server.</p>
+                    <p>
+                      This extension doesn't allow multiple instances on the
+                      same server.
+                    </p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
@@ -1035,7 +1043,10 @@ onMounted(() => {
                         :disabled="!canAddExtension(def.id)"
                       >
                         {{ def.name }}
-                        <span v-if="!canAddExtension(def.id)" class="text-xs text-destructive ml-2">
+                        <span
+                          v-if="!canAddExtension(def.id)"
+                          class="text-xs text-destructive ml-2"
+                        >
                           (Already in use)
                         </span>
                       </SelectItem>
@@ -1055,9 +1066,7 @@ onMounted(() => {
                 <div class="text-sm font-medium">
                   {{ getExtensionNameById(addFormValues.name) }}
                   <span class="text-xs text-muted-foreground ml-2">
-                    v{{
-                      getExtensionDetailById(addFormValues.name, "version")
-                    }}
+                    v{{ getExtensionDetailById(addFormValues.name, "version") }}
                     by
                     {{ getExtensionDetailById(addFormValues.name, "author") }}
                   </span>
@@ -1081,9 +1090,24 @@ onMounted(() => {
                 </FormControl>
               </FormField>
 
+              <FormField name="notes">
+                <FormLabel>Notes</FormLabel>
+                <FormControl>
+                  <Textarea v-model="addFormValues.notes" />
+                </FormControl>
+                <FormDescription
+                  >Add notes to help identify the purpose of this extension
+                  (optional)</FormDescription
+                >
+              </FormField>
+
               <!-- Dynamic config fields based on selected extension type -->
               <div
-                v-if="addFormValues.name && extensionTypes[addFormValues.name] && hasConfigSchema(addFormValues.name)"
+                v-if="
+                  addFormValues.name &&
+                  extensionTypes[addFormValues.name] &&
+                  hasConfigSchema(addFormValues.name)
+                "
                 class="mt-6"
               >
                 <h3 class="font-medium mb-4">Configuration</h3>
@@ -1145,9 +1169,7 @@ onMounted(() => {
 
                       <!-- Array input -->
                       <div
-                        v-else-if="
-                          isArrayType(field.type)
-                        "
+                        v-else-if="isArrayType(field.type)"
                         class="space-y-2"
                       >
                         <div
@@ -1192,11 +1214,16 @@ onMounted(() => {
 
                           <!-- Object array item -->
                           <div
-                            v-else-if="getArrayItemType(field.type) === 'object' && field.nested"
+                            v-else-if="
+                              getArrayItemType(field.type) === 'object' &&
+                              field.nested
+                            "
                             class="w-full border rounded-md p-3 mb-2"
                           >
                             <div class="flex justify-between items-center mb-2">
-                              <h5 class="text-sm font-medium">Item {{ index + 1 }}</h5>
+                              <h5 class="text-sm font-medium">
+                                Item {{ index + 1 }}
+                              </h5>
                               <Button
                                 type="button"
                                 variant="destructive"
@@ -1213,30 +1240,50 @@ onMounted(() => {
                                 <Icon name="lucide:trash-2" class="h-3 w-3" />
                               </Button>
                             </div>
-                            
+
                             <div class="space-y-3">
                               <div
                                 v-for="nestedField in field.nested"
                                 :key="`${fieldName}-${index}-${nestedField.name}`"
                                 class="space-y-1"
                               >
-                                <FormLabel class="text-xs">{{ nestedField.name }}</FormLabel>
-                                
+                                <FormLabel class="text-xs">{{
+                                  nestedField.name
+                                }}</FormLabel>
+
                                 <!-- String nested field -->
                                 <Input
-                                  v-if="nestedField.type === 'string' && (!nestedField.options || !nestedField.options.length)"
-                                  v-model="addFormValues.config[fieldName][index][nestedField.name]"
+                                  v-if="
+                                    nestedField.type === 'string' &&
+                                    (!nestedField.options ||
+                                      !nestedField.options.length)
+                                  "
+                                  v-model="
+                                    addFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                  "
                                   :placeholder="`Enter ${nestedField.name}`"
                                   class="h-8 text-sm"
                                 />
-                                
+
                                 <!-- Select input for string options -->
                                 <Select
-                                  v-else-if="nestedField.type === 'string' && nestedField.options && nestedField.options.length"
-                                  v-model="addFormValues.config[fieldName][index][nestedField.name]"
+                                  v-else-if="
+                                    nestedField.type === 'string' &&
+                                    nestedField.options &&
+                                    nestedField.options.length
+                                  "
+                                  v-model="
+                                    addFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                  "
                                 >
                                   <SelectTrigger class="w-full h-8 text-sm">
-                                    <SelectValue :placeholder="`Select ${nestedField.name}`" />
+                                    <SelectValue
+                                      :placeholder="`Select ${nestedField.name}`"
+                                    />
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem
@@ -1248,22 +1295,42 @@ onMounted(() => {
                                     </SelectItem>
                                   </SelectContent>
                                 </Select>
-                                
+
                                 <!-- Number nested field -->
                                 <Input
-                                  v-else-if="(nestedField.type === 'number' || nestedField.type === 'int') && (!nestedField.options || !nestedField.options.length)"
-                                  v-model.number="addFormValues.config[fieldName][index][nestedField.name]"
+                                  v-else-if="
+                                    (nestedField.type === 'number' ||
+                                      nestedField.type === 'int') &&
+                                    (!nestedField.options ||
+                                      !nestedField.options.length)
+                                  "
+                                  v-model.number="
+                                    addFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                  "
                                   type="number"
                                   class="h-8 text-sm"
                                 />
-                                
+
                                 <!-- Select input for number options -->
                                 <Select
-                                  v-else-if="(nestedField.type === 'number' || nestedField.type === 'int') && nestedField.options && nestedField.options.length"
-                                  v-model="addFormValues.config[fieldName][index][nestedField.name]"
+                                  v-else-if="
+                                    (nestedField.type === 'number' ||
+                                      nestedField.type === 'int') &&
+                                    nestedField.options &&
+                                    nestedField.options.length
+                                  "
+                                  v-model="
+                                    addFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                  "
                                 >
                                   <SelectTrigger class="w-full h-8 text-sm">
-                                    <SelectValue :placeholder="`Select ${nestedField.name}`" />
+                                    <SelectValue
+                                      :placeholder="`Select ${nestedField.name}`"
+                                    />
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem
@@ -1275,31 +1342,54 @@ onMounted(() => {
                                     </SelectItem>
                                   </SelectContent>
                                 </Select>
-                                
+
                                 <!-- Boolean nested field -->
                                 <div
-                                  v-else-if="nestedField.type === 'boolean' || nestedField.type === 'bool'"
+                                  v-else-if="
+                                    nestedField.type === 'boolean' ||
+                                    nestedField.type === 'bool'
+                                  "
                                   class="flex items-center space-x-2"
                                 >
-                                  <Switch v-model="addFormValues.config[fieldName][index][nestedField.name]" />
+                                  <Switch
+                                    v-model="
+                                      addFormValues.config[fieldName][index][
+                                        nestedField.name
+                                      ]
+                                    "
+                                  />
                                   <span class="text-sm">{{
-                                    addFormValues.config[fieldName][index][nestedField.name] ? "Yes" : "No"
+                                    addFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                      ? "Yes"
+                                      : "No"
                                   }}</span>
                                 </div>
-                                
+
                                 <!-- Array nested field -->
                                 <div
                                   v-else-if="nestedField.type === 'arraystring'"
                                   class="space-y-2"
                                 >
                                   <div
-                                    v-for="(nestedItem, nestedIndex) in addFormValues.config[fieldName][index][nestedField.name] || []"
+                                    v-for="(
+                                      nestedItem, nestedIndex
+                                    ) in addFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ] || []"
                                     :key="`${fieldName}-${index}-${nestedField.name}-${nestedIndex}`"
                                     class="flex items-center space-x-2"
                                   >
                                     <Input
-                                      v-model="addFormValues.config[fieldName][index][nestedField.name][nestedIndex]"
-                                      :placeholder="`Enter ${nestedField.name} item ${nestedIndex + 1}`"
+                                      v-model="
+                                        addFormValues.config[fieldName][index][
+                                          nestedField.name
+                                        ][nestedIndex]
+                                      "
+                                      :placeholder="`Enter ${
+                                        nestedField.name
+                                      } item ${nestedIndex + 1}`"
                                       class="h-8 text-sm flex-grow"
                                     />
                                     <Button
@@ -1307,9 +1397,16 @@ onMounted(() => {
                                       variant="destructive"
                                       size="icon"
                                       class="h-6 w-6 shrink-0"
-                                      @click="addFormValues.config[fieldName][index][nestedField.name].splice(nestedIndex, 1)"
+                                      @click="
+                                        addFormValues.config[fieldName][index][
+                                          nestedField.name
+                                        ].splice(nestedIndex, 1)
+                                      "
                                     >
-                                      <Icon name="lucide:trash-2" class="h-3 w-3" />
+                                      <Icon
+                                        name="lucide:trash-2"
+                                        class="h-3 w-3"
+                                      />
                                     </Button>
                                   </div>
                                   <Button
@@ -1319,14 +1416,27 @@ onMounted(() => {
                                     class="text-xs h-7"
                                     @click="
                                       {
-                                        if (!Array.isArray(addFormValues.config[fieldName][index][nestedField.name])) {
-                                          addFormValues.config[fieldName][index][nestedField.name] = [];
+                                        if (
+                                          !Array.isArray(
+                                            addFormValues.config[fieldName][
+                                              index
+                                            ][nestedField.name]
+                                          )
+                                        ) {
+                                          addFormValues.config[fieldName][
+                                            index
+                                          ][nestedField.name] = [];
                                         }
-                                        addFormValues.config[fieldName][index][nestedField.name].push('');
+                                        addFormValues.config[fieldName][index][
+                                          nestedField.name
+                                        ].push('');
                                       }
                                     "
                                   >
-                                    <Icon name="lucide:plus" class="h-3 w-3 mr-1" />
+                                    <Icon
+                                      name="lucide:plus"
+                                      class="h-3 w-3 mr-1"
+                                    />
                                     Add {{ nestedField.name }} Item
                                   </Button>
                                 </div>
@@ -1474,13 +1584,24 @@ onMounted(() => {
                   <div class="flex items-center space-x-2">
                     <Switch v-model="editFormValues.enabled" />
                     <span class="text-sm text-muted-foreground"
-                      >Enable or disable this extension</span
+                      >Enable the extension</span
                     >
                   </div>
                 </FormControl>
               </FormField>
 
-              <!-- Dynamic config fields based on extension type -->
+              <FormField name="notes">
+                <FormLabel>Notes</FormLabel>
+                <FormControl>
+                  <Textarea v-model="editFormValues.notes" />
+                </FormControl>
+                <FormDescription
+                  >Add notes to help identify the purpose of this extension
+                  (optional)</FormDescription
+                >
+              </FormField>
+
+              <!-- Dynamic config fields based on selected extension type -->
               <div
                 v-if="
                   selectedExtension && extensionTypes[selectedExtension.name]
@@ -1546,9 +1667,7 @@ onMounted(() => {
 
                       <!-- Array input -->
                       <div
-                        v-else-if="
-                          isArrayType(field.type)
-                        "
+                        v-else-if="isArrayType(field.type)"
                         class="space-y-2"
                       >
                         <div
@@ -1593,11 +1712,16 @@ onMounted(() => {
 
                           <!-- Object array item -->
                           <div
-                            v-else-if="getArrayItemType(field.type) === 'object' && field.nested"
+                            v-else-if="
+                              getArrayItemType(field.type) === 'object' &&
+                              field.nested
+                            "
                             class="w-full border rounded-md p-3 mb-2"
                           >
                             <div class="flex justify-between items-center mb-2">
-                              <h5 class="text-sm font-medium">Item {{ index + 1 }}</h5>
+                              <h5 class="text-sm font-medium">
+                                Item {{ index + 1 }}
+                              </h5>
                               <Button
                                 type="button"
                                 variant="destructive"
@@ -1614,30 +1738,50 @@ onMounted(() => {
                                 <Icon name="lucide:trash-2" class="h-3 w-3" />
                               </Button>
                             </div>
-                            
+
                             <div class="space-y-3">
                               <div
                                 v-for="nestedField in field.nested"
                                 :key="`${fieldName}-${index}-${nestedField.name}`"
                                 class="space-y-1"
                               >
-                                <FormLabel class="text-xs">{{ nestedField.name }}</FormLabel>
-                                
+                                <FormLabel class="text-xs">{{
+                                  nestedField.name
+                                }}</FormLabel>
+
                                 <!-- String nested field -->
                                 <Input
-                                  v-if="nestedField.type === 'string' && (!nestedField.options || !nestedField.options.length)"
-                                  v-model="editFormValues.config[fieldName][index][nestedField.name]"
+                                  v-if="
+                                    nestedField.type === 'string' &&
+                                    (!nestedField.options ||
+                                      !nestedField.options.length)
+                                  "
+                                  v-model="
+                                    editFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                  "
                                   :placeholder="`Enter ${nestedField.name}`"
                                   class="h-8 text-sm"
                                 />
-                                
+
                                 <!-- Select input for string options -->
                                 <Select
-                                  v-else-if="nestedField.type === 'string' && nestedField.options && nestedField.options.length"
-                                  v-model="editFormValues.config[fieldName][index][nestedField.name]"
+                                  v-else-if="
+                                    nestedField.type === 'string' &&
+                                    nestedField.options &&
+                                    nestedField.options.length
+                                  "
+                                  v-model="
+                                    editFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                  "
                                 >
                                   <SelectTrigger class="w-full h-8 text-sm">
-                                    <SelectValue :placeholder="`Select ${nestedField.name}`" />
+                                    <SelectValue
+                                      :placeholder="`Select ${nestedField.name}`"
+                                    />
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem
@@ -1649,22 +1793,42 @@ onMounted(() => {
                                     </SelectItem>
                                   </SelectContent>
                                 </Select>
-                                
+
                                 <!-- Number nested field -->
                                 <Input
-                                  v-else-if="(nestedField.type === 'number' || nestedField.type === 'int') && (!nestedField.options || !nestedField.options.length)"
-                                  v-model.number="editFormValues.config[fieldName][index][nestedField.name]"
+                                  v-else-if="
+                                    (nestedField.type === 'number' ||
+                                      nestedField.type === 'int') &&
+                                    (!nestedField.options ||
+                                      !nestedField.options.length)
+                                  "
+                                  v-model.number="
+                                    editFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                  "
                                   type="number"
                                   class="h-8 text-sm"
                                 />
-                                
+
                                 <!-- Select input for number options -->
                                 <Select
-                                  v-else-if="(nestedField.type === 'number' || nestedField.type === 'int') && nestedField.options && nestedField.options.length"
-                                  v-model="editFormValues.config[fieldName][index][nestedField.name]"
+                                  v-else-if="
+                                    (nestedField.type === 'number' ||
+                                      nestedField.type === 'int') &&
+                                    nestedField.options &&
+                                    nestedField.options.length
+                                  "
+                                  v-model="
+                                    editFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                  "
                                 >
                                   <SelectTrigger class="w-full h-8 text-sm">
-                                    <SelectValue :placeholder="`Select ${nestedField.name}`" />
+                                    <SelectValue
+                                      :placeholder="`Select ${nestedField.name}`"
+                                    />
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem
@@ -1676,31 +1840,54 @@ onMounted(() => {
                                     </SelectItem>
                                   </SelectContent>
                                 </Select>
-                                
+
                                 <!-- Boolean nested field -->
                                 <div
-                                  v-else-if="nestedField.type === 'boolean' || nestedField.type === 'bool'"
+                                  v-else-if="
+                                    nestedField.type === 'boolean' ||
+                                    nestedField.type === 'bool'
+                                  "
                                   class="flex items-center space-x-2"
                                 >
-                                  <Switch v-model="editFormValues.config[fieldName][index][nestedField.name]" />
+                                  <Switch
+                                    v-model="
+                                      editFormValues.config[fieldName][index][
+                                        nestedField.name
+                                      ]
+                                    "
+                                  />
                                   <span class="text-sm">{{
-                                    editFormValues.config[fieldName][index][nestedField.name] ? "Yes" : "No"
+                                    editFormValues.config[fieldName][index][
+                                      nestedField.name
+                                    ]
+                                      ? "Yes"
+                                      : "No"
                                   }}</span>
                                 </div>
-                                
+
                                 <!-- Array nested field -->
                                 <div
                                   v-else-if="nestedField.type === 'arraystring'"
                                   class="space-y-2"
                                 >
                                   <div
-                                    v-for="(nestedItem, nestedIndex) in editFormValues.config[fieldName][index][nestedField.name] || []"
+                                    v-for="(
+                                      nestedItem, nestedIndex
+                                    ) in editFormValues.config[fieldName][
+                                      index
+                                    ][nestedField.name] || []"
                                     :key="`${fieldName}-${index}-${nestedField.name}-${nestedIndex}`"
                                     class="flex items-center space-x-2"
                                   >
                                     <Input
-                                      v-model="editFormValues.config[fieldName][index][nestedField.name][nestedIndex]"
-                                      :placeholder="`Enter ${nestedField.name} item ${nestedIndex + 1}`"
+                                      v-model="
+                                        editFormValues.config[fieldName][index][
+                                          nestedField.name
+                                        ][nestedIndex]
+                                      "
+                                      :placeholder="`Enter ${
+                                        nestedField.name
+                                      } item ${nestedIndex + 1}`"
                                       class="h-8 text-sm flex-grow"
                                     />
                                     <Button
@@ -1708,9 +1895,16 @@ onMounted(() => {
                                       variant="destructive"
                                       size="icon"
                                       class="h-6 w-6 shrink-0"
-                                      @click="editFormValues.config[fieldName][index][nestedField.name].splice(nestedIndex, 1)"
+                                      @click="
+                                        editFormValues.config[fieldName][index][
+                                          nestedField.name
+                                        ].splice(nestedIndex, 1)
+                                      "
                                     >
-                                      <Icon name="lucide:trash-2" class="h-3 w-3" />
+                                      <Icon
+                                        name="lucide:trash-2"
+                                        class="h-3 w-3"
+                                      />
                                     </Button>
                                   </div>
                                   <Button
@@ -1720,14 +1914,27 @@ onMounted(() => {
                                     class="text-xs h-7"
                                     @click="
                                       {
-                                        if (!Array.isArray(editFormValues.config[fieldName][index][nestedField.name])) {
-                                          editFormValues.config[fieldName][index][nestedField.name] = [];
+                                        if (
+                                          !Array.isArray(
+                                            editFormValues.config[fieldName][
+                                              index
+                                            ][nestedField.name]
+                                          )
+                                        ) {
+                                          editFormValues.config[fieldName][
+                                            index
+                                          ][nestedField.name] = [];
                                         }
-                                        editFormValues.config[fieldName][index][nestedField.name].push('');
+                                        editFormValues.config[fieldName][index][
+                                          nestedField.name
+                                        ].push('');
                                       }
                                     "
                                   >
-                                    <Icon name="lucide:plus" class="h-3 w-3 mr-1" />
+                                    <Icon
+                                      name="lucide:plus"
+                                      class="h-3 w-3 mr-1"
+                                    />
                                     Add {{ nestedField.name }} Item
                                   </Button>
                                 </div>
@@ -1822,111 +2029,59 @@ onMounted(() => {
     <Dialog v-model:open="showViewDetailsDialog">
       <DialogContent class="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle v-if="selectedExtension">
-            {{ getExtensionNameById(selectedExtension.name) }}
-          </DialogTitle>
-          <DialogDescription v-if="selectedExtension">
-            <span class="text-sm">
-              v{{
-                getExtensionDetailById(selectedExtension.name, "version")
-              }}
-              by {{ getExtensionDetailById(selectedExtension.name, "author") }}
-            </span>
+          <DialogTitle>Extension Details</DialogTitle>
+          <DialogDescription>
+            Detailed information about this extension
           </DialogDescription>
         </DialogHeader>
 
-        <div class="py-4" v-if="selectedExtension">
-          <div class="space-y-4">
-            <!-- Extension Description -->
-            <div class="mb-4">
-              <p>
-                {{
-                  getExtensionDetailById(selectedExtension.name, "description")
-                }}
-              </p>
-            </div>
-
-            <!-- Configuration Schema -->
-            <div
-              v-if="extensionTypes[selectedExtension.name] && hasConfigSchema(selectedExtension.name)"
-              class="border rounded-md p-4"
-            >
-              <h3 class="text-lg font-medium mb-3">Configuration Options</h3>
-
-              <div class="space-y-4">
-                <div
-                  v-for="(field, fieldName) in extensionTypes[
-                    selectedExtension.name
-                  ]"
-                  :key="fieldName"
-                  class="pb-3 border-b border-gray-100 last:border-0"
-                >
-                  <div class="flex items-start justify-between">
-                    <div>
-                      <h4 class="text-sm font-medium">{{ fieldName }}</h4>
-                      <p class="text-sm text-muted-foreground">
-                        {{ field.description }}
-                      </p>
-
-                      <div class="mt-1 text-xs flex flex-wrap gap-2">
-                        <Badge variant="outline">{{ field.type }}</Badge>
-                        <Badge v-if="field.required" variant="default"
-                          >Required</Badge
-                        >
-                        <Badge v-else variant="outline">Optional</Badge>
-                      </div>
-                    </div>
-
-                    <div v-if="field.default !== undefined" class="text-sm">
-                      <span class="text-xs text-muted-foreground"
-                        >Default:</span
-                      >
-                      <code class="bg-muted px-1 rounded text-xs">{{
-                        JSON.stringify(field.default)
-                      }}</code>
-                    </div>
-                  </div>
-
-                  <!-- Current Value -->
-                  <div
-                    v-if="
-                      selectedExtension.config &&
-                      fieldName in selectedExtension.config
-                    "
-                    class="mt-2"
-                  >
-                    <span class="text-xs text-muted-foreground"
-                      >Current Value:</span
-                    >
-                    <code class="bg-muted px-1 rounded text-xs">{{
-                      JSON.stringify(selectedExtension.config[fieldName])
-                    }}</code>
-                  </div>
-                </div>
-              </div>
-            </div>
+        <div v-if="selectedExtension" class="space-y-4">
+          <div>
+            <h3 class="text-lg font-semibold">
+              {{ getExtensionNameById(selectedExtension.name) }}
+            </h3>
+            <p class="text-sm text-muted-foreground">
+              Version:
+              {{ getExtensionDetailById(selectedExtension.name, "version") }} |
+              Author:
+              {{ getExtensionDetailById(selectedExtension.name, "author") }}
+            </p>
+            <p class="mt-2">
+              {{
+                getExtensionDetailById(selectedExtension.name, "description")
+              }}
+            </p>
           </div>
 
-          <DialogFooter class="mt-6">
-            <Button
-              type="button"
-              variant="outline"
-              @click="showViewDetailsDialog = false"
+          <div>
+            <h4 class="text-sm font-semibold mb-1">Status</h4>
+            <Badge
+              :variant="selectedExtension.enabled ? 'default' : 'outline'"
+              class="text-xs"
             >
-              Close
-            </Button>
-            <Button
-              v-if="hasConfigSchema(selectedExtension.name)"
-              type="button"
-              @click="
-                openEditDialog(selectedExtension);
-                showViewDetailsDialog = false;
-              "
+              {{ selectedExtension.enabled ? "Enabled" : "Disabled" }}
+            </Badge>
+          </div>
+
+          <div v-if="selectedExtension.notes">
+            <h4 class="text-sm font-semibold mb-1">Notes</h4>
+            <p class="text-sm">{{ selectedExtension.notes }}</p>
+          </div>
+
+          <div>
+            <h4 class="text-sm font-semibold mb-1">Configuration</h4>
+            <pre
+              class="bg-muted p-4 rounded-md text-xs overflow-auto max-h-60"
+              >{{ formatConfig(selectedExtension.config) }}</pre
             >
-              Edit Configuration
-            </Button>
-          </DialogFooter>
+          </div>
         </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showViewDetailsDialog = false">
+            Close
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   </div>
