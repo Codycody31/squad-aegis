@@ -879,7 +879,6 @@ onMounted(() => {
                       Details
                     </Button>
                     <Button
-                      v-if="hasConfigSchema(extension.name)"
                       variant="outline"
                       size="sm"
                       @click="openEditDialog(extension)"
@@ -1110,8 +1109,16 @@ onMounted(() => {
                 "
                 class="mt-6"
               >
-                <h3 class="font-medium mb-4">Configuration</h3>
-                <div class="space-y-4 border p-4 rounded-md">
+                <h3
+                  class="font-medium mb-4"
+                  v-if="hasConfigSchema(addFormValues.name)"
+                >
+                  Configuration
+                </h3>
+                <div
+                  v-if="hasConfigSchema(addFormValues.name)"
+                  class="space-y-4 border p-4 rounded-md"
+                >
                   <FormField
                     v-for="(field, fieldName) in extensionTypes[
                       addFormValues.name
@@ -1608,8 +1615,16 @@ onMounted(() => {
                 "
                 class="mt-6"
               >
-                <h3 class="font-medium mb-4">Configuration</h3>
-                <div class="space-y-4 border p-4 rounded-md">
+                <h3
+                  class="font-medium mb-4"
+                  v-if="hasConfigSchema(editFormValues.name)"
+                >
+                  Configuration
+                </h3>
+                <div
+                  v-if="hasConfigSchema(editFormValues.name)"
+                  class="space-y-4 border p-4 rounded-md"
+                >
                   <FormField
                     v-for="(field, fieldName) in extensionTypes[
                       selectedExtension.name
