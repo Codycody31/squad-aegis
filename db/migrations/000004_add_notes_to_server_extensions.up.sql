@@ -1,0 +1,1 @@
+ALTER TABLE public.server_extensions ADD COLUMN IF NOT EXISTS notes TEXT;
