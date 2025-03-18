@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/v1.2.0) - 2025-03-17
+## [1.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/v1.2.0) - 2025-03-18
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -11,6 +11,12 @@
 - feat(admin-chat): add admin chat functionality and endpoints [[#21](https://github.com/Codycody31/squad-aegis/pull/21)]
 - Server Connectors & Extensions [[#14](https://github.com/Codycody31/squad-aegis/pull/14)]
 
+### 📈 Enhancement
+
+- enhancement: add notes for extensions database records [[#22](https://github.com/Codycody31/squad-aegis/pull/22)]
+- enhancement(connector): global connector deletion process [[#18](https://github.com/Codycody31/squad-aegis/pull/18)]
+- RCON Manager [[#12](https://github.com/Codycody31/squad-aegis/pull/12)]
+
 ### 📚 Documentation
 
 - docs: update README with features and extensibility details [[#20](https://github.com/Codycody31/squad-aegis/pull/20)]
@@ -19,11 +25,6 @@
 
 - fix(docker): add ca-certificates to final image dependencies [[#19](https://github.com/Codycody31/squad-aegis/pull/19)]
 - Fix broken connector add logic [[#16](https://github.com/Codycody31/squad-aegis/pull/16)]
-
-### 📈 Enhancement
-
-- enhancement(connector): global connector deletion process [[#18](https://github.com/Codycody31/squad-aegis/pull/18)]
-- RCON Manager [[#12](https://github.com/Codycody31/squad-aegis/pull/12)]
 
 ### 📦️ Dependency
 
