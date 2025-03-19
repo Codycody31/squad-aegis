@@ -94,54 +94,53 @@ func (m *ExtensionManager) startEventListener() {
 // createDependencies creates a Dependencies instance for an extension
 func (m *ExtensionManager) createDependencies(def ExtensionDefinition, server *models.Server) (*Dependencies, error) {
 	deps := &Dependencies{
-		Connectors: make(map[string]connector_manager.Connector),
+		Database:    m.db,
+		Server:      server,
+		RconManager: m.rconManager,
+		Connectors:  make(map[string]connector_manager.Connector),
 	}
 
 	// Check required dependencies
 	for _, depType := range def.Dependencies.Required {
 		switch depType {
 		case DependencyDatabase:
-			if m.db == nil {
+			if deps.Database == nil {
 				return nil, fmt.Errorf("required dependency not available: database")
 			}
-
-			deps.Database = m.db
 		case DependencyServer:
-			if server == nil {
+			if deps.Server == nil {
 				return nil, fmt.Errorf("required dependency not available: server")
 			}
-
-			deps.Server = server
 		case DependencyRconManager:
-			if m.rconManager == nil {
+			if deps.RconManager == nil {
 				return nil, fmt.Errorf("required dependency not available: rcon_manager")
 			}
-
-			deps.RconManager = m.rconManager
 		case DependencyConnectors:
 			// Get server connectors (including global connectors)
 			serverConnectors := m.connectorManager.GetConnectorsByServer(server.Id)
 
-			// Add connectors to dependencies
+			// Add required connectors
 			for _, requiredConnector := range def.RequiredConnectors {
+				found := false
 				for _, connector := range serverConnectors {
-					if connector.GetType() == requiredConnector {
-						deps.Connectors[connector.GetType()] = connector
+					connDef := connector.GetDefinition()
+					if connDef.ID == requiredConnector {
+						deps.Connectors[connDef.ID] = connector
+						found = true
 						break
 					}
 				}
-
-				// Check if required connector is available
-				if _, exists := deps.Connectors[requiredConnector]; !exists {
+				if !found {
 					return nil, fmt.Errorf("required connector not found: %s", requiredConnector)
 				}
 			}
 
-			// Add optional connectors
+			// Add optional connectors if available
 			for _, optionalConnector := range def.OptionalConnectors {
 				for _, connector := range serverConnectors {
-					if connector.GetType() == optionalConnector {
-						deps.Connectors[connector.GetType()] = connector
+					connDef := connector.GetDefinition()
+					if connDef.ID == optionalConnector {
+						deps.Connectors[connDef.ID] = connector
 						break
 					}
 				}

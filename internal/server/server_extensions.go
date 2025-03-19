@@ -1061,34 +1061,35 @@ func (s *Server) createExtensionDependencies(def extension_manager.ExtensionDefi
 			if deps.RconManager == nil {
 				return nil, fmt.Errorf("required dependency not available: rcon_manager")
 			}
-		case extension_manager.DependencyConnectors:
-			// Get server connectors
-			serverConnectors := s.Dependencies.ConnectorManager.GetConnectorsByServer(server.Id)
+		}
+	}
 
-			// Add connectors to dependencies
-			for _, requiredConnector := range def.RequiredConnectors {
-				found := false
-				for _, connector := range serverConnectors {
-					if connector.GetType() == requiredConnector {
-						deps.Connectors[connector.GetType()] = connector
-						found = true
-						break
-					}
-				}
+	// Get all connectors for this server
+	connectors := s.Dependencies.ConnectorManager.GetConnectorsByServer(server.Id)
 
-				if !found {
-					return nil, fmt.Errorf("required connector not available: %s", requiredConnector)
-				}
+	// Add required connectors
+	for _, requiredConnector := range def.RequiredConnectors {
+		found := false
+		for _, connector := range connectors {
+			connDef := connector.GetDefinition()
+			if connDef.ID == requiredConnector {
+				deps.Connectors[connDef.ID] = connector
+				found = true
+				break
 			}
+		}
+		if !found {
+			return nil, fmt.Errorf("required connector not found: %s", requiredConnector)
+		}
+	}
 
-			// Add optional connectors
-			for _, optionalConnector := range def.OptionalConnectors {
-				for _, connector := range serverConnectors {
-					if connector.GetType() == optionalConnector {
-						deps.Connectors[connector.GetType()] = connector
-						break
-					}
-				}
+	// Add optional connectors if available
+	for _, optionalConnector := range def.OptionalConnectors {
+		for _, connector := range connectors {
+			connDef := connector.GetDefinition()
+			if connDef.ID == optionalConnector {
+				deps.Connectors[connDef.ID] = connector
+				break
 			}
 		}
 	}

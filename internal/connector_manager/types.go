@@ -7,12 +7,6 @@ import (
 
 // Connector represents a loaded connector instance
 type Connector interface {
-	// GetID returns the unique identifier for this connector instance
-	GetID() uuid.UUID
-	// GetType returns the type of connector
-	GetType() string
-	// GetConfig returns the configuration for this connector
-	GetConfig() map[string]interface{}
 	// Initialize initializes the connector with its configuration
 	Initialize(config map[string]interface{}) error
 	// Shutdown gracefully shuts down the connector
@@ -43,8 +37,34 @@ type ConnectorDefinition struct {
 	// Configuration schema for this connector
 	ConfigSchema plug_config_schema.ConfigSchema
 
+	// Event handlers this connector provides
+	EventHandlers []EventHandler
+
 	// Factory method to create new instances
-	CreateInstance func(id uuid.UUID, config map[string]interface{}) (Connector, error)
+	CreateInstance func() Connector
+}
+
+// EventHandlerSource defines the source of an event
+type EventHandlerSource string
+
+const (
+	EventHandlerSourceRCON EventHandlerSource = "RCON"
+	EventHandlerSourceLOGS EventHandlerSource = "LOGS"
+)
+
+// EventHandler defines a specific event that can be handled by the connector
+type EventHandler struct {
+	// Source of the event (e.g., "RCON", "LOGS", etc.)
+	Source EventHandlerSource
+
+	// Name of the event (e.g., "CHAT", "PLAYER_CONNECTED", etc.)
+	Name string
+
+	// Description of what this handler does
+	Description string
+
+	// The actual handler function that processes the event data
+	Handler func(c Connector, data interface{}) error
 }
 
 // ConnectorBase provides a base implementation for connectors
@@ -78,18 +98,7 @@ func (b *ConnectorBase) GetDefinition() ConnectorDefinition {
 	return b.Definition
 }
 
-func (b *ConnectorBase) GetID() uuid.UUID {
-	return b.ID
-}
-
-func (b *ConnectorBase) GetType() string {
-	return b.Definition.ID
-}
-
-func (b *ConnectorBase) GetConfig() map[string]interface{} {
-	return b.Config
-}
-
+// ConnectorRegistrar is the interface that connector packages must implement
 type ConnectorRegistrar interface {
 	// Define returns the connector definition
 	Define() ConnectorDefinition
