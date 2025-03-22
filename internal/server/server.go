@@ -175,6 +175,13 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Server info endpoints
 				serverGroup.GET("/rcon/server-info", server.ServerRconServerInfo)
 
+				// Server-specific connector management endpoints
+				serverGroup.GET("/connectors", server.AuthHasServerPermission("manageserver"), server.ServerConnectorsList)
+				serverGroup.POST("/connectors", server.AuthHasServerPermission("manageserver"), server.CreateServerConnector)
+				serverGroup.GET("/connectors/:connectorId", server.AuthHasServerPermission("manageserver"), server.GetServerConnector)
+				serverGroup.PUT("/connectors/:connectorId", server.AuthHasServerPermission("manageserver"), server.UpdateServerConnector)
+				serverGroup.DELETE("/connectors/:connectorId", server.AuthHasServerPermission("manageserver"), server.DeleteServerConnector)
+
 				// Server-specific extension management endpoints
 				serverGroup.GET("/extensions", server.AuthHasServerPermission("manageserver"), server.ServerExtensionsList)
 				serverGroup.POST("/extensions", server.AuthHasServerPermission("manageserver"), server.ServerExtensionCreate)

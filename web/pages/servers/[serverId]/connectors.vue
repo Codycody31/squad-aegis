@@ -55,6 +55,8 @@ import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
 
+const route = useRoute();
+const serverId = route.params.serverId as string;
 const loading = ref({
   connectors: true,
   types: true,
@@ -197,7 +199,7 @@ async function fetchConnectorDefinitions() {
         {
           method: "GET",
           query: {
-            scope: "global",
+            scope: "server",
           },
           headers: {
             Authorization: `Bearer ${token}`,
@@ -256,7 +258,7 @@ async function fetchConnectors() {
   try {
     const { data, error: fetchError } = await useFetch<{
       connectors: Connector[];
-    }>(`${runtimeConfig.public.backendApi}/connectors/global`, {
+    }>(`${runtimeConfig.public.backendApi}/servers/${serverId}/connectors`, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -304,7 +306,7 @@ async function addConnector(values: any) {
 
   try {
     const { data, error: fetchError } = await useFetch(
-      `${runtimeConfig.public.backendApi}/connectors/global`,
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/connectors`,
       {
         method: "POST",
         body: {
@@ -363,7 +365,7 @@ async function deleteConnector(connectorId: string) {
 
   try {
     const { data, error: fetchError } = await useFetch(
-      `${runtimeConfig.public.backendApi}/connectors/global/${connectorId}`,
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/connectors/${connectorId}`,
       {
         method: "DELETE",
         headers: {
@@ -514,7 +516,7 @@ onMounted(() => {
 <template>
   <div class="p-4">
     <div class="flex justify-between items-center mb-4">
-      <h1 class="text-2xl font-bold">Global Connectors</h1>
+      <h1 class="text-2xl font-bold">Connectors</h1>
       <Button @click="showAddConnectorDialog = true" :disabled="loading.types">
         Add Connector
       </Button>
@@ -609,10 +611,6 @@ onMounted(() => {
         <p class="text-sm text-muted-foreground">
           Connectors provide integration with external services such as Discord,
           allowing your server to interact with these platforms.
-        </p>
-        <p class="text-sm text-muted-foreground mt-2">
-          <strong>Global Connectors</strong> - These connectors are available to
-          all servers in your system. They're ideal for shared integrations.
         </p>
         <p class="text-sm text-muted-foreground mt-2">
           <strong>Configuration</strong> - Each connector requires specific

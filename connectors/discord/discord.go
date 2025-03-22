@@ -76,6 +76,7 @@ func Define() connector_manager.ConnectorDefinition {
 		Description: "Discord bot connector for Squad Aegis",
 		Version:     "1.0.0",
 		Author:      "Squad Aegis Team",
+		Scope:       connector_manager.ConnectorScopeGlobal,
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
 				{

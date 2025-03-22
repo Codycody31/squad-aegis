@@ -51,8 +51,9 @@ type ExtensionDefinition struct {
 type EventHandlerSource string
 
 const (
-	EventHandlerSourceRCON EventHandlerSource = "RCON"
-	EventHandlerSourceLOGS EventHandlerSource = "LOGS"
+	EventHandlerSourceRCON      EventHandlerSource = "RCON"
+	EventHandlerSourceLOGS      EventHandlerSource = "LOGS"
+	EventHandlerSourceCONNECTOR EventHandlerSource = "CONNECTOR"
 )
 
 // EventHandler defines a specific event that can be handled by the extension
