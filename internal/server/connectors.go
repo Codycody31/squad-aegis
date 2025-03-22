@@ -955,8 +955,13 @@ func (s *Server) CreateServerConnector(c *gin.Context) {
 		return
 	}
 
-	// Generate new UUID for the connector
-	id := uuid.New()
+	serverConnectors := s.Dependencies.ConnectorManager.GetConnectorsByServer(server.Id)
+	for _, connector := range serverConnectors {
+		if connector.GetDefinition().ID == req.Name {
+			responses.BadRequest(c, "Connector already exists for this server", nil)
+			return
+		}
+	}
 
 	// Convert config to JSON
 	configJSON, err := json.Marshal(req.Config)
@@ -966,11 +971,18 @@ func (s *Server) CreateServerConnector(c *gin.Context) {
 		return
 	}
 
+	serverConnectorId, err := s.Dependencies.ConnectorManager.CreateServerConnector(server.Id, req.Name, req.Config)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create server connector")
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to create connector"})
+		return
+	}
+
 	// Insert into database
 	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
 		INSERT INTO server_connectors (id, server_id, name, config)
 		VALUES ($1, $2, $3, $4)
-	`, id, server.Id, req.Name, configJSON)
+	`, serverConnectorId, server.Id, req.Name, configJSON)
 
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to insert server connector")
@@ -978,33 +990,9 @@ func (s *Server) CreateServerConnector(c *gin.Context) {
 		return
 	}
 
-	_, err = s.Dependencies.ConnectorManager.CreateServerConnector(id, req.Name, req.Config)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to create server connector")
-		responses.InternalServerError(c, err, &gin.H{"error": "Failed to create connector"})
-		return
-	}
-
-	// // Create and initialize connector instance
-	// instance := def.CreateInstance()
-	// if err := instance.Initialize(req.Config); err != nil {
-	// 	log.Error().Err(err).Str("id", id.String()).Msg("Failed to initialize server connector")
-
-	// 	// Cleanup database entry on initialization failure
-	// 	_, cleanupErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
-	// 		DELETE FROM server_connectors WHERE id = $1
-	// 	`, id)
-	// 	if cleanupErr != nil {
-	// 		log.Error().Err(cleanupErr).Str("id", id.String()).Msg("Failed to cleanup failed server connector")
-	// 	}
-
-	// 	responses.InternalServerError(c, err, &gin.H{"error": "Failed to initialize connector: " + err.Error()})
-	// 	return
-	// }
-
 	// Build response
 	resp := ConnectorResponse{
-		ID:          id.String(),
+		ID:          serverConnectorId.String(),
 		ServerID:    &serverIDStr,
 		Name:        req.Name,
 		Description: def.Description,
@@ -1016,7 +1004,7 @@ func (s *Server) CreateServerConnector(c *gin.Context) {
 
 	// Create audit log entry
 	auditData := map[string]interface{}{
-		"connectorId":   id.String(),
+		"connectorId":   serverConnectorId.String(),
 		"connectorType": req.Name,
 		"serverId":      server.Id.String(),
 	}
