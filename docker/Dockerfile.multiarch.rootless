@@ -7,9 +7,10 @@ RUN groupadd -g 1000 squad-aegis && \
 
 WORKDIR /app
 COPY . .
+RUN apt-get update && apt-get install -y zip && rm -rf /var/lib/apt/lists/*
 RUN go mod tidy && \
     go mod vendor && \
-    make release
+    make release-server
 
 ARG TARGETOS TARGETARCH
 ENV GODEBUG=netdns=go
