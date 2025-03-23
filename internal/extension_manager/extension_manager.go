@@ -191,7 +191,7 @@ func (m *ExtensionManager) createDependencies(def ExtensionDefinition, server *m
 			}
 		case DependencyConnectors:
 			// Get server connectors (including global connectors)
-			serverConnectors := m.connectorManager.GetConnectorsByServer(server.Id)
+			serverConnectors := m.connectorManager.GetConnectorsByServerWithGlobal(server.Id)
 
 			// Add required connectors
 			for _, requiredConnector := range def.RequiredConnectors {

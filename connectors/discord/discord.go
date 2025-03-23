@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
 	plug_config_schema "go.codycody31.dev/squad-aegis/shared/plug_config_schema"
 )
@@ -46,7 +45,6 @@ func (d *DiscordConnector) Initialize(config map[string]interface{}) error {
 		return fmt.Errorf("failed to start Discord session: %v", err)
 	}
 
-	log.Info().Msg("Discord bot is running")
 	return nil
 }
 
