@@ -18,6 +18,7 @@ steps:
     image: *node_image
     commands:
       - cd web
+      - corepack prepare pnpm@9.12.3 --activate
       - corepack enable
       - pnpm install --frozen-lockfile
       - pnpm run build
