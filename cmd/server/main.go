@@ -16,7 +16,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/connectors/discord"
-	"go.codycody31.dev/squad-aegis/connectors/heartbeat"
+	"go.codycody31.dev/squad-aegis/connectors/logwatcher"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
 	"go.codycody31.dev/squad-aegis/extensions/chat_commands"
@@ -135,7 +135,7 @@ func run(ctx context.Context) error {
 	// Initialize connector manager
 	connectorManager := connector_manager.NewConnectorManager(ctx)
 	connectorManager.RegisterConnector("discord", discord.Registrar)
-	connectorManager.RegisterConnector("heartbeat", heartbeat.Registrar)
+	connectorManager.RegisterConnector("logwatcher", logwatcher.Registrar)
 	if err := connectorManager.InitializeConnectors(ctx, database); err != nil {
 		log.Error().Err(err).Msg("Failed to initialize connectors")
 	}
