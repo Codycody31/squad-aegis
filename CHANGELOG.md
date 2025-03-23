@@ -12,6 +12,12 @@
 - feat(admin-chat): add admin chat functionality and endpoints [[#21](https://github.com/Codycody31/squad-aegis/pull/21)]
 - Server Connectors & Extensions [[#14](https://github.com/Codycody31/squad-aegis/pull/14)]
 
+### 🐛 Bug Fixes
+
+- Fix log watcher docker image not using the correct binary [[#28](https://github.com/Codycody31/squad-aegis/pull/28)]
+- fix(docker): add ca-certificates to final image dependencies [[#19](https://github.com/Codycody31/squad-aegis/pull/19)]
+- Fix broken connector add logic [[#16](https://github.com/Codycody31/squad-aegis/pull/16)]
+
 ### 📈 Enhancement
 
 - enhancement: add notes for extensions database records [[#22](https://github.com/Codycody31/squad-aegis/pull/22)]
@@ -21,11 +27,6 @@
 ### 📚 Documentation
 
 - docs: update README with features and extensibility details [[#20](https://github.com/Codycody31/squad-aegis/pull/20)]
-
-### 🐛 Bug Fixes
-
-- fix(docker): add ca-certificates to final image dependencies [[#19](https://github.com/Codycody31/squad-aegis/pull/19)]
-- Fix broken connector add logic [[#16](https://github.com/Codycody31/squad-aegis/pull/16)]
 
 ### 📦️ Dependency
 
