@@ -2,7 +2,8 @@ package connector_manager
 
 import (
 	"github.com/google/uuid"
-	"github.com/iamalone98/eventEmitter"
+	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/eventEmitter"
 	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
 )
 
@@ -105,6 +106,10 @@ type ConnectorBase struct {
 	EventEmitter eventEmitter.EventEmitter
 }
 
+type ConnectorBaseEventCapable interface {
+	GetEventEmitter() eventEmitter.EventEmitter
+}
+
 // Initialize initializes the connector with its configuration
 func (b *ConnectorBase) Initialize(config map[string]interface{}) error {
 	b.Config = config
@@ -126,9 +131,15 @@ func (b *ConnectorBase) GetDefinition() ConnectorDefinition {
 	return b.Definition
 }
 
+// GetEventEmitter returns the event emitter for this connector
+func (b *ConnectorBase) GetEventEmitter() eventEmitter.EventEmitter {
+	return b.EventEmitter
+}
+
 // EmitEvent emits an event for the connector manager to handle
 func (b *ConnectorBase) EmitEvent(eventType string, data interface{}) {
 	if b.EventEmitter == nil {
+		log.Warn().Str("event", eventType).Str("connectorId", b.ID.String()).Msg("Attempted to emit event without event emitter")
 		return
 	}
 

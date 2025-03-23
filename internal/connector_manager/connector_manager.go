@@ -18,8 +18,8 @@ type ConnectorManager struct {
 	serverConnectors       map[uuid.UUID][]string                     // Maps server IDs to connector instance IDs
 	eventSubscribers       map[string][]EventSubscriber               // Global event subscribers
 	serverEventSubscribers map[uuid.UUID]map[string][]EventSubscriber // Server-specific event subscribers
-	globalConfig           map[string]interface{}
-	subscriberCallbacks    map[string]map[string]func(data interface{})
+	globalConfig           map[string]any
+	subscriberCallbacks    map[string]map[string]func(data any)
 	mu                     sync.RWMutex
 	ctx                    context.Context
 	cancel                 context.CancelFunc
@@ -29,7 +29,7 @@ type ConnectorManager struct {
 type connectorInstance struct {
 	connector Connector
 	id        uuid.UUID
-	config    map[string]interface{}
+	config    map[string]any
 	serverID  *uuid.UUID // nil for global connectors
 }
 
@@ -44,7 +44,7 @@ type Event struct {
 	ConnectorID string
 	ServerID    uuid.UUID
 	Type        string
-	Data        interface{}
+	Data        any
 }
 
 // NewConnectorManager creates a new connector manager
@@ -56,8 +56,8 @@ func NewConnectorManager(ctx context.Context) *ConnectorManager {
 		serverConnectors:       make(map[uuid.UUID][]string),
 		eventSubscribers:       make(map[string][]EventSubscriber),
 		serverEventSubscribers: make(map[uuid.UUID]map[string][]EventSubscriber),
-		globalConfig:           make(map[string]interface{}),
-		subscriberCallbacks:    make(map[string]map[string]func(data interface{})),
+		globalConfig:           make(map[string]any),
+		subscriberCallbacks:    make(map[string]map[string]func(data any)),
 		ctx:                    ctx,
 		cancel:                 cancel,
 	}
@@ -120,7 +120,7 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 			continue
 		}
 
-		var config map[string]interface{}
+		var config map[string]any
 		if err := json.Unmarshal(configJSON, &config); err != nil {
 			log.Error().Err(err).Str("id", id.String()).Msg("Failed to unmarshal connector config")
 			continue
@@ -177,7 +177,7 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 			continue
 		}
 
-		var config map[string]interface{}
+		var config map[string]any
 		if err := json.Unmarshal(configJSON, &config); err != nil {
 			log.Error().Err(err).Str("id", id.String()).Msg("Failed to unmarshal server connector config")
 			continue
@@ -299,7 +299,7 @@ func (m *ConnectorManager) GetConnectorsByServerWithGlobal(serverID uuid.UUID) [
 }
 
 // RestartConnector restarts a connector with new configuration
-func (m *ConnectorManager) RestartConnector(id uuid.UUID, config map[string]interface{}) error {
+func (m *ConnectorManager) RestartConnector(id uuid.UUID, config map[string]any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -386,8 +386,8 @@ func (m *ConnectorManager) SubscribeToEvents(connectorID string, callback func(e
 	}
 
 	// Get the base connector to access EventEmitter
-	base := instance.connector.(*ConnectorBase)
-	if base.EventEmitter == nil {
+	base := instance.connector.(ConnectorBaseEventCapable)
+	if base.GetEventEmitter() == nil {
 		log.Error().Str("connectorID", connectorID).Msg("Connector does not support events")
 		return ""
 	}
@@ -396,13 +396,13 @@ func (m *ConnectorManager) SubscribeToEvents(connectorID string, callback func(e
 
 	// Initialize callbacks map for this connector if needed
 	if _, ok := m.subscriberCallbacks[connectorID]; !ok {
-		m.subscriberCallbacks[connectorID] = make(map[string]func(data interface{}))
+		m.subscriberCallbacks[connectorID] = make(map[string]func(data any))
 	}
 
 	// Create and store the callback wrapper
-	wrapper := func(data interface{}) {
+	wrapper := func(data any) {
 		// For wildcard events, data will be a tuple of (eventType, eventData)
-		if tuple, ok := data.([]interface{}); ok && len(tuple) == 2 {
+		if tuple, ok := data.([]any); ok && len(tuple) == 2 {
 			eventType, ok1 := tuple[0].(string)
 			eventData := tuple[1]
 			if !ok1 {
@@ -430,7 +430,7 @@ func (m *ConnectorManager) SubscribeToEvents(connectorID string, callback func(e
 	m.subscriberCallbacks[connectorID][subscriberID] = wrapper
 
 	// Subscribe to all events using "*" as the event type
-	base.EventEmitter.On("*", wrapper)
+	base.GetEventEmitter().On("*", wrapper)
 
 	return subscriberID
 }
@@ -492,42 +492,8 @@ func (m *ConnectorManager) UnsubscribeFromServerEvents(serverID uuid.UUID, conne
 	m.UnsubscribeFromEvents(connectorID, subscriberID)
 }
 
-// PublishEvent publishes an event to all subscribers
-func (m *ConnectorManager) PublishEvent(event Event) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	// First try to parse as UUID for database ID
-	var instance connectorInstance
-	var exists bool
-
-	if id, err := uuid.Parse(event.ConnectorID); err == nil {
-		// If it's a valid UUID, look up by instance ID
-		instance, exists = m.instances[id]
-	} else {
-		// If not a UUID, it might be a connector name - log an error
-		log.Error().Str("connectorID", event.ConnectorID).Msg("Invalid connector ID format - expected UUID")
-		return
-	}
-
-	if !exists {
-		log.Error().Str("connectorID", event.ConnectorID).Msg("Attempted to publish event for non-existent connector")
-		return
-	}
-
-	// Get the base connector to access EventEmitter
-	base := instance.connector.(*ConnectorBase)
-	if base.EventEmitter == nil {
-		log.Error().Str("connectorID", event.ConnectorID).Msg("Connector does not support events")
-		return
-	}
-
-	// Emit the event through the connector's EventEmitter
-	base.EventEmitter.Emit(event.Type, event.Data)
-}
-
 // createConnector creates a new connector instance
-func (m *ConnectorManager) createConnector(def ConnectorDefinition, id uuid.UUID, config map[string]interface{}, serverID *uuid.UUID) (Connector, error) {
+func (m *ConnectorManager) createConnector(def ConnectorDefinition, id uuid.UUID, config map[string]any, serverID *uuid.UUID) (Connector, error) {
 	// Create new instance
 	connector := def.CreateInstance()
 
@@ -558,7 +524,7 @@ func (m *ConnectorManager) ListRegisteredConnectors() []ConnectorRegistrar {
 
 // CreateServerConnector creates and enables a server-specific connector with the given type and config.
 // It returns the new connector's UUID or an error if creation/initialization fails.
-func (m *ConnectorManager) CreateServerConnector(serverID uuid.UUID, connectorType string, config map[string]interface{}) (uuid.UUID, error) {
+func (m *ConnectorManager) CreateServerConnector(serverID uuid.UUID, connectorType string, config map[string]any) (uuid.UUID, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -570,9 +536,6 @@ func (m *ConnectorManager) CreateServerConnector(serverID uuid.UUID, connectorTy
 
 	// Create a new UUID for the connector
 	newID := uuid.New()
-
-	// Add server ID to the configuration
-	config["server_id"] = serverID.String()
 
 	// Get connector definition and create an instance
 	def := registrar.Define()
