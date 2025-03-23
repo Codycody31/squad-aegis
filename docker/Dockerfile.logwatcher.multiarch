@@ -1,0 +1,25 @@
+FROM --platform=$BUILDPLATFORM docker.io/golang:1.24 AS build
+
+RUN groupadd -g 1000 squad-aegis && \
+  useradd -u 1000 -g 1000 squad-aegis && \
+  mkdir -p /etc/squad-aegis
+
+WORKDIR /src
+COPY . .
+ARG TARGETOS TARGETARCH CI_COMMIT_SHA CI_COMMIT_TAG CI_COMMIT_BRANCH
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    make build-logwatcher
+
+FROM scratch
+ENV GODEBUG=netdns=go
+ENV APP_IN_CONTAINER=true
+EXPOSE 31135
+
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /src/dist/squad-aegis-logwatcher /bin/
+COPY --from=build --chown=squad-aegis:squad-aegis /etc/squad-aegis /etc
+COPY --from=build /etc/passwd /etc/passwd
+COPY --from=build /etc/group /etc/group
+
+ENTRYPOINT ["/bin/squad-aegis-logwatcher"]

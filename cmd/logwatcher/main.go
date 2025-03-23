@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,10 +12,11 @@ import (
 	"sync"
 
 	"github.com/hpcloud/tail"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"google.golang.org/grpc"
 
 	pb "go.codycody31.dev/squad-aegis/proto/logwatcher"
+	"go.codycody31.dev/squad-aegis/shared/utils"
 )
 
 // Auth token (configurable via CLI)
@@ -236,7 +238,7 @@ func (s *LogWatcherServer) broadcastEvent(event *pb.EventEntry) {
 }
 
 // StartServer runs the gRPC server
-func StartServer(c *cli.Context) error {
+func StartServer(ctx context.Context, c *cli.Command) error {
 	logFile := c.String("log-file")
 	port := c.String("port")
 	authToken = c.String("auth-token")
@@ -256,22 +258,29 @@ func StartServer(c *cli.Context) error {
 }
 
 func main() {
-	app := &cli.App{
+	ctx := utils.WithContextSigtermCallback(context.Background(), func() {
+		log.Println("[INFO] Received SIGTERM, shutting down")
+	})
+
+	app := &cli.Command{
 		Name:  "logwatcher",
 		Usage: "Watches a file and streams changes via gRPC",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_LOG_FILE"),
 				Name:     "log-file",
 				Usage:    "Path to the log file to watch",
 				Required: true,
 			},
 			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_PORT"),
 				Name:     "port",
 				Usage:    "Port to run the gRPC server on",
 				Value:    "31135",
 				Required: false,
 			},
 			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_AUTH_TOKEN"),
 				Name:     "auth-token",
 				Usage:    "Simple auth token for authentication",
 				Required: true,
@@ -280,7 +289,7 @@ func main() {
 		Action: StartServer,
 	}
 
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(ctx, os.Args); err != nil {
 		log.Fatal(err)
 	}
 }
