@@ -80,7 +80,6 @@ func (es *EventStreamer) streamEvents(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Warn().Msg("Event streaming stopped")
 			return
 		default:
 			stream, err := es.client.StreamEvents(ctx, &logwatcher.AuthRequest{Token: es.token})
