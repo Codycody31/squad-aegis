@@ -14,6 +14,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix: event emitter not respecting global for server log watcher connector events. [[#30](https://github.com/Codycody31/squad-aegis/pull/30)]
 - fix: add missing discord admin broadcast extension [[#29](https://github.com/Codycody31/squad-aegis/pull/29)]
 - Fix log watcher docker image not using the correct binary [[#28](https://github.com/Codycody31/squad-aegis/pull/28)]
 - fix(docker): add ca-certificates to final image dependencies [[#19](https://github.com/Codycody31/squad-aegis/pull/19)]
