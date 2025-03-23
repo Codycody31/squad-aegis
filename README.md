@@ -31,22 +31,53 @@ Connectors are used to extend the dashboard's connectivity to external services 
 
 Extensions are used to extend the dashboard's functionality for example `DiscordAdminCamLogs`, however extensions do not affect the UI of the dashboard and are primarily used to modify the backend logic of the dashboard, for example supporting custom commands in the chat.
 
-## **Roadmap**
+## **Getting Started**
 
-- [ ] Log exporter - export squad logs via GRPC or some other protocol and allow events to be consumed by the dashboard
-- [ ] Admin chat - just on the panel, not in discord or in-game
-- [ ] Admin notes - add notes to players, bans, etc.
-- [ ] Feeds - add feeds for live server events (e.g. kills, deaths, chat, etc.)
-  - [ ] Live chat
-  - [ ] Live team kills
-  - [ ] Live connect/disconnect
-  - [ ] Live admin requests
-- [ ] Extensions - bringing some plugins from SquadJS to the dashboard or just any cool extensions
-  - [ ] RCON command scheduling - ie: AdminChangeLayer every day at 10:00 PM
-  - [ ] Automatic Kick of Unassigned Players
-  - [ ] Automatic Team Kill Warning
-  - [ ] Etc, from SquadJS
-- [ ] Player profiles - similar to battlemetrics showing play history, statistics, chat history, warnings history
+### **Prerequisites**
+
+- **Docker**: [Install Docker](https://docs.docker.com/get-docker/)
+- **Docker Compose**: [Install Docker Compose](https://docs.docker.com/compose/install/)
+
+### **Server/Squad Aegis Installation**
+
+It should be noted that you can skip steps 1 and 2 if you have already cloned the repository or if you just have the `docker-compose.yml` file, as the `docker-compose.yml` file will automatically pull the latest image from my self-hosted registry.
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/Codycody31/squad-aegis.git -o codycody31-squad-aegis
+```
+
+2. Change into the project directory:
+
+```bash
+cd codycody31-squad-aegis
+```
+
+3. Edit the `docker-compose.yml` file and update the following environment variables:
+
+- `INITIAL_ADMIN_USERNAME`: The initial admin username.
+- `INITIAL_ADMIN_PASSWORD`: The initial admin password.
+
+If you have a external PostgreSQL database, you can update the following environment variables:
+
+- `DB_HOST`: The PostgreSQL database host.
+- `DB_PORT`: The PostgreSQL database port.
+- `DB_USER`: The PostgreSQL database user.
+- `DB_PASS`: The PostgreSQL database password.
+- `DB_NAME`: The PostgreSQL database name.
+
+4. Start the project:
+
+```bash
+docker-compose up
+```
+
+5. Access the dashboard at `http://localhost:3113`.
+
+### **Log Watcher Installation**
+
+No instructions yet, a docker image should exist for `registry.vmgware.dev/insidiousfiddler/squad-aegis-logwatcher:<latest|next>`, you can use the `docker-compose.logwatcher.yml` file to run the log watcher.
 
 ## **Some important notes on the project**
 

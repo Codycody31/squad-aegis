@@ -4,7 +4,7 @@ services:
     ports:
       - 5432:5432
     volumes:
-      - squad-aegis-database:/var/lib/postgresql/data
+      - database:/var/lib/postgresql/data
     environment:
       - POSTGRES_PASSWORD=squad-aegis
       - POSTGRES_USER=squad-aegis
@@ -12,8 +12,31 @@ services:
     networks:
       - default
 
+  server:
+    image: registry.vmgware.dev/insidiousfiddler/squad-aegis:latest
+    depends_on:
+      - database
+    ports:
+      - 3113:3113
+    volumes:
+      - squad-aegis:/etc/squad-aegis
+    environment:
+      - APP_PORT=3113
+      - APP_URL=http://localhost:3113
+      - APP_WEB_UI_PROXY=http://localhost:3000/
+      - INITIAL_ADMIN_USERNAME=admin
+      - INITIAL_ADMIN_PASSWORD"admin
+      - DB_HOST=database
+      - DB_PORT=5432
+      - DB_NAME=squad-aegis
+      - DB_USER=squad-aegis
+      - DB_PASS=squad-aegis
+    networks:
+      - default
+
 volumes:
-  squad-aegis-database:
+  database:
+  squad-aegis:
 
 networks:
   default:
