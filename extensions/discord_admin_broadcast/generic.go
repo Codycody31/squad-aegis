@@ -55,7 +55,7 @@ func Define() extension_manager.ExtensionDefinition {
 
 		EventHandlers: []extension_manager.EventHandler{
 			{
-				Source:      extension_manager.EventHandlerSourceLOGS,
+				Source:      extension_manager.EventHandlerSourceCONNECTOR,
 				Name:        "ADMIN_BROADCAST",
 				Description: "Logs admin broadcasts to Discord.",
 				Handler: func(e extension_manager.Extension, data interface{}) error {

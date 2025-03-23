@@ -52,7 +52,6 @@ type EventHandlerSource string
 
 const (
 	EventHandlerSourceRCON      EventHandlerSource = "RCON"
-	EventHandlerSourceLOGS      EventHandlerSource = "LOGS"
 	EventHandlerSourceCONNECTOR EventHandlerSource = "CONNECTOR"
 )
 
