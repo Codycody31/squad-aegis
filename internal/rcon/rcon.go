@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/iamalone98/eventEmitter"
+	"go.codycody31.dev/squad-aegis/internal/eventEmitter"
 
 	"go.codycody31.dev/squad-aegis/internal/rcon/internal/utils"
 	p "go.codycody31.dev/squad-aegis/internal/rcon/parser"

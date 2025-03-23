@@ -286,12 +286,20 @@ func (m *ExtensionManager) Initialize(ctx context.Context) error {
 			for _, connector := range serverConnectors {
 				def := connector.GetDefinition()
 				if def.Flags.ImplementsEvents {
+					// Find the db id of the server connector
+					var dbID string
+					err := m.db.QueryRowContext(ctx, `SELECT id FROM server_connectors WHERE server_id = $1 AND name = $2`, serverID, def.ID).Scan(&dbID)
+					if err != nil {
+						log.Error().Err(err).Str("connectorID", def.ID).Str("serverID", serverID.String()).Msg("Failed to get server connector ID")
+						continue
+					}
+
 					// Subscribe to server-specific connector events
-					m.connectorManager.SubscribeToServerEvents(serverID, def.ID, func(event connector_manager.Event) error {
+					m.connectorManager.SubscribeToServerEvents(serverID, dbID, func(event connector_manager.Event) error {
 						return m.HandleConnectorEvent(event)
 					})
 					log.Info().
-						Str("connectorID", def.ID).
+						Str("connectorID", dbID).
 						Str("serverID", serverID.String()).
 						Msg("Subscribed to server connector events")
 				}
