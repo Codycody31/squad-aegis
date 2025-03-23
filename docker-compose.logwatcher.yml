@@ -1,0 +1,17 @@
+services:
+  logwatcher:
+    image: registry.vmgware.dev/insidiousfiddler/squad-aegis-logwatcher:latest
+    ports:
+      - 31135:31135
+    volumes:
+      - <path to log files>:/etc/squad-aegis/logwatcher/squad-game-logs
+    environment:
+      - LOGWATCHER_PORT=31135
+      - LOGWATCHER_AUTH_TOKEN=<auth token>
+      - LOGWATCHER_LOG_FILE=/etc/squad-aegis/logwatcher/squad-game-logs/SquadGame.log
+    networks:
+      - default
+
+networks:
+  default:
+    driver: bridge

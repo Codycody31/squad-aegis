@@ -142,6 +142,7 @@ steps:
     when:
       - evaluate: 'not (CI_COMMIT_PULL_REQUEST_LABELS contains "build_pr_images")'
         event: pull_request
+        path: *when_path
 
   publish-logwatcher-next:
     image: *buildx_plugin
