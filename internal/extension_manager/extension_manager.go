@@ -62,8 +62,82 @@ func NewExtensionManager(ctx context.Context, db *sql.DB, connectorManager *conn
 	}
 }
 
+// HandleConnectorEvent handles events from connectors
+func (m *ExtensionManager) HandleConnectorEvent(event connector_manager.Event) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Get extensions for this server
+	extensionIDs, ok := m.serverExtensions[event.ServerID]
+	if !ok {
+		// No extensions for this server
+		return nil
+	}
+
+	// Get the connector instance to determine its scope
+	connector, exists := m.connectorManager.GetConnectorByID(uuid.MustParse(event.ConnectorID))
+	if !exists {
+		log.Error().Str("connectorID", event.ConnectorID).Msg("Connector not found")
+		return nil
+	}
+
+	def := connector.GetDefinition()
+
+	// Dispatch event to all extensions for this server
+	for _, extensionID := range extensionIDs {
+		extension, ok := m.instances[extensionID]
+		if !ok {
+			continue
+		}
+
+		// Get extension definition
+		extDef := extension.GetDefinition()
+
+		// Check if extension requires this connector
+		requiresConnector := false
+		for _, reqConnector := range extDef.RequiredConnectors {
+			if reqConnector == def.ID {
+				requiresConnector = true
+				break
+			}
+		}
+
+		// Also check optional connectors
+		if !requiresConnector {
+			for _, optConnector := range extDef.OptionalConnectors {
+				if optConnector == def.ID {
+					requiresConnector = true
+					break
+				}
+			}
+		}
+
+		if !requiresConnector {
+			continue
+		}
+
+		// Check if extension has handlers for this event source
+		for _, handler := range extDef.EventHandlers {
+			if handler.Source == EventHandlerSourceCONNECTOR && handler.Name == event.Type {
+				// Handle event in a goroutine to prevent blocking
+				go func(h EventHandler) {
+					if err := h.Handler(extension, event.Data); err != nil {
+						log.Error().
+							Err(err).
+							Str("extensionID", extensionID).
+							Str("connectorID", event.ConnectorID).
+							Str("eventType", event.Type).
+							Msg("Error handling connector event")
+					}
+				}(handler)
+			}
+		}
+	}
+
+	return nil
+}
+
 // startEventListener subscribes to RCON events and dispatches them to extensions
-// TODO: Seperate rcon event listener and the log event listener
 func (m *ExtensionManager) startEventListener() {
 	if m.rconManager == nil {
 		log.Warn().Msg("RCON manager not available, cannot listen for events")
@@ -94,54 +168,53 @@ func (m *ExtensionManager) startEventListener() {
 // createDependencies creates a Dependencies instance for an extension
 func (m *ExtensionManager) createDependencies(def ExtensionDefinition, server *models.Server) (*Dependencies, error) {
 	deps := &Dependencies{
-		Connectors: make(map[string]connector_manager.Connector),
+		Database:    m.db,
+		Server:      server,
+		RconManager: m.rconManager,
+		Connectors:  make(map[string]connector_manager.Connector),
 	}
 
 	// Check required dependencies
 	for _, depType := range def.Dependencies.Required {
 		switch depType {
 		case DependencyDatabase:
-			if m.db == nil {
+			if deps.Database == nil {
 				return nil, fmt.Errorf("required dependency not available: database")
 			}
-
-			deps.Database = m.db
 		case DependencyServer:
-			if server == nil {
+			if deps.Server == nil {
 				return nil, fmt.Errorf("required dependency not available: server")
 			}
-
-			deps.Server = server
 		case DependencyRconManager:
-			if m.rconManager == nil {
+			if deps.RconManager == nil {
 				return nil, fmt.Errorf("required dependency not available: rcon_manager")
 			}
-
-			deps.RconManager = m.rconManager
 		case DependencyConnectors:
 			// Get server connectors (including global connectors)
-			serverConnectors := m.connectorManager.GetConnectorsByServer(server.Id)
+			serverConnectors := m.connectorManager.GetConnectorsByServerWithGlobal(server.Id)
 
-			// Add connectors to dependencies
+			// Add required connectors
 			for _, requiredConnector := range def.RequiredConnectors {
+				found := false
 				for _, connector := range serverConnectors {
-					if connector.GetType() == requiredConnector {
-						deps.Connectors[connector.GetType()] = connector
+					connDef := connector.GetDefinition()
+					if connDef.ID == requiredConnector {
+						deps.Connectors[connDef.ID] = connector
+						found = true
 						break
 					}
 				}
-
-				// Check if required connector is available
-				if _, exists := deps.Connectors[requiredConnector]; !exists {
+				if !found {
 					return nil, fmt.Errorf("required connector not found: %s", requiredConnector)
 				}
 			}
 
-			// Add optional connectors
+			// Add optional connectors if available
 			for _, optionalConnector := range def.OptionalConnectors {
 				for _, connector := range serverConnectors {
-					if connector.GetType() == optionalConnector {
-						deps.Connectors[connector.GetType()] = connector
+					connDef := connector.GetDefinition()
+					if connDef.ID == optionalConnector {
+						deps.Connectors[connDef.ID] = connector
 						break
 					}
 				}
@@ -183,10 +256,65 @@ func (m *ExtensionManager) GetExtension(name string) (ExtensionRegistrar, bool) 
 	return registrar, ok
 }
 
-// InitializeExtensions initializes all extensions from the database
-func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
+// Initialize initializes all extensions from the database
+func (m *ExtensionManager) Initialize(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Subscribe to connector events if connector manager is available
+	if m.connectorManager != nil {
+		// Get all servers from the database
+		rows, err := m.db.QueryContext(ctx, `
+			SELECT id
+			FROM servers
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to query servers: %w", err)
+		}
+		defer rows.Close()
+
+		// For each server, get its connectors and subscribe to their events
+		for rows.Next() {
+			var serverID uuid.UUID
+			if err := rows.Scan(&serverID); err != nil {
+				log.Error().Err(err).Msg("Failed to scan server row")
+				continue
+			}
+
+			// Get server connectors
+			serverConnectors := m.connectorManager.GetConnectorsByServer(serverID)
+			for _, connector := range serverConnectors {
+				def := connector.GetDefinition()
+				if def.Flags.ImplementsEvents {
+					// Subscribe to server-specific connector events
+					m.connectorManager.SubscribeToServerEvents(serverID, def.ID, func(event connector_manager.Event) error {
+						return m.HandleConnectorEvent(event)
+					})
+					log.Info().
+						Str("connectorID", def.ID).
+						Str("serverID", serverID.String()).
+						Msg("Subscribed to server connector events")
+				}
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			log.Error().Err(err).Msg("Error iterating server rows")
+		}
+
+		// Subscribe to global connector events
+		for _, registrar := range m.connectorManager.ListRegisteredConnectors() {
+			def := registrar.Define()
+			if def.Flags.ImplementsEvents && def.Scope == connector_manager.ConnectorScopeGlobal {
+				m.connectorManager.SubscribeToEvents(def.ID, func(event connector_manager.Event) error {
+					return m.HandleConnectorEvent(event)
+				})
+				log.Info().
+					Str("connectorID", def.ID).
+					Msg("Subscribed to global connector events")
+			}
+		}
+	}
 
 	// Query for server extensions
 	rows, err := m.db.QueryContext(ctx, `
@@ -198,124 +326,75 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 	}
 	defer rows.Close()
 
-	// Track which extensions are used by each server
-	serverExtensionTypes := make(map[uuid.UUID]map[string]bool)
-
-	// Initialize extensions
+	// Initialize server extensions
 	for rows.Next() {
-		var dbID string
+		var id uuid.UUID
 		var serverID uuid.UUID
 		var name string
 		var enabled bool
 		var configJSON []byte
 
-		if err := rows.Scan(&dbID, &serverID, &name, &enabled, &configJSON); err != nil {
-			log.Error().Err(err).Msg("Failed to scan server extension row")
+		if err := rows.Scan(&id, &serverID, &name, &enabled, &configJSON); err != nil {
+			log.Error().Err(err).Msg("Failed to scan extension row")
 			continue
 		}
 
-		var config map[string]interface{}
-		if err := json.Unmarshal(configJSON, &config); err != nil {
-			log.Error().Err(err).Str("name", name).Msg("Failed to unmarshal extension config")
+		// Skip disabled extensions
+		if !enabled {
 			continue
 		}
 
-		// Find registrar for this extension
+		// Get server
+		server, err := core.GetServerById(ctx, m.db, serverID, nil)
+		if err != nil {
+			log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server for extension")
+			continue
+		}
+
+		// Find registrar for this extension type
 		registrar, ok := m.registeredExtensions[name]
 		if !ok {
-			log.Error().Str("name", name).Msg("No registrar found for extension")
+			log.Error().Str("name", name).Msg("No registrar found for extension type")
 			continue
 		}
 
 		// Get extension definition
 		def := registrar.Define()
 
-		// Check if this extension type is already in use for this server and doesn't allow multiple instances
-		if !def.AllowMultipleInstances {
-			if _, exists := serverExtensionTypes[serverID]; !exists {
-				serverExtensionTypes[serverID] = make(map[string]bool)
-			}
-
-			if serverExtensionTypes[serverID][def.ID] {
-				log.Warn().
-					Str("extension", name).
-					Str("serverID", serverID.String()).
-					Msg("Extension doesn't allow multiple instances and is already in use for this server. Skipping.")
-				continue
-			}
-
-			// Mark this extension type as in use for this server
-			serverExtensionTypes[serverID][def.ID] = true
-		}
-
-		// Use the ID provided by the extension
-		extensionID := def.ID
-
-		// Get server
-		server, err := core.GetServerById(ctx, m.db, serverID, nil)
-		if err != nil {
-			log.Error().Err(err).Str("serverID", serverID.String()).Msg("Failed to get server")
+		// Parse config JSON
+		var config map[string]interface{}
+		if err := json.Unmarshal(configJSON, &config); err != nil {
+			log.Error().Err(err).Str("id", id.String()).Msg("Failed to unmarshal extension config")
 			continue
 		}
 
 		// Create dependencies
 		deps, err := m.createDependencies(def, server)
 		if err != nil {
-			log.Error().
-				Err(err).
-				Str("extension", name).
-				Str("serverID", serverID.String()).
-				Msg("Failed to create dependencies")
+			log.Error().Err(err).Str("id", id.String()).Msg("Failed to create extension dependencies")
 			continue
 		}
 
-		// Create extension instance
+		// Create and initialize extension instance
 		instance := def.CreateInstance()
-
-		// Skip disabled extensions
-		if !enabled {
-			// Store the extension instance but don't initialize it
-			m.instances[extensionID] = instance
-
-			// Add to server extensions map
-			if _, ok := m.serverExtensions[serverID]; !ok {
-				m.serverExtensions[serverID] = []string{}
-			}
-			m.serverExtensions[serverID] = append(m.serverExtensions[serverID], extensionID)
-
-			log.Info().
-				Str("id", extensionID).
-				Str("serverID", serverID.String()).
-				Str("extension", name).
-				Bool("enabled", false).
-				Msg("Registered disabled extension")
-			continue
-		}
-
-		// Initialize extension
 		if err := instance.Initialize(config, deps); err != nil {
-			log.Error().
-				Err(err).
-				Str("extension", name).
-				Str("serverID", serverID.String()).
-				Msg("Failed to initialize extension")
+			log.Error().Err(err).Str("id", id.String()).Msg("Failed to initialize extension instance")
 			continue
 		}
 
-		// Store extension instance
-		m.instances[extensionID] = instance
+		// Store instance
+		m.instances[id.String()] = instance
 
-		// Add to server extensions map
+		// Map server to extension
 		if _, ok := m.serverExtensions[serverID]; !ok {
-			m.serverExtensions[serverID] = []string{}
+			m.serverExtensions[serverID] = make([]string, 0)
 		}
-		m.serverExtensions[serverID] = append(m.serverExtensions[serverID], extensionID)
+		m.serverExtensions[serverID] = append(m.serverExtensions[serverID], id.String())
 
 		log.Info().
-			Str("id", extensionID).
+			Str("id", id.String()).
 			Str("serverID", serverID.String()).
-			Str("extension", name).
-			Bool("enabled", enabled).
+			Str("type", def.ID).
 			Msg("Initialized extension")
 	}
 
@@ -323,7 +402,7 @@ func (m *ExtensionManager) InitializeExtensions(ctx context.Context) error {
 		log.Error().Err(err).Msg("Error iterating extension rows")
 	}
 
-	// Start the event listener after initializing extensions
+	// Start event listener for RCON events
 	m.startEventListener()
 
 	return nil
