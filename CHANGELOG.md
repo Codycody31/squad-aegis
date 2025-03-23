@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/v1.2.0) - 2025-03-18
+## [1.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/v1.2.0) - 2025-03-23
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- Log Watcher Connector & Related Extensions [[#24](https://github.com/Codycody31/squad-aegis/pull/24)]
 - feat(admin-chat): add admin chat functionality and endpoints [[#21](https://github.com/Codycody31/squad-aegis/pull/21)]
 - Server Connectors & Extensions [[#14](https://github.com/Codycody31/squad-aegis/pull/14)]
 
