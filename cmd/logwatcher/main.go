@@ -416,6 +416,53 @@ var logParsers = []LogParser{
 				eventData[platformKey] = id
 			}
 
+			// Get victim and attacker team information to check for teamkill
+			var isTeamkill bool
+			var victimTeamID, attackerTeamID string
+
+			// Look up victim team ID
+			server.eventStore.mu.RLock()
+			if victimData, exists := server.eventStore.session[victimName]; exists {
+				if teamID, hasTeam := victimData["teamID"].(string); hasTeam {
+					victimTeamID = teamID
+				}
+			}
+
+			// Look up attacker EOS ID from the event data
+			var attackerEOSID string
+			if eosID, hasEOS := eventData["attackerEos"].(string); hasEOS {
+				attackerEOSID = eosID
+			}
+
+			// Look up attacker team ID if we have their EOS ID
+			if attackerEOSID != "" {
+				if attackerData, exists := server.eventStore.players[attackerEOSID]; exists {
+					if teamID, hasTeam := attackerData["teamID"].(string); hasTeam {
+						attackerTeamID = teamID
+					}
+				}
+			}
+			server.eventStore.mu.RUnlock()
+
+			// Check for teamkill: same team but different players
+			if victimTeamID != "" && attackerTeamID != "" && victimTeamID == attackerTeamID {
+				// Ensure this isn't self-damage
+				var victimEOSID string
+				server.eventStore.mu.RLock()
+				if victimData, exists := server.eventStore.session[victimName]; exists {
+					if eosID, hasEOS := victimData["eosID"].(string); hasEOS {
+						victimEOSID = eosID
+					}
+				}
+				server.eventStore.mu.RUnlock()
+
+				// If we have both EOSIDs and they're different, but teams are the same, it's a teamkill
+				if victimEOSID != "" && attackerEOSID != "" && victimEOSID != attackerEOSID {
+					isTeamkill = true
+					eventData["teamkill"] = true
+				}
+			}
+
 			// Update session data
 			server.eventStore.mu.Lock()
 			server.eventStore.session[victimName] = eventData
@@ -432,6 +479,15 @@ var logParsers = []LogParser{
 				Data:  string(jsonBytes),
 			}
 			server.broadcastEvent(data)
+
+			// If it's a teamkill, emit a separate TEAMKILL event
+			if isTeamkill {
+				teamkillData := &pb.EventEntry{
+					Event: "TEAMKILL",
+					Data:  string(jsonBytes),
+				}
+				server.broadcastEvent(teamkillData)
+			}
 		},
 	},
 	{
@@ -713,6 +769,53 @@ var logParsers = []LogParser{
 				eventData[platformKey] = id
 			}
 
+			// Get victim and attacker team information to check for teamkill
+			var isTeamkill bool
+			var victimTeamID, attackerTeamID string
+
+			// Look up victim team ID
+			server.eventStore.mu.RLock()
+			if victimData, exists := server.eventStore.session[victimName]; exists {
+				if teamID, hasTeam := victimData["teamID"].(string); hasTeam {
+					victimTeamID = teamID
+				}
+			}
+
+			// Look up attacker EOS ID from the event data
+			var attackerEOSID string
+			if eosID, hasEOS := eventData["attackerEos"].(string); hasEOS {
+				attackerEOSID = eosID
+			}
+
+			// Look up attacker team ID if we have their EOS ID
+			if attackerEOSID != "" {
+				if attackerData, exists := server.eventStore.players[attackerEOSID]; exists {
+					if teamID, hasTeam := attackerData["teamID"].(string); hasTeam {
+						attackerTeamID = teamID
+					}
+				}
+			}
+			server.eventStore.mu.RUnlock()
+
+			// Check for teamkill: same team but different players
+			if victimTeamID != "" && attackerTeamID != "" && victimTeamID == attackerTeamID {
+				// Ensure this isn't self-damage
+				var victimEOSID string
+				server.eventStore.mu.RLock()
+				if victimData, exists := server.eventStore.session[victimName]; exists {
+					if eosID, hasEOS := victimData["eosID"].(string); hasEOS {
+						victimEOSID = eosID
+					}
+				}
+				server.eventStore.mu.RUnlock()
+
+				// If we have both EOSIDs and they're different, but teams are the same, it's a teamkill
+				if victimEOSID != "" && attackerEOSID != "" && victimEOSID != attackerEOSID {
+					isTeamkill = true
+					eventData["teamkill"] = true
+				}
+			}
+
 			// Update session data
 			server.eventStore.mu.Lock()
 			server.eventStore.session[victimName] = eventData
@@ -729,6 +832,15 @@ var logParsers = []LogParser{
 				Data:  string(jsonBytes),
 			}
 			server.broadcastEvent(data)
+
+			// If it's a teamkill, emit a separate TEAMKILL event
+			if isTeamkill {
+				teamkillData := &pb.EventEntry{
+					Event: "TEAMKILL",
+					Data:  string(jsonBytes),
+				}
+				server.broadcastEvent(teamkillData)
+			}
 		},
 	},
 	{
@@ -893,6 +1005,181 @@ var logParsers = []LogParser{
 
 			data := &pb.EventEntry{
 				Event: "NEW_GAME",
+				Data:  string(jsonBytes),
+			}
+			server.broadcastEvent(data)
+		},
+	},
+	{
+		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?SquadJoined\(\): Player:(.+) \(Online IDs:([^)]+)\) Joined Team ([0-9]) Squad ([0-9]+)`),
+		onMatch: func(args []string, server *LogWatcherServer) {
+			log.Println("[DEBUG] Matched PLAYER_SQUAD_CHANGE event: ", args)
+
+			// Parse online IDs from the log
+			idsString := args[4]
+			ids := make(map[string]string)
+
+			// Split IDs by commas and extract platform:id pairs
+			idPairs := strings.Split(idsString, ",")
+			for _, pair := range idPairs {
+				pair = strings.TrimSpace(pair)
+				parts := strings.Split(pair, ":")
+				if len(parts) == 2 {
+					platform := strings.ToLower(strings.TrimSpace(parts[0]))
+					id := strings.TrimSpace(parts[1])
+					ids[platform] = id
+				}
+			}
+
+			// Build event data
+			playerName := args[3]
+			teamID := args[5]
+			squadID := args[6]
+
+			eventData := map[string]interface{}{
+				"raw":        args[0],
+				"time":       args[1],
+				"chainID":    args[2],
+				"name":       playerName,
+				"teamID":     teamID,
+				"squadID":    squadID,
+				"oldTeamID":  nil, // We don't track previous team in this implementation
+				"oldSquadID": nil, // We don't track previous squad in this implementation
+			}
+
+			// Add all player IDs to event data with capitalized platform name
+			for platform, id := range ids {
+				// Capitalize first letter of platform for key name
+				platformKey := "player"
+				if len(platform) > 0 {
+					platformKey += strings.ToUpper(platform[:1])
+					if len(platform) > 1 {
+						platformKey += platform[1:]
+					}
+				}
+				eventData[platformKey] = id
+			}
+
+			// Store player information including team ID in session data
+			server.eventStore.mu.Lock()
+
+			// Create/update player session data
+			if _, exists := server.eventStore.session[playerName]; !exists {
+				server.eventStore.session[playerName] = make(map[string]interface{})
+			}
+			server.eventStore.session[playerName]["teamID"] = teamID
+			server.eventStore.session[playerName]["squadID"] = squadID
+
+			// If we have an EOS ID, also store team info by EOS ID
+			if eosID, ok := ids["eos"]; ok {
+				if _, exists := server.eventStore.players[eosID]; !exists {
+					server.eventStore.players[eosID] = make(map[string]interface{})
+				}
+				server.eventStore.players[eosID]["teamID"] = teamID
+				server.eventStore.players[eosID]["squadID"] = squadID
+				server.eventStore.players[eosID]["name"] = playerName
+			}
+
+			server.eventStore.mu.Unlock()
+
+			jsonBytes, err := json.Marshal(eventData)
+			if err != nil {
+				log.Println("[ERROR] Failed to marshal event data:", err)
+				return
+			}
+
+			data := &pb.EventEntry{
+				Event: "PLAYER_SQUAD_CHANGE",
+				Data:  string(jsonBytes),
+			}
+			server.broadcastEvent(data)
+		},
+	},
+	{
+		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?TeamJoined\(\): Player:(.+) \(Online IDs:([^)]+)\) Is Now On Team ([0-9])`),
+		onMatch: func(args []string, server *LogWatcherServer) {
+			log.Println("[DEBUG] Matched PLAYER_TEAM_CHANGE event: ", args)
+
+			// Parse online IDs from the log
+			idsString := args[4]
+			ids := make(map[string]string)
+
+			// Split IDs by commas and extract platform:id pairs
+			idPairs := strings.Split(idsString, ",")
+			for _, pair := range idPairs {
+				pair = strings.TrimSpace(pair)
+				parts := strings.Split(pair, ":")
+				if len(parts) == 2 {
+					platform := strings.ToLower(strings.TrimSpace(parts[0]))
+					id := strings.TrimSpace(parts[1])
+					ids[platform] = id
+				}
+			}
+
+			// Build event data
+			playerName := args[3]
+			newTeamID := args[5]
+
+			// Get old team ID if available
+			var oldTeamID interface{} = nil
+			server.eventStore.mu.RLock()
+			if playerData, exists := server.eventStore.session[playerName]; exists {
+				if teamID, hasTeam := playerData["teamID"]; hasTeam {
+					oldTeamID = teamID
+				}
+			}
+			server.eventStore.mu.RUnlock()
+
+			eventData := map[string]interface{}{
+				"raw":       args[0],
+				"time":      args[1],
+				"chainID":   args[2],
+				"name":      playerName,
+				"newTeamID": newTeamID,
+				"oldTeamID": oldTeamID,
+			}
+
+			// Add all player IDs to event data with capitalized platform name
+			for platform, id := range ids {
+				// Capitalize first letter of platform for key name
+				platformKey := "player"
+				if len(platform) > 0 {
+					platformKey += strings.ToUpper(platform[:1])
+					if len(platform) > 1 {
+						platformKey += platform[1:]
+					}
+				}
+				eventData[platformKey] = id
+			}
+
+			// Store player information including team ID in session data
+			server.eventStore.mu.Lock()
+
+			// Create/update player session data
+			if _, exists := server.eventStore.session[playerName]; !exists {
+				server.eventStore.session[playerName] = make(map[string]interface{})
+			}
+			server.eventStore.session[playerName]["teamID"] = newTeamID
+
+			// If we have an EOS ID, also store team info by EOS ID
+			if eosID, ok := ids["eos"]; ok {
+				if _, exists := server.eventStore.players[eosID]; !exists {
+					server.eventStore.players[eosID] = make(map[string]interface{})
+				}
+				server.eventStore.players[eosID]["teamID"] = newTeamID
+				server.eventStore.players[eosID]["name"] = playerName
+			}
+
+			server.eventStore.mu.Unlock()
+
+			jsonBytes, err := json.Marshal(eventData)
+			if err != nil {
+				log.Println("[ERROR] Failed to marshal event data:", err)
+				return
+			}
+
+			data := &pb.EventEntry{
+				Event: "PLAYER_TEAM_CHANGE",
 				Data:  string(jsonBytes),
 			}
 			server.broadcastEvent(data)
