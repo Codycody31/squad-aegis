@@ -22,25 +22,6 @@ import (
 // Auth token (configurable via CLI)
 var authToken string
 
-// EventStore tracks player data across the server session
-type EventStore struct {
-	mu           sync.RWMutex
-	disconnected map[string]map[string]interface{} // Players who disconnected, cleared on map change
-	players      map[string]map[string]interface{} // Persistent player data (steamId, controller, suffix)
-	session      map[string]map[string]interface{} // Non-persistent session data
-	joinRequests map[string]map[string]interface{} // Track join requests by chainID
-}
-
-// NewEventStore creates a new event store
-func NewEventStore() *EventStore {
-	return &EventStore{
-		disconnected: make(map[string]map[string]interface{}),
-		players:      make(map[string]map[string]interface{}),
-		session:      make(map[string]map[string]interface{}),
-		joinRequests: make(map[string]map[string]interface{}),
-	}
-}
-
 // LogWatcherServer implements the LogWatcher service
 type LogWatcherServer struct {
 	pb.UnimplementedLogWatcherServer
