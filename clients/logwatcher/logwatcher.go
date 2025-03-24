@@ -26,6 +26,7 @@ type AdminBroadcastEvent struct {
 	From    string `json:"from"`
 }
 
+// DeployableDamagedEvent is the dedicated struct for DEPLOYABLE_DAMAGED events.
 type DeployableDamagedEvent struct {
 	Time            string `json:"time"`
 	ChainID         string `json:"chainID"`
@@ -37,11 +38,157 @@ type DeployableDamagedEvent struct {
 	HealthRemaining string `json:"healthRemaining"`
 }
 
+// TickRateEvent is the dedicated struct for TICK_RATE events.
 type TickRateEvent struct {
 	Time     string `json:"time"`
 	ChainID  string `json:"chainID"`
 	TickRate string `json:"tickRate"`
 }
+
+// PlayerConnectedEvent is the dedicated struct for PLAYER_CONNECTED events.
+type PlayerConnectedEvent struct {
+	Time             string `json:"time"`
+	ChainID          string `json:"chainID"`
+	PlayerController string `json:"playercontroller"`
+	IP               string `json:"ip"`
+	Steam            string `json:"steam,omitempty"`
+	EOS              string `json:"eos,omitempty"`
+}
+
+// NewGameEvent is the dedicated struct for NEW_GAME events.
+type NewGameEvent struct {
+	Time           string `json:"time"`
+	ChainID        string `json:"chainID"`
+	Team           string `json:"team,omitempty"`
+	Subfaction     string `json:"subfaction,omitempty"`
+	Faction        string `json:"faction,omitempty"`
+	Action         string `json:"action,omitempty"`
+	Tickets        string `json:"tickets,omitempty"`
+	Layer          string `json:"layer,omitempty"`
+	Level          string `json:"level,omitempty"`
+	DLC            string `json:"dlc,omitempty"`
+	MapClassname   string `json:"mapClassname,omitempty"`
+	LayerClassname string `json:"layerClassname,omitempty"`
+}
+
+// PlayerDisconnectedEvent is the dedicated struct for PLAYER_DISCONNECTED events.
+type PlayerDisconnectedEvent struct {
+	Time             string `json:"time"`
+	ChainID          string `json:"chainID"`
+	IP               string `json:"ip"`
+	PlayerController string `json:"playerController"`
+	EOSID            string `json:"eosID"`
+}
+
+// PlayerDamagedEvent is the dedicated struct for PLAYER_DAMAGED events.
+type PlayerDamagedEvent struct {
+	Time               string `json:"time"`
+	ChainID            string `json:"chainID"`
+	VictimName         string `json:"victimName"`
+	Damage             string `json:"damage"`
+	AttackerName       string `json:"attackerName"`
+	AttackerController string `json:"attackerController"`
+	Weapon             string `json:"weapon"`
+	AttackerEOS        string `json:"attackerEos,omitempty"`
+	AttackerSteam      string `json:"attackerSteam,omitempty"`
+}
+
+// PlayerDiedEvent is the dedicated struct for PLAYER_DIED events.
+type PlayerDiedEvent struct {
+	Time                     string `json:"time"`
+	WoundTime                string `json:"woundTime"`
+	ChainID                  string `json:"chainID"`
+	VictimName               string `json:"victimName"`
+	Damage                   string `json:"damage"`
+	AttackerPlayerController string `json:"attackerPlayerController"`
+	Weapon                   string `json:"weapon"`
+	AttackerEOS              string `json:"attackerEos,omitempty"`
+	AttackerSteam            string `json:"attackerSteam,omitempty"`
+	Teamkill                 bool   `json:"teamkill,omitempty"`
+}
+
+// JoinSucceededEvent is the dedicated struct for JOIN_SUCCEEDED events.
+type JoinSucceededEvent struct {
+	Time         string `json:"time"`
+	ChainID      string `json:"chainID"`
+	PlayerSuffix string `json:"playerSuffix"`
+	IP           string `json:"ip,omitempty"`
+	Steam        string `json:"steam,omitempty"`
+	EOS          string `json:"eos,omitempty"`
+}
+
+// PlayerPossessEvent is the dedicated struct for PLAYER_POSSESS events.
+type PlayerPossessEvent struct {
+	Time             string `json:"time"`
+	ChainID          string `json:"chainID"`
+	PlayerSuffix     string `json:"playerSuffix"`
+	PossessClassname string `json:"possessClassname"`
+	PlayerEOS        string `json:"playerEos,omitempty"`
+	PlayerSteam      string `json:"playerSteam,omitempty"`
+}
+
+// PlayerRevivedEvent is the dedicated struct for PLAYER_REVIVED events.
+type PlayerRevivedEvent struct {
+	Time         string `json:"time"`
+	ChainID      string `json:"chainID"`
+	ReviverName  string `json:"reviverName"`
+	VictimName   string `json:"victimName"`
+	ReviverEOS   string `json:"reviverEos,omitempty"`
+	ReviverSteam string `json:"reviverSteam,omitempty"`
+	VictimEOS    string `json:"victimEos,omitempty"`
+	VictimSteam  string `json:"victimSteam,omitempty"`
+}
+
+// PlayerWoundedEvent is the dedicated struct for PLAYER_WOUNDED events.
+type PlayerWoundedEvent struct {
+	Time                     string `json:"time"`
+	ChainID                  string `json:"chainID"`
+	VictimName               string `json:"victimName"`
+	Damage                   string `json:"damage"`
+	AttackerPlayerController string `json:"attackerPlayerController"`
+	Weapon                   string `json:"weapon"`
+	AttackerEOS              string `json:"attackerEos,omitempty"`
+	AttackerSteam            string `json:"attackerSteam,omitempty"`
+	Teamkill                 bool   `json:"teamkill,omitempty"`
+}
+
+// RoundEndedEvent is the dedicated struct for ROUND_ENDED events.
+type RoundEndedEvent struct {
+	Time       string                 `json:"time"`
+	ChainID    string                 `json:"chainID,omitempty"`
+	Winner     string                 `json:"winner,omitempty"`
+	Layer      string                 `json:"layer,omitempty"`
+	WinnerData map[string]interface{} `json:"winner,omitempty"`
+	LoserData  map[string]interface{} `json:"loser,omitempty"`
+}
+
+// PlayerSquadChangeEvent is the dedicated struct for PLAYER_SQUAD_CHANGE events.
+type PlayerSquadChangeEvent struct {
+	Time        string `json:"time"`
+	ChainID     string `json:"chainID"`
+	Name        string `json:"name"`
+	TeamID      string `json:"teamID"`
+	SquadID     string `json:"squadID"`
+	OldTeamID   string `json:"oldTeamID,omitempty"`
+	OldSquadID  string `json:"oldSquadID,omitempty"`
+	PlayerEOS   string `json:"playerEos,omitempty"`
+	PlayerSteam string `json:"playerSteam,omitempty"`
+}
+
+// PlayerTeamChangeEvent is the dedicated struct for PLAYER_TEAM_CHANGE events.
+type PlayerTeamChangeEvent struct {
+	Time        string `json:"time"`
+	ChainID     string `json:"chainID"`
+	Name        string `json:"name"`
+	NewTeamID   string `json:"newTeamID"`
+	OldTeamID   string `json:"oldTeamID,omitempty"`
+	PlayerEOS   string `json:"playerEos,omitempty"`
+	PlayerSteam string `json:"playerSteam,omitempty"`
+}
+
+// TeamkillEvent shares the same structure as PlayerWoundedEvent or PlayerDiedEvent with teamkill=true.
+// Using PlayerDiedEvent as it has more fields.
+type TeamkillEvent PlayerDiedEvent
 
 // EventStreamer handles event streaming from the server.
 type EventStreamer struct {
@@ -115,6 +262,118 @@ func (es *EventStreamer) streamEvents(ctx context.Context) {
 						parsed = nil
 					} else {
 						parsed = tickRateEvent
+					}
+				case "DEPLOYABLE_DAMAGED":
+					var deployableEvent DeployableDamagedEvent
+					if err := json.Unmarshal([]byte(event.Data), &deployableEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse DEPLOYABLE_DAMAGED event data")
+						parsed = nil
+					} else {
+						parsed = deployableEvent
+					}
+				case "PLAYER_CONNECTED":
+					var playerEvent PlayerConnectedEvent
+					if err := json.Unmarshal([]byte(event.Data), &playerEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_CONNECTED event data")
+						parsed = nil
+					} else {
+						parsed = playerEvent
+					}
+				case "NEW_GAME":
+					var gameEvent NewGameEvent
+					if err := json.Unmarshal([]byte(event.Data), &gameEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse NEW_GAME event data")
+						parsed = nil
+					} else {
+						parsed = gameEvent
+					}
+				case "PLAYER_DISCONNECTED":
+					var disconnectEvent PlayerDisconnectedEvent
+					if err := json.Unmarshal([]byte(event.Data), &disconnectEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_DISCONNECTED event data")
+						parsed = nil
+					} else {
+						parsed = disconnectEvent
+					}
+				case "PLAYER_DAMAGED":
+					var damageEvent PlayerDamagedEvent
+					if err := json.Unmarshal([]byte(event.Data), &damageEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_DAMAGED event data")
+						parsed = nil
+					} else {
+						parsed = damageEvent
+					}
+				case "PLAYER_DIED":
+					var deathEvent PlayerDiedEvent
+					if err := json.Unmarshal([]byte(event.Data), &deathEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_DIED event data")
+						parsed = nil
+					} else {
+						parsed = deathEvent
+					}
+				case "JOIN_SUCCEEDED":
+					var joinEvent JoinSucceededEvent
+					if err := json.Unmarshal([]byte(event.Data), &joinEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse JOIN_SUCCEEDED event data")
+						parsed = nil
+					} else {
+						parsed = joinEvent
+					}
+				case "PLAYER_POSSESS":
+					var possessEvent PlayerPossessEvent
+					if err := json.Unmarshal([]byte(event.Data), &possessEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_POSSESS event data")
+						parsed = nil
+					} else {
+						parsed = possessEvent
+					}
+				case "PLAYER_REVIVED":
+					var reviveEvent PlayerRevivedEvent
+					if err := json.Unmarshal([]byte(event.Data), &reviveEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_REVIVED event data")
+						parsed = nil
+					} else {
+						parsed = reviveEvent
+					}
+				case "PLAYER_WOUNDED":
+					var woundEvent PlayerWoundedEvent
+					if err := json.Unmarshal([]byte(event.Data), &woundEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_WOUNDED event data")
+						parsed = nil
+					} else {
+						parsed = woundEvent
+					}
+				case "ROUND_ENDED":
+					var roundEvent RoundEndedEvent
+					if err := json.Unmarshal([]byte(event.Data), &roundEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse ROUND_ENDED event data")
+						parsed = nil
+					} else {
+						parsed = roundEvent
+					}
+				case "PLAYER_SQUAD_CHANGE":
+					var squadEvent PlayerSquadChangeEvent
+					if err := json.Unmarshal([]byte(event.Data), &squadEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_SQUAD_CHANGE event data")
+						parsed = nil
+					} else {
+						parsed = squadEvent
+					}
+				case "PLAYER_TEAM_CHANGE":
+					var teamEvent PlayerTeamChangeEvent
+					if err := json.Unmarshal([]byte(event.Data), &teamEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse PLAYER_TEAM_CHANGE event data")
+						parsed = nil
+					} else {
+						parsed = teamEvent
+					}
+				case "TEAMKILL":
+					var teamkillEvent TeamkillEvent
+					if err := json.Unmarshal([]byte(event.Data), &teamkillEvent); err != nil {
+						log.Error().Err(err).Msg("Failed to parse TEAMKILL event data")
+						parsed = nil
+					} else {
+						parsed = teamkillEvent
 					}
 				default:
 					log.Warn().Msgf("Unknown event type received: %s", event.Event)
