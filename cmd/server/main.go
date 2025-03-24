@@ -19,13 +19,18 @@ import (
 	"go.codycody31.dev/squad-aegis/connectors/logwatcher"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
+	"go.codycody31.dev/squad-aegis/extensions/auto_kick_unassigned"
+	"go.codycody31.dev/squad-aegis/extensions/auto_tk_warn"
 	"go.codycody31.dev/squad-aegis/extensions/chat_commands"
 	"go.codycody31.dev/squad-aegis/extensions/discord_admin_broadcast"
 	"go.codycody31.dev/squad-aegis/extensions/discord_admin_cam_logs"
 	"go.codycody31.dev/squad-aegis/extensions/discord_admin_request"
 	"go.codycody31.dev/squad-aegis/extensions/discord_cbl_info"
 	"go.codycody31.dev/squad-aegis/extensions/discord_chat"
+	"go.codycody31.dev/squad-aegis/extensions/discord_fob_hab_explosion_damage"
+	"go.codycody31.dev/squad-aegis/extensions/discord_killfeed"
 	"go.codycody31.dev/squad-aegis/extensions/discord_squad_created"
+	"go.codycody31.dev/squad-aegis/extensions/discord_teamkill"
 	"go.codycody31.dev/squad-aegis/extensions/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/extensions/team_randomizer"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
@@ -256,6 +261,11 @@ func getExtensionRegistrars() map[string]extension_manager.ExtensionRegistrar {
 	registrars["chat_commands"] = chat_commands.ChatCommandsRegistrar{}
 	registrars["discord_squad_created"] = discord_squad_created.DiscordSquadCreatedRegistrar{}
 	registrars["discord_admin_broadcast"] = discord_admin_broadcast.DiscordAdminBroadcastRegistrar{}
+	registrars["discord_fob_hab_explosion_damage"] = discord_fob_hab_explosion_damage.DiscordFOBHabExplosionDamageRegistrar{}
+	registrars["discord_teamkill"] = discord_teamkill.DiscordTeamkillRegistrar{}
+	registrars["discord_killfeed"] = discord_killfeed.DiscordKillfeedRegistrar{}
+	registrars["auto_kick_unassigned"] = auto_kick_unassigned.AutoKickUnassignedRegistrar{}
+	registrars["auto_tk_warn"] = auto_tk_warn.AutoTKWarnRegistrar{}
 
 	return registrars
 }

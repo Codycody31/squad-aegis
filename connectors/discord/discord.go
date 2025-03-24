@@ -45,6 +45,8 @@ func (d *DiscordConnector) Initialize(config map[string]interface{}) error {
 		return fmt.Errorf("failed to start Discord session: %v", err)
 	}
 
+	d.session.UpdateCustomStatus("Powered by Squad Aegis")
+
 	return nil
 }
 
