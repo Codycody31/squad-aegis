@@ -56,7 +56,7 @@ steps:
       - vendor
     image: *buildx_plugin
     settings:
-      repo: *publish_repos
+      repo: insidiousfiddler/squad-aegis
       dockerfile: docker/Dockerfile.multiarch.rootless
       platforms: *platforms_preview
       tag: pull_${CI_COMMIT_PULL_REQUEST}
@@ -72,7 +72,7 @@ steps:
     image: *buildx_plugin
     settings:
       dry_run: true
-      repo: *publish_repos
+      repo: insidiousfiddler/squad-aegis
       dockerfile: docker/Dockerfile.multiarch.rootless
       platforms: *platforms_preview
       tag: pull_${CI_COMMIT_PULL_REQUEST}
@@ -118,7 +118,7 @@ steps:
       - vendor
     image: *buildx_plugin
     settings:
-      repo: *publish_repos_logwatcher
+      repo: insidiousfiddler/squad-aegis-logwatcher
       dockerfile: docker/Dockerfile.logwatcher.multiarch
       platforms: *platforms_preview
       tag: pull_${CI_COMMIT_PULL_REQUEST}
@@ -134,7 +134,7 @@ steps:
     image: *buildx_plugin
     settings:
       dry_run: true
-      repo: *publish_repos_logwatcher
+      repo: insidiousfiddler/squad-aegis-logwatcher
       dockerfile: docker/Dockerfile.logwatcher.multiarch
       platforms: *platforms_preview
       tag: pull_${CI_COMMIT_PULL_REQUEST}
