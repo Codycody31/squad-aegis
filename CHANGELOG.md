@@ -8,12 +8,22 @@
 
 ### ✨ Features
 
+- Add log parsers for game events & some more extensions [[#38](https://github.com/Codycody31/squad-aegis/pull/38)]
 - Add log parsers for game events & some more extensions [[#36](https://github.com/Codycody31/squad-aegis/pull/36)]
 - Log Watcher Connector & Related Extensions [[#24](https://github.com/Codycody31/squad-aegis/pull/24)]
 - feat(admin-chat): add admin chat functionality and endpoints [[#21](https://github.com/Codycody31/squad-aegis/pull/21)]
 - Server Connectors & Extensions [[#14](https://github.com/Codycody31/squad-aegis/pull/14)]
 - Configure ACL/RBAC based on Squad permissions [[#9](https://github.com/Codycody31/squad-aegis/pull/9)]
 - feat: add audit logs for most endpoints [[#4](https://github.com/Codycody31/squad-aegis/pull/4)]
+
+### 📈 Enhancement
+
+- refactor: remove unused chat processor implementation [[#39](https://github.com/Codycody31/squad-aegis/pull/39)]
+- enhancement: add notes for extensions database records [[#22](https://github.com/Codycody31/squad-aegis/pull/22)]
+- enhancement(connector): global connector deletion process [[#18](https://github.com/Codycody31/squad-aegis/pull/18)]
+- RCON Manager [[#12](https://github.com/Codycody31/squad-aegis/pull/12)]
+- refactor: enhance audit logging for admin actions [[#7](https://github.com/Codycody31/squad-aegis/pull/7)]
+- refactor: update release config to drop unneeded sections [[#6](https://github.com/Codycody31/squad-aegis/pull/6)]
 
 ### 📚 Documentation
 
@@ -27,14 +37,6 @@
 - Fix log watcher docker image not using the correct binary [[#28](https://github.com/Codycody31/squad-aegis/pull/28)]
 - fix(docker): add ca-certificates to final image dependencies [[#19](https://github.com/Codycody31/squad-aegis/pull/19)]
 - Fix broken connector add logic [[#16](https://github.com/Codycody31/squad-aegis/pull/16)]
-
-### 📈 Enhancement
-
-- enhancement: add notes for extensions database records [[#22](https://github.com/Codycody31/squad-aegis/pull/22)]
-- enhancement(connector): global connector deletion process [[#18](https://github.com/Codycody31/squad-aegis/pull/18)]
-- RCON Manager [[#12](https://github.com/Codycody31/squad-aegis/pull/12)]
-- refactor: enhance audit logging for admin actions [[#7](https://github.com/Codycody31/squad-aegis/pull/7)]
-- refactor: update release config to drop unneeded sections [[#6](https://github.com/Codycody31/squad-aegis/pull/6)]
 
 ### 📦️ Dependency
 
