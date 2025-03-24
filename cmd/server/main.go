@@ -19,6 +19,8 @@ import (
 	"go.codycody31.dev/squad-aegis/connectors/logwatcher"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/db"
+	"go.codycody31.dev/squad-aegis/extensions/auto_kick_unassigned"
+	"go.codycody31.dev/squad-aegis/extensions/auto_tk_warn"
 	"go.codycody31.dev/squad-aegis/extensions/chat_commands"
 	"go.codycody31.dev/squad-aegis/extensions/discord_admin_broadcast"
 	"go.codycody31.dev/squad-aegis/extensions/discord_admin_cam_logs"
@@ -262,6 +264,8 @@ func getExtensionRegistrars() map[string]extension_manager.ExtensionRegistrar {
 	registrars["discord_fob_hab_explosion_damage"] = discord_fob_hab_explosion_damage.DiscordFOBHabExplosionDamageRegistrar{}
 	registrars["discord_teamkill"] = discord_teamkill.DiscordTeamkillRegistrar{}
 	registrars["discord_killfeed"] = discord_killfeed.DiscordKillfeedRegistrar{}
+	registrars["auto_kick_unassigned"] = auto_kick_unassigned.AutoKickUnassignedRegistrar{}
+	registrars["auto_tk_warn"] = auto_tk_warn.AutoTKWarnRegistrar{}
 
 	return registrars
 }
