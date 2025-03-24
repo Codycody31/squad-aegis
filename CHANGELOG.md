@@ -42,5 +42,6 @@
 
 ### Misc
 
+- Revert "Add log parsers for game events & some more extensions" [[#37](https://github.com/Codycody31/squad-aegis/pull/37)]
 - chore: add Docker compose configuration for database and logwatcher [[#33](https://github.com/Codycody31/squad-aegis/pull/33)]
 - chore: remove unused dependencies [[#8](https://github.com/Codycody31/squad-aegis/pull/8)]
