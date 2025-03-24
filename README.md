@@ -2,93 +2,153 @@
 
 <img src=".github/images/aegis_squad.png" alt="Logo" width="500"/>
 
-#### Squad Aegis
+# Squad Aegis
+
+A comprehensive control panel for Squad game server administration
 
 </div>
 
-## **About**
+## Overview
 
-**Squad Aegis** is a comprehensive control panel solution for administrating multiple **Squad** game servers in one place. Built on a **Go** backend, **Nuxt 3** frontend, and a **PostgreSQL** database, it streamlines player management, role-based permissions, and RCON controls into a single, easy-to-use web interface.
+**Squad Aegis** is an all-in-one control panel for managing multiple Squad game servers. Built with a Go backend, Nuxt 3 frontend, and PostgreSQL database, it provides:
 
-## **Features**
+- Centralized server management
+- Role-based access control
+- RCON command interface
+- Comprehensive audit logging
+- Extensible architecture through connectors and extensions
 
-- **Multiple Servers**: Support for managing multiple Squad servers from a single interface.
-- **Role-Based Permissions**: Set permissions for each role to control access to various features.
-- **RCON Controls**: Execute commands on your servers with the click of a button.
-- **Audit Logs**: Track all actions taken by dashboard users.
-- **Connectors**: Extend the dashboard's functionality by adding custom connectors.
-- **Extensions**: Extend the dashboard's functionality by adding extensions that may work with connectors.
+## Features
 
-## **Connectors & Extensions**
+### Core Features
 
-The dashboard is designed to be extensible through connectors and extensions.
+- **Multi-Server Management**: Control multiple Squad servers from a single dashboard
+- **Role-Based Access**: Granular permission controls for different user roles
+- **RCON Interface**: Execute server commands through an intuitive web interface
+- **Audit System**: Track all administrative actions
+- **Real-time Monitoring**: Monitor server status and player activity
 
-### **Connectors**
+### Extensibility
 
-Connectors are used to extend the dashboard's connectivity to external services for example `Discord`.
+- **Connectors**: Integrate with external services (e.g., Discord)
+- **Extensions**: Add custom functionality without modifying core code
 
-### **Extensions**
+## Installation Guide
 
-Extensions are used to extend the dashboard's functionality for example `DiscordAdminCamLogs`, however extensions do not affect the UI of the dashboard and are primarily used to modify the backend logic of the dashboard, for example supporting custom commands in the chat.
+### Prerequisites
 
-## **Getting Started**
+- Docker Engine 20.10.0 or newer
+- Docker Compose V2
+- 2GB RAM minimum
+- 10GB available storage
 
-### **Prerequisites**
+### Quick Start (Docker)
 
-- **Docker**: [Install Docker](https://docs.docker.com/get-docker/)
-- **Docker Compose**: [Install Docker Compose](https://docs.docker.com/compose/install/)
-
-### **Server/Squad Aegis Installation**
-
-It should be noted that you can skip steps 1 and 2 if you have already cloned the repository or if you just have the `docker-compose.yml` file, as the `docker-compose.yml` file will automatically pull the latest image from my self-hosted registry.
-
-1. Clone the repository:
-
-```bash
-git clone https://github.com/Codycody31/squad-aegis.git -o codycody31-squad-aegis
-```
-
-2. Change into the project directory:
+1. Create a new directory and download the docker-compose file:
 
 ```bash
-cd codycody31-squad-aegis
+mkdir squad-aegis && cd squad-aegis
+curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/main/docker-compose.yml
 ```
 
-3. Edit the `docker-compose.yml` file and update the following environment variables:
-
-- `INITIAL_ADMIN_USERNAME`: The initial admin username.
-- `INITIAL_ADMIN_PASSWORD`: The initial admin password.
-
-If you have a external PostgreSQL database, you can update the following environment variables:
-
-- `DB_HOST`: The PostgreSQL database host.
-- `DB_PORT`: The PostgreSQL database port.
-- `DB_USER`: The PostgreSQL database user.
-- `DB_PASS`: The PostgreSQL database password.
-- `DB_NAME`: The PostgreSQL database name.
-
-4. Start the project:
+2. Create a `.env` file with your configuration:
 
 ```bash
-docker-compose up
+# Core Settings
+INITIAL_ADMIN_USERNAME=your_admin_username
+INITIAL_ADMIN_PASSWORD=your_secure_password
+APP_URL=http://your_domain_or_ip:3113
+
+# Database Settings (optional - default values shown)
+DB_HOST=database
+DB_PORT=5432
+DB_NAME=squad-aegis
+DB_USER=squad-aegis
+DB_PASS=squad-aegis
 ```
 
-5. Access the dashboard at `http://localhost:3113`.
+3. Start the services:
 
-### **Log Watcher Installation**
+```bash
+docker compose up -d
+```
 
-No instructions yet, a docker image should exist for `registry.vmgware.dev/insidiousfiddler/squad-aegis-logwatcher:<latest|next>`, you can use the `docker-compose.logwatcher.yml` file to run the log watcher.
+4. Access the dashboard at `http://localhost:3113`
 
-## **Some important notes on the project**
+### Log Watcher Setup
 
-- Inspired by [milutinke/sqcp](https://github.com/milutinke/sqcp) but with a focus on being a more complete solution for server administration.
-- The project is still in early development and the UI is subject to change.
-- A large amount of the code was written by AI, so while it may work, I do have plans to refactor it to be more readable and maintainable rather than just functional.
+The Log Watcher component monitors Squad server logs in real-time. To set it up:
 
-## **Screenshots**
+1. Create a new docker-compose file for the log watcher:
+
+```bash
+curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/main/docker-compose.logwatcher.yml
+```
+
+2. Configure the log watcher environment:
+
+```yaml
+environment:
+  LOGWATCHER_PORT: 31135
+  LOGWATCHER_AUTH_TOKEN: "your_secure_token"  # Must match dashboard configuration
+  LOGWATCHER_LOG_FILE: "/path/to/SquadGame.log"
+```
+
+3. Start the log watcher:
+
+```bash
+docker compose -f docker-compose.logwatcher.yml up -d
+```
+
+## Configuration
+
+### Environment Variables
+
+#### Core Application
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| APP_PORT | Dashboard web port | 3113 |
+| APP_URL | Public URL | <http://localhost:3113> |
+| INITIAL_ADMIN_USERNAME | First admin user | admin |
+| INITIAL_ADMIN_PASSWORD | First admin password | admin |
+
+#### Database
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| DB_HOST | PostgreSQL host | database |
+| DB_PORT | PostgreSQL port | 5432 |
+| DB_NAME | Database name | squad-aegis |
+| DB_USER | Database user | squad-aegis |
+| DB_PASS | Database password | squad-aegis |
+
+## Development
+
+For development environments, use the dev compose file:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
+## Screenshots
 
 ![Dashboard](.github/images/dashboard.png)
 
-## **License**
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
+
+## Support
+
+- [Issue Tracker](https://github.com/Codycody31/squad-aegis/issues)
+- [Discord Server](https://discord.gg/your-invite)
+
+## License
 
 This project is licensed under the [Apache 2.0 License](LICENSE).
+
+## Acknowledgments
+
+- Inspired by [milutinke/sqcp](https://github.com/milutinke/sqcp)
+- Special thanks to the Squad gaming community
