@@ -156,39 +156,6 @@ func GetArrayObjectValue(config map[string]interface{}, fieldName string) []map[
 	return result
 }
 
-// GetStringValue safely retrieves a string value from config
-func GetStringValue(config map[string]interface{}, fieldName string) string {
-	if val, ok := config[fieldName]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
-	}
-	return ""
-}
-
-// GetBoolValue safely retrieves a bool value from config
-func GetBoolValue(config map[string]interface{}, fieldName string) bool {
-	if val, ok := config[fieldName]; ok {
-		if b, ok := val.(bool); ok {
-			return b
-		}
-	}
-	return false
-}
-
-// GetIntValue safely retrieves an int value from config
-func GetIntValue(config map[string]interface{}, fieldName string) int {
-	if val, ok := config[fieldName]; ok {
-		if i, ok := val.(int); ok {
-			return i
-		}
-		if f, ok := val.(float64); ok {
-			return int(f)
-		}
-	}
-	return 0
-}
-
 // MigrateDeprecatedArrays updates a schema to use typed arrays instead of the generic FieldTypeArray
 // It analyzes the default values or tries to infer the array type from usage
 func MigrateDeprecatedArrays(schema *ConfigSchema) {
