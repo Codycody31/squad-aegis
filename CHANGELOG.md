@@ -6,6 +6,10 @@
 
 @Codycody31
 
+### 📚 Documentation
+
+- docs: update README for improved configuration setup [[#42](https://github.com/Codycody31/squad-aegis/pull/42)]
+
 ### 📈 Enhancement
 
 - feat(settings): add server settings page and update routes [[#40](https://github.com/Codycody31/squad-aegis/pull/40)]
