@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -260,4 +262,19 @@ func GetUserServerPermissions(ctx context.Context, database db.Executor, userId 
 	}
 
 	return serverPermissions, nil
+}
+
+// UpdateServer updates a server in the database
+func UpdateServer(ctx context.Context, db *sql.DB, server *models.Server) error {
+	_, err := db.ExecContext(ctx, `
+		UPDATE servers
+		SET name = $1, ip_address = $2, game_port = $3, rcon_port = $4, rcon_password = $5, updated_at = $6
+		WHERE id = $7
+	`, server.Name, server.IpAddress, server.GamePort, server.RconPort, server.RconPassword, time.Now(), server.Id)
+
+	if err != nil {
+		return fmt.Errorf("failed to update server: %w", err)
+	}
+
+	return nil
 }

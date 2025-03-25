@@ -137,7 +137,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			serverGroup := serversGroup.Group("/:serverId")
 			{
 				serverGroup.GET("", server.ServerGet)
-				// serverGroup.PUT("", server.ServerUpdate)
+				serverGroup.PUT("", server.ServerUpdate)
 				serverGroup.DELETE("", server.AuthIsSuperAdmin(), server.ServerDelete)
 
 				serverGroup.GET("/status", server.ServerStatus)

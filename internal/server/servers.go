@@ -107,6 +107,15 @@ type ServerAdminCreateRequest struct {
 	ServerRoleID string `json:"serverRoleId"`
 }
 
+// ServerUpdateRequest represents a request to update a server
+type ServerUpdateRequest struct {
+	Name         string `json:"name" binding:"required"`
+	IpAddress    string `json:"ip_address" binding:"required"`
+	GamePort     int    `json:"game_port" binding:"required"`
+	RconPort     int    `json:"rcon_port" binding:"required"`
+	RconPassword string `json:"rcon_password"`
+}
+
 func (s *Server) ServersList(c *gin.Context) {
 	user := s.getUserFromSession(c)
 
@@ -396,4 +405,89 @@ func (s *Server) ServerUserRoles(c *gin.Context) {
 	responses.Success(c, "User server permissions fetched successfully", &gin.H{
 		"roles": serverPermissions,
 	})
+}
+
+// ServerUpdate handles updating a server
+func (s *Server) ServerUpdate(c *gin.Context) {
+	serverId := c.Param("serverId")
+	if serverId == "" {
+		responses.BadRequest(c, "Server ID is required", &gin.H{"error": "Server ID is required"})
+		return
+	}
+
+	// Parse UUID
+	serverUUID, err := uuid.Parse(serverId)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID format", &gin.H{"error": "Invalid server ID format"})
+		return
+	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Get server from database
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverUUID, user)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Server not found", &gin.H{"error": "Server not found"})
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to fetch server"})
+		return
+	}
+
+	var request ServerUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate request
+	err = validation.ValidateStruct(&request,
+		validation.Field(&request.Name, validation.Required),
+		validation.Field(&request.IpAddress, validation.Required),
+		validation.Field(&request.GamePort, validation.Required),
+		validation.Field(&request.RconPort, validation.Required),
+	)
+
+	if err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"errors": err})
+		return
+	}
+
+	// Update server fields
+	server.Name = request.Name
+	server.IpAddress = request.IpAddress
+	server.GamePort = request.GamePort
+	server.RconPort = request.RconPort
+
+	if request.RconPassword != "" {
+		server.RconPassword = request.RconPassword
+	}
+
+	// Update server in database
+	if err := core.UpdateServer(c.Request.Context(), s.Dependencies.DB, server); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to update server"})
+		return
+	}
+
+	// Reconnect RCON with new credentials
+	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, server.IpAddress, server.RconPort, server.RconPassword)
+
+	// Create audit log entry
+	auditData := map[string]interface{}{
+		"serverId":    server.Id.String(),
+		"name":        server.Name,
+		"ipAddress":   server.IpAddress,
+		"gamePort":    server.GamePort,
+		"rconPort":    server.RconPort,
+		"rconUpdated": true,
+	}
+	s.CreateAuditLog(c.Request.Context(), &server.Id, &user.Id, "server:update", auditData)
+
+	responses.Success(c, "Server updated successfully", &gin.H{"server": server})
 }
