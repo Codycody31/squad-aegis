@@ -74,4 +74,11 @@ export default [
     },
     permissions: ["super_admin", "manageserver"],
   },
+  {
+    title: "Settings",
+    icon: "mdi:cog",
+    to: {
+      name: "servers-serverId-settings",
+    },
+  },
 ];
