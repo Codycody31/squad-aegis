@@ -11,10 +11,29 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/core"
-	rcon "go.codycody31.dev/squad-aegis/internal/rcon"
+	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/rcon"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
+
+// ServerBanResponse represents a ban response with additional fields
+type ServerBanResponse struct {
+	ID        string    `json:"id"`
+	ServerID  string    `json:"serverId"`
+	AdminID   string    `json:"adminId"`
+	AdminName string    `json:"adminName"`
+	SteamID   string    `json:"steamId"`
+	Name      string    `json:"name"` // Not stored in DB, populated from cache or external source
+	Reason    string    `json:"reason"`
+	Duration  int       `json:"duration"` // In minutes, 0 means permanent
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Permanent bool      `json:"permanent"`
+	RuleID    *string   `json:"ruleId"`
+	RuleName  *string   `json:"ruleName"`
+}
 
 // ServerBansList handles listing all bans for a server
 func (s *Server) ServerBansList(c *gin.Context) {
@@ -36,9 +55,11 @@ func (s *Server) ServerBansList(c *gin.Context) {
 
 	// Query the database for bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.updated_at,
+			   sb.rule_id, sr.name as rule_name
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
+		LEFT JOIN server_rules sr ON sb.rule_id = sr.id
 		WHERE sb.server_id = $1
 		ORDER BY sb.created_at DESC
 	`, serverId)
@@ -48,10 +69,12 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	bans := []ServerBan{}
+	bans := []ServerBanResponse{}
 	for rows.Next() {
-		var ban ServerBan
+		var ban ServerBanResponse
 		var steamIDInt int64
+		var ruleId sql.NullString
+		var ruleName sql.NullString
 		err := rows.Scan(
 			&ban.ID,
 			&ban.ServerID,
@@ -62,6 +85,8 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			&ban.Duration,
 			&ban.CreatedAt,
 			&ban.UpdatedAt,
+			&ruleId,
+			&ruleName,
 		)
 		if err != nil {
 			responses.BadRequest(c, "Failed to scan ban", &gin.H{"error": err.Error()})
@@ -75,6 +100,14 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		ban.Permanent = ban.Duration == 0
 		if !ban.Permanent {
 			ban.ExpiresAt = ban.CreatedAt.Add(time.Duration(ban.Duration) * time.Minute)
+		}
+
+		// Set rule information if available
+		if ruleId.Valid {
+			ban.RuleID = &ruleId.String
+		}
+		if ruleName.Valid {
+			ban.RuleName = &ruleName.String
 		}
 
 		// TODO: Fetch player name from cache or external source if needed
@@ -107,14 +140,14 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		return
 	}
 
-	var request ServerBanCreateRequest
+	var request models.ServerBanCreateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
 		return
 	}
 
 	// Validate request
-	if request.SteamID == "" {
+	if request.SteamId == "" {
 		responses.BadRequest(c, "Steam ID is required", &gin.H{"error": "Steam ID is required"})
 		return
 	}
@@ -130,20 +163,39 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	}
 
 	// Convert SteamID to int64
-	steamID, err := strconv.ParseInt(request.SteamID, 10, 64)
+	steamID, err := strconv.ParseInt(request.SteamId, 10, 64)
 	if err != nil {
 		responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
 		return
 	}
 
+	// If rule ID is provided, verify it exists and belongs to this server
+	if request.RuleId != nil {
+		var count int
+		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+			SELECT COUNT(*) FROM server_rules
+			WHERE id = $1 AND server_id = $2
+		`, request.RuleId, serverId).Scan(&count)
+
+		if err != nil {
+			responses.BadRequest(c, "Failed to verify rule", &gin.H{"error": err.Error()})
+			return
+		}
+
+		if count == 0 {
+			responses.BadRequest(c, "Rule not found", &gin.H{"error": "Rule not found"})
+			return
+		}
+	}
+
 	// Insert the ban into the database
 	var banID string
-
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		INSERT INTO server_bans (server_id, admin_id, steam_id, reason, duration)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO server_bans (server_id, admin_id, steam_id, reason, duration, rule_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
-	`, serverId, user.Id, steamID, request.Reason, request.Duration).Scan(&banID)
+	`, serverId, user.Id, steamID, request.Reason, request.Duration*24*60, request.RuleId).Scan(&banID)
+
 	if err != nil {
 		responses.BadRequest(c, "Failed to create ban", &gin.H{"error": err.Error()})
 		return
@@ -152,20 +204,24 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	// Also apply the ban via RCON if the server is online
 	if server != nil {
 		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-		_ = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
+		_ = r.BanPlayer(request.SteamId, request.Duration, request.Reason)
 	}
 
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"banId":    banID,
-		"steamId":  request.SteamID,
+		"steamId":  request.SteamId,
 		"reason":   request.Reason,
 		"duration": request.Duration,
 	}
 
+	if request.RuleId != nil {
+		auditData["ruleId"] = request.RuleId.String()
+	}
+
 	// Add expiry information if not permanent
 	if request.Duration > 0 {
-		expiresAt := time.Now().Add(time.Duration(request.Duration) * time.Minute)
+		expiresAt := time.Now().Add(time.Duration(request.Duration) * time.Hour * 24)
 		auditData["expiresAt"] = expiresAt.Format(time.RFC3339)
 	}
 
