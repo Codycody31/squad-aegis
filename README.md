@@ -48,23 +48,22 @@ A comprehensive control panel for Squad game server administration
 
 ```bash
 mkdir squad-aegis && cd squad-aegis
-curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/main/docker-compose.yml
+LATEST_TAG=$(curl -s https://api.github.com/repos/Codycody31/squad-aegis/releases/latest | jq -r '.tag_name')
+curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/$LATEST_TAG/docker-compose.yml
 ```
 
-2. Create a `.env` file with your configuration:
+2. Configure the dashboard environment:
 
-```bash
-# Core Settings
-INITIAL_ADMIN_USERNAME=your_admin_username
-INITIAL_ADMIN_PASSWORD=your_secure_password
-APP_URL=http://your_domain_or_ip:3113
-
-# Database Settings (optional - default values shown)
-DB_HOST=database
-DB_PORT=5432
-DB_NAME=squad-aegis
-DB_USER=squad-aegis
-DB_PASS=squad-aegis
+```yaml
+environment:
+  - INITIAL_ADMIN_USERNAME=your_admin_username
+  - INITIAL_ADMIN_PASSWORD=your_secure_password
+  - APP_URL=http://your_domain_or_ip:3113
+  - DB_HOST=database
+  - DB_PORT=5432
+  - DB_NAME=squad-aegis
+  - DB_USER=squad-aegis
+  - DB_PASS=squad-aegis
 ```
 
 3. Start the services:
@@ -82,7 +81,9 @@ The Log Watcher component monitors Squad server logs in real-time. To set it up:
 1. Create a new docker-compose file for the log watcher:
 
 ```bash
-curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/main/docker-compose.logwatcher.yml
+mkdir squad-aegis-log-watcher && cd squad-aegis-log-watcher
+LATEST_TAG=$(curl -s https://api.github.com/repos/Codycody31/squad-aegis/releases/latest | jq -r '.tag_name')
+curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/$LATEST_TAG/docker-compose.logwatcher.yml
 ```
 
 2. Configure the log watcher environment:
