@@ -18,14 +18,22 @@ type Server struct {
 }
 
 type ServerBan struct {
-	Id        uuid.UUID `json:"id"`
-	ServerId  uuid.UUID `json:"server_id"`
-	AdminId   uuid.UUID `json:"admin_id"`
-	SteamId   int64     `json:"steam_id"`
-	Reason    string    `json:"reason"`
-	Duration  int       `json:"duration"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Id        uuid.UUID  `json:"id"`
+	ServerId  uuid.UUID  `json:"server_id"`
+	AdminId   uuid.UUID  `json:"admin_id"`
+	SteamId   int64      `json:"steam_id"`
+	Reason    string     `json:"reason"`
+	Duration  int        `json:"duration"`
+	RuleId    *uuid.UUID `json:"rule_id"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+type ServerBanCreateRequest struct {
+	SteamId  string     `json:"steamId"`
+	Reason   string     `json:"reason"`
+	Duration int        `json:"duration"` // In days, 0 means permanent
+	RuleId   *uuid.UUID `json:"ruleId"`   // Optional rule ID
 }
 
 type ServerAdmin struct {

@@ -172,6 +172,12 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.POST("/bans", server.AuthHasAnyServerPermission("ban"), server.ServerBansAdd)
 				serverGroup.DELETE("/bans/:banId", server.AuthHasAnyServerPermission("ban"), server.ServerBansRemove)
 
+				// Server rules endpoints
+				serverGroup.GET("/rules", server.ServerRulesList)
+				serverGroup.POST("/rules", server.AuthHasServerPermission("manageserver"), server.ServerRulesAdd)
+				serverGroup.PUT("/rules/:ruleId", server.AuthHasServerPermission("manageserver"), server.ServerRulesUpdate)
+				serverGroup.DELETE("/rules/:ruleId", server.AuthHasServerPermission("manageserver"), server.ServerRulesDelete)
+
 				// Player action endpoints
 				serverGroup.POST("/rcon/kick-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconKickPlayer)
 				serverGroup.POST("/rcon/warn-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconWarnPlayer)
