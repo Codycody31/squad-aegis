@@ -177,6 +177,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.POST("/rules", server.AuthHasServerPermission("manageserver"), server.ServerRulesAdd)
 				serverGroup.PUT("/rules/:ruleId", server.AuthHasServerPermission("manageserver"), server.ServerRulesUpdate)
 				serverGroup.DELETE("/rules/:ruleId", server.AuthHasServerPermission("manageserver"), server.ServerRulesDelete)
+				serverGroup.PUT("/rules/batch-update", server.AuthHasServerPermission("manageserver"), server.ServerRulesBatchUpdate)
 
 				// Player action endpoints
 				serverGroup.POST("/rcon/kick-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconKickPlayer)
