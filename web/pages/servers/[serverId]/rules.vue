@@ -48,6 +48,7 @@ const refreshInterval = ref<NodeJS.Timeout | null>(null);
 const showAddRuleDialog = ref(false);
 const addRuleLoading = ref(false);
 const editingRule = ref<ServerRule | null>(null);
+const localRulesTree = ref<any[]>([]);
 
 interface ServerRule {
     id: string;
@@ -78,10 +79,18 @@ const form = useForm({
     },
 });
 
-// Computed property for rules tree structure with ordering
-const rulesTree = computed(() => {
+// Update the computed property to use the local tree
+const rulesTree = computed({
+    get: () => localRulesTree.value,
+    set: (newValue) => {
+        localRulesTree.value = newValue;
+    }
+});
+
+// Add this watch to update local tree when rules change
+watch(() => rules.value, (newRules) => {
     const buildTree = (parentId: string | null = null): any[] => {
-        return rules.value
+        return newRules
             .filter(rule => rule.parentId === parentId)
             .sort((a, b) => a.orderKey.localeCompare(b.orderKey, undefined, { numeric: true }))
             .map(rule => ({
@@ -89,8 +98,8 @@ const rulesTree = computed(() => {
                 children: buildTree(rule.id),
             }));
     };
-    return buildTree(null);
-});
+    localRulesTree.value = buildTree(null);
+}, { immediate: true });
 
 // Function to generate next order key
 function generateNextOrderKey(parentRule: ServerRule | null = null): string {
@@ -350,58 +359,89 @@ watch(showAddRuleDialog, (newValue) => {
 });
 
 // Function to update order keys after drag and drop
-async function updateOrderKeys(newRules: any[], parentId: string | null = null, prefix: string = '') {
+async function updateOrderKeys(newRules: any[], parentId: string | null = null, prefix: string = ''): Promise<Array<{ id: string; orderKey: string }>> {
+    const updates: Array<{ id: string; orderKey: string }> = [];
+    
     for (let i = 0; i < newRules.length; i++) {
         const rule = newRules[i];
+        if (!rule || !rule.id) continue; // Skip invalid rules
+        
         const newOrderKey = `${prefix}${i + 1}`;
         
         if (rule.orderKey !== newOrderKey) {
-            try {
-                const runtimeConfig = useRuntimeConfig();
-                const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-                const token = cookieToken.value;
-
-                if (!token) continue;
-
-                await useFetch(
-                    `${runtimeConfig.public.backendApi}/servers/${serverId}/rules/${rule.id}`,
-                    {
-                        method: "PUT",
-                        body: {
-                            name: rule.name,
-                            description: rule.description || "",
-                            suggestedDuration: rule.suggestedDuration,
-                            orderKey: newOrderKey,
-                        },
-                        headers: {
-                            Authorization: `Bearer ${token}`,
-                        },
-                    },
-                );
-            } catch (err) {
-                console.error('Failed to update rule order:', err);
-            }
+            updates.push({
+                id: rule.id,
+                orderKey: newOrderKey
+            });
         }
 
         if (rule.children && rule.children.length > 0) {
-            await updateOrderKeys(rule.children, rule.id, `${newOrderKey}.`);
+            const childUpdates = await updateOrderKeys(rule.children, rule.id, `${newOrderKey}.`);
+            updates.push(...childUpdates);
         }
     }
+
+    return updates;
 }
 
-// Function to handle drag end
+// Update the onDragEnd function
 async function onDragEnd(evt: any, parentId: string | null = null) {
     if (evt.from === evt.to) {
-        const newRules = evt.to.children;
-        await updateOrderKeys(newRules, parentId);
-        await fetchServerRules();
+        // Only update if the order has actually changed
+        const oldIndex = evt.oldIndex;
+        const newIndex = evt.newIndex;
+        if (oldIndex !== newIndex) {
+            const newRules = evt.to.children;
+            const updates = await updateOrderKeys(newRules, parentId);
+
+            // Only make API call if there are actual updates with valid IDs
+            if (updates.length > 0 && updates.every(update => update.id)) {
+                try {
+                    const runtimeConfig = useRuntimeConfig();
+                    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+                    const token = cookieToken.value;
+
+                    if (!token) return;
+
+                    console.log('Sending updates:', updates); // Debug log
+
+                    // Update all rules in a single batch
+                    await useFetch(
+                        `${runtimeConfig.public.backendApi}/servers/${serverId}/rules/batch-update`,
+                        {
+                            method: "PUT",
+                            body: {
+                                updates: updates
+                            },
+                            headers: {
+                                Authorization: `Bearer ${token}`,
+                            },
+                        },
+                    );
+
+                    // Update the rules array directly
+                    for (const update of updates) {
+                        const rule = rules.value.find(r => r.id === update.id);
+                        if (rule) {
+                            rule.orderKey = update.orderKey;
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to update rule orders:', err);
+                }
+            }
+        }
     }
 }
 
 // Function to handle nesting
 async function handleNest(evt: any, targetRule: any) {
-    const draggedRule = evt.draggedContext.element;
-    if (draggedRule.id === targetRule.id || draggedRule.parentId === targetRule.id) return;
+    // Get the dragged rule ID from the data transfer
+    const draggedRuleId = evt.dataTransfer?.getData('text/plain');
+    if (!draggedRuleId) return;
+
+    const draggedRule = rules.value.find(r => r.id === draggedRuleId);
+    if (!draggedRule || draggedRule.id === targetRule.id || draggedRule.parentId === targetRule.id) return;
 
     try {
         const runtimeConfig = useRuntimeConfig();
@@ -409,6 +449,30 @@ async function handleNest(evt: any, targetRule: any) {
         const token = cookieToken.value;
 
         if (!token) return;
+
+        const newOrderKey = generateNextOrderKey(targetRule);
+        console.log('Nesting rule:', draggedRule.id, 'into:', targetRule.id, 'with order:', newOrderKey);
+
+        // Update the target rule to ensure it has a children array
+        const updatedTargetRule = {
+            ...targetRule,
+            children: targetRule.children || []
+        };
+
+        // Update the target rule in the local tree
+        const findAndUpdateTreeRule = (tree: any[], targetId: string, updatedRule: any): boolean => {
+            for (let i = 0; i < tree.length; i++) {
+                if (tree[i].id === targetId) {
+                    tree[i] = { ...tree[i], ...updatedRule };
+                    return true;
+                }
+                if (tree[i].children && findAndUpdateTreeRule(tree[i].children, targetId, updatedRule)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        findAndUpdateTreeRule(localRulesTree.value, targetRule.id, updatedTargetRule);
 
         await useFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/rules/${draggedRule.id}`,
@@ -419,7 +483,7 @@ async function handleNest(evt: any, targetRule: any) {
                     description: draggedRule.description || "",
                     suggestedDuration: draggedRule.suggestedDuration,
                     parentId: targetRule.id,
-                    orderKey: generateNextOrderKey(targetRule),
+                    orderKey: newOrderKey,
                 },
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -427,10 +491,52 @@ async function handleNest(evt: any, targetRule: any) {
             },
         );
 
-        await fetchServerRules();
+        // Update the rules array directly
+        const rule = rules.value.find(r => r.id === draggedRule.id);
+        if (rule) {
+            rule.parentId = targetRule.id;
+            rule.orderKey = newOrderKey;
+        }
     } catch (err) {
         console.error('Failed to update rule parent:', err);
     }
+}
+
+// Function to handle drag start
+function handleDragStart(evt: DragEvent, rule: any) {
+    if (evt.dataTransfer) {
+        evt.dataTransfer.setData('text/plain', rule.id);
+    }
+}
+
+// Function to update a rule in the array
+function updateRuleInArray(updatedRule: ServerRule) {
+    // Update in the main rules array
+    const findAndUpdateRule = (rules: ServerRule[], targetId: string, updatedRule: ServerRule): boolean => {
+        for (let i = 0; i < rules.length; i++) {
+            if (rules[i].id === targetId) {
+                rules[i] = { ...rules[i], ...updatedRule };
+                return true;
+            }
+        }
+        return false;
+    };
+    findAndUpdateRule(rules.value, updatedRule.id, updatedRule);
+
+    // Update in the local tree
+    const findAndUpdateTreeRule = (tree: any[], targetId: string, updatedRule: any): boolean => {
+        for (let i = 0; i < tree.length; i++) {
+            if (tree[i].id === targetId) {
+                tree[i] = { ...tree[i], ...updatedRule };
+                return true;
+            }
+            if (tree[i].children && findAndUpdateTreeRule(tree[i].children, targetId, updatedRule)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    findAndUpdateTreeRule(localRulesTree.value, updatedRule.id, updatedRule);
 }
 </script>
 
@@ -589,16 +695,16 @@ async function handleNest(evt: any, targetRule: any) {
                         @end="onDragEnd"
                         :group="{ name: 'rules' }"
                         class="space-y-2"
+                        :animation="50"
+                        ghost-class="sortable-ghost"
+                        drag-class="sortable-drag"
+                        :sort="true"
+                        :forceFallback="true"
                     >
                         <template #item="slotProps">
                             <RuleItem
                                 :rule="slotProps.element"
-                                @update:rule="(updatedRule) => {
-                                    const index = rulesTree.findIndex(r => r.id === updatedRule.id);
-                                    if (index !== -1) {
-                                        rulesTree[index] = updatedRule;
-                                    }
-                                }"
+                                @update:rule="updateRuleInArray"
                                 :on-edit="startEditRule"
                                 :on-delete="deleteRule"
                                 :on-drag-end="onDragEnd"

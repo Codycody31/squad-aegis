@@ -37,6 +37,14 @@ type ServerRuleUpdateRequest struct {
 	OrderKey          string `json:"orderKey"`          // For ordering rules
 }
 
+// ServerRuleBatchUpdate represents a request to batch update rules
+type ServerRuleBatchUpdate struct {
+	Updates []struct {
+		ID       string `json:"id"`
+		OrderKey string `json:"orderKey"`
+	} `json:"updates"`
+}
+
 // ServerRulesList handles listing all rules for a server
 func (s *Server) ServerRulesList(c *gin.Context) {
 	user := s.getUserFromSession(c)
@@ -353,4 +361,76 @@ func (s *Server) ServerRulesDelete(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rule:delete", auditData)
 
 	responses.Success(c, "Rule deleted successfully", nil)
+}
+
+// ServerRulesBatchUpdate handles batch updating rules
+func (s *Server) ServerRulesBatchUpdate(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if user has access to this server
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	var request ServerRuleBatchUpdate
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Start a transaction
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.BadRequest(c, "Failed to start transaction", &gin.H{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback()
+
+	// Update each rule
+	for _, update := range request.Updates {
+		ruleId, err := uuid.Parse(update.ID)
+		if err != nil {
+			responses.BadRequest(c, "Invalid rule ID", &gin.H{"error": err.Error()})
+			return
+		}
+
+		result, err := tx.ExecContext(c.Request.Context(), `
+			UPDATE server_rules
+			SET order_key = $1
+			WHERE id = $2 AND server_id = $3
+		`, update.OrderKey, ruleId, serverId)
+
+		if err != nil {
+			responses.BadRequest(c, "Failed to update rule", &gin.H{"error": err.Error()})
+			return
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			responses.BadRequest(c, "Failed to get rows affected", &gin.H{"error": err.Error()})
+			return
+		}
+
+		if rowsAffected == 0 {
+			responses.BadRequest(c, "Rule not found", &gin.H{"error": "Rule not found"})
+			return
+		}
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		responses.BadRequest(c, "Failed to commit transaction", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Rules updated successfully", nil)
 }
