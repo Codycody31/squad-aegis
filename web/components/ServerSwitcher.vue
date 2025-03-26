@@ -71,6 +71,15 @@ handleServerChange(router.currentRoute.value.params.serverId as string);
             size="lg"
             class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
           >
+            <Avatar class="h-8 w-8 rounded-lg" v-if="uiStore.activeServer">
+              <AvatarImage
+                :src="`/api/images/avatar?username=${uiStore.activeServer?.name}&width=256&height=256&gridsize=8`"
+                :alt="uiStore.activeServer?.name"
+              />
+              <AvatarFallback class="rounded-lg">
+                {{ uiStore.activeServer?.name?.slice(0, 2)?.toUpperCase() || "CN" }}
+              </AvatarFallback>
+            </Avatar>
             <div
               class="grid flex-1 text-left text-sm leading-tight"
               v-if="uiStore.activeServer"
@@ -105,6 +114,12 @@ handleServerChange(router.currentRoute.value.params.serverId as string);
             class="gap-2 p-2"
             @click="onServerSelect(server)"
           >
+            <Avatar class="h-8 w-8 rounded-lg">
+              <AvatarImage
+                :src="`/api/images/avatar?username=${server.name}&width=256&height=256&gridsize=8`"
+                :alt="server.name"
+              />
+            </Avatar>
             {{ server.name }}
           </DropdownMenuItem>
         </DropdownMenuContent>
