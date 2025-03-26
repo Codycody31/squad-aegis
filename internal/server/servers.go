@@ -205,15 +205,50 @@ func (s *Server) ServerGet(c *gin.Context) {
 		return
 	}
 
+	responses.Success(c, "Server fetched successfully", &gin.H{
+		"server": server,
+	})
+}
+
+// ServerMetrics handles getting the metrics of a server
+func (s *Server) ServerMetrics(c *gin.Context) {
+	serverId := c.Param("serverId")
+	if serverId == "" {
+		responses.BadRequest(c, "Server ID is required", &gin.H{"error": "Server ID is required"})
+		return
+	}
+
+	// Parse UUID
+	serverUUID, err := uuid.Parse(serverId)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID format", &gin.H{"error": "Invalid server ID format"})
+		return
+	}
+
+	// Get user from session
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	// Get server from database
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverUUID, user)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Server not found", &gin.H{"error": "Server not found"})
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to fetch server"})
+		return
+	}
+
 	// Get server status and metrics if possible
-	serverStatus := map[string]interface{}{}
 	var metrics map[string]interface{} = nil
 
 	// Try to connect to RCON to check if server is online
 	rconClient, err := squadRcon.NewSquadRconWithConnection(s.Dependencies.RconManager, serverUUID, server.IpAddress, server.RconPort, server.RconPassword)
 	if err == nil {
-		serverStatus["rcon"] = true
-
 		// Close the connection after checking
 		defer rconClient.Close()
 
@@ -256,18 +291,7 @@ func (s *Server) ServerGet(c *gin.Context) {
 		}
 	}
 
-	// Prepare response with server info and status
-	serverResponse := gin.H{
-		"server": server,
-		"status": serverStatus,
-	}
-
-	// Add metrics if available
-	if metrics != nil {
-		serverResponse["metrics"] = metrics
-	}
-
-	responses.Success(c, "Server fetched successfully", &serverResponse)
+	responses.Success(c, "Server metrics fetched successfully", &gin.H{"metrics": metrics})
 }
 
 // ServerStatus handles getting the status of a server
@@ -305,6 +329,17 @@ func (s *Server) ServerStatus(c *gin.Context) {
 
 	// Get server status and metrics if possible
 	serverStatus := map[string]interface{}{}
+
+	// pinger, err := probing.NewPinger(server.IpAddress)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// err = pinger.Run() // Blocks until finished.
+	// if err != nil {
+	// 	serverStatus["ping"] = false
+	// } else {
+	// 	serverStatus["ping"] = true
+	// }
 
 	rconClient, err := squadRcon.NewSquadRconWithConnection(s.Dependencies.RconManager, serverUUID, server.IpAddress, server.RconPort, server.RconPassword)
 	if err == nil {
