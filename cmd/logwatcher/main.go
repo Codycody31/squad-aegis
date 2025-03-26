@@ -115,6 +115,20 @@ func NewSFTPSource(host string, port int, username, password, keyPath, filepath 
 	tempFileName := fmt.Sprintf("sftp-tail-%x.tmp", md5sum([]byte(h)))
 	tempFilePath := os.TempDir() + "/" + tempFileName
 
+	// Create temp directory if it doesn't exist
+	if _, err := os.Stat(os.TempDir()); os.IsNotExist(err) {
+		os.MkdirAll(os.TempDir(), 0755)
+	}
+
+	// Create temp file if it doesn't exist
+	if _, err := os.Stat(tempFilePath); os.IsNotExist(err) {
+		file, err := os.Create(tempFilePath)
+		if err != nil {
+			log.Printf("[ERROR] Failed to create temp file: %v", err)
+		}
+		file.Close()
+	}
+
 	return &SFTPSource{
 		host:           host,
 		port:           port,
@@ -471,6 +485,20 @@ func NewFTPSource(host string, port int, username, password, filepath string, po
 	h := fmt.Sprintf("%s:%d:%s", host, port, filepath)
 	tempFileName := fmt.Sprintf("ftp-tail-%x.tmp", md5sum([]byte(h)))
 	tempFilePath := os.TempDir() + "/" + tempFileName
+
+	// Create temp directory if it doesn't exist
+	if _, err := os.Stat(os.TempDir()); os.IsNotExist(err) {
+		os.MkdirAll(os.TempDir(), 0755)
+	}
+
+	// Create temp file if it doesn't exist
+	if _, err := os.Stat(tempFilePath); os.IsNotExist(err) {
+		file, err := os.Create(tempFilePath)
+		if err != nil {
+			log.Printf("[ERROR] Failed to create temp file: %v", err)
+		}
+		file.Close()
+	}
 
 	return &FTPSource{
 		host:          host,
