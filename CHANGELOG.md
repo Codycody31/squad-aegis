@@ -6,6 +6,10 @@
 
 @Codycody31
 
+### ✨ Features
+
+- feat(logwatcher): refactor log processing and client broadcasting [[#45](https://github.com/Codycody31/squad-aegis/pull/45)]
+
 ### 📈 Enhancement
 
 - feat: add server metrics endpoint and fetching logic [[#43](https://github.com/Codycody31/squad-aegis/pull/43)]
