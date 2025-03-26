@@ -153,6 +153,40 @@ async function fetchServerInfo() {
   }
 }
 
+// fetch server metrics
+async function fetchServerMetrics() {
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
+  const token = cookieToken.value;
+  if (!token) {
+    error.value = "Authentication required";
+    return;
+  }
+
+  const { data: responseData, error: fetchError } = await useFetch(
+    `${runtimeConfig.public.backendApi}/servers/${serverId}/metrics`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (fetchError.value) {
+    throw new Error(
+      fetchError.value.message || "Failed to fetch server metrics"
+    );
+  }
+
+  if (responseData.value && responseData.value.data) {
+    serverInfo.value.metrics = responseData.value.data.metrics;
+    console.log(serverInfo.value);
+  }
+}
+
 async function fetchRconServerInfo() {
   rconServerInfoLoading.value = true;
   rconServerInfoError.value = null;
@@ -469,6 +503,7 @@ function openMapChangeDialog() {
 function refresh() {
   fetchServerInfo();
   fetchTeamsData();
+  fetchServerMetrics();
   fetchRconServerInfo();
 }
 
@@ -573,8 +608,8 @@ refresh();
                   <p class="text-sm text-muted-foreground">
                     <template
                       v-if="
-                        rconServerInfo.match_timeout * 60 -
-                          rconServerInfo.playtime >
+                        rconServerInfo?.match_timeout * 60 -
+                          rconServerInfo?.playtime >
                         0
                       "
                     >

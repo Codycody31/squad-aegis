@@ -21,7 +21,7 @@
             <div
               :class="[
                 'w-3 h-3 rounded-full',
-                serverStatus?.status?.rcon ? 'bg-green-500' : 'bg-red-500',
+                serverStatus?.rcon ? 'bg-green-500' : 'bg-red-500',
               ]"
             ></div>
             <span class="text-sm">RCON Connection</span>
@@ -246,7 +246,6 @@ const fetchServerDetails = async () => {
     const data = await response.json();
 
     if (data.code === 200) {
-      serverStatus.value = data.data;
       serverForm.value = {
         name: data.data.server.name,
         ip_address: data.data.server.ip_address,
@@ -261,6 +260,19 @@ const fetchServerDetails = async () => {
       description: "Failed to fetch server details",
       variant: "destructive",
     });
+  }
+};
+
+// fetch server status
+const fetchServerStatus = async () => {
+  const response = await fetch(`/api/servers/${serverId}/status`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  const data = await response.json();
+  if (data.code === 200) {
+    serverStatus.value = data.data.status;
   }
 };
 
@@ -386,5 +398,6 @@ const deleteServer = async () => {
 
 onMounted(() => {
   fetchServerDetails();
+  fetchServerStatus();
 });
 </script>
