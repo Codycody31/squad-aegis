@@ -655,7 +655,7 @@ function updateRuleInArray(updatedRule: ServerRule) {
             <CardHeader>
                 <CardTitle>Rules List</CardTitle>
                 <p class="text-sm text-muted-foreground">
-                    Drag rules to reorder them. Drag a rule onto another rule to nest it.
+                    Drag rules to reorder them. Drag a rule onto any other rule to nest it as a child rule. Order numbers are shown next to each rule name.
                 </p>
             </CardHeader>
             <CardContent>

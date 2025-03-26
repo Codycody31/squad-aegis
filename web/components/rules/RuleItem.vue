@@ -91,7 +91,10 @@ function toggleExpand() {
                                 class="h-4 w-4"
                             />
                         </Button>
-                        <div class="font-medium">{{ rule.name }}</div>
+                        <div class="font-medium">
+                            <span class="text-muted-foreground mr-2">{{ rule.orderKey }}</span>
+                            {{ rule.name }}
+                        </div>
                     </div>
                     <div v-if="rule.description" class="text-sm text-muted-foreground mt-1">
                         {{ rule.description }}
