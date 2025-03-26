@@ -140,6 +140,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.PUT("", server.ServerUpdate)
 				serverGroup.DELETE("", server.AuthIsSuperAdmin(), server.ServerDelete)
 
+				serverGroup.GET("/metrics", server.ServerMetrics)
 				serverGroup.GET("/status", server.ServerStatus)
 				serverGroup.GET("/audit-logs", server.AuthHasServerPermission("manageserver"), server.ServerAuditLogs)
 
