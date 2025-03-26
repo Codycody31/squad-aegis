@@ -39,31 +39,35 @@ function toggleExpand() {
 </script>
 
 <template>
-    <div class="border rounded-lg p-4 bg-card">
+    <div class="border rounded-lg p-4 bg-card rule-container">
         <div class="relative">
             <div 
                 class="absolute inset-0 drop-target"
                 @dragover.prevent="(evt) => {
-                    evt.stopPropagation();
+                    if (evt.dataTransfer) {
+                        evt.dataTransfer.dropEffect = 'move';
+                    }
                     const target = evt.currentTarget as HTMLElement;
                     target.classList.add('drop-target-active');
                 }"
                 @dragleave.prevent="(evt) => {
-                    evt.stopPropagation();
                     const target = evt.currentTarget as HTMLElement;
                     target.classList.remove('drop-target-active');
                 }"
                 @drop.prevent="(evt) => {
-                    evt.stopPropagation();
                     const target = evt.currentTarget as HTMLElement;
                     target.classList.remove('drop-target-active');
                     onNest(evt, rule);
                 }"
             ></div>
             <div 
-                class="flex items-start gap-2 relative"
-                @dragstart.stop="(evt) => {
+                class="flex items-start gap-2 relative z-20"
+                draggable="true"
+                @dragstart="(evt) => {
                     evt.dataTransfer?.setData('text/plain', rule.id);
+                    if (evt.dataTransfer) {
+                        evt.dataTransfer.effectAllowed = 'move';
+                    }
                 }"
             >
                 <div class="drag-handle cursor-move mt-1">
@@ -124,6 +128,8 @@ function toggleExpand() {
                 :group="{ name: 'rules' }"
                 class="space-y-2"
                 :animation="50"
+                ghost-class="sortable-ghost"
+                drag-class="sortable-drag"
             >
                 <template #item="childSlotProps">
                     <RuleItem
@@ -166,10 +172,15 @@ function toggleExpand() {
     transition: transform 0.1s ease;
 }
 
+.rule-container {
+    position: relative;
+}
+
 .drop-target {
     transition: all 0.15s ease;
     border: 2px solid transparent;
     border-radius: 0.375rem;
+    z-index: 10;
     pointer-events: none;
 }
 
@@ -190,7 +201,6 @@ function toggleExpand() {
     padding: 2px 8px;
     border-radius: 4px;
     font-size: 12px;
-    pointer-events: none;
     z-index: 10;
 }
 </style> 
