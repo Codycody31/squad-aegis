@@ -10,6 +10,10 @@
 
 - feat(logwatcher): refactor log processing and client broadcasting [[#45](https://github.com/Codycody31/squad-aegis/pull/45)]
 
+### 🐛 Bug Fixes
+
+- fix(logwatcher): temp directory and file creation for sources [[#46](https://github.com/Codycody31/squad-aegis/pull/46)]
+
 ### 📈 Enhancement
 
 - feat: add server metrics endpoint and fetching logic [[#43](https://github.com/Codycody31/squad-aegis/pull/43)]
