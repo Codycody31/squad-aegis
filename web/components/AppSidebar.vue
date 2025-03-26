@@ -246,7 +246,7 @@ await fetchServers();
               >
                 <Avatar class="h-8 w-8 rounded-lg">
                   <AvatarImage
-                    :src="''"
+                    :src="`/api/images/avatar?username=${useAuthStore().user?.name}&width=256&height=256&gridsize=8`"
                     :alt="useAuthStore().user?.name ?? ''"
                   />
                   <AvatarFallback class="rounded-lg">
@@ -278,7 +278,7 @@ await fetchServers();
                 >
                   <Avatar class="h-8 w-8 rounded-lg">
                     <AvatarImage
-                      :src="''"
+                      :src="`/api/images/avatar?username=${useAuthStore().user?.name}&width=256&height=256&gridsize=8`"
                       :alt="useAuthStore().user?.name ?? ''"
                     />
                     <AvatarFallback class="rounded-lg">

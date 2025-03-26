@@ -86,6 +86,8 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 		apiGroup.Use(server.OptionalAuthSession)
 
+		apiGroup.GET("/images/avatar", server.GetAvatar)
+
 		authGroup := apiGroup.Group("/auth")
 		{
 			authGroup.GET("/initial", server.AuthSession, server.AuthInitial)
