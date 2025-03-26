@@ -78,7 +78,7 @@ docker compose up -d
 
 The Log Watcher component monitors Squad server logs in real-time. To set it up:
 
-1. Create a new docker-compose file for the log watcher:
+1. Create a new directory and download the log watcher docker-compose file:
 
 ```bash
 mkdir squad-aegis-log-watcher && cd squad-aegis-log-watcher
@@ -90,9 +90,11 @@ curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/$LATEST_TAG/doc
 
 ```yaml
 environment:
-  LOGWATCHER_PORT: 31135
-  LOGWATCHER_AUTH_TOKEN: "your_secure_token"  # Must match dashboard configuration
-  LOGWATCHER_LOG_FILE: "/path/to/SquadGame.log"
+  - LOGWATCHER_PORT=31135
+  - LOGWATCHER_AUTH_TOKEN=your_secure_token  # Must match dashboard configuration
+  - LOGWATCHER_SOURCE_TYPE=local             # Options: local, sftp, ftp
+  - LOGWATCHER_LOG_FILE=/path/to/SquadGame.log
+  - LOGWATCHER_READ_FROM_START=false         # Optional: Set to true to read entire log file history
 ```
 
 3. Start the log watcher:
@@ -100,6 +102,12 @@ environment:
 ```bash
 docker compose -f docker-compose.logwatcher.yml up -d
 ```
+
+#### Log Watcher Behavior
+
+By default, the Log Watcher only broadcasts new log entries that appear after it starts (similar to `tail -f`). This prevents flooding clients with potentially large amounts of historical log data.
+
+To read and process the entire log file from the beginning, set `LOGWATCHER_READ_FROM_START=true`.
 
 ## Configuration
 
@@ -123,6 +131,23 @@ docker compose -f docker-compose.logwatcher.yml up -d
 | DB_NAME | Database name | squad-aegis |
 | DB_USER | Database user | squad-aegis |
 | DB_PASS | Database password | squad-aegis |
+
+#### Log Watcher
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| LOGWATCHER_PORT | gRPC server port | 31135 |
+| LOGWATCHER_AUTH_TOKEN | Authentication token | (required) |
+| LOGWATCHER_SOURCE_TYPE | Source type (local, sftp, ftp) | local |
+| LOGWATCHER_LOG_FILE | Path to local log file | (required for local) |
+| LOGWATCHER_HOST | Remote host for SFTP/FTP | (required for sftp/ftp) |
+| LOGWATCHER_REMOTE_PORT | Remote port for SFTP/FTP | 22 (sftp), 21 (ftp) |
+| LOGWATCHER_USERNAME | Username for SFTP/FTP | (required for sftp/ftp) |
+| LOGWATCHER_PASSWORD | Password for SFTP/FTP | (required for ftp) |
+| LOGWATCHER_KEY_PATH | Path to SSH key for SFTP | (optional for sftp) |
+| LOGWATCHER_REMOTE_PATH | Path to remote log file | (required for sftp/ftp) |
+| LOGWATCHER_POLL_FREQUENCY | Poll frequency for remote files | 5s |
+| LOGWATCHER_READ_FROM_START | Read entire log from beginning | false |
 
 ## Development
 

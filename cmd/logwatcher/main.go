@@ -2,17 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hpcloud/tail"
+	"github.com/jlaffaye/ftp"
+	"github.com/pkg/sftp"
 	"github.com/urfave/cli/v3"
+	"golang.org/x/crypto/ssh"
 	"google.golang.org/grpc"
 
 	pb "go.codycody31.dev/squad-aegis/proto/logwatcher"
@@ -21,6 +28,747 @@ import (
 
 // Auth token (configurable via CLI)
 var authToken string
+
+// LogSource defines an interface for different log sources
+type LogSource interface {
+	// Start watching logs and return a channel that receives log lines
+	Watch(ctx context.Context) (<-chan string, error)
+	// Close the log source
+	Close() error
+}
+
+// LocalFileSource implements LogSource for local file access
+type LocalFileSource struct {
+	filepath string
+	tail     *tail.Tail
+}
+
+// NewLocalFileSource creates a new local file source
+func NewLocalFileSource(filepath string) *LocalFileSource {
+	return &LocalFileSource{
+		filepath: filepath,
+	}
+}
+
+// Watch starts watching a local file for changes
+func (l *LocalFileSource) Watch(ctx context.Context) (<-chan string, error) {
+	cleanPath := filepath.Clean(l.filepath)
+	t, err := tail.TailFile(cleanPath, tail.Config{
+		Follow: true,
+		ReOpen: true,
+		Poll:   true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	l.tail = t
+
+	logChan := make(chan string)
+	go func() {
+		defer close(logChan)
+		for {
+			select {
+			case line := <-t.Lines:
+				if line != nil {
+					logChan <- strings.TrimSpace(line.Text)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return logChan, nil
+}
+
+// Close closes the local file source
+func (l *LocalFileSource) Close() error {
+	if l.tail != nil {
+		return l.tail.Stop()
+	}
+	return nil
+}
+
+// SFTPSource implements LogSource for SFTP access
+type SFTPSource struct {
+	host           string
+	port           int
+	username       string
+	password       string
+	keyPath        string
+	filepath       string
+	client         *sftp.Client
+	sshConn        *ssh.Client
+	pollFreq       time.Duration
+	lastPos        int64
+	mu             sync.Mutex // Mutex for protecting client access
+	reconnectDelay time.Duration
+	maxDelay       time.Duration
+	tempFilePath   string // Path to temporary file for downloads
+	readFromStart  bool   // Whether to read from the beginning of the file
+}
+
+// NewSFTPSource creates a new SFTP source
+func NewSFTPSource(host string, port int, username, password, keyPath, filepath string, pollFreq time.Duration, readFromStart bool) *SFTPSource {
+	// Create a unique temp file name based on connection details
+	h := fmt.Sprintf("%s:%d:%s", host, port, filepath)
+	tempFileName := fmt.Sprintf("sftp-tail-%x.tmp", md5sum([]byte(h)))
+	tempFilePath := os.TempDir() + "/" + tempFileName
+
+	return &SFTPSource{
+		host:           host,
+		port:           port,
+		username:       username,
+		password:       password,
+		keyPath:        keyPath,
+		filepath:       filepath,
+		pollFreq:       pollFreq,
+		lastPos:        0,
+		reconnectDelay: 1 * time.Second,  // Start with 1 second
+		maxDelay:       60 * time.Second, // Max 1 minute between retries
+		tempFilePath:   tempFilePath,
+		readFromStart:  readFromStart,
+	}
+}
+
+// md5sum creates an MD5 hash of the input
+func md5sum(data []byte) []byte {
+	hash := md5.Sum(data)
+	return hash[:]
+}
+
+// Watch starts watching an SFTP file for changes
+func (s *SFTPSource) Watch(ctx context.Context) (<-chan string, error) {
+	// Initial connection
+	if err := s.connect(); err != nil {
+		return nil, err
+	}
+
+	// Set initial position to end of file for proper tailing behavior
+	if err := s.initializePosition(); err != nil {
+		return nil, fmt.Errorf("failed to initialize file position: %v", err)
+	}
+
+	// Create temp file if it doesn't exist
+	if _, err := os.Stat(s.tempFilePath); os.IsNotExist(err) {
+		file, err := os.Create(s.tempFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp file: %v", err)
+		}
+		file.Close()
+	}
+
+	logChan := make(chan string)
+
+	// Start the polling goroutine
+	go func() {
+		defer close(logChan)
+		defer os.Remove(s.tempFilePath) // Cleanup temp file when done
+
+		ticker := time.NewTicker(s.pollFreq)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Test connection first
+				if !s.isConnected() {
+					log.Printf("[WARN] SFTP connection test failed, attempting reconnect")
+					if err := s.reconnect(); err != nil {
+						log.Printf("[ERROR] Failed to reconnect to SFTP server: %v", err)
+						continue
+					}
+				}
+
+				// Download new data and get lines
+				newLines, err := s.fetchNewData()
+				if err != nil {
+					log.Printf("[ERROR] Failed to fetch data from SFTP: %v", err)
+					// Try to reconnect on error
+					if err := s.reconnect(); err != nil {
+						log.Printf("[ERROR] Failed to reconnect to SFTP server: %v", err)
+					}
+					continue
+				}
+
+				// Reset reconnect delay after successful fetch
+				s.mu.Lock()
+				s.reconnectDelay = 1 * time.Second
+				s.mu.Unlock()
+
+				// Send each line to the channel
+				for _, line := range newLines {
+					logChan <- line
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return logChan, nil
+}
+
+// initializePosition sets the initial file position
+func (s *SFTPSource) initializePosition() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if client is nil
+	if s.client == nil {
+		return fmt.Errorf("SFTP client is nil, connection may have been lost")
+	}
+
+	// Get file stats to set initial position
+	stat, err := s.client.Stat(s.filepath)
+	if err != nil {
+		return fmt.Errorf("failed to stat remote file: %v", err)
+	}
+
+	// Set initial position based on configuration
+	fileSize := stat.Size()
+	if s.readFromStart {
+		s.lastPos = 0
+		log.Printf("[INFO] Initial SFTP position set to start of file (reading from beginning)")
+	} else {
+		s.lastPos = fileSize
+		log.Printf("[INFO] Initial SFTP position set to end of file (%d bytes)", fileSize)
+	}
+
+	return nil
+}
+
+// fetchNewData downloads new file content and returns parsed lines
+func (s *SFTPSource) fetchNewData() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if client is nil
+	if s.client == nil {
+		return nil, fmt.Errorf("SFTP client is nil, connection may have been lost")
+	}
+
+	// Get file stats to check size
+	stat, err := s.client.Stat(s.filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat remote file: %v", err)
+	}
+
+	// Check if file size has changed
+	fileSize := stat.Size()
+
+	// If file size has not changed, return empty slice
+	if fileSize == s.lastPos {
+		return []string{}, nil
+	}
+
+	// If file has been rotated (smaller than our last position), reset position
+	if fileSize < s.lastPos {
+		log.Printf("[INFO] File size decreased from %d to %d, file may have been rotated", s.lastPos, fileSize)
+		s.lastPos = 0
+	}
+
+	// Open remote file
+	remoteFile, err := s.client.Open(s.filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open remote file: %v", err)
+	}
+	defer remoteFile.Close()
+
+	// Seek to last position
+	_, err = remoteFile.Seek(s.lastPos, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to seek in remote file: %v", err)
+	}
+
+	// Open temporary file for writing
+	tempFile, err := os.OpenFile(s.tempFilePath, os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open temp file: %v", err)
+	}
+	defer tempFile.Close()
+
+	// Copy data from remote to temp file
+	bytesRead, err := io.Copy(tempFile, remoteFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy data to temp file: %v", err)
+	}
+
+	// Update last position
+	s.lastPos += bytesRead
+
+	// If no new data, return empty result
+	if bytesRead == 0 {
+		return []string{}, nil
+	}
+
+	// Read the temp file content
+	tempFile.Close() // Close before reading
+	content, err := os.ReadFile(s.tempFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read temp file: %v", err)
+	}
+
+	// Split content into lines
+	contentStr := string(content)
+	lines := strings.Split(strings.ReplaceAll(contentStr, "\r\n", "\n"), "\n")
+
+	// Remove empty last line if present
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	return lines, nil
+}
+
+// isConnected tests if the SFTP connection is still valid
+func (s *SFTPSource) isConnected() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.client == nil || s.sshConn == nil {
+		return false
+	}
+
+	// Try a simple operation - list directory of the parent folder
+	parentDir := filepath.Dir(s.filepath)
+	_, err := s.client.ReadDir(parentDir)
+	return err == nil
+}
+
+// connect establishes an SFTP connection
+func (s *SFTPSource) connect() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Create SSH client configuration
+	config := &ssh.ClientConfig{
+		User:            s.username,
+		Auth:            []ssh.AuthMethod{},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         5 * time.Second,
+	}
+
+	// Add password auth if provided
+	if s.password != "" {
+		config.Auth = append(config.Auth, ssh.Password(s.password))
+	}
+
+	// Add key auth if provided
+	if s.keyPath != "" {
+		key, err := os.ReadFile(s.keyPath)
+		if err != nil {
+			return fmt.Errorf("unable to read private key: %v", err)
+		}
+
+		signer, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			return fmt.Errorf("unable to parse private key: %v", err)
+		}
+		config.Auth = append(config.Auth, ssh.PublicKeys(signer))
+	}
+
+	// Connect to SSH server
+	sshConn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", s.host, s.port), config)
+	if err != nil {
+		return fmt.Errorf("failed to dial SSH: %v", err)
+	}
+
+	// Create SFTP client
+	sftpClient, err := sftp.NewClient(sshConn)
+	if err != nil {
+		sshConn.Close()
+		return fmt.Errorf("failed to create SFTP client: %v", err)
+	}
+
+	// Close any existing connections
+	if s.client != nil {
+		s.client.Close()
+	}
+	if s.sshConn != nil {
+		s.sshConn.Close()
+	}
+
+	// Store new connections
+	s.sshConn = sshConn
+	s.client = sftpClient
+
+	return nil
+}
+
+// reconnect closes existing connections and creates new ones with exponential backoff
+func (s *SFTPSource) reconnect() error {
+	s.mu.Lock()
+	delay := s.reconnectDelay
+	// Implement exponential backoff
+	if s.reconnectDelay*2 < s.maxDelay {
+		s.reconnectDelay = s.reconnectDelay * 2
+	} else {
+		s.reconnectDelay = s.maxDelay
+	}
+	s.mu.Unlock()
+
+	log.Printf("[INFO] Attempting to reconnect to SFTP server %s:%d (delay: %v)", s.host, s.port, delay)
+
+	// Wait before reconnecting
+	time.Sleep(delay)
+
+	return s.connect()
+}
+
+// Close closes the SFTP source and removes temp file
+func (s *SFTPSource) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var errMsgs []string
+
+	// Clean up temp file
+	if err := os.Remove(s.tempFilePath); err != nil && !os.IsNotExist(err) {
+		errMsgs = append(errMsgs, fmt.Sprintf("failed to remove temp file: %v", err))
+	}
+
+	if s.client != nil {
+		if err := s.client.Close(); err != nil {
+			errMsgs = append(errMsgs, fmt.Sprintf("failed to close SFTP client: %v", err))
+		}
+		s.client = nil
+	}
+
+	if s.sshConn != nil {
+		if err := s.sshConn.Close(); err != nil {
+			errMsgs = append(errMsgs, fmt.Sprintf("failed to close SSH connection: %v", err))
+		}
+		s.sshConn = nil
+	}
+
+	if len(errMsgs) > 0 {
+		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	}
+	return nil
+}
+
+// FTPSource implements LogSource for FTP access
+type FTPSource struct {
+	host          string
+	port          int
+	username      string
+	password      string
+	filepath      string
+	conn          *ftp.ServerConn
+	pollFreq      time.Duration
+	lastPos       int64
+	mu            sync.Mutex    // Mutex for protecting connection access
+	tempFilePath  string        // Path to temporary file for downloads
+	maxRetries    int           // Maximum number of retries for operations
+	retryDelay    time.Duration // Delay between retries
+	readFromStart bool          // Whether to read from the beginning of the file
+}
+
+// NewFTPSource creates a new FTP source
+func NewFTPSource(host string, port int, username, password, filepath string, pollFreq time.Duration, readFromStart bool) *FTPSource {
+	// Create a unique temp file name based on connection details
+	h := fmt.Sprintf("%s:%d:%s", host, port, filepath)
+	tempFileName := fmt.Sprintf("ftp-tail-%x.tmp", md5sum([]byte(h)))
+	tempFilePath := os.TempDir() + "/" + tempFileName
+
+	return &FTPSource{
+		host:          host,
+		port:          port,
+		username:      username,
+		password:      password,
+		filepath:      filepath,
+		pollFreq:      pollFreq,
+		lastPos:       0,
+		tempFilePath:  tempFilePath,
+		maxRetries:    3,
+		retryDelay:    time.Second,
+		readFromStart: readFromStart,
+	}
+}
+
+// Watch starts watching an FTP file for changes
+func (f *FTPSource) Watch(ctx context.Context) (<-chan string, error) {
+	// Initial connection
+	if err := f.connect(); err != nil {
+		return nil, err
+	}
+
+	// Set initial position to end of file for proper tailing behavior
+	if err := f.initializePosition(); err != nil {
+		return nil, fmt.Errorf("failed to initialize file position: %v", err)
+	}
+
+	// Create temp file if it doesn't exist
+	if _, err := os.Stat(f.tempFilePath); os.IsNotExist(err) {
+		file, err := os.Create(f.tempFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp file: %v", err)
+		}
+		file.Close()
+	}
+
+	logChan := make(chan string)
+
+	// Start the polling goroutine
+	go func() {
+		defer close(logChan)
+		defer os.Remove(f.tempFilePath) // Cleanup temp file when done
+
+		ticker := time.NewTicker(f.pollFreq)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Download new data and get lines
+				newLines, err := f.fetchNewData()
+				if err != nil {
+					log.Printf("[ERROR] Failed to fetch data from FTP: %v", err)
+					// Try to reconnect if connection was lost
+					if err := f.reconnect(); err != nil {
+						log.Printf("[ERROR] Failed to reconnect to FTP server: %v", err)
+					}
+					continue
+				}
+
+				// Send each line to the channel
+				for _, line := range newLines {
+					logChan <- line
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return logChan, nil
+}
+
+// initializePosition sets the initial file position
+func (f *FTPSource) initializePosition() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Check if connection is nil
+	if f.conn == nil {
+		return fmt.Errorf("FTP connection is nil, connection may have been lost")
+	}
+
+	// Get file size with retries to set initial position
+	var fileSize int64
+	var err error
+
+	for retry := 0; retry < f.maxRetries; retry++ {
+		fileSize, err = f.conn.FileSize(f.filepath)
+		if err == nil {
+			break
+		}
+
+		if retry < f.maxRetries-1 {
+			log.Printf("[WARN] Failed to get initial file size (attempt %d/%d): %v, retrying...",
+				retry+1, f.maxRetries, err)
+			time.Sleep(f.retryDelay)
+
+			// Try reconnecting before retry
+			if strings.Contains(err.Error(), "connection") {
+				f.reconnect()
+			}
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to get initial file size after %d attempts: %v",
+			f.maxRetries, err)
+	}
+
+	// Set initial position based on configuration
+	if f.readFromStart {
+		f.lastPos = 0
+		log.Printf("[INFO] Initial FTP position set to start of file (reading from beginning)")
+	} else {
+		f.lastPos = fileSize
+		log.Printf("[INFO] Initial FTP position set to end of file (%d bytes)", fileSize)
+	}
+
+	return nil
+}
+
+// fetchNewData downloads new file content from FTP and returns parsed lines
+func (f *FTPSource) fetchNewData() ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Check if connection is nil
+	if f.conn == nil {
+		return nil, fmt.Errorf("FTP connection is nil, connection may have been lost")
+	}
+
+	// Get file size with retries
+	var fileSize int64
+	var err error
+
+	for retry := 0; retry < f.maxRetries; retry++ {
+		fileSize, err = f.conn.FileSize(f.filepath)
+		if err == nil {
+			break
+		}
+
+		if retry < f.maxRetries-1 {
+			log.Printf("[WARN] Failed to get file size (attempt %d/%d): %v, retrying...",
+				retry+1, f.maxRetries, err)
+			time.Sleep(f.retryDelay)
+
+			// Try reconnecting before retry
+			if strings.Contains(err.Error(), "connection") {
+				f.reconnect()
+			}
+		}
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file size after %d attempts: %v",
+			f.maxRetries, err)
+	}
+
+	// If file size has not changed, return empty slice
+	if f.lastPos == fileSize {
+		return []string{}, nil
+	}
+
+	// If file has been rotated (smaller than our last position), reset position
+	if f.lastPos > fileSize {
+		log.Printf("[INFO] File size decreased from %d to %d, file may have been rotated",
+			f.lastPos, fileSize)
+		f.lastPos = 0
+	}
+
+	// Create a range command to read only new data (with retries)
+	var resp *ftp.Response
+
+	for retry := 0; retry < f.maxRetries; retry++ {
+		resp, err = f.conn.RetrFrom(f.filepath, uint64(f.lastPos))
+		if err == nil {
+			break
+		}
+
+		if retry < f.maxRetries-1 {
+			log.Printf("[WARN] Failed to retrieve file (attempt %d/%d): %v, retrying...",
+				retry+1, f.maxRetries, err)
+			time.Sleep(f.retryDelay)
+
+			// Try reconnecting before retry
+			if strings.Contains(err.Error(), "connection") {
+				f.reconnect()
+			}
+		}
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve file after %d attempts: %v",
+			f.maxRetries, err)
+	}
+	defer resp.Close()
+
+	// Open temporary file for writing
+	tempFile, err := os.OpenFile(f.tempFilePath, os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open temp file: %v", err)
+	}
+	defer tempFile.Close()
+
+	// Copy data from remote to temp file
+	bytesRead, err := io.Copy(tempFile, resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy data to temp file: %v", err)
+	}
+
+	// Update last position
+	f.lastPos += bytesRead
+
+	// If no new data, return empty result
+	if bytesRead == 0 {
+		return []string{}, nil
+	}
+
+	// Read the temp file content
+	tempFile.Close() // Close before reading
+	content, err := os.ReadFile(f.tempFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read temp file: %v", err)
+	}
+
+	// Split content into lines
+	contentStr := string(content)
+	lines := strings.Split(strings.ReplaceAll(contentStr, "\r\n", "\n"), "\n")
+
+	// Remove empty last line if present
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	return lines, nil
+}
+
+// connect establishes an FTP connection
+func (f *FTPSource) connect() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Close existing connection if any
+	if f.conn != nil {
+		f.conn.Quit()
+		f.conn = nil
+	}
+
+	// Connect to FTP server
+	addr := fmt.Sprintf("%s:%d", f.host, f.port)
+	conn, err := ftp.Dial(addr, ftp.DialWithTimeout(5*time.Second))
+	if err != nil {
+		return fmt.Errorf("failed to connect to FTP server: %v", err)
+	}
+
+	// Login
+	if err := conn.Login(f.username, f.password); err != nil {
+		conn.Quit()
+		return fmt.Errorf("failed to login to FTP server: %v", err)
+	}
+
+	f.conn = conn
+	return nil
+}
+
+// reconnect attempts to reconnect to the FTP server
+func (f *FTPSource) reconnect() error {
+	log.Printf("[INFO] Attempting to reconnect to FTP server %s:%d", f.host, f.port)
+	return f.connect()
+}
+
+// Close closes the FTP source and removes temp file
+func (f *FTPSource) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var errMsgs []string
+
+	// Clean up temp file
+	if err := os.Remove(f.tempFilePath); err != nil && !os.IsNotExist(err) {
+		errMsgs = append(errMsgs, fmt.Sprintf("failed to remove temp file: %v", err))
+	}
+
+	if f.conn != nil {
+		err := f.conn.Quit()
+		f.conn = nil
+		if err != nil {
+			errMsgs = append(errMsgs, fmt.Sprintf("failed to quit FTP connection: %v", err))
+		}
+	}
+
+	if len(errMsgs) > 0 {
+		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	}
+	return nil
+}
 
 // EventStore tracks player data across the server session
 type EventStore struct {
@@ -47,8 +795,10 @@ type LogWatcherServer struct {
 	mu         sync.Mutex
 	clients    map[pb.LogWatcher_StreamLogsServer]struct{}
 	eventSubs  map[pb.LogWatcher_StreamEventsServer]struct{}
-	logFile    string
+	logSource  LogSource
 	eventStore *EventStore
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 // LogParser represents a log parser with a regex and a handler function
@@ -1188,17 +1938,19 @@ var logParsers = []LogParser{
 }
 
 // NewLogWatcherServer initializes the server
-func NewLogWatcherServer(logFile string) *LogWatcherServer {
-	log.Println("[DEBUG] Initializing LogWatcherServer with file:", logFile)
+func NewLogWatcherServer(logSource LogSource) *LogWatcherServer {
+	ctx, cancel := context.WithCancel(context.Background())
 	server := &LogWatcherServer{
 		clients:    make(map[pb.LogWatcher_StreamLogsServer]struct{}),
 		eventSubs:  make(map[pb.LogWatcher_StreamEventsServer]struct{}),
-		logFile:    logFile,
+		logSource:  logSource,
 		eventStore: NewEventStore(),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 
 	// Start processing logs for events
-	go server.processLogFile()
+	go server.processLogs()
 
 	return server
 }
@@ -1228,16 +1980,8 @@ func (s *LogWatcherServer) StreamLogs(req *pb.AuthRequest, stream pb.LogWatcher_
 		s.mu.Unlock()
 	}()
 
-	// Start tailing logs
-	t, err := tail.TailFile(s.logFile, tail.Config{Follow: true, ReOpen: true, Poll: true})
-	if err != nil {
-		return err
-	}
-
-	for line := range t.Lines {
-		stream.Send(&pb.LogEntry{Content: strings.TrimSpace(line.Text)})
-	}
-
+	// Keep stream open
+	<-stream.Context().Done()
 	return nil
 }
 
@@ -1259,21 +2003,29 @@ func (s *LogWatcherServer) StreamEvents(req *pb.AuthRequest, stream pb.LogWatche
 	}()
 
 	// Keep stream open
-	for {
-		select {}
+	<-stream.Context().Done()
+	return nil
+}
+
+// processLogs continuously reads logs and processes events
+func (s *LogWatcherServer) processLogs() {
+	logChan, err := s.logSource.Watch(s.ctx)
+	if err != nil {
+		log.Fatalf("[ERROR] Failed to watch logs: %v", err)
+	}
+
+	for logLine := range logChan {
+		s.processLogForEvents(logLine)
+		s.broadcastLogLine(logLine)
 	}
 }
 
-// processLogFile continuously reads logs and processes events
-func (s *LogWatcherServer) processLogFile() {
-	// Start tailing logs
-	t, err := tail.TailFile(s.logFile, tail.Config{Follow: true, ReOpen: true, Poll: true})
-	if err != nil {
-		return
-	}
-
-	for line := range t.Lines {
-		s.processLogForEvents(line.Text)
+// broadcastLogLine sends log line to all connected log stream clients
+func (s *LogWatcherServer) broadcastLogLine(logLine string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for stream := range s.clients {
+		stream.Send(&pb.LogEntry{Content: logLine})
 	}
 }
 
@@ -1295,13 +2047,89 @@ func (s *LogWatcherServer) broadcastEvent(event *pb.EventEntry) {
 	}
 }
 
+// Shutdown gracefully shuts down the server
+func (s *LogWatcherServer) Shutdown() {
+	s.cancel()
+	if s.logSource != nil {
+		s.logSource.Close()
+	}
+}
+
 // StartServer runs the gRPC server
 func StartServer(ctx context.Context, c *cli.Command) error {
-	logFile := c.String("log-file")
 	port := c.String("port")
 	authToken = c.String("auth-token")
+	sourceType := c.String("source-type")
+	pollFrequency := c.Duration("poll-frequency")
+	readFromStart := c.Bool("read-from-start")
 
-	server := NewLogWatcherServer(logFile)
+	var logSource LogSource
+	var err error
+
+	switch sourceType {
+	case "local":
+		logFile := c.String("log-file")
+		if logFile == "" {
+			return fmt.Errorf("log-file must be specified for local source type")
+		}
+		logSource = NewLocalFileSource(logFile)
+		log.Printf("[INFO] Using local file source: %s", logFile)
+
+	case "sftp":
+		host := c.String("host")
+		if host == "" {
+			return fmt.Errorf("host must be specified for sftp source type")
+		}
+		remotePort := c.Int("remote-port")
+		if remotePort == 0 {
+			remotePort = 22 // Default SFTP port
+		}
+		username := c.String("username")
+		if username == "" {
+			return fmt.Errorf("username must be specified for sftp source type")
+		}
+		password := c.String("password")
+		keyPath := c.String("key-path")
+		if password == "" && keyPath == "" {
+			return fmt.Errorf("either password or key-path must be specified for sftp source type")
+		}
+		remotePath := c.String("remote-path")
+		if remotePath == "" {
+			return fmt.Errorf("remote-path must be specified for sftp source type")
+		}
+		logSource = NewSFTPSource(host, int(remotePort), username, password, keyPath, remotePath, pollFrequency, readFromStart)
+		log.Printf("[INFO] Using SFTP source: %s@%s:%d%s (read from start: %v)", username, host, remotePort, remotePath, readFromStart)
+
+	case "ftp":
+		host := c.String("host")
+		if host == "" {
+			return fmt.Errorf("host must be specified for ftp source type")
+		}
+		remotePort := c.Int("remote-port")
+		if remotePort == 0 {
+			remotePort = 21 // Default FTP port
+		}
+		username := c.String("username")
+		if username == "" {
+			return fmt.Errorf("username must be specified for ftp source type")
+		}
+		password := c.String("password")
+		if password == "" {
+			return fmt.Errorf("password must be specified for ftp source type")
+		}
+		remotePath := c.String("remote-path")
+		if remotePath == "" {
+			return fmt.Errorf("remote-path must be specified for ftp source type")
+		}
+		logSource = NewFTPSource(host, int(remotePort), username, password, remotePath, pollFrequency, readFromStart)
+		log.Printf("[INFO] Using FTP source: %s@%s:%d%s (read from start: %v)", username, host, remotePort, remotePath, readFromStart)
+
+	default:
+		return fmt.Errorf("invalid source-type: %s, must be 'local', 'sftp', or 'ftp'", sourceType)
+	}
+
+	server := NewLogWatcherServer(logSource)
+	defer server.Shutdown()
 
 	// Start gRPC server
 	lis, err := net.Listen("tcp", ":"+port)
@@ -1312,6 +2140,14 @@ func StartServer(ctx context.Context, c *cli.Command) error {
 	pb.RegisterLogWatcherServer(grpcServer, server)
 
 	log.Printf("[INFO] LogWatcher gRPC server listening on :%s", port)
+
+	// Handle graceful shutdown
+	go func() {
+		<-ctx.Done()
+		log.Println("[INFO] Shutting down server...")
+		grpcServer.GracefulStop()
+	}()
+
 	return grpcServer.Serve(lis)
 }
 
@@ -1325,10 +2161,60 @@ func main() {
 		Usage: "Watches a file and streams changes via gRPC",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_SOURCE_TYPE"),
+				Name:     "source-type",
+				Usage:    "Type of log source (local, sftp, ftp)",
+				Value:    "local",
+				Required: false,
+			},
+			&cli.StringFlag{
 				Sources:  cli.EnvVars("LOGWATCHER_LOG_FILE"),
 				Name:     "log-file",
-				Usage:    "Path to the log file to watch",
-				Required: true,
+				Usage:    "Path to the local log file to watch (for local source type)",
+				Required: false,
+			},
+			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_HOST"),
+				Name:     "host",
+				Usage:    "Remote host for SFTP/FTP connection",
+				Required: false,
+			},
+			&cli.IntFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_REMOTE_PORT"),
+				Name:     "remote-port",
+				Usage:    "Port for SFTP/FTP connection",
+				Required: false,
+			},
+			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_USERNAME"),
+				Name:     "username",
+				Usage:    "Username for SFTP/FTP connection",
+				Required: false,
+			},
+			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_PASSWORD"),
+				Name:     "password",
+				Usage:    "Password for SFTP/FTP connection",
+				Required: false,
+			},
+			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_KEY_PATH"),
+				Name:     "key-path",
+				Usage:    "Path to private key file for SFTP authentication",
+				Required: false,
+			},
+			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_REMOTE_PATH"),
+				Name:     "remote-path",
+				Usage:    "Path to the remote log file for SFTP/FTP",
+				Required: false,
+			},
+			&cli.DurationFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_POLL_FREQUENCY"),
+				Name:     "poll-frequency",
+				Usage:    "How often to poll for changes in SFTP/FTP mode",
+				Value:    5 * time.Second,
+				Required: false,
 			},
 			&cli.StringFlag{
 				Sources:  cli.EnvVars("LOGWATCHER_PORT"),
@@ -1342,6 +2228,13 @@ func main() {
 				Name:     "auth-token",
 				Usage:    "Simple auth token for authentication",
 				Required: true,
+			},
+			&cli.BoolFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_READ_FROM_START"),
+				Name:     "read-from-start",
+				Usage:    "Read the entire log file from the beginning rather than tailing only new entries",
+				Value:    false,
+				Required: false,
 			},
 		},
 		Action: StartServer,
