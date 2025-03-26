@@ -147,7 +147,7 @@ async function fetchServerRules() {
     }
 
     try {
-        const { data, error: fetchError } = await useFetch(
+        const response = await useFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/rules`,
             {
                 method: "GET",
@@ -157,12 +157,14 @@ async function fetchServerRules() {
             },
         );
 
-        if (fetchError.value) {
-            throw new Error(fetchError.value.message || "Failed to fetch server rules");
+        if (response.error.value) {
+            throw new Error(response.error.value.message || "Failed to fetch server rules");
         }
 
-        if (data.value && data.value.data) {
-            rules.value = data.value.data.rules || [];
+        // Safely access the data with proper type checking
+        const responseData = response.data.value as any;
+        if (responseData && responseData.data) {
+            rules.value = responseData.data.rules || [];
         }
     } catch (err: any) {
         error.value = err.message || "An error occurred while fetching server rules";
@@ -436,14 +438,20 @@ async function onDragEnd(evt: any, parentId: string | null = null) {
 
 // Function to handle nesting
 async function handleNest(evt: any, targetRule: any) {
-    // Get the dragged rule ID from the data transfer
-    const draggedRuleId = evt.dataTransfer?.getData('text/plain');
-    if (!draggedRuleId) return;
-
-    const draggedRule = rules.value.find(r => r.id === draggedRuleId);
-    if (!draggedRule || draggedRule.id === targetRule.id || draggedRule.parentId === targetRule.id) return;
-
     try {
+        // Get the dragged rule ID from the data transfer
+        const draggedRuleId = evt.dataTransfer?.getData('text/plain');
+        if (!draggedRuleId) return;
+
+        const draggedRule = rules.value.find(r => r.id === draggedRuleId);
+        if (!draggedRule || draggedRule.id === targetRule.id) return;
+        
+        // Prevent circular nesting (can't nest parent into its own child)
+        if (targetRule.parentId === draggedRule.id) return;
+        
+        // Check if directly trying to nest into own parent (no change needed)
+        if (draggedRule.parentId === targetRule.id) return;
+
         const runtimeConfig = useRuntimeConfig();
         const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
         const token = cookieToken.value;
@@ -451,29 +459,14 @@ async function handleNest(evt: any, targetRule: any) {
         if (!token) return;
 
         const newOrderKey = generateNextOrderKey(targetRule);
-        console.log('Nesting rule:', draggedRule.id, 'into:', targetRule.id, 'with order:', newOrderKey);
+        
+        // Ensure the target rule has isExpanded set to true
+        if (!targetRule.isExpanded) {
+            const updatedTargetRule = { ...targetRule, isExpanded: true };
+            updateRuleInArray(updatedTargetRule);
+        }
 
-        // Update the target rule to ensure it has a children array
-        const updatedTargetRule = {
-            ...targetRule,
-            children: targetRule.children || []
-        };
-
-        // Update the target rule in the local tree
-        const findAndUpdateTreeRule = (tree: any[], targetId: string, updatedRule: any): boolean => {
-            for (let i = 0; i < tree.length; i++) {
-                if (tree[i].id === targetId) {
-                    tree[i] = { ...tree[i], ...updatedRule };
-                    return true;
-                }
-                if (tree[i].children && findAndUpdateTreeRule(tree[i].children, targetId, updatedRule)) {
-                    return true;
-                }
-            }
-            return false;
-        };
-        findAndUpdateTreeRule(localRulesTree.value, targetRule.id, updatedTargetRule);
-
+        // Update the rule parent through API
         await useFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/rules/${draggedRule.id}`,
             {
@@ -491,12 +484,8 @@ async function handleNest(evt: any, targetRule: any) {
             },
         );
 
-        // Update the rules array directly
-        const rule = rules.value.find(r => r.id === draggedRule.id);
-        if (rule) {
-            rule.parentId = targetRule.id;
-            rule.orderKey = newOrderKey;
-        }
+        // Refresh rules to ensure the UI is updated properly
+        fetchServerRules();
     } catch (err) {
         console.error('Failed to update rule parent:', err);
     }
@@ -698,8 +687,6 @@ function updateRuleInArray(updatedRule: ServerRule) {
                         :animation="50"
                         ghost-class="sortable-ghost"
                         drag-class="sortable-drag"
-                        :sort="true"
-                        :forceFallback="true"
                     >
                         <template #item="slotProps">
                             <RuleItem
@@ -749,5 +736,14 @@ function updateRuleInArray(updatedRule: ServerRule) {
     opacity: 0.9;
     background: #ffffff;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.dragging-fallback {
+    opacity: 0.9;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transform: scale(1.02);
+    max-width: 100%;
+    z-index: 9999;
 }
 </style> 
