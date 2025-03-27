@@ -30,10 +30,11 @@ type ServerBan struct {
 }
 
 type ServerBanCreateRequest struct {
-	SteamId  string     `json:"steamId"`
-	Reason   string     `json:"reason"`
-	Duration int        `json:"duration"` // In days, 0 means permanent
-	RuleId   *uuid.UUID `json:"ruleId"`   // Optional rule ID
+	SteamId   string  `json:"steamId" binding:"required"`
+	Reason    string  `json:"reason" binding:"required"`
+	Duration  int     `json:"duration"`  // In days, 0 means permanent
+	RuleId    *string `json:"ruleId"`    // Optional rule ID
+	BanListId *string `json:"banListId"` // Optional - Add to a ban list
 }
 
 type ServerAdmin struct {

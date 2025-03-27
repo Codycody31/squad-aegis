@@ -20,6 +20,11 @@ import {
 } from "~/components/ui/dropdown-menu";
 import { Textarea } from "~/components/ui/textarea";
 import { useToast } from "~/components/ui/toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
+import { Badge } from "~/components/ui/badge";
+import { useForm } from "vee-validate";
+import { toTypedSchema } from "@vee-validate/zod";
+import { z } from "zod";
 
 const authStore = useAuthStore();
 const route = useRoute();
@@ -41,6 +46,7 @@ const actionReason = ref("");
 const actionDuration = ref("1"); // Default to 1 day
 const isActionLoading = ref(false);
 
+// Add to the interface section
 interface Player {
   playerId: number;
   eosId: string;
@@ -59,6 +65,30 @@ interface PlayersResponse {
     };
   };
 }
+
+// Add to the refs section
+const banLists = ref<BanList[]>([]);
+
+// Add to the form schema
+const formSchema = toTypedSchema(
+  z.object({
+    steamId: z.string().min(17, "Steam ID must be at least 17 characters").max(17, "Steam ID must be exactly 17 characters").regex(/^\d+$/, "Steam ID must contain only numbers"),
+    reason: z.string().min(1, "Reason is required"),
+    duration: z.number().min(0, "Duration must be at least 0"),
+    banListId: z.string().optional(),
+  }),
+);
+
+// Add to the form initial values
+const form = useForm({
+  validationSchema: formSchema,
+  initialValues: {
+    steamId: "",
+    reason: "",
+    duration: 24,
+    banListId: "",
+  },
+});
 
 // Computed property for filtered players
 const filteredPlayers = computed(() => {
@@ -161,9 +191,42 @@ function formatDisconnectTime(timeStr: string): string {
   }
 }
 
+// Add function to fetch ban lists
+async function fetchBanLists() {
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const token = cookieToken.value;
+
+  if (!token) return;
+
+  try {
+    const { data, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/ban-lists`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      console.error("Failed to fetch ban lists:", fetchError.value);
+      return;
+    }
+
+    if (data.value && data.value.data) {
+      banLists.value = data.value.data.banLists || [];
+    }
+  } catch (err: any) {
+    console.error("Failed to fetch ban lists:", err);
+  }
+}
+
 // Setup auto-refresh
 onMounted(() => {
   fetchDisconnectedPlayers();
+  fetchBanLists();
   
   // Refresh data every 30 seconds
   refreshInterval.value = setInterval(() => {
@@ -450,6 +513,26 @@ async function executePlayerAction() {
             class="col-span-3"
             rows="3"
           />
+        </div>
+
+        <div class="grid grid-cols-4 items-center gap-4">
+          <label for="banList" class="text-right col-span-1">Ban List</label>
+          <Select v-model="form.values.banListId">
+            <SelectTrigger class="col-span-3">
+              <SelectValue placeholder="Select a ban list (optional)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">No Ban List</SelectItem>
+              <SelectItem
+                v-for="banList in banLists"
+                :key="banList.id"
+                :value="banList.id"
+              >
+                {{ banList.name }}
+                <Badge v-if="banList.isGlobal" variant="secondary" class="ml-2">Global</Badge>
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
       

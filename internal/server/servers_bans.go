@@ -188,13 +188,38 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
+	// If ban list ID is provided, verify it exists
+	if request.BanListId != nil {
+		banListId, err := uuid.Parse(*request.BanListId)
+		if err != nil {
+			responses.BadRequest(c, "Invalid ban list ID", &gin.H{"error": err.Error()})
+			return
+		}
+
+		var count int
+		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+			SELECT COUNT(*) FROM ban_lists
+			WHERE id = $1
+		`, banListId).Scan(&count)
+
+		if err != nil {
+			responses.BadRequest(c, "Failed to verify ban list", &gin.H{"error": err.Error()})
+			return
+		}
+
+		if count == 0 {
+			responses.BadRequest(c, "Ban list not found", &gin.H{"error": "Ban list not found"})
+			return
+		}
+	}
+
 	// Insert the ban into the database
 	var banID string
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		INSERT INTO server_bans (server_id, admin_id, steam_id, reason, duration, rule_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO server_bans (server_id, admin_id, steam_id, reason, duration, rule_id, ban_list_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id
-	`, serverId, user.Id, steamID, request.Reason, request.Duration*24*60, request.RuleId).Scan(&banID)
+	`, serverId, user.Id, steamID, request.Reason, request.Duration*24*60, request.RuleId, request.BanListId).Scan(&banID)
 
 	if err != nil {
 		responses.BadRequest(c, "Failed to create ban", &gin.H{"error": err.Error()})
@@ -216,7 +241,20 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	}
 
 	if request.RuleId != nil {
-		auditData["ruleId"] = request.RuleId.String()
+		auditData["ruleId"] = *request.RuleId
+	}
+
+	if request.BanListId != nil {
+		auditData["banListId"] = *request.BanListId
+
+		// If the ban is added to a ban list, apply it to all servers subscribed to that list
+		banId, err := uuid.Parse(banID)
+		if err == nil {
+			banListId, err := uuid.Parse(*request.BanListId)
+			if err == nil {
+				s.propagateBanToSubscribedServers(c.Request.Context(), banId, banListId, user.Id.String())
+			}
+		}
 	}
 
 	// Add expiry information if not permanent

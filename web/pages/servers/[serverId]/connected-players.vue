@@ -23,6 +23,9 @@ import {
 } from "~/components/ui/dropdown-menu";
 import { Textarea } from "~/components/ui/textarea";
 import { useToast } from "~/components/ui/toast";
+import { useForm } from "vee-validate";
+import { toTypedSchema } from "@vee-validate/zod";
+import { z } from "zod";
 
 const authStore = useAuthStore();
 const route = useRoute();
@@ -49,6 +52,7 @@ const actionDuration = ref(""); // For ban duration
 const targetTeamId = ref<number | null>(null); // For move action
 const isActionLoading = ref(false);
 
+// Add to the interface section
 interface Player {
   playerId: number;
   eosId: string;
@@ -70,6 +74,13 @@ interface PlayersResponse {
       name: string;
     }>;
   };
+}
+
+interface BanList {
+  id: string;
+  name: string;
+  description: string;
+  isGlobal: boolean;
 }
 
 // Get unique squads from players
@@ -137,6 +148,32 @@ const filteredPlayers = computed(() => {
   }
   
   return filtered;
+});
+
+// Add to the refs section
+const banLists = ref<BanList[]>([]);
+
+// Add to the form schema
+const formSchema = toTypedSchema(
+  z.object({
+    steamId: z.string().min(17, "Steam ID must be at least 17 characters").max(17, "Steam ID must be exactly 17 characters").regex(/^\d+$/, "Steam ID must contain only numbers"),
+    reason: z.string().min(1, "Reason is required"),
+    duration: z.number().min(0, "Duration must be at least 0"),
+    ruleId: z.string().optional(),
+    banListId: z.string().optional(),
+  }),
+);
+
+// Add to the form initial values
+const form = useForm({
+  validationSchema: formSchema,
+  initialValues: {
+    steamId: "",
+    reason: "",
+    duration: 24,
+    ruleId: "",
+    banListId: "",
+  },
 });
 
 // Function to fetch connected players data
@@ -207,7 +244,49 @@ function getSquadName(teamId: number, squadId: number | null): string {
   return squad ? squad.name : `Squad ${squadId}`;
 }
 
-fetchConnectedPlayers();
+// Add function to fetch ban lists
+async function fetchBanLists() {
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const token = cookieToken.value;
+
+  if (!token) return;
+
+  try {
+    const { data, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/ban-lists`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      console.error("Failed to fetch ban lists:", fetchError.value);
+      return;
+    }
+
+    if (data.value && data.value.data) {
+      banLists.value = data.value.data.banLists || [];
+    }
+  } catch (err: any) {
+    console.error("Failed to fetch ban lists:", err);
+  }
+}
+
+// Add to onMounted
+onMounted(() => {
+  fetchConnectedPlayers();
+  fetchServerRules();
+  fetchBanLists();
+
+  // Refresh data every 30 seconds
+  refreshInterval.value = setInterval(() => {
+    fetchConnectedPlayers();
+  }, 30000);
+});
 
 // Manual refresh function
 function refreshData() {
@@ -647,22 +726,39 @@ async function executePlayerAction() {
               rows="3"
             />
           </div>
+
+          <div class="grid grid-cols-4 items-center gap-4">
+            <label for="banList" class="text-right col-span-1">Ban List</label>
+            <Select v-model="form.values.banListId">
+              <SelectTrigger class="col-span-3">
+                <SelectValue placeholder="Select a ban list (optional)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">No Ban List</SelectItem>
+                <SelectItem
+                  v-for="banList in banLists"
+                  :key="banList.id"
+                  :value="banList.id"
+                >
+                  {{ banList.name }}
+                  <Badge v-if="banList.isGlobal" variant="secondary" class="ml-2">Global</Badge>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         
         <DialogFooter>
           <Button variant="outline" @click="closeActionDialog">Cancel</Button>
           <Button 
-            :variant="actionType === 'warn' || actionType === 'move' ? 'default' : 'destructive'" 
+            variant="destructive" 
             @click="executePlayerAction"
             :disabled="isActionLoading"
           >
             <span v-if="isActionLoading" class="mr-2">
               <Icon name="lucide:loader-2" class="h-4 w-4 animate-spin" />
             </span>
-            <template v-if="actionType === 'kick'">Kick Player</template>
-            <template v-else-if="actionType === 'ban'">Ban Player</template>
-            <template v-else-if="actionType === 'warn'">Send Warning</template>
-            <template v-else-if="actionType === 'move'">Move Player</template>
+            Ban Player
           </Button>
         </DialogFooter>
       </DialogContent>
