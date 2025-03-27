@@ -30,10 +30,6 @@ func (c *LogWatcherConnector) Initialize(config map[string]any) error {
 		}
 
 		for parsedEvent := range eventStreamer.GetEvents() {
-			log.Debug().
-				Str("event", parsedEvent.Original.Event).
-				Interface("data", parsedEvent.Data).
-				Msg("Received event")
 			c.EmitEvent(parsedEvent.Original.Event, parsedEvent.Data)
 		}
 	}()

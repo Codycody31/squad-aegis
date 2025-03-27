@@ -130,13 +130,12 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
-	// Initialize RCON manager
+	// Create RCON manager
 	rconManager := rcon_manager.NewRconManager(ctx)
-	log.Info().Msg("Starting RCON connection manager service...")
+	defer rconManager.Shutdown()
+
+	// Start RCON connection manager
 	go rconManager.StartConnectionManager()
-	log.Info().Msg("Connecting to all servers with RCON enabled...")
-	rconManager.ConnectToAllServers(ctx, database)
-	log.Info().Msg("RCON connection manager service started")
 
 	// Initialize connector manager
 	connectorManager := connector_manager.NewConnectorManager(ctx)
