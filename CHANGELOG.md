@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-03-26
+## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-03-27
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -12,6 +12,7 @@
 
 ### 📈 Enhancement
 
+- enhancement(rcon): manage active connections in RconManager [[#49](https://github.com/Codycody31/squad-aegis/pull/49)]
 - enhancement: add avatar functionality to server switcher [[#47](https://github.com/Codycody31/squad-aegis/pull/47)]
 - feat: add server metrics endpoint and fetching logic [[#43](https://github.com/Codycody31/squad-aegis/pull/43)]
 - feat(settings): add server settings page and update routes [[#40](https://github.com/Codycody31/squad-aegis/pull/40)]
