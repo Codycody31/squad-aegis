@@ -842,7 +842,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: ADMIN COMMAND: Message broadcasted <(.+)> from (.+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched ADMIN_BROADCAST event: %v", args)
+			log.Debug().Msgf("Matched ADMIN_BROADCAST event: %v", args)
 			// Build a JSON object with the event details.
 			eventData := map[string]string{
 				"time":    args[1],
@@ -867,7 +867,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQDeployable::)?TakeDamage\(\): ([A-z0-9_]+)_C_[0-9]+: ([0-9.]+) damage attempt by causer ([A-z0-9_]+)_C_[0-9]+ instigator (.+) with damage type ([A-z0-9_]+)_C health remaining ([0-9.]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched DEPLOYABLE_DAMAGED event: %v", args)
+			log.Debug().Msgf("Matched DEPLOYABLE_DAMAGED event: %v", args)
 			// Build a JSON object with the event details.
 			eventData := map[string]string{
 				"time":            args[1],
@@ -896,7 +896,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: PostLogin: NewPlayer: BP_PlayerController_C .+PersistentLevel\.([^\s]+) \(IP: ([\d.]+) \| Online IDs:([^)|]+)\)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_CONNECTED event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_CONNECTED event: %v", args)
 
 			// Parse online IDs from the log
 			idsString := args[5]
@@ -975,7 +975,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadGameEvents: Display: Team ([0-9]), (.*) \( ?(.*?) ?\) has (won|lost) the match with ([0-9]+) Tickets on layer (.*) \(level (.*)\)!`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched NEW_GAME event (tickets): %v", args)
+			log.Debug().Msgf("Matched NEW_GAME event (tickets): %v", args)
 
 			// Build event data
 			eventData := map[string]interface{}{
@@ -1016,7 +1016,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: UChannel::Close: Sending CloseBunch\. ChIndex == [0-9]+\. Name: \[UChannel\] ChIndex: [0-9]+, Closing: [0-9]+ \[UNetConnection\] RemoteAddr: ([\d.]+):[\d]+, Name: EOSIpNetConnection_[0-9]+, Driver: GameNetDriver EOSNetDriver_[0-9]+, IsServer: YES, PC: ([^ ]+PlayerController_C_[0-9]+), Owner: [^ ]+PlayerController_C_[0-9]+, UniqueId: RedpointEOS:([\d\w]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_DISCONNECTED event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_DISCONNECTED event: %v", args)
 
 			// Build event data
 			eventData := map[string]interface{}{
@@ -1055,7 +1055,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Player:(.+) ActualDamage=([0-9.]+) from (.+) \(Online IDs:([^|]+)\| Player Controller ID: ([^ ]+)\)caused by ([A-z_0-9-]+)_C`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_DAMAGED event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_DAMAGED event: %v", args)
 
 			// Skip if IDs are invalid
 			if strings.Contains(args[6], "INVALID") {
@@ -1134,7 +1134,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQSoldier::)?Die\(\): Player:(.+) KillingDamage=(?:-)*([0-9.]+) from ([A-z_0-9]+) \(Online IDs:([^)|]+)\| Contoller ID: ([\w\d]+)\) caused by ([A-z_0-9-]+)_C`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_DIED event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_DIED event: %v", args)
 
 			// Skip if IDs are invalid
 			if strings.Contains(args[6], "INVALID") {
@@ -1273,7 +1273,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: Join succeeded: (.+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched JOIN_SUCCEEDED event: %v", args)
+			log.Debug().Msgf("Matched JOIN_SUCCEEDED event: %v", args)
 
 			// Convert chainID to number (stored as string in Go)
 			chainID := args[2]
@@ -1324,7 +1324,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?OnPossess\(\): PC=(.+) \(Online IDs:([^)]+)\) Pawn=([A-z0-9_]+)_C`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_POSSESS event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_POSSESS event: %v", args)
 
 			// Parse online IDs from the log
 			idsString := args[4]
@@ -1393,7 +1393,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: (.+) \(Online IDs:([^)]+)\) has revived (.+) \(Online IDs:([^)]+)\)\.`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_REVIVED event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_REVIVED event: %v", args)
 
 			// Parse reviver IDs
 			reviverIdsString := args[4]
@@ -1488,7 +1488,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQSoldier::)?Wound\(\): Player:(.+) KillingDamage=(?:-)*([0-9.]+) from ([A-z_0-9]+) \(Online IDs:([^)|]+)\| Controller ID: ([\w\d]+)\) caused by ([A-z_0-9-]+)_C`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_WOUNDED event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_WOUNDED event: %v", args)
 
 			// Skip if IDs are invalid
 			if strings.Contains(args[6], "INVALID") {
@@ -1626,7 +1626,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: USQGameState: Server Tick Rate: ([0-9.]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched TICK_RATE event: %v", args)
+			log.Debug().Msgf("Matched TICK_RATE event: %v", args)
 			// Build a JSON object with the event details.
 			eventData := map[string]string{
 				"time":     args[1],
@@ -1650,7 +1650,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQGameMode::)?DetermineMatchWinner\(\): (.+) won on (.+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched ROUND_ENDED event: %v", args)
+			log.Debug().Msgf("Matched ROUND_ENDED event: %v", args)
 
 			// Build event data
 			eventData := map[string]interface{}{
@@ -1695,7 +1695,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogGameState: Match State Changed from InProgress to WaitingPostMatch`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched MATCH_STATE_CHANGE event (to WaitingPostMatch): %v", args)
+			log.Debug().Msgf("Matched MATCH_STATE_CHANGE event (to WaitingPostMatch): %v", args)
 
 			// Get winner and loser data from event store
 			server.eventStore.mu.Lock()
@@ -1741,7 +1741,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogWorld: Bringing World \/([A-z]+)\/(?:Maps\/)?([A-z0-9-]+)\/(?:.+\/)?([A-z0-9-]+)(?:\.[A-z0-9-]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched NEW_GAME event (map loading): %v", args)
+			log.Debug().Msgf("Matched NEW_GAME event (map loading): %v", args)
 
 			// Skip transition map
 			if args[5] == "TransitionMap" {
@@ -1793,7 +1793,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?SquadJoined\(\): Player:(.+) \(Online IDs:([^)]+)\) Joined Team ([0-9]) Squad ([0-9]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_SQUAD_CHANGE event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_SQUAD_CHANGE event: %v", args)
 
 			// Parse online IDs from the log
 			idsString := args[4]
@@ -1878,7 +1878,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?TeamJoined\(\): Player:(.+) \(Online IDs:([^)]+)\) Is Now On Team ([0-9])`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Info().Msgf("Matched PLAYER_TEAM_CHANGE event: %v", args)
+			log.Debug().Msgf("Matched PLAYER_TEAM_CHANGE event: %v", args)
 
 			// Parse online IDs from the log
 			idsString := args[4]
