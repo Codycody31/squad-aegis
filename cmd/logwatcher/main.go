@@ -1988,10 +1988,9 @@ func NewLogWatcherServer(logSource LogSource) *LogWatcherServer {
 // Authenticate using a simple token
 func validateToken(tokenString string) bool {
 	if tokenString == authToken {
-		log.Info().Msg("Authentication successful")
 		return true
 	}
-	log.Info().Msg("Authentication failed")
+	log.Warn().Msg("Authentication failed")
 	return false
 }
 
@@ -2021,7 +2020,7 @@ func (s *LogWatcherServer) StreamEvents(req *pb.AuthRequest, stream pb.LogWatche
 		return fmt.Errorf("unauthorized")
 	}
 
-	log.Info().Msg("New StreamEvents subscriber")
+	log.Debug().Msg("New StreamEvents subscriber")
 
 	s.mu.Lock()
 	s.eventSubs[stream] = struct{}{}
