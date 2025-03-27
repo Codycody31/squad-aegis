@@ -170,6 +170,18 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.POST("/bans", server.AuthHasAnyServerPermission("ban"), server.ServerBansAdd)
 				serverGroup.DELETE("/bans/:banId", server.AuthHasAnyServerPermission("ban"), server.ServerBansRemove)
 
+				// Ban lists endpoints for a specific server
+				serverGroup.GET("/ban-lists", server.ServerBanListsList)
+				serverGroup.POST("/ban-lists/subscribe", server.AuthHasServerPermission("manageserver"), server.ServerBanListSubscribe)
+				serverGroup.POST("/ban-lists/unsubscribe", server.AuthHasServerPermission("manageserver"), server.ServerBanListUnsubscribe)
+
+				// Server rules endpoints
+				serverGroup.GET("/rules", server.ServerRulesList)
+				serverGroup.POST("/rules", server.AuthHasServerPermission("manageserver"), server.ServerRulesAdd)
+				serverGroup.PUT("/rules/:ruleId", server.AuthHasServerPermission("manageserver"), server.ServerRulesUpdate)
+				serverGroup.DELETE("/rules/:ruleId", server.AuthHasServerPermission("manageserver"), server.ServerRulesDelete)
+				serverGroup.PUT("/rules/batch-update", server.AuthHasServerPermission("manageserver"), server.ServerRulesBatchUpdate)
+
 				// Player action endpoints
 				serverGroup.POST("/rcon/kick-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconKickPlayer)
 				serverGroup.POST("/rcon/warn-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconWarnPlayer)
@@ -210,6 +222,20 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			connectorGroup.POST("/global", server.CreateGlobalConnector)
 			connectorGroup.GET("/global/:id", server.GetGlobalConnector)
 			connectorGroup.DELETE("/global/:id", server.DeleteGlobalConnector)
+		}
+
+		// Ban Lists global endpoints
+		banListsGroup := apiGroup.Group("/ban-lists")
+		{
+			banListsGroup.Use(server.AuthSession)
+
+			banListsGroup.GET("", server.BanListsList)
+			banListsGroup.POST("", server.AuthIsSuperAdmin(), server.BanListCreate)
+			banListsGroup.GET("/:banListId", server.BanListGet)
+			banListsGroup.PUT("/:banListId", server.AuthIsSuperAdmin(), server.BanListUpdate)
+			banListsGroup.DELETE("/:banListId", server.AuthIsSuperAdmin(), server.BanListDelete)
+			banListsGroup.POST("/assign-ban", server.AuthIsSuperAdmin(), server.BanListAssignBan)
+			banListsGroup.DELETE("/bans/:banId", server.AuthIsSuperAdmin(), server.BanListRemoveBan)
 		}
 
 		// Extension management endpoints

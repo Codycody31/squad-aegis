@@ -1,0 +1,1 @@
+ALTER TABLE server_rules DROP COLUMN order_key; 
