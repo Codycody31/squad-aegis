@@ -49,6 +49,8 @@ type ServerConnection struct {
 	host     string
 	port     string
 	password string
+	// Track active connections
+	activeConnections int
 }
 
 // RconManager manages RCON connections to multiple servers
@@ -186,6 +188,7 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 
 		// Connection already exists and is connected
 		conn.LastUsed = time.Now()
+		conn.activeConnections++
 
 		return nil
 	}
@@ -227,17 +230,18 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	cmdSemaphore := make(chan struct{}, 1)
 
 	conn := &ServerConnection{
-		ServerID:     serverID,
-		CommandRcon:  commandRcon,
-		EventRcon:    eventRcon,
-		CommandChan:  make(chan RconCommand, 100),
-		EventChan:    make(chan RconEvent, 100),
-		Disconnected: false,
-		LastUsed:     time.Now(),
-		cmdSemaphore: cmdSemaphore,
-		host:         host,
-		port:         portStr,
-		password:     password,
+		ServerID:          serverID,
+		CommandRcon:       commandRcon,
+		EventRcon:         eventRcon,
+		CommandChan:       make(chan RconCommand, 100),
+		EventChan:         make(chan RconEvent, 100),
+		Disconnected:      false,
+		LastUsed:          time.Now(),
+		cmdSemaphore:      cmdSemaphore,
+		host:              host,
+		port:              portStr,
+		password:          password,
+		activeConnections: 1,
 	}
 
 	m.connections[serverID] = conn
@@ -266,10 +270,17 @@ func (m *RconManager) DisconnectFromServer(serverID uuid.UUID) error {
 		return errors.New("server already disconnected")
 	}
 
-	// Close both connections
-	conn.CommandRcon.Close()
-	conn.EventRcon.Close()
-	conn.Disconnected = true
+	// Decrement active connections
+	conn.activeConnections--
+
+	// Only close the connection if there are no active connections
+	if conn.activeConnections <= 0 {
+		// Close both connections
+		conn.CommandRcon.Close()
+		conn.EventRcon.Close()
+		conn.Disconnected = true
+		conn.activeConnections = 0
+	}
 
 	return nil
 }
