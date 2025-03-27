@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/hpcloud/tail"
 	"github.com/jlaffaye/ftp"
@@ -23,6 +24,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "go.codycody31.dev/squad-aegis/proto/logwatcher"
+	"go.codycody31.dev/squad-aegis/shared/logger"
 	"go.codycody31.dev/squad-aegis/shared/utils"
 )
 
@@ -840,7 +842,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: ADMIN COMMAND: Message broadcasted <(.+)> from (.+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched ADMIN_BROADCAST event: ", args)
+			log.Debug().Msgf("Matched ADMIN_BROADCAST event: %v", args)
 			// Build a JSON object with the event details.
 			eventData := map[string]string{
 				"time":    args[1],
@@ -851,7 +853,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -865,7 +867,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQDeployable::)?TakeDamage\(\): ([A-z0-9_]+)_C_[0-9]+: ([0-9.]+) damage attempt by causer ([A-z0-9_]+)_C_[0-9]+ instigator (.+) with damage type ([A-z0-9_]+)_C health remaining ([0-9.]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched DEPLOYABLE_DAMAGED event: ", args)
+			log.Debug().Msgf("Matched DEPLOYABLE_DAMAGED event: %v", args)
 			// Build a JSON object with the event details.
 			eventData := map[string]string{
 				"time":            args[1],
@@ -880,7 +882,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -894,7 +896,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: PostLogin: NewPlayer: BP_PlayerController_C .+PersistentLevel\.([^\s]+) \(IP: ([\d.]+) \| Online IDs:([^)|]+)\)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_CONNECTED event: ", args)
+			log.Debug().Msgf("Matched PLAYER_CONNECTED event: %v", args)
 
 			// Parse online IDs from the log
 			idsString := args[5]
@@ -958,7 +960,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -973,7 +975,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadGameEvents: Display: Team ([0-9]), (.*) \( ?(.*?) ?\) has (won|lost) the match with ([0-9]+) Tickets on layer (.*) \(level (.*)\)!`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched NEW_GAME event (tickets): ", args)
+			log.Debug().Msgf("Matched NEW_GAME event (tickets): %v", args)
 
 			// Build event data
 			eventData := map[string]interface{}{
@@ -1000,7 +1002,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1014,7 +1016,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: UChannel::Close: Sending CloseBunch\. ChIndex == [0-9]+\. Name: \[UChannel\] ChIndex: [0-9]+, Closing: [0-9]+ \[UNetConnection\] RemoteAddr: ([\d.]+):[\d]+, Name: EOSIpNetConnection_[0-9]+, Driver: GameNetDriver EOSNetDriver_[0-9]+, IsServer: YES, PC: ([^ ]+PlayerController_C_[0-9]+), Owner: [^ ]+PlayerController_C_[0-9]+, UniqueId: RedpointEOS:([\d\w]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_DISCONNECTED event: ", args)
+			log.Debug().Msgf("Matched PLAYER_DISCONNECTED event: %v", args)
 
 			// Build event data
 			eventData := map[string]interface{}{
@@ -1039,7 +1041,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1053,7 +1055,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Player:(.+) ActualDamage=([0-9.]+) from (.+) \(Online IDs:([^|]+)\| Player Controller ID: ([^ ]+)\)caused by ([A-z_0-9-]+)_C`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_DAMAGED event: ", args)
+			log.Debug().Msgf("Matched PLAYER_DAMAGED event: %v", args)
 
 			// Skip if IDs are invalid
 			if strings.Contains(args[6], "INVALID") {
@@ -1118,7 +1120,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1132,7 +1134,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQSoldier::)?Die\(\): Player:(.+) KillingDamage=(?:-)*([0-9.]+) from ([A-z_0-9]+) \(Online IDs:([^)|]+)\| Contoller ID: ([\w\d]+)\) caused by ([A-z_0-9-]+)_C`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_DIED event: ", args)
+			log.Debug().Msgf("Matched PLAYER_DIED event: %v", args)
 
 			// Skip if IDs are invalid
 			if strings.Contains(args[6], "INVALID") {
@@ -1248,7 +1250,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1271,7 +1273,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: Join succeeded: (.+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched JOIN_SUCCEEDED event: ", args)
+			log.Debug().Msgf("Matched JOIN_SUCCEEDED event: %v", args)
 
 			// Convert chainID to number (stored as string in Go)
 			chainID := args[2]
@@ -1280,7 +1282,7 @@ var logParsers = []LogParser{
 			server.eventStore.mu.Lock()
 			player, exists := server.eventStore.joinRequests[chainID]
 			if !exists {
-				log.Println("[ERROR] No join request found for chainID:", chainID)
+				log.Error().Msgf("No join request found for chainID: %s", chainID)
 				server.eventStore.mu.Unlock()
 				return
 			}
@@ -1308,7 +1310,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1322,7 +1324,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?OnPossess\(\): PC=(.+) \(Online IDs:([^)]+)\) Pawn=([A-z0-9_]+)_C`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_POSSESS event: ", args)
+			log.Debug().Msgf("Matched PLAYER_POSSESS event: %v", args)
 
 			// Parse online IDs from the log
 			idsString := args[4]
@@ -1377,7 +1379,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1391,7 +1393,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: (.+) \(Online IDs:([^)]+)\) has revived (.+) \(Online IDs:([^)]+)\)\.`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_REVIVED event: ", args)
+			log.Debug().Msgf("Matched PLAYER_REVIVED event: %v", args)
 
 			// Parse reviver IDs
 			reviverIdsString := args[4]
@@ -1472,7 +1474,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1486,7 +1488,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQSoldier::)?Wound\(\): Player:(.+) KillingDamage=(?:-)*([0-9.]+) from ([A-z_0-9]+) \(Online IDs:([^)|]+)\| Controller ID: ([\w\d]+)\) caused by ([A-z_0-9-]+)_C`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_WOUNDED event: ", args)
+			log.Debug().Msgf("Matched PLAYER_WOUNDED event: %v", args)
 
 			// Skip if IDs are invalid
 			if strings.Contains(args[6], "INVALID") {
@@ -1601,7 +1603,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1624,7 +1626,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: USQGameState: Server Tick Rate: ([0-9.]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched TICK_RATE event: ", args)
+			log.Debug().Msgf("Matched TICK_RATE event: %v", args)
 			// Build a JSON object with the event details.
 			eventData := map[string]string{
 				"time":     args[1],
@@ -1634,7 +1636,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1648,7 +1650,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQGameMode::)?DetermineMatchWinner\(\): (.+) won on (.+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched ROUND_ENDED event: ", args)
+			log.Debug().Msgf("Matched ROUND_ENDED event: %v", args)
 
 			// Build event data
 			eventData := map[string]interface{}{
@@ -1679,7 +1681,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1693,7 +1695,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogGameState: Match State Changed from InProgress to WaitingPostMatch`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched MATCH_STATE_CHANGE event (to WaitingPostMatch): ", args)
+			log.Debug().Msgf("Matched MATCH_STATE_CHANGE event (to WaitingPostMatch): %v", args)
 
 			// Get winner and loser data from event store
 			server.eventStore.mu.Lock()
@@ -1725,7 +1727,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1739,7 +1741,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogWorld: Bringing World \/([A-z]+)\/(?:Maps\/)?([A-z0-9-]+)\/(?:.+\/)?([A-z0-9-]+)(?:\.[A-z0-9-]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched NEW_GAME event (map loading): ", args)
+			log.Debug().Msgf("Matched NEW_GAME event (map loading): %v", args)
 
 			// Skip transition map
 			if args[5] == "TransitionMap" {
@@ -1777,7 +1779,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1791,7 +1793,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?SquadJoined\(\): Player:(.+) \(Online IDs:([^)]+)\) Joined Team ([0-9]) Squad ([0-9]+)`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_SQUAD_CHANGE event: ", args)
+			log.Debug().Msgf("Matched PLAYER_SQUAD_CHANGE event: %v", args)
 
 			// Parse online IDs from the log
 			idsString := args[4]
@@ -1862,7 +1864,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1876,7 +1878,7 @@ var logParsers = []LogParser{
 	{
 		regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?TeamJoined\(\): Player:(.+) \(Online IDs:([^)]+)\) Is Now On Team ([0-9])`),
 		onMatch: func(args []string, server *LogWatcherServer) {
-			log.Println("[DEBUG] Matched PLAYER_TEAM_CHANGE event: ", args)
+			log.Debug().Msgf("Matched PLAYER_TEAM_CHANGE event: %v", args)
 
 			// Parse online IDs from the log
 			idsString := args[4]
@@ -1952,7 +1954,7 @@ var logParsers = []LogParser{
 
 			jsonBytes, err := json.Marshal(eventData)
 			if err != nil {
-				log.Println("[ERROR] Failed to marshal event data:", err)
+				log.Error().Err(err).Msg("Failed to marshal event data")
 				return
 			}
 
@@ -1986,10 +1988,9 @@ func NewLogWatcherServer(logSource LogSource) *LogWatcherServer {
 // Authenticate using a simple token
 func validateToken(tokenString string) bool {
 	if tokenString == authToken {
-		log.Println("[DEBUG] Authentication successful")
 		return true
 	}
-	log.Println("[DEBUG] Authentication failed")
+	log.Warn().Msg("Authentication failed")
 	return false
 }
 
@@ -2019,7 +2020,7 @@ func (s *LogWatcherServer) StreamEvents(req *pb.AuthRequest, stream pb.LogWatche
 		return fmt.Errorf("unauthorized")
 	}
 
-	log.Println("[DEBUG] New StreamEvents subscriber")
+	log.Debug().Msg("New StreamEvents subscriber")
 
 	s.mu.Lock()
 	s.eventSubs[stream] = struct{}{}
@@ -2039,7 +2040,7 @@ func (s *LogWatcherServer) StreamEvents(req *pb.AuthRequest, stream pb.LogWatche
 func (s *LogWatcherServer) processLogs() {
 	logChan, err := s.logSource.Watch(s.ctx)
 	if err != nil {
-		log.Fatalf("[ERROR] Failed to watch logs: %v", err)
+		log.Fatal().Err(err).Msg("Failed to watch logs")
 	}
 
 	for logLine := range logChan {
@@ -2090,9 +2091,16 @@ func StartServer(ctx context.Context, c *cli.Command) error {
 	sourceType := c.String("source-type")
 	pollFrequency := c.Duration("poll-frequency")
 	readFromStart := c.Bool("read-from-start")
+	logLevel := c.String("log-level")
+	logPretty := c.Bool("log-pretty")
+	logNoColor := c.Bool("log-no-color")
+
+	err := logger.SetupGlobalLogger(ctx, logLevel, logPretty, logNoColor, "", true)
+	if err != nil {
+		return fmt.Errorf("failed to set up logger: %v", err)
+	}
 
 	var logSource LogSource
-	var err error
 
 	switch sourceType {
 	case "local":
@@ -2101,7 +2109,7 @@ func StartServer(ctx context.Context, c *cli.Command) error {
 			return fmt.Errorf("log-file must be specified for local source type")
 		}
 		logSource = NewLocalFileSource(logFile)
-		log.Printf("[INFO] Using local file source: %s", logFile)
+		log.Info().Msgf("Using local file source: %s", logFile)
 
 	case "sftp":
 		host := c.String("host")
@@ -2126,7 +2134,7 @@ func StartServer(ctx context.Context, c *cli.Command) error {
 			return fmt.Errorf("remote-path must be specified for sftp source type")
 		}
 		logSource = NewSFTPSource(host, int(remotePort), username, password, keyPath, remotePath, pollFrequency, readFromStart)
-		log.Printf("[INFO] Using SFTP source: %s@%s:%d%s (read from start: %v)", username, host, remotePort, remotePath, readFromStart)
+		log.Info().Msgf("Using SFTP source: %s@%s:%d%s (read from start: %v)", username, host, remotePort, remotePath, readFromStart)
 
 	case "ftp":
 		host := c.String("host")
@@ -2150,7 +2158,7 @@ func StartServer(ctx context.Context, c *cli.Command) error {
 			return fmt.Errorf("remote-path must be specified for ftp source type")
 		}
 		logSource = NewFTPSource(host, int(remotePort), username, password, remotePath, pollFrequency, readFromStart)
-		log.Printf("[INFO] Using FTP source: %s@%s:%d%s (read from start: %v)", username, host, remotePort, remotePath, readFromStart)
+		log.Info().Msgf("Using FTP source: %s@%s:%d%s (read from start: %v)", username, host, remotePort, remotePath, readFromStart)
 
 	default:
 		return fmt.Errorf("invalid source-type: %s, must be 'local', 'sftp', or 'ftp'", sourceType)
@@ -2162,17 +2170,17 @@ func StartServer(ctx context.Context, c *cli.Command) error {
 	// Start gRPC server
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
+		log.Fatal().Err(err).Msg("Failed to listen")
 	}
 	grpcServer := grpc.NewServer()
 	pb.RegisterLogWatcherServer(grpcServer, server)
 
-	log.Printf("[INFO] LogWatcher gRPC server listening on :%s", port)
+	log.Info().Msgf("LogWatcher gRPC server listening on :%s", port)
 
 	// Handle graceful shutdown
 	go func() {
 		<-ctx.Done()
-		log.Println("[INFO] Shutting down server...")
+		log.Info().Msg("Shutting down server...")
 		grpcServer.GracefulStop()
 	}()
 
@@ -2181,7 +2189,7 @@ func StartServer(ctx context.Context, c *cli.Command) error {
 
 func main() {
 	ctx := utils.WithContextSigtermCallback(context.Background(), func() {
-		log.Println("[INFO] Received SIGTERM, shutting down")
+		log.Info().Msg("Received SIGTERM, shutting down")
 	})
 
 	app := &cli.Command{
@@ -2264,11 +2272,32 @@ func main() {
 				Value:    false,
 				Required: false,
 			},
+			&cli.StringFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_LOG_LEVEL"),
+				Name:     "log-level",
+				Usage:    "Log level (debug, info, warn, error, fatal, panic)",
+				Value:    "info",
+				Required: false,
+			},
+			&cli.BoolFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_LOG_PRETTY"),
+				Name:     "log-pretty",
+				Usage:    "Enable pretty logging",
+				Value:    true,
+				Required: false,
+			},
+			&cli.BoolFlag{
+				Sources:  cli.EnvVars("LOGWATCHER_LOG_NO_COLOR"),
+				Name:     "log-no-color",
+				Usage:    "Disable color output",
+				Value:    false,
+				Required: false,
+			},
 		},
 		Action: StartServer,
 	}
 
 	if err := app.Run(ctx, os.Args); err != nil {
-		log.Fatal(err)
+		log.Error().Msgf("error running Squad Aegis log watcher: %v", err)
 	}
 }
