@@ -50,7 +50,9 @@ func GetDeviceInfo(anonymous bool) DeviceInfo {
 	}
 
 	// Add common metrics
-	info.Metrics["hostname"] = getHostname()
+	if !anonymous {
+		info.Metrics["hostname"] = getHostname()
+	}
 	info.Metrics["container"] = isRunningInContainer()
 	info.Metrics["env"] = getEnvironment()
 
