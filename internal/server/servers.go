@@ -370,7 +370,7 @@ func (s *Server) ServerDelete(c *gin.Context) {
 	}
 
 	// Disconnect from RCON
-	_ = s.Dependencies.RconManager.DisconnectFromServer(serverId)
+	_ = s.Dependencies.RconManager.DisconnectFromServer(serverId, true)
 
 	// Begin transaction
 	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)

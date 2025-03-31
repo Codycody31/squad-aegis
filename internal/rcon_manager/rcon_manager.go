@@ -36,21 +36,20 @@ type CommandResponse struct {
 
 // ServerConnection represents a connection to an RCON server
 type ServerConnection struct {
-	ServerID     uuid.UUID
-	CommandRcon  *rcon.Rcon // Connection for executing commands
-	EventRcon    *rcon.Rcon // Connection for listening to events
-	CommandChan  chan RconCommand
-	EventChan    chan RconEvent
-	Disconnected bool
-	LastUsed     time.Time
-	mu           sync.Mutex
-	cmdSemaphore chan struct{}
-	// Connection details for reconnection
-	host     string
-	port     string
-	password string
-	// Track active connections
-	activeConnections int
+	ServerID             uuid.UUID
+	CommandRcon          *rcon.Rcon // Connection for executing commands
+	EventRcon            *rcon.Rcon // Connection for listening to events
+	CommandChan          chan RconCommand
+	EventChan            chan RconEvent
+	Disconnected         bool
+	LastUsed             time.Time
+	mu                   sync.Mutex
+	cmdSemaphore         chan struct{}
+	host                 string
+	port                 string
+	password             string
+	activeConnections    int
+	wasForceDisconnected bool
 }
 
 // RconManager manages RCON connections to multiple servers
@@ -129,9 +128,15 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 
 		// If connection is disconnected, reconnect
 		if conn.Disconnected {
-			log.Debug().
-				Str("serverID", serverID.String()).
-				Msg("Reconnecting to disconnected RCON server")
+			if conn.wasForceDisconnected {
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Msg("Reconnecting to force-disconnected RCON server")
+			} else {
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Msg("Reconnecting to disconnected RCON server")
+			}
 
 			// Create command connection
 			commandRcon, err := rcon.NewRcon(rcon.RconConfig{
@@ -254,7 +259,7 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 }
 
 // DisconnectFromServer disconnects from an RCON server
-func (m *RconManager) DisconnectFromServer(serverID uuid.UUID) error {
+func (m *RconManager) DisconnectFromServer(serverID uuid.UUID, force bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -268,6 +273,15 @@ func (m *RconManager) DisconnectFromServer(serverID uuid.UUID) error {
 
 	if conn.Disconnected {
 		return errors.New("server already disconnected")
+	}
+
+	if force {
+		conn.CommandRcon.Close()
+		conn.EventRcon.Close()
+		conn.Disconnected = true
+		conn.activeConnections = 0
+		conn.wasForceDisconnected = true
+		return nil
 	}
 
 	// Decrement active connections

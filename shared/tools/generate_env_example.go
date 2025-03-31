@@ -39,6 +39,12 @@ func generateEnvExample(s interface{}, prefix string) []string {
 		field := val.Field(i)
 		fieldType := typ.Field(i)
 		key := envKey(prefix, fieldType.Name)
+
+		// Skip fields that are not modifiable
+		if fieldType.Tag.Get("modifiable") == "false" {
+			continue
+		}
+
 		var defaultValue string
 		if field.Kind() == reflect.String {
 			defaultValue = "\"" + fieldType.Tag.Get("default") + "\""

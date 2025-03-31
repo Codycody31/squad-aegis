@@ -3,11 +3,18 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -33,6 +40,7 @@ import (
 	"go.codycody31.dev/squad-aegis/extensions/discord_teamkill"
 	"go.codycody31.dev/squad-aegis/extensions/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/extensions/team_randomizer"
+	"go.codycody31.dev/squad-aegis/internal/analytics"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
@@ -41,6 +49,7 @@ import (
 	"go.codycody31.dev/squad-aegis/shared/config"
 	"go.codycody31.dev/squad-aegis/shared/logger"
 	"go.codycody31.dev/squad-aegis/shared/utils"
+	"go.codycody31.dev/squad-aegis/version"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -58,6 +67,107 @@ func main() {
 	ctx := utils.WithContextSigtermCallback(context.Background(), func() {
 		log.Info().Msg("termination signal is received, shutting down server")
 	})
+
+	startTime := time.Now()
+
+	// Add panic handler for crash reporting
+	defer func() {
+		if r := recover(); r != nil {
+			// Get stack trace
+			stack := make([]byte, 4096)
+			stack = stack[:runtime.Stack(stack, false)]
+
+			// Log the crash
+			log.Error().
+				Interface("panic", r).
+				Str("stack", string(stack)).
+				Msg("Server crashed")
+
+			// Report to analytics if enabled
+			if config.Config.App.Telemetry {
+				metricsCollector := analytics.NewMetricsCollector(
+					analytics.NewCountly(
+						config.Config.App.Countly.AppKey,
+						config.Config.App.Countly.Host,
+						!config.Config.App.NonAnonymousTelemetry,
+					),
+				)
+
+				// Get device info
+				deviceInfo := analytics.GetDeviceInfo(!config.Config.App.NonAnonymousTelemetry)
+
+				// Get system state
+				var ramCurrent uint64
+				if runtime.GOOS == "linux" {
+					if data, err := os.ReadFile("/proc/self/status"); err == nil {
+						scanner := bufio.NewScanner(bytes.NewReader(data))
+						for scanner.Scan() {
+							line := scanner.Text()
+							if strings.Contains(line, "VmRSS:") {
+								fields := strings.Fields(line)
+								if len(fields) >= 2 {
+									if mem, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
+										ramCurrent = mem * 1024 // Convert from KB to bytes
+									}
+								}
+							}
+						}
+					}
+				}
+
+				// Get disk info
+				var diskCurrent, diskTotal uint64
+				if runtime.GOOS == "linux" {
+					var stat syscall.Statfs_t
+					if err := syscall.Statfs("/", &stat); err == nil {
+						diskTotal = stat.Blocks * uint64(stat.Bsize)
+						diskCurrent = diskTotal - (stat.Bfree * uint64(stat.Bsize))
+					}
+				}
+
+				metricsCollector.GetCountly().TrackCrash(map[string]interface{}{
+					// Device metrics
+					"_os":          deviceInfo.OS,
+					"_os_version":  deviceInfo.OSVersion,
+					"_device":      deviceInfo.DeviceName,
+					"_app_version": version.String(),
+					"_cpu":         deviceInfo.OSArch,
+
+					// Device state
+					"_ram_current":  ramCurrent / (1024 * 1024),             // Convert to MB
+					"_ram_total":    deviceInfo.MemoryTotal / (1024 * 1024), // Convert to MB
+					"_disk_current": diskCurrent / (1024 * 1024),            // Convert to MB
+					"_disk_total":   diskTotal / (1024 * 1024),              // Convert to MB
+
+					// System state
+					"_root":       false, // Not applicable for server
+					"_online":     true,  // Server is always online when running
+					"_muted":      false, // Not applicable for server
+					"_background": false, // Server is always in foreground
+
+					// Error info
+					"_name":     fmt.Sprintf("%v", r),
+					"_error":    string(stack),
+					"_nonfatal": false,
+					"_logs":     log.Logger.GetLevel().String(),
+					"_run":      time.Since(startTime).Seconds(),
+
+					// Custom data
+					"_custom": map[string]interface{}{
+						"container": deviceInfo.Metrics["container"],
+						"env":       deviceInfo.Metrics["env"],
+						"hostname":  deviceInfo.Metrics["hostname"],
+					},
+				})
+
+				metricsCollector.GetCountly().EndSession()
+				metricsCollector.GetCountly().Close()
+			}
+
+			// Re-panic to maintain original behavior
+			panic(r)
+		}
+	}()
 
 	if err := run(ctx); err != nil {
 		log.Error().Msgf("error running Squad Aegis: %v", err)
@@ -80,6 +190,22 @@ func run(ctx context.Context) error {
 	err := logger.SetupGlobalLogger(ctx, config.Config.Log.Level, config.Config.Debug.Pretty, config.Config.Debug.NoColor, config.Config.Log.File, true)
 	if err != nil {
 		return fmt.Errorf("failed to set up logger: %v", err)
+	}
+
+	// Initialize analytics if telemetry is enabled
+	var metricsCollector *analytics.MetricsCollector
+	if config.Config.App.Telemetry {
+		countly := analytics.NewCountly(config.Config.App.Countly.AppKey, config.Config.App.Countly.Host, !config.Config.App.NonAnonymousTelemetry)
+		metricsCollector = analytics.NewMetricsCollector(countly)
+		log.Debug().Msg("Telemetry initialized")
+
+		metricsCollector.GetCountly().Consent(analytics.Consent{
+			Sessions: true,
+			Events:   true,
+			Location: config.Config.App.NonAnonymousTelemetry,
+		})
+
+		metricsCollector.GetCountly().BeginSession()
 	}
 
 	// set gin mode based on log level
@@ -157,6 +283,22 @@ func run(ctx context.Context) error {
 	// Initialize services
 	waitingGroup := errgroup.Group{}
 
+	if config.Config.App.Telemetry {
+		waitingGroup.Go(func() error {
+			ticker := time.NewTicker(120 * time.Second)
+			defer ticker.Stop() // Ensure the ticker is stopped when the goroutine exits
+
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C: // Use the ticker's channel for timing
+					metricsCollector.GetCountly().UpdateSession()
+				}
+			}
+		})
+	}
+
 	// Start HTTP server
 	waitingGroup.Go(func() error {
 		log.Info().Msg("Starting http service...")
@@ -171,6 +313,7 @@ func run(ctx context.Context) error {
 			RconManager:      rconManager,
 			ConnectorManager: connectorManager,
 			ExtensionManager: extensionManager,
+			MetricsCollector: metricsCollector,
 		}
 
 		// Initialize router
@@ -202,6 +345,11 @@ func run(ctx context.Context) error {
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				log.Error().Err(err).Msg("error shutting down http server")
 				return err
+			}
+
+			if metricsCollector != nil {
+				metricsCollector.GetCountly().EndSession()
+				metricsCollector.GetCountly().Close()
 			}
 
 			log.Info().Msg("http server shutdown completed")
