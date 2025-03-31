@@ -115,7 +115,7 @@ func (c *Countly) BeginSession() {
 		return
 	}
 
-	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s", c.host, c.appKey, c.deviceID)
+	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s&sdk_name=golang", c.host, c.appKey, c.deviceID)
 	resp, err := c.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Error().Err(err).Msg("Error sending telemetry events to Countly")
@@ -136,7 +136,7 @@ func (c *Countly) UpdateSession() {
 		return
 	}
 
-	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s", c.host, c.appKey, c.deviceID)
+	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s&sdk_name=golang", c.host, c.appKey, c.deviceID)
 	resp, err := c.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Error().Err(err).Msg("Error sending telemetry events to Countly")
@@ -157,7 +157,7 @@ func (c *Countly) EndSession() {
 		return
 	}
 
-	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s", c.host, c.appKey, c.deviceID)
+	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s&sdk_name=golang", c.host, c.appKey, c.deviceID)
 	resp, err := c.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Error().Err(err).Msg("Error sending telemetry events to Countly")
@@ -178,7 +178,7 @@ func (c *Countly) Consent(consent Consent) {
 		return
 	}
 
-	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s", c.host, c.appKey, c.deviceID)
+	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s&sdk_name=golang", c.host, c.appKey, c.deviceID)
 	resp, err := c.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Error().Err(err).Msg("Error sending telemetry events to Countly")
@@ -199,7 +199,7 @@ func (c *Countly) TrackCrash(crashData map[string]interface{}) {
 		return
 	}
 
-	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s", c.host, c.appKey, c.deviceID)
+	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s&sdk_name=golang", c.host, c.appKey, c.deviceID)
 	resp, err := c.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Error().Err(err).Msg("Error sending telemetry events to Countly")
@@ -232,7 +232,7 @@ func (c *Countly) flushEvents() {
 		return
 	}
 
-	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s", c.host, c.appKey, c.deviceID)
+	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s&sdk_name=golang", c.host, c.appKey, c.deviceID)
 	resp, err := c.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Error().Err(err).Msg("Error sending telemetry events to Countly")
