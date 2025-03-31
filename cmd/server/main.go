@@ -160,7 +160,7 @@ func main() {
 					},
 				})
 
-				// Ensure analytics are sent before exit
+				metricsCollector.GetCountly().EndSession()
 				metricsCollector.GetCountly().Close()
 			}
 
