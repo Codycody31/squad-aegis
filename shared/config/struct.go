@@ -7,7 +7,7 @@ type Struct struct {
 		Port                  string `default:"3113"`
 		Url                   string `default:"http://localhost:3113"`
 		InContainer           bool   `default:"false"`
-		Telemetry             bool   `default:"false"`
+		Telemetry             bool   `default:"true"`
 		NonAnonymousTelemetry bool   `default:"false"`
 		Countly               struct {
 			AppKey string `default:"11d9f2263e6e3b52e1d5eecf2b7d85d9a69bdf50" modifiable:"false"`
