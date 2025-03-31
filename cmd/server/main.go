@@ -285,11 +285,14 @@ func run(ctx context.Context) error {
 
 	if config.Config.App.Telemetry {
 		waitingGroup.Go(func() error {
+			ticker := time.NewTicker(120 * time.Second)
+			defer ticker.Stop() // Ensure the ticker is stopped when the goroutine exits
+
 			for {
 				select {
 				case <-ctx.Done():
 					return nil
-				case <-time.Tick(120 * time.Second):
+				case <-ticker.C: // Use the ticker's channel for timing
 					metricsCollector.GetCountly().UpdateSession()
 				}
 			}
