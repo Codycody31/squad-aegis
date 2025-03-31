@@ -74,6 +74,13 @@ func fillStruct(s interface{}, prefix string) {
 			fillStruct(field.Addr().Interface(), key)
 		} else {
 			if field.CanSet() {
+				// Check if field is modifiable (defaults to true if not specified)
+				modifiable := fieldType.Tag.Get("modifiable")
+				if modifiable == "false" {
+					field.SetString(fieldType.Tag.Get("default"))
+					continue // Skip this field if it's not modifiable
+				}
+
 				switch field.Kind() {
 				case reflect.String:
 					field.SetString(getEnv(key, fieldType.Tag.Get("default")))

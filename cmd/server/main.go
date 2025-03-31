@@ -33,6 +33,7 @@ import (
 	"go.codycody31.dev/squad-aegis/extensions/discord_teamkill"
 	"go.codycody31.dev/squad-aegis/extensions/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/extensions/team_randomizer"
+	"go.codycody31.dev/squad-aegis/internal/analytics"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
@@ -80,6 +81,21 @@ func run(ctx context.Context) error {
 	err := logger.SetupGlobalLogger(ctx, config.Config.Log.Level, config.Config.Debug.Pretty, config.Config.Debug.NoColor, config.Config.Log.File, true)
 	if err != nil {
 		return fmt.Errorf("failed to set up logger: %v", err)
+	}
+
+	// Initialize analytics if telemetry is enabled
+	var metricsCollector *analytics.MetricsCollector
+	if config.Config.App.Telemetry {
+		countly := analytics.NewCountly(config.Config.App.Countly.AppKey, config.Config.App.Countly.Host)
+		metricsCollector = analytics.NewMetricsCollector(countly)
+		log.Info().Msg("Telemetry initialized")
+
+		metricsCollector.GetCountly().BeginSession()
+
+		go func() {
+			time.Sleep(60 * time.Second)
+			metricsCollector.GetCountly().UpdateSession()
+		}()
 	}
 
 	// set gin mode based on log level
@@ -171,6 +187,7 @@ func run(ctx context.Context) error {
 			RconManager:      rconManager,
 			ConnectorManager: connectorManager,
 			ExtensionManager: extensionManager,
+			MetricsCollector: metricsCollector,
 		}
 
 		// Initialize router
@@ -202,6 +219,11 @@ func run(ctx context.Context) error {
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				log.Error().Err(err).Msg("error shutting down http server")
 				return err
+			}
+
+			if metricsCollector != nil {
+				metricsCollector.GetCountly().EndSession()
+				metricsCollector.GetCountly().Close()
 			}
 
 			log.Info().Msg("http server shutdown completed")
