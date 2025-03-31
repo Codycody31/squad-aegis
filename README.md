@@ -109,6 +109,55 @@ By default, the Log Watcher only broadcasts new log entries that appear after it
 
 To read and process the entire log file from the beginning, set `LOGWATCHER_READ_FROM_START=true`.
 
+### Analytics & Telemetry
+
+Squad Aegis includes anonymous telemetry to help improve the application. By default, anonymous telemetry is enabled and collects:
+
+- Basic system information (OS, CPU architecture, memory usage)
+- Feature usage statistics
+- Crash reports (if any occur)
+- Performance metrics
+
+#### Telemetry Configuration
+
+You can configure telemetry settings through environment variables:
+
+```yaml
+environment:
+  # Enable/disable telemetry completely
+  - APP_TELEMETRY=true
+  
+  # Enable non-anonymous telemetry (includes server ID and hostname)
+  - APP_NON_ANONYMOUS_TELEMETRY=false
+```
+
+#### What Data is Collected?
+
+When telemetry is enabled, the following data is collected:
+
+1. **Anonymous Mode** (default):
+   - OS and version
+   - CPU architecture
+   - Memory usage
+   - Disk usage
+   - Application version
+   - Feature usage statistics
+   - Crash reports (if any)
+
+2. **Non-Anonymous Mode** (optional):
+   - All anonymous data
+   - Server hostname
+   - Server ID's
+
+#### Disabling Telemetry
+
+To completely disable telemetry, set:
+
+```yaml
+environment:
+  - APP_TELEMETRY=false
+```
+
 ## Configuration
 
 ### Environment Variables

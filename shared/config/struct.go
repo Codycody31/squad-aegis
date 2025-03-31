@@ -2,11 +2,17 @@ package config
 
 type Struct struct {
 	App struct {
-		IsDevelopment bool   `default:"true"`
-		WebUiProxy    string `default:""`
-		Port          string `default:"3113"`
-		Url           string `default:"http://localhost:3113"`
-		InContainer   bool   `default:"false"`
+		IsDevelopment         bool   `default:"true"`
+		WebUiProxy            string `default:""`
+		Port                  string `default:"3113"`
+		Url                   string `default:"http://localhost:3113"`
+		InContainer           bool   `default:"false"`
+		Telemetry             bool   `default:"true"`
+		NonAnonymousTelemetry bool   `default:"false"`
+		Countly               struct {
+			AppKey string `default:"11d9f2263e6e3b52e1d5eecf2b7d85d9a69bdf50" modifiable:"false"`
+			Host   string `default:"https://analytics.codycody31.dev" modifiable:"false"`
+		}
 	}
 	Initial struct {
 		Admin struct {

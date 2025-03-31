@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/core"
 	"go.codycody31.dev/squad-aegis/internal/commands"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
@@ -306,7 +307,7 @@ func (s *Server) ServerRconForceRestart(c *gin.Context) {
 	}
 
 	// First disconnect from the server
-	err = s.Dependencies.RconManager.DisconnectFromServer(serverId)
+	err = s.Dependencies.RconManager.DisconnectFromServer(serverId, true)
 	if err != nil && err.Error() != "server not connected" && err.Error() != "server already disconnected" {
 		responses.BadRequest(c, "Failed to disconnect from RCON", &gin.H{"error": err.Error()})
 		return
@@ -319,11 +320,10 @@ func (s *Server) ServerRconForceRestart(c *gin.Context) {
 		return
 	}
 
+	log.Info().Str("server_id", serverId.String()).Msg("RCON connection restarted")
+
 	// Create audit log for the action
-	auditData := map[string]interface{}{
-		"server_id": serverId.String(),
-	}
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:force_restart", auditData)
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:force_restart", map[string]interface{}{})
 
 	responses.Success(c, "RCON connection restarted successfully", nil)
 }
