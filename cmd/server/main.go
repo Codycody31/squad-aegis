@@ -3,11 +3,18 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -42,6 +49,7 @@ import (
 	"go.codycody31.dev/squad-aegis/shared/config"
 	"go.codycody31.dev/squad-aegis/shared/logger"
 	"go.codycody31.dev/squad-aegis/shared/utils"
+	"go.codycody31.dev/squad-aegis/version"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -86,16 +94,17 @@ func run(ctx context.Context) error {
 	// Initialize analytics if telemetry is enabled
 	var metricsCollector *analytics.MetricsCollector
 	if config.Config.App.Telemetry {
-		countly := analytics.NewCountly(config.Config.App.Countly.AppKey, config.Config.App.Countly.Host)
+		countly := analytics.NewCountly(config.Config.App.Countly.AppKey, config.Config.App.Countly.Host, !config.Config.App.NonAnonymousTelemetry)
 		metricsCollector = analytics.NewMetricsCollector(countly)
-		log.Info().Msg("Telemetry initialized")
+		log.Debug().Msg("Telemetry initialized")
+
+		metricsCollector.GetCountly().Consent(analytics.Consent{
+			Sessions: true,
+			Events:   true,
+			Location: config.Config.App.NonAnonymousTelemetry,
+		})
 
 		metricsCollector.GetCountly().BeginSession()
-
-		go func() {
-			time.Sleep(60 * time.Second)
-			metricsCollector.GetCountly().UpdateSession()
-		}()
 	}
 
 	// set gin mode based on log level
@@ -172,6 +181,19 @@ func run(ctx context.Context) error {
 
 	// Initialize services
 	waitingGroup := errgroup.Group{}
+
+	if config.Config.App.Telemetry {
+		waitingGroup.Go(func() error {
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-time.Tick(120 * time.Second):
+					metricsCollector.GetCountly().UpdateSession()
+				}
+			}
+		})
+	}
 
 	// Start HTTP server
 	waitingGroup.Go(func() error {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"runtime"
 	"sync"
 	"time"
 
@@ -33,6 +32,13 @@ type Countly struct {
 	batchSize     int
 	flushInterval time.Duration
 	stopChan      chan struct{}
+	anonymous     bool
+}
+
+type Consent struct {
+	Sessions bool `json:"sessions"`
+	Events   bool `json:"events"`
+	Location bool `json:"location"`
 }
 
 // Event represents a Countly event
@@ -45,7 +51,7 @@ type Event struct {
 }
 
 // NewCountly creates a new Countly analytics instance
-func NewCountly(appKey, host string) *Countly {
+func NewCountly(appKey, host string, anonymous bool) *Countly {
 	once.Do(func() {
 		instance = &Countly{
 			appKey:        appKey,
@@ -56,6 +62,7 @@ func NewCountly(appKey, host string) *Countly {
 			batchSize:     100,
 			flushInterval: 30 * time.Second,
 			stopChan:      make(chan struct{}),
+			anonymous:     anonymous,
 		}
 		go instance.periodicFlush()
 	})
@@ -87,20 +94,18 @@ func (c *Countly) TrackEvent(key string, count int, sum float64, segmentation ma
 }
 
 func (c *Countly) BeginSession() {
+	deviceInfo := GetDeviceInfo(c.anonymous)
+
 	payload := map[string]interface{}{
 		"begin_session": 1,
 		"metrics": map[string]interface{}{
-			"_os":          runtime.GOOS,
-			"os_arch":      runtime.GOARCH,
-			"_os_version": "4.1",
-			"_device": "Samsung Galaxy",
-			"_resolution": "1200x800",
-			"_carrier": "Vodafone",
+			"_os":          deviceInfo.OS,
+			"os_arch":      deviceInfo.OSArch,
+			"_os_version":  deviceInfo.OSVersion,
+			"_device":      deviceInfo.DeviceName,
 			"_app_version": version.String(),
-			"_density": "MDPI",
-			"_store": "com.android.vending",
-			"_browser": "Chrome",
-			"_browser_version": "40.0.0"
+			"cpu_count":    deviceInfo.CPUCount,
+			"memory_total": deviceInfo.MemoryTotal,
 		},
 	}
 
@@ -144,6 +149,48 @@ func (c *Countly) UpdateSession() {
 func (c *Countly) EndSession() {
 	payload := map[string]interface{}{
 		"end_session": 1,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		log.Error().Err(err).Msg("Error marshaling telemetry events")
+		return
+	}
+
+	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s", c.host, c.appKey, c.deviceID)
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Error().Err(err).Msg("Error sending telemetry events to Countly")
+		return
+	}
+
+	defer resp.Body.Close()
+}
+
+func (c *Countly) Consent(consent Consent) {
+	payload := map[string]interface{}{
+		"consent": consent,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		log.Error().Err(err).Msg("Error marshaling telemetry events")
+		return
+	}
+
+	url := fmt.Sprintf("%s/i?app_key=%s&device_id=%s", c.host, c.appKey, c.deviceID)
+	resp, err := c.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Error().Err(err).Msg("Error sending telemetry events to Countly")
+		return
+	}
+
+	defer resp.Body.Close()
+}
+
+func (c *Countly) TrackCrash(crashData map[string]interface{}) {
+	payload := map[string]interface{}{
+		"crash": crashData,
 	}
 
 	jsonData, err := json.Marshal(payload)
