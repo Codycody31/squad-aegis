@@ -836,14 +836,14 @@ func (s *Server) ServerExtensionDelete(c *gin.Context) {
 
 			// Try to shut down the extension
 			if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
-				log.Info().
+				log.Warn().
 					Err(err).
 					Str("id", eID.String()).
 					Str("extension", name).
 					Str("serverID", serverID.String()).
 					Msg("Error shutting down extension before delete, continuing anyway")
 			} else {
-				log.Info().Str("id", eID.String()).Msg("Extension shut down before deletion")
+				log.Info().Str("serverID", serverID.String()).Str("id", eID.String()).Msg("Extension shut down before deletion")
 			}
 		}
 	}
