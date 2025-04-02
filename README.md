@@ -10,41 +10,46 @@ A comprehensive control panel for Squad game server administration
 
 ## Overview
 
-**Squad Aegis** is an all-in-one control panel for managing multiple Squad game servers. Built with a Go backend, Nuxt 3 frontend, and PostgreSQL database, it provides:
+**Squad Aegis** is an all-in-one control panel designed to manage multiple Squad game servers efficiently. Whether you're running a single server or a complex cluster, Squad Aegis provides a centralized interface to keep everything under control. Built with a robust Go backend, a sleek Nuxt 3 frontend, and a reliable PostgreSQL database, it is tailored to offer:
 
-- Centralized server management
-- Role-based access control
-- RCON command interface
-- Comprehensive audit logging
-- Extensible architecture through connectors and extensions
+- **Centralized Server Management**: Seamlessly manage numerous Squad game servers from a unified dashboard.
+- **Role-Based Access Control**: Establish granular permissions to secure server operations.
+- **RCON Command Interface**: Send RCON commands directly via an intuitive web UI.
+- **Comprehensive Audit Logging**: Keep a detailed record of all administrative actions for accountability.
+- **Extensible Architecture**: Utilize connectors and extensions to integrate and extend functionalities.
 
 ## Features
 
 ### Core Features
 
-- **Multi-Server Management**: Control multiple Squad servers from a single dashboard
-- **Role-Based Access**: Granular permission controls for different user roles
-- **RCON Interface**: Execute server commands through an intuitive web interface
-- **Audit System**: Track all administrative actions
-- **Real-time Monitoring**: Monitor server status and player activity
+- **Multi-Server Management**: Central hub allowing supervision and control of multiple servers from a single interface.
+- **Role-Based Access**: Define specific permissions for users to ensure only authorized actions are executed.
+- **RCON Interface**: Engage with server commands using a user-friendly web-based interface.
+- **Audit System**: Detailed logging of administrative activities for transparency and security.
 
 ### Extensibility
 
-- **Connectors**: Integrate with external services (e.g., Discord)
-- **Extensions**: Add custom functionality without modifying core code
+- **Connectors**: Provide integrations with external services, such as Discord, to enhance your server capabilities.
+- **Extensions**: Introduce additional functionalities without altering the core codebase, ensuring flexibility and adaptability.
 
 ## Installation Guide
 
+To set up **Squad Aegis**, you'll need to install certain prerequisites and configure the environment correctly. Follow the steps below for a successful installation:
+
 ### Prerequisites
 
-- Docker Engine 20.10.0 or newer
-- Docker Compose V2
-- 2GB RAM minimum
-- 10GB available storage
+Ensure you have the following installed on your system:
 
-### Quick Start (Docker)
+- **Docker Engine** 20.10.0 or newer: Container platform to deploy the application.
+- **Docker Compose V2**: Tool for defining and running multi-container Docker applications.
+- Minimum **2GB RAM**: For efficient performance.
+- At least **10GB available storage**: To store data and logs.
 
-1. Create a new directory and download the docker-compose file:
+### Quick Start (Using Docker)
+
+Follow these concise steps to quickly deploy Squad Aegis using Docker:
+
+1. **Create a new directory and download the docker-compose file** to begin the installation:
 
 ```bash
 mkdir squad-aegis && cd squad-aegis
@@ -52,7 +57,7 @@ LATEST_TAG=$(curl -s https://api.github.com/repos/Codycody31/squad-aegis/release
 curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/$LATEST_TAG/docker-compose.yml
 ```
 
-2. Configure the dashboard environment:
+2. **Configure the dashboard environment** by creating a `.env` file with the environment variables specified below:
 
 ```yaml
 environment:
@@ -66,19 +71,19 @@ environment:
   - DB_PASS=squad-aegis
 ```
 
-3. Start the services:
+3. **Start the services** using the docker compose:
 
 ```bash
 docker compose up -d
 ```
 
-4. Access the dashboard at `http://localhost:3113`
+4. **Access the dashboard**: Once the servers start, visit `http://localhost:3113` to access your control panel.
 
 ### Log Watcher Setup
 
-The Log Watcher component monitors Squad server logs in real-time. To set it up:
+To monitor Squad server logs in real-time, set up the Log Watcher component:
 
-1. Create a new directory and download the log watcher docker-compose file:
+1. **Create a separate directory and download the Log Watcher docker-compose file**:
 
 ```bash
 mkdir squad-aegis-log-watcher && cd squad-aegis-log-watcher
@@ -86,7 +91,7 @@ LATEST_TAG=$(curl -s https://api.github.com/repos/Codycody31/squad-aegis/release
 curl -O https://raw.githubusercontent.com/Codycody31/squad-aegis/$LATEST_TAG/docker-compose.logwatcher.yml
 ```
 
-2. Configure the log watcher environment:
+2. **Configure the Log Watcher environment** to suit your logging requirements:
 
 ```yaml
 environment:
@@ -94,64 +99,39 @@ environment:
   - LOGWATCHER_AUTH_TOKEN=your_secure_token  # Must match dashboard configuration
   - LOGWATCHER_SOURCE_TYPE=local             # Options: local, sftp, ftp
   - LOGWATCHER_LOG_FILE=/path/to/SquadGame.log
-  - LOGWATCHER_READ_FROM_START=false         # Optional: Set to true to read entire log file history
+  - LOGWATCHER_READ_FROM_START=false         # Set true to read entire log history
 ```
 
-3. Start the log watcher:
+3. **Start the Log Watcher**:
 
 ```bash
 docker compose -f docker-compose.logwatcher.yml up -d
 ```
 
-#### Log Watcher Behavior
-
-By default, the Log Watcher only broadcasts new log entries that appear after it starts (similar to `tail -f`). This prevents flooding clients with potentially large amounts of historical log data.
-
-To read and process the entire log file from the beginning, set `LOGWATCHER_READ_FROM_START=true`.
+By default, the Log Watcher broadcasts new log entries from the point it starts, akin to `tail -f`. To process entire log data, adjust `LOGWATCHER_READ_FROM_START`.
 
 ### Analytics & Telemetry
 
-Squad Aegis includes anonymous telemetry to help improve the application. By default, anonymous telemetry is enabled and collects:
+Squad Aegis incorporates anonymous telemetry to refine performance and user experience. By default, this feature is active and collects:
 
 - Basic system information (OS, CPU architecture, memory usage)
-- Feature usage statistics
-- Crash reports (if any occur)
+- Statistics on feature usage
+- Crash reports, if any
 - Performance metrics
 
 #### Telemetry Configuration
 
-You can configure telemetry settings through environment variables:
+Adjust telemetry settings via environment variables:
 
 ```yaml
 environment:
-  # Enable/disable telemetry completely
+  # Enable/disable telemetry
   - APP_TELEMETRY=true
-  
-  # Enable non-anonymous telemetry (includes server ID and hostname)
+  # Non-anonymous telemetry
   - APP_NON_ANONYMOUS_TELEMETRY=false
 ```
 
-#### What Data is Collected?
-
-When telemetry is enabled, the following data is collected:
-
-1. **Anonymous Mode** (default):
-   - OS and version
-   - CPU architecture
-   - Memory usage
-   - Disk usage
-   - Application version
-   - Feature usage statistics
-   - Crash reports (if any)
-
-2. **Non-Anonymous Mode** (optional):
-   - All anonymous data
-   - Server hostname
-   - Server ID's
-
-#### Disabling Telemetry
-
-To completely disable telemetry, set:
+To completely turn off telemetry, configure:
 
 ```yaml
 environment:
@@ -160,47 +140,32 @@ environment:
 
 ## Configuration
 
-### Environment Variables
+### Essential Environment Variables
+
+For optimal configuration, make note of these essential variables:
 
 #### Core Application
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | APP_PORT | Dashboard web port | 3113 |
-| APP_URL | Public URL | <http://localhost:3113> |
+| APP_URL | The public URL of the application | <http://localhost:3113> |
 | INITIAL_ADMIN_USERNAME | First admin user | admin |
-| INITIAL_ADMIN_PASSWORD | First admin password | admin |
+| INITIAL_ADMIN_PASSWORD | Initial admin password | admin |
 
-#### Database
+#### Database Connection
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| DB_HOST | PostgreSQL host | database |
-| DB_PORT | PostgreSQL port | 5432 |
+| DB_HOST | PostgreSQL database host | database |
+| DB_PORT | PostgreSQL connection port | 5432 |
 | DB_NAME | Database name | squad-aegis |
 | DB_USER | Database user | squad-aegis |
 | DB_PASS | Database password | squad-aegis |
 
-#### Log Watcher
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| LOGWATCHER_PORT | gRPC server port | 31135 |
-| LOGWATCHER_AUTH_TOKEN | Authentication token | (required) |
-| LOGWATCHER_SOURCE_TYPE | Source type (local, sftp, ftp) | local |
-| LOGWATCHER_LOG_FILE | Path to local log file | (required for local) |
-| LOGWATCHER_HOST | Remote host for SFTP/FTP | (required for sftp/ftp) |
-| LOGWATCHER_REMOTE_PORT | Remote port for SFTP/FTP | 22 (sftp), 21 (ftp) |
-| LOGWATCHER_USERNAME | Username for SFTP/FTP | (required for sftp/ftp) |
-| LOGWATCHER_PASSWORD | Password for SFTP/FTP | (required for ftp) |
-| LOGWATCHER_KEY_PATH | Path to SSH key for SFTP | (optional for sftp) |
-| LOGWATCHER_REMOTE_PATH | Path to remote log file | (required for sftp/ftp) |
-| LOGWATCHER_POLL_FREQUENCY | Poll frequency for remote files | 5s |
-| LOGWATCHER_READ_FROM_START | Read entire log from beginning | false |
-
 ## Development
 
-For development environments, use the dev compose file:
+For those interested in development, utilize the development compose file to set up the environment:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
@@ -212,18 +177,18 @@ docker compose -f docker-compose.dev.yml up -d
 
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
+We welcome contributions!
 
 ## Support
 
-- [Issue Tracker](https://github.com/Codycody31/squad-aegis/issues)
-- [Discord Server](https://discord.gg/your-invite)
+For help and support, you can refer to the resources below:
+
+- **Issue Tracker**: [Submit bug reports and feature requests](https://github.com/Codycody31/squad-aegis/issues)
 
 ## License
 
-This project is licensed under the [Apache 2.0 License](LICENSE).
+This project is available under the [Apache 2.0 License](LICENSE).
 
 ## Acknowledgments
 
-- Inspired by [milutinke/sqcp](https://github.com/milutinke/sqcp)
-- Special thanks to the Squad gaming community
+This project draws inspiration from [milutinke/sqcp](https://github.com/milutinke/sqcp), and we extend gratitude to the Squad gaming community for their support and feedback.
