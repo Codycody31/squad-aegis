@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-03-31
+## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-04-02
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -9,6 +9,11 @@
 ### ✨ Features
 
 - feat(logwatcher): refactor log processing and client broadcasting [[#45](https://github.com/Codycody31/squad-aegis/pull/45)]
+
+### 📚 Documentation
+
+- docs: Update README for clarity and formatting improvements [[#54](https://github.com/Codycody31/squad-aegis/pull/54)]
+- docs: update README for improved configuration setup [[#42](https://github.com/Codycody31/squad-aegis/pull/42)]
 
 ### 🐛 Bug Fixes
 
@@ -23,10 +28,6 @@
 - enhancement: add avatar functionality to server switcher [[#47](https://github.com/Codycody31/squad-aegis/pull/47)]
 - feat: add server metrics endpoint and fetching logic [[#43](https://github.com/Codycody31/squad-aegis/pull/43)]
 - feat(settings): add server settings page and update routes [[#40](https://github.com/Codycody31/squad-aegis/pull/40)]
-
-### 📚 Documentation
-
-- docs: update README for improved configuration setup [[#42](https://github.com/Codycody31/squad-aegis/pull/42)]
 
 ## [0.1.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.1.0) - 2025-03-24
 
