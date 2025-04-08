@@ -262,6 +262,7 @@ func run(ctx context.Context) error {
 
 	// Start RCON connection manager
 	go rconManager.StartConnectionManager()
+	go rconManager.ConnectToAllServers(ctx, database)
 
 	// Initialize connector manager
 	connectorManager := connector_manager.NewConnectorManager(ctx)
