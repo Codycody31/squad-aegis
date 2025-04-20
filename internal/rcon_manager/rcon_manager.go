@@ -332,7 +332,7 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 	select {
 	case conn.CommandChan <- RconCommand{Command: command, Response: responseChan}:
 		// Command queued successfully
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second): // Increased timeout
 		log.Error().
 			Str("serverID", serverID.String()).
 			Str("command", command).
@@ -352,7 +352,7 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 				Msg("Command execution failed")
 		}
 		return response.Response, response.Error
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second): // Increased timeout
 		log.Error().
 			Str("serverID", serverID.String()).
 			Str("command", command).
@@ -428,7 +428,7 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 			select {
 			case response := <-responseChan:
 				cmdResponse = response
-			case <-time.After(5 * time.Second): // Slightly less than the client timeout
+			case <-time.After(15 * time.Second): // Increased timeout (Match client timeout)
 				cmdResponse = CommandResponse{
 					Response: "",
 					Error:    errors.New("command execution timed out"),
@@ -459,105 +459,73 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 
 // listenForEvents listens for events from an RCON server
 func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
-	// Setup event listeners
-	sr.Emitter.On("CHAT_MESSAGE", func(data interface{}) {
+	// Helper function to update LastUsed and broadcast event
+	updateAndBroadcast := func(eventType string, data interface{}) {
+		m.mu.RLock()
+		conn, exists := m.connections[serverID]
+		m.mu.RUnlock()
+
+		if exists {
+			conn.mu.Lock()
+			conn.LastUsed = time.Now()
+			conn.mu.Unlock()
+		} else {
+			log.Warn().Str("serverID", serverID.String()).Msg("Connection not found for event, cannot update LastUsed")
+		}
+
 		event := RconEvent{
 			ServerID: serverID,
-			Type:     "CHAT_MESSAGE",
+			Type:     eventType,
 			Data:     data,
 			Time:     time.Now(),
 		}
-
 		m.broadcastEvent(event)
+	}
+
+	// Setup event listeners
+	sr.Emitter.On("CHAT_MESSAGE", func(data interface{}) {
+		updateAndBroadcast("CHAT_MESSAGE", data)
 	})
 
 	sr.Emitter.On("CHAT_COMMAND", func(data interface{}) {
-		event := RconEvent{
-			ServerID: serverID,
-			Type:     "CHAT_COMMAND",
-			Data:     data,
-			Time:     time.Now(),
-		}
-
-		m.broadcastEvent(event)
+		updateAndBroadcast("CHAT_COMMAND", data)
 	})
 
 	sr.Emitter.On("PLAYER_WARNED", func(data interface{}) {
-		event := RconEvent{
-			ServerID: serverID,
-			Type:     "PLAYER_WARNED",
-			Data:     data,
-			Time:     time.Now(),
-		}
-
-		m.broadcastEvent(event)
+		updateAndBroadcast("PLAYER_WARNED", data)
 	})
 
 	sr.Emitter.On("PLAYER_KICKED", func(data interface{}) {
-		event := RconEvent{
-			ServerID: serverID,
-			Type:     "PLAYER_KICKED",
-			Data:     data,
-			Time:     time.Now(),
-		}
-
-		m.broadcastEvent(event)
+		updateAndBroadcast("PLAYER_KICKED", data)
 	})
 
 	sr.Emitter.On("POSSESSED_ADMIN_CAMERA", func(data interface{}) {
-		event := RconEvent{
-			ServerID: serverID,
-			Type:     "POSSESSED_ADMIN_CAMERA",
-			Data:     data,
-			Time:     time.Now(),
-		}
-
-		m.broadcastEvent(event)
+		updateAndBroadcast("POSSESSED_ADMIN_CAMERA", data)
 	})
 
 	sr.Emitter.On("UNPOSSESSED_ADMIN_CAMERA", func(data interface{}) {
-		event := RconEvent{
-			ServerID: serverID,
-			Type:     "UNPOSSESSED_ADMIN_CAMERA",
-			Data:     data,
-			Time:     time.Now(),
-		}
-
-		m.broadcastEvent(event)
+		updateAndBroadcast("UNPOSSESSED_ADMIN_CAMERA", data)
 	})
 
 	sr.Emitter.On("SQUAD_CREATED", func(data interface{}) {
-		event := RconEvent{
-			ServerID: serverID,
-			Type:     "SQUAD_CREATED",
-			Data:     data,
-			Time:     time.Now(),
-		}
-
-		m.broadcastEvent(event)
+		updateAndBroadcast("SQUAD_CREATED", data)
 	})
 
 	// Listen for connection events
 	sr.Emitter.On("close", func(data interface{}) {
-		event := RconEvent{
-			ServerID: serverID,
-			Type:     "CONNECTION_CLOSED",
-			Data:     nil,
-			Time:     time.Now(),
-		}
-
-		m.broadcastEvent(event)
+		log.Warn(). // Use Warn level for unexpected closures
+				Str("serverID", serverID.String()).
+				Interface("data", data).
+				Msg("RCON event connection closed")
+		updateAndBroadcast("CONNECTION_CLOSED", data)
 	})
 
 	sr.Emitter.On("error", func(data interface{}) {
-		event := RconEvent{
-			ServerID: serverID,
-			Type:     "CONNECTION_ERROR",
-			Data:     data,
-			Time:     time.Now(),
-		}
-
-		m.broadcastEvent(event)
+		log.Error(). // Use Error level for connection errors
+				Str("serverID", serverID.String()).
+				Interface("data", data). // Often the error itself
+				Msg("RCON event connection error")
+		updateAndBroadcast("CONNECTION_ERROR", data)
 	})
 
 	// Block until context is done
@@ -588,20 +556,28 @@ func (m *RconManager) cleanupIdleConnections() {
 	now := time.Now()
 	idleTimeout := 30 * time.Minute
 
+	cleanedCount := 0 // Keep track of how many were cleaned
 	for serverID, conn := range m.connections {
 		conn.mu.Lock()
-		if !conn.Disconnected && now.Sub(conn.LastUsed) > idleTimeout {
-			// Debug logs for idle cleanup aren't that useful in production
-			log.Info().
-				Str("serverID", serverID.String()).
-				Dur("idleTime", now.Sub(conn.LastUsed)).
-				Msg("Closing idle RCON connection")
+		isDisconnected := conn.Disconnected // Read before potentially changing
+		lastUsed := conn.LastUsed
+		shouldClean := !isDisconnected && now.Sub(lastUsed) > idleTimeout
+
+		if shouldClean {
+			log.Info(). // Keep Info level for explicit idle cleanup
+					Str("serverID", serverID.String()).
+					Dur("idleDuration", now.Sub(lastUsed)).
+					Msg("Closing idle RCON connection due to inactivity")
 
 			conn.CommandRcon.Close()
 			conn.EventRcon.Close()
 			conn.Disconnected = true
+			cleanedCount++
 		}
-		conn.mu.Unlock()
+		conn.mu.Unlock() // Release lock before potentially long operation or next iteration
+	}
+	if cleanedCount > 0 {
+		log.Debug().Int("cleanedCount", cleanedCount).Msg("Idle RCON connection cleanup finished")
 	}
 }
 
