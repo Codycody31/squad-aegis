@@ -564,27 +564,13 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 		return
 	}
 
-	// Get extension registrar
-	registrar, ok := s.Dependencies.ExtensionManager.GetExtension(name)
-	if !ok {
-		log.Error().Str("name", name).Msg("Extension registrar not found")
-		responses.InternalServerError(c, err, &gin.H{"error": "Extension type not found"})
-		return
-	}
-
-	// Get extension definition
-	extensionDef := registrar.Define()
-
 	var warningMessage string
 
 	// For config change but keeping enabled, we need to commit the transaction
 	// before restarting the extension so it reads the new config
 	if configChanged && newEnabled && !enabledChanged {
-		// Get extension definition ID
-		extensionID := extensionDef.ID
-
-		// First, shut down the extension
-		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
+		// First, shut down the extension using its database ID (eID)
+		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, eID.String()); err != nil {
 			log.Info().
 				Err(err).
 				Str("id", eID.String()).
@@ -642,8 +628,6 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 				"enabled": newEnabled,
 			})
 		}
-
-		// Transaction is already committed in this case
 		return
 	}
 
@@ -698,16 +682,11 @@ func (s *Server) ServerExtensionUpdate(c *gin.Context) {
 				"enabled": newEnabled,
 			})
 		}
-
-		// Transaction already committed
 		return
 	} else if enabledChanged && !newEnabled {
 		// Disabling the extension
-		// Get extension definition ID
-		extensionID := extensionDef.ID
-
-		// Use the extension manager to shut down the extension
-		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
+		// Use the extension manager to shut down the extension using its database ID (eID)
+		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, eID.String()); err != nil {
 			log.Info().
 				Err(err).
 				Str("id", eID.String()).
@@ -960,17 +939,6 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 		return
 	}
 
-	// Get extension registrar
-	registrar, ok := s.Dependencies.ExtensionManager.GetExtension(name)
-	if !ok {
-		log.Error().Str("name", name).Msg("Extension registrar not found")
-		responses.InternalServerError(c, err, &gin.H{"error": "Extension type not found"})
-		return
-	}
-
-	// Get extension definition
-	extensionDef := registrar.Define()
-
 	var warningMessage string
 
 	// If we're enabling, initialize
@@ -995,11 +963,8 @@ func (s *Server) ServerExtensionToggle(c *gin.Context) {
 		}
 	} else {
 		// Disabling the extension
-		// Get extension definition ID
-		extensionID := extensionDef.ID
-
-		// Use the extension manager to shut down the extension
-		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, extensionID); err != nil {
+		// Use the extension manager to shut down the extension using its database ID (eID)
+		if err := s.Dependencies.ExtensionManager.ShutdownExtension(serverID, eID.String()); err != nil {
 			log.Info().
 				Err(err).
 				Str("id", eID.String()).
