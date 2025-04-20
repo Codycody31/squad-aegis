@@ -262,11 +262,8 @@ func run(ctx context.Context) error {
 
 	// Start RCON connection manager
 	go rconManager.StartConnectionManager()
-	go func() {
-		if err := rconManager.ConnectToAllServers(ctx, database); err != nil {
-			log.Error().Err(err).Msg("Failed to connect to all servers")
-		}
-	}()
+	rconManager.ConnectToAllServers(ctx, database)
+	
 	// Initialize connector manager
 	connectorManager := connector_manager.NewConnectorManager(ctx)
 	connectorManager.RegisterConnector("discord", discord.Registrar)
