@@ -99,47 +99,56 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	log.Debug().Msg("Starting connector initialization...")
+
 	// Query for global connectors
+	log.Debug().Msg("Querying global connectors...")
 	globalRows, err := db.QueryContext(ctx, `
 		SELECT id, name, config
 		FROM connectors
 	`)
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to query global connectors")
 		return fmt.Errorf("failed to query connectors: %w", err)
 	}
 	defer globalRows.Close()
+	log.Debug().Msg("Global connectors query successful.")
 
 	// Initialize global connectors
+	globalCount := 0
 	for globalRows.Next() {
+		globalCount++
 		var id uuid.UUID
 		var name string
 		var configJSON []byte
 
 		if err := globalRows.Scan(&id, &name, &configJSON); err != nil {
-			log.Error().Err(err).Msg("Failed to scan connector row")
+			log.Error().Err(err).Int("globalIndex", globalCount).Msg("Failed to scan global connector row")
 			continue
 		}
+		log.Trace().Str("id", id.String()).Str("name", name).Int("globalIndex", globalCount).Msg("Processing global connector")
 
 		var config map[string]any
 		if err := json.Unmarshal(configJSON, &config); err != nil {
-			log.Error().Err(err).Str("id", id.String()).Msg("Failed to unmarshal connector config")
+			log.Error().Err(err).Str("id", id.String()).Int("globalIndex", globalCount).Msg("Failed to unmarshal global connector config")
 			continue
 		}
 
 		// Find registrar for this connector type
 		registrar, ok := m.registeredConnectors[name]
 		if !ok {
-			log.Error().Str("name", name).Msg("No registrar found for connector type")
+			log.Error().Str("name", name).Str("id", id.String()).Int("globalIndex", globalCount).Msg("No registrar found for global connector type")
 			continue
 		}
 
 		// Get connector definition
 		def := registrar.Define()
+		log.Trace().Str("id", id.String()).Str("type", def.ID).Int("globalIndex", globalCount).Msg("Creating global connector instance")
 
 		// Create and initialize connector instance
 		instance := def.CreateInstance()
 		if err := instance.Initialize(config); err != nil {
-			log.Error().Err(err).Str("id", id.String()).Str("type", def.ID).Msg("Failed to initialize connector instance")
+			log.Error().Err(err).Str("id", id.String()).Str("type", def.ID).Int("globalIndex", globalCount).Msg("Failed to initialize global connector instance")
 			continue
 		}
 
@@ -152,34 +161,41 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 	}
 
 	if err := globalRows.Err(); err != nil {
-		log.Error().Err(err).Msg("Error iterating connector rows")
+		log.Error().Err(err).Msg("Error iterating global connector rows")
 	}
+	log.Debug().Int("count", globalCount).Msg("Finished processing global connectors.")
 
 	// Query for server-specific connectors
+	log.Debug().Msg("Querying server connectors...")
 	serverRows, err := db.QueryContext(ctx, `
 		SELECT id, server_id, name, config
 		FROM server_connectors
 	`)
 	if err != nil {
+		log.Error().Err(err).Msg("Failed to query server connectors")
 		return fmt.Errorf("failed to query server connectors: %w", err)
 	}
 	defer serverRows.Close()
+	log.Debug().Msg("Server connectors query successful.")
 
 	// Initialize server-specific connectors
+	serverCount := 0
 	for serverRows.Next() {
+		serverCount++
 		var id uuid.UUID
 		var serverID uuid.UUID
 		var name string
 		var configJSON []byte
 
 		if err := serverRows.Scan(&id, &serverID, &name, &configJSON); err != nil {
-			log.Error().Err(err).Msg("Failed to scan server connector row")
+			log.Error().Err(err).Int("serverIndex", serverCount).Msg("Failed to scan server connector row")
 			continue
 		}
+		log.Trace().Str("id", id.String()).Str("serverID", serverID.String()).Str("name", name).Int("serverIndex", serverCount).Msg("Processing server connector")
 
 		var config map[string]any
 		if err := json.Unmarshal(configJSON, &config); err != nil {
-			log.Error().Err(err).Str("id", id.String()).Msg("Failed to unmarshal server connector config")
+			log.Error().Err(err).Str("id", id.String()).Int("serverIndex", serverCount).Msg("Failed to unmarshal server connector config")
 			continue
 		}
 
@@ -189,17 +205,18 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 		// Find registrar for this connector type
 		registrar, ok := m.registeredConnectors[name]
 		if !ok {
-			log.Error().Str("name", name).Msg("No registrar found for connector type")
+			log.Error().Str("name", name).Str("id", id.String()).Int("serverIndex", serverCount).Msg("No registrar found for server connector type")
 			continue
 		}
 
 		// Get connector definition
 		def := registrar.Define()
+		log.Trace().Str("id", id.String()).Str("type", def.ID).Int("serverIndex", serverCount).Msg("Creating server connector instance")
 
 		// Create and initialize connector instance
 		instance := def.CreateInstance()
 		if err := instance.Initialize(config); err != nil {
-			log.Error().Err(err).Str("id", id.String()).Str("type", def.ID).Msg("Failed to initialize server connector instance")
+			log.Error().Err(err).Str("id", id.String()).Str("type", def.ID).Int("serverIndex", serverCount).Msg("Failed to initialize server connector instance")
 			continue
 		}
 
@@ -215,7 +232,9 @@ func (m *ConnectorManager) InitializeConnectors(ctx context.Context, db *sql.DB)
 	if err := serverRows.Err(); err != nil {
 		log.Error().Err(err).Msg("Error iterating server connector rows")
 	}
+	log.Debug().Int("count", serverCount).Msg("Finished processing server connectors.")
 
+	log.Debug().Msg("Connector initialization finished.")
 	return nil
 }
 
