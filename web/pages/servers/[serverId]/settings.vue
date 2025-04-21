@@ -193,6 +193,51 @@
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- Ban List Subscriptions -->
+    <Card class="mb-4">
+      <CardHeader>
+        <CardTitle>Ban List Subscriptions</CardTitle>
+        <p class="text-sm text-muted-foreground">
+          Subscribe to ban lists to automatically apply their bans to this server.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div v-if="loading" class="text-center py-8">
+          <div class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p>Loading ban lists...</p>
+        </div>
+
+        <div v-else-if="banLists.length === 0" class="text-center py-8">
+          <p>No ban lists available</p>
+        </div>
+
+        <div v-else class="space-y-4">
+          <div v-for="banList in banLists" :key="banList.id" class="flex items-center justify-between p-4 border rounded-lg">
+            <div>
+              <div class="font-medium">{{ banList.name }}</div>
+              <div class="text-sm text-muted-foreground">{{ banList.description }}</div>
+              <div class="flex items-center gap-2 mt-2">
+                <Badge :variant="banList.isGlobal ? 'default' : 'outline'">
+                  {{ banList.isGlobal ? 'Global' : 'Server-Specific' }}
+                </Badge>
+                <Badge variant="secondary">{{ banList.banCount }} bans</Badge>
+              </div>
+            </div>
+            <Button
+              :variant="subscribedBanLists.some(s => s.id === banList.id) ? 'destructive' : 'default'"
+              :disabled="isSubscribing"
+              @click="subscribedBanLists.some(s => s.id === banList.id) ? unsubscribeFromBanList(banList.id) : subscribeToBanList(banList.id)"
+            >
+              <span v-if="isSubscribing" class="mr-2">
+                <Icon name="lucide:loader-2" class="h-4 w-4 animate-spin" />
+              </span>
+              {{ subscribedBanLists.some(s => s.id === banList.id) ? 'Unsubscribe' : 'Subscribe' }}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
@@ -234,6 +279,20 @@ const isUpdating = ref(false);
 const isRestarting = ref(false);
 const isDeleting = ref(false);
 const showDeleteDialog = ref(false);
+
+// Add to the interface section
+interface BanList {
+  id: string;
+  name: string;
+  description: string;
+  isGlobal: boolean;
+  banCount: number;
+}
+
+// Add to the refs section
+const banLists = ref<BanList[]>([]);
+const subscribedBanLists = ref<BanList[]>([]);
+const isSubscribing = ref(false);
 
 // Fetch server details
 const fetchServerDetails = async () => {
@@ -396,8 +455,159 @@ const deleteServer = async () => {
   }
 };
 
+// Add function to fetch ban lists
+async function fetchBanLists() {
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const token = cookieToken.value;
+
+  if (!token) return;
+
+  try {
+    const { data, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/ban-lists`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      console.error("Failed to fetch ban lists:", fetchError.value);
+      return;
+    }
+
+    if (data.value && data.value.data) {
+      banLists.value = data.value.data.banLists || [];
+    }
+  } catch (err: any) {
+    console.error("Failed to fetch ban lists:", err);
+  }
+}
+
+// Add function to fetch subscribed ban lists
+async function fetchSubscribedBanLists() {
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+  const token = cookieToken.value;
+
+  if (!token) return;
+
+  try {
+    const { data, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-lists`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      console.error("Failed to fetch subscribed ban lists:", fetchError.value);
+      return;
+    }
+
+    if (data.value && data.value.data) {
+      subscribedBanLists.value = data.value.data.banLists || [];
+    }
+  } catch (err: any) {
+    console.error("Failed to fetch subscribed ban lists:", err);
+  }
+}
+
+// Add function to subscribe to a ban list
+async function subscribeToBanList(banListId: string) {
+  isSubscribing.value = true;
+  try {
+    const response = await fetch(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-lists/subscribe`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          banListId,
+        }),
+      }
+    );
+
+    const data = await response.json();
+    if (data.code === 200) {
+      toast({
+        title: "Success",
+        description: "Subscribed to ban list successfully",
+        variant: "default",
+      });
+      fetchSubscribedBanLists();
+    } else {
+      toast({
+        title: "Error",
+        description: data.message || "Failed to subscribe to ban list",
+        variant: "destructive",
+      });
+    }
+  } catch (error) {
+    toast({
+      title: "Error",
+      description: "Failed to subscribe to ban list",
+      variant: "destructive",
+    });
+  } finally {
+    isSubscribing.value = false;
+  }
+}
+
+// Add function to unsubscribe from a ban list
+async function unsubscribeFromBanList(banListId: string) {
+  try {
+    const response = await fetch(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-lists/unsubscribe`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          banListId,
+        }),
+      }
+    );
+
+    const data = await response.json();
+    if (data.code === 200) {
+      toast({
+        title: "Success",
+        description: "Unsubscribed from ban list successfully",
+        variant: "default",
+      });
+      fetchSubscribedBanLists();
+    } else {
+      toast({
+        title: "Error",
+        description: data.message || "Failed to unsubscribe from ban list",
+        variant: "destructive",
+      });
+    }
+  } catch (error) {
+    toast({
+      title: "Error",
+      description: "Failed to unsubscribe from ban list",
+      variant: "destructive",
+    });
+  }
+}
+
 onMounted(() => {
   fetchServerDetails();
   fetchServerStatus();
+  fetchBanLists();
+  fetchSubscribedBanLists();
 });
 </script>
