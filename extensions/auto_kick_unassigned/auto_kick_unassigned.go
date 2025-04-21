@@ -95,19 +95,53 @@ func (e *AutoKickUnassignedExtension) Initialize(config map[string]interface{}, 
 	return nil
 }
 
-// Shutdown stops all timers and cleans up resources
+// Shutdown stops the extension's background tasks
 func (e *AutoKickUnassignedExtension) Shutdown() error {
-	mgr := e.Manager.(*AutoKickManager)
-
-	// Stop all tracking timers
-	for eosID := range mgr.TrackedPlayers {
-		e.untrackPlayer(eosID)
+	// Ensure Manager is initialized before accessing its fields
+	if e.Manager == nil {
+		log.Warn().Str("extension", e.Definition.ID).Msg("Shutdown called on uninitialized extension")
+		return nil // Or return an error? For now, just log and return.
 	}
 
-	// Stop the manager timers
-	mgr.PlayerListTicker.Stop()
-	mgr.CleanupTicker.Stop()
-	close(mgr.StopChan)
+	mgr := e.Manager.(*AutoKickManager)
+
+	mgr.mu.Lock() // Lock the manager's mutex
+	defer mgr.mu.Unlock()
+
+	// Stop timers first (if they exist)
+	if mgr.PlayerListTicker != nil {
+		mgr.PlayerListTicker.Stop()
+	}
+	if mgr.CleanupTicker != nil {
+		mgr.CleanupTicker.Stop()
+	}
+
+	// Stop tracking timers for all tracked players
+	for eosID, tracker := range mgr.TrackedPlayers {
+		if tracker.WarnTimerID != nil {
+			tracker.WarnTimerID.Stop()
+		}
+		if tracker.KickTimerID != nil {
+			tracker.KickTimerID.Stop()
+		}
+		// Also close the tracker's StopChan if it exists
+		if tracker.StopChan != nil {
+			close(tracker.StopChan)
+			tracker.StopChan = nil
+		}
+		log.Debug().Str("eosID", eosID).Msg("Stopped timers for tracked player during shutdown")
+	}
+	mgr.TrackedPlayers = make(map[string]*PlayerTracker) // Clear tracked players
+
+	// Check if manager's stopChan exists and is not nil before attempting to close
+	ch := mgr.StopChan // Temporarily store the channel
+	if ch != nil {
+		mgr.StopChan = nil // Set manager's field to nil *before* closing
+		close(ch)          // Close the stored channel
+		log.Debug().Str("extension", e.Definition.ID).Msg("Manager stopChan closed successfully in Shutdown")
+	} else {
+		log.Debug().Str("extension", e.Definition.ID).Msg("Shutdown called but manager stopChan was already nil")
+	}
 
 	return nil
 }
@@ -512,4 +546,9 @@ func contains(slice []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// GetDefinition returns the extension's definition
+func (e *AutoKickUnassignedExtension) GetDefinition() extension_manager.ExtensionDefinition {
+	return e.Definition
 }
