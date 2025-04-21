@@ -4,12 +4,6 @@
 
     <Card class="mb-6">
       <CardHeader class="px-6 py-4 border-b border-border">
-        <p
-          v-if="chatType === 'server' && selectedServerId && currentServerName"
-          class="text-sm text-muted-foreground"
-        >
-          {{ currentServerName }}
-        </p>
         <div
           class="flex flex-col space-y-4 md:flex-row md:space-y-0 md:space-x-4"
         >
@@ -173,12 +167,6 @@
           </div>
 
           <div class="flex justify-between items-center">
-            <div
-              class="text-xs text-muted-foreground"
-              v-if="chatType === 'server' && selectedServerId"
-            >
-              Chatting in: {{ currentServerName }}
-            </div>
             <button
               type="submit"
               class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
