@@ -1,3 +1,6 @@
+// Original source: https://github.com/SquadGO/squad-rcon-go
+// With modifications
+
 package parser
 
 import (

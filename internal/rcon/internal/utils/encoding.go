@@ -1,3 +1,5 @@
+// Original source: https://github.com/SquadGO/squad-rcon-go
+
 package utils
 
 import (
