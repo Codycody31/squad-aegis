@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -50,10 +50,19 @@ const serverId = route.params.serverId;
 const loading = ref(true);
 const error = ref<string | null>(null);
 const bannedPlayers = ref<BannedPlayer[]>([]);
+const serverRules = ref<ServerRule[]>([]);
 const refreshInterval = ref<NodeJS.Timeout | null>(null);
 const searchQuery = ref("");
 const showAddBanDialog = ref(false);
 const addBanLoading = ref(false);
+
+interface ServerRule {
+    id: string;
+    name: string;
+    description: string | null;
+    parentId: string | null;
+    suggestedDuration: number;
+}
 
 interface BannedPlayer {
     id: string;
@@ -63,6 +72,8 @@ interface BannedPlayer {
     bannedAt: string;
     duration: number;
     createdAt: string;
+    ruleId: string | null;
+    ruleName?: string;
 }
 
 interface BannedPlayersResponse {
@@ -81,6 +92,7 @@ const formSchema = toTypedSchema(
             .regex(/^\d+$/, "Steam ID must contain only numbers"),
         reason: z.string().min(1, "Reason is required"),
         duration: z.number().min(0, "Duration must be at least 0"),
+        ruleId: z.string().optional(),
     }),
 );
 
@@ -91,6 +103,7 @@ const form = useForm({
         steamId: "",
         reason: "",
         duration: 24,
+        ruleId: "",
     },
 });
 
@@ -166,17 +179,60 @@ async function fetchBannedPlayers() {
     }
 }
 
+// Function to fetch server rules
+async function fetchServerRules() {
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+    const token = cookieToken.value;
+
+    if (!token) {
+        error.value = "Authentication required";
+        return;
+    }
+
+    try {
+        const { data, error: fetchError } = await useFetch(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/rules`,
+            {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            },
+        );
+
+        if (fetchError.value) {
+            throw new Error(fetchError.value.message || "Failed to fetch server rules");
+        }
+
+        if (data.value && data.value.data) {
+            serverRules.value = data.value.data.rules || [];
+        }
+    } catch (err: any) {
+        console.error("Failed to fetch server rules:", err);
+    }
+}
+
+// Watch for rule selection changes
+watch(() => form.values.ruleId, (newRuleId) => {
+    if (newRuleId) {
+        const selectedRule = serverRules.value.find(rule => rule.id === newRuleId);
+        if (selectedRule) {
+            form.setFieldValue('duration', selectedRule.suggestedDuration / (24 * 60)); // Convert minutes to days
+            form.setFieldValue('reason', selectedRule.description || selectedRule.name);
+        }
+    }
+});
+
 // Function to add a ban
 async function addBan(values: any) {
-    const { steamId, reason, duration } = values;
+    const { steamId, reason, duration, ruleId } = values;
 
     addBanLoading.value = true;
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
+    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
     const token = cookieToken.value;
 
     if (!token) {
@@ -194,6 +250,7 @@ async function addBan(values: any) {
                     steamId,
                     reason,
                     duration,
+                    ruleId,
                 },
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -270,9 +327,10 @@ function formatDate(dateString: string): string {
     return new Date(dateString).toLocaleString();
 }
 
-// Setup auto-refresh
+// Setup auto-refresh and initial data load
 onMounted(() => {
     fetchBannedPlayers();
+    fetchServerRules();
 
     // Refresh data every 60 seconds
     refreshInterval.value = setInterval(() => {
@@ -317,9 +375,9 @@ function copyBanCfgUrl() {
                 >
                     <Dialog v-model:open="showAddBanDialog">
                         <DialogTrigger asChild>
-                            <Button v-if="authStore.getServerPermissions(serverId as string).includes('ban')">Add Ban Manually</Button>
+                            <Button v-if="authStore.getServerPermission(serverId as string, 'ban')">Add Ban Manually</Button>
                         </DialogTrigger>
-                        <DialogContent class="sm:max-w-[425px]">
+                        <DialogContent class="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
                             <DialogHeader>
                                 <DialogTitle>Add New Ban</DialogTitle>
                                 <DialogDescription>
@@ -344,6 +402,37 @@ function copyBanCfgUrl() {
                                                     v-bind="componentField"
                                                 />
                                             </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+                                    <FormField
+                                        name="ruleId"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Rule (Optional)</FormLabel>
+                                            <Select
+                                                v-model="form.values.ruleId"
+                                                :options="serverRules"
+                                                @update:modelValue="(value) => form.setFieldValue('ruleId', value)"
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select a rule" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="">Manual Reason</SelectItem>
+                                                    <SelectItem
+                                                        v-for="rule in serverRules"
+                                                        :key="rule.id"
+                                                        :value="rule.id"
+                                                    >
+                                                        {{ rule.name }}
+                                                    </SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <FormDescription>
+                                                Selecting a rule will auto-fill the reason and suggested duration
+                                            </FormDescription>
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
@@ -472,12 +561,11 @@ function copyBanCfgUrl() {
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Steam ID</TableHead>
+                                <TableHead>Rule</TableHead>
                                 <TableHead>Reason</TableHead>
                                 <TableHead>Banned At</TableHead>
                                 <TableHead>Duration</TableHead>
-                                <TableHead class="text-right"
-                                    >Actions</TableHead
-                                >
+                                <TableHead class="text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -490,6 +578,12 @@ function copyBanCfgUrl() {
                                     <div class="font-medium">
                                         {{ player.steamId }}
                                     </div>
+                                </TableCell>
+                                <TableCell>
+                                    <Badge v-if="player.ruleName" variant="secondary">
+                                        {{ player.ruleName }}
+                                    </Badge>
+                                    <span v-else class="text-muted-foreground">Manual</span>
                                 </TableCell>
                                 <TableCell>{{ player.reason }}</TableCell>
                                 <TableCell>{{

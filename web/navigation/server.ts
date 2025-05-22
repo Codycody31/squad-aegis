@@ -8,6 +8,13 @@ export default [
     },
   },
   {
+    title: "Rules",
+    icon: "lucide:list-ordered",
+    to: {
+      name: "servers-serverId-rules",
+    },
+  },
+  {
     title: "Connected Players",
     icon: "mdi:account-multiple",
     to: {
