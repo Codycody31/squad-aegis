@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	"github.com/bwmarrin/discordgo"
-	"go.codycody31.dev/squad-aegis/internal/rcon"
 )
 
 func (e *DiscordSquadCreatedExtension) handleSquadCreated(data interface{}) error {
-	squadCreated, ok := data.(rcon.SquadCreated)
+	squadCreated, ok := data.(rconTypes.SquadCreated)
 	if !ok {
 		return fmt.Errorf("invalid data type for squad created")
 	}

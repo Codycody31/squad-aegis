@@ -5,16 +5,16 @@ import (
 	"slices"
 	"time"
 
+	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	"github.com/bwmarrin/discordgo"
 	"github.com/rs/zerolog/log"
-	"go.codycody31.dev/squad-aegis/internal/rcon"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
 )
 
 // handleChatMessage handles chat messages and looks for admin requests
 func (e *DiscordChatExtension) handleChatMessage(data interface{}) error {
-	message, ok := data.(rcon.Message)
+	message, ok := data.(rconTypes.Message)
 	if !ok {
 		return fmt.Errorf("invalid data type for chat message")
 	}
@@ -48,7 +48,7 @@ func (e *DiscordChatExtension) handleChatMessage(data interface{}) error {
 }
 
 // sendDiscordMessage sends the chat message to Discord
-func (e *DiscordChatExtension) sendDiscordMessage(message rcon.Message, team, squad int) error {
+func (e *DiscordChatExtension) sendDiscordMessage(message rconTypes.Message, team, squad int) error {
 	// Get channel ID
 	channelID, ok := e.Config["channel_id"].(string)
 	if !ok || channelID == "" {

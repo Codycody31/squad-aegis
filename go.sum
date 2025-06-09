@@ -8,6 +8,8 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/MuhammadSaim/goavatar v0.1.0 h1:qEHzlaUqxJFRG7NM+xshhnDq0KbDfySNhf+z/3E519A=
 github.com/MuhammadSaim/goavatar v0.1.0/go.mod h1:nrVAlNPAk6R92ch9Gt5RvP7qB3ShZJPENMeEAL88qds=
+github.com/SquadGO/squad-rcon-go/v2 v2.0.4 h1:Y10yxoWA8cUKJWf0RAq49U8X6ggDbH94zQ8/OX0EzKk=
+github.com/SquadGO/squad-rcon-go/v2 v2.0.4/go.mod h1:6km4XiO2+pLhLuouKyXIwISTC9ju1lfmhzCS9SlHYIs=
 github.com/asaskevich/govalidator v0.0.0-20200108200545-475eaeb16496 h1:zV3ejI06GQ59hwDQAvmK1qxOQGB3WuVTRoY0okPTAv0=
 github.com/asaskevich/govalidator v0.0.0-20200108200545-475eaeb16496/go.mod h1:oGkLhpf+kjZl6xBf758TQhh5XrAeiJv/7FRz/2spLIg=
 github.com/bwmarrin/discordgo v0.28.1 h1:gXsuo2GBO7NbR6uqmrrBDplPUx2T3nzu775q/Rd1aG4=
@@ -81,6 +83,8 @@ github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+l
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
 github.com/hpcloud/tail v1.0.0 h1:nfCOvKYfkgYP8hkirhJocXT2+zOD8yUNjXaWfTlyFKI=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
+github.com/iamalone98/eventEmitter v1.0.1 h1:LSe8w7xDTQHfcwZ6Xe/3Epp8d1FjZvfouDCK4ef+VRk=
+github.com/iamalone98/eventEmitter v1.0.1/go.mod h1:2CWQB7S5/lM3CDHnhwPVYLqZip8bmcke/t/I40eEI8o=
 github.com/jlaffaye/ftp v0.2.0 h1:lXNvW7cBu7R/68bknOX3MrRIIqZ61zELs1P2RAiA3lg=
 github.com/jlaffaye/ftp v0.2.0/go.mod h1:is2Ds5qkhceAPy2xD6RLI6hmp/qysSoymZ+Z2uTnspI=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
