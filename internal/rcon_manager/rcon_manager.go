@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
+	rcon "github.com/SquadGO/squad-rcon-go/v2"
+	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
-	"go.codycody31.dev/squad-aegis/internal/rcon"
 )
 
 // RconEvent represents an event from the RCON server
@@ -397,21 +398,20 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 			startTime := time.Now()
 			go func() {
 				// Execute command using the command connection
-				response, err := conn.CommandRcon.Execute(cmd.Command)
+				response := conn.CommandRcon.Execute(cmd.Command)
 				// Only log on errors, not every execution time
-				if err != nil {
+				if response == "" {
 					execTime := time.Since(startTime)
 					log.Debug().
 						Str("serverID", serverID.String()).
 						Str("command", cmd.Command).
-						Err(err).
+						Err(errors.New("empty response")).
 						Dur("execTime", execTime).
 						Msg("Command execution returned error")
 				}
 				select {
 				case responseChan <- CommandResponse{
 					Response: response,
-					Error:    err,
 				}:
 					// Response sent
 				default:
@@ -656,7 +656,7 @@ func (m *RconManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 }
 
 // ProcessChatMessages starts processing chat messages for all connected servers
-func (m *RconManager) ProcessChatMessages(ctx context.Context, messageHandler func(serverID uuid.UUID, message rcon.Message)) {
+func (m *RconManager) ProcessChatMessages(ctx context.Context, messageHandler func(serverID uuid.UUID, message rconTypes.Message)) {
 	// Create a channel to receive chat events
 	eventChan := m.SubscribeToEvents()
 
@@ -672,7 +672,7 @@ func (m *RconManager) ProcessChatMessages(ctx context.Context, messageHandler fu
 			case event := <-eventChan:
 				// Only process chat messages
 				if event.Type == "CHAT_MESSAGE" {
-					if message, ok := event.Data.(rcon.Message); ok {
+					if message, ok := event.Data.(rconTypes.Message); ok {
 						// Call the message handler
 						messageHandler(event.ServerID, message)
 					}
