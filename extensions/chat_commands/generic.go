@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
-	"go.codycody31.dev/squad-aegis/internal/rcon"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/shared/utils"
 )
 
 // Command represents a chat command configuration
@@ -114,9 +115,14 @@ func (e *ChatCommandsExtension) Initialize(config map[string]interface{}, deps *
 
 // handleChatMessage processes chat command messages
 func (e *ChatCommandsExtension) handleChatMessage(data interface{}) error {
-	message, ok := data.(rcon.CommandMessage)
+	rconMessage, ok := data.(rconTypes.Message)
 	if !ok {
 		return fmt.Errorf("invalid data type for chat message")
+	}
+
+	message, err := utils.ParseRconCommandMessage(rconMessage)
+	if err != nil {
+		return fmt.Errorf("failed to parse RCON command message: %w", err)
 	}
 
 	// Process each configured command
@@ -132,7 +138,8 @@ func (e *ChatCommandsExtension) handleChatMessage(data interface{}) error {
 		}
 
 		cmdTrigger, ok := cmdMap["command"].(string)
-		if !ok || cmdTrigger != message.Command {
+		// TODO: Handle this
+		if !ok || cmdTrigger != fmt.Sprintf("!%s", message.Message) {
 			continue
 		}
 

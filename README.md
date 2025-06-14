@@ -18,6 +18,11 @@ A comprehensive control panel for Squad game server administration
 - **Comprehensive Audit Logging**: Keep a detailed record of all administrative actions for accountability.
 - **Extensible Architecture**: Utilize connectors and extensions to integrate and extend functionalities.
 
+## Acknowledgments
+
+- [milutinke/sqcp](https://github.com/milutinke/sqcp): This project draws inspiration sqcp and we extend gratitude to the Squad gaming community for their support and feedback.
+- [SquadGO/squad-rcon-go](https://github.com/SquadGO/squad-rcon-go): For the RCON library used in this project with some modifications of our own to suit our needs.
+
 ## Features
 
 ### Core Features
@@ -189,6 +194,4 @@ For help and support, you can refer to the resources below:
 
 This project is available under the [Apache 2.0 License](LICENSE).
 
-## Acknowledgments
-
-This project draws inspiration from [milutinke/sqcp](https://github.com/milutinke/sqcp), and we extend gratitude to the Squad gaming community for their support and feedback.
+Ensure to check directories for any additional licenses or third-party components.

@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	"github.com/bwmarrin/discordgo"
-	"go.codycody31.dev/squad-aegis/internal/rcon"
 )
 
 func (e *DiscordAdminCamLogsExtension) handleAdminCamPossessed(data interface{}) error {
-	message := data.(rcon.PosAdminCam)
+	message := data.(rconTypes.PosAdminCam)
 
 	// Get channel ID
 	channelID, ok := e.Config["channel_id"].(string)
@@ -57,7 +57,7 @@ func (e *DiscordAdminCamLogsExtension) handleAdminCamPossessed(data interface{})
 }
 
 func (e *DiscordAdminCamLogsExtension) handleAdminCamUnpossessed(data interface{}) error {
-	message := data.(rcon.UnposAdminCam)
+	message := data.(rconTypes.UnposAdminCam)
 
 	// Get channel ID
 	channelID, ok := e.Config["channel_id"].(string)

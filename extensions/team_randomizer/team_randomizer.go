@@ -5,14 +5,20 @@ import (
 	"math/rand"
 	"strconv"
 
-	"go.codycody31.dev/squad-aegis/internal/rcon"
+	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
+	"go.codycody31.dev/squad-aegis/shared/utils"
 )
 
 func (e *TeamRandomizerExtension) handleTeamRandomizationRequest(data interface{}) error {
-	message, ok := data.(rcon.CommandMessage)
+	rconMessage, ok := data.(rconTypes.Message)
 	if !ok {
 		return fmt.Errorf("invalid data type for chat message")
+	}
+
+	message, err := utils.ParseRconCommandMessage(rconMessage)
+	if err != nil {
+		return fmt.Errorf("failed to parse RCON command message: %w", err)
 	}
 
 	if message.ChatType != "ChatAdmin" {

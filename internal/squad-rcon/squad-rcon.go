@@ -526,7 +526,7 @@ func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData
 		Squads:  []Squad{},
 		Players: []Player{},
 	})
-	teamMap[1] = &teams[0]
+	teamMap[1] = &teams[1]
 
 	// Second pass: Assign players to squads and identify squad leaders
 	squadMap := make(map[int]*Squad)
@@ -555,7 +555,7 @@ func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData
 	// Third pass: Assign squads to teams and unassigned players to teams
 	// Assign squads to teams
 	for _, squad := range squads {
-		if team, ok := teamMap[squad.TeamId]; ok {
+		if team, ok := teamMap[squad.TeamId-1]; ok {
 			team.Squads = append(team.Squads, squad)
 		}
 	}
@@ -564,7 +564,7 @@ func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData
 	for _, player := range players.OnlinePlayers {
 		// Only process players that are not in a squad (SquadId is 0 or N/A)
 		if player.SquadId <= 0 {
-			if team, ok := teamMap[player.TeamId]; ok {
+			if team, ok := teamMap[player.TeamId-1]; ok {
 				team.Players = append(team.Players, player)
 			}
 		}
