@@ -89,16 +89,15 @@ func (s *Server) ServerAuditLogs(c *gin.Context) {
 
 	// Build the query
 	query := `
-		SELECT al.id, al.server_id, s.name, al.user_id, u.username, al.action, al.changes, al.timestamp
+		SELECT al.id, al.user_id, u.username, al.action, al.changes, al.timestamp
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
-		LEFT JOIN servers s ON al.server_id = s.id
 		WHERE al.server_id = $1
 	`
 	countQuery := `
 		SELECT COUNT(*)
-		FROM audit_logs
-		WHERE server_id = $1
+		FROM audit_logs al
+		WHERE al.server_id = $1
 	`
 	args := []interface{}{serverID}
 	whereCount := 1
