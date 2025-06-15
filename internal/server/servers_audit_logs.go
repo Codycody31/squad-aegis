@@ -17,13 +17,12 @@ import (
 
 // AuditLogEntry represents an audit log entry
 type AuditLogEntry struct {
-	ID        uuid.UUID       `json:"id"`
-	ServerID  *uuid.UUID      `json:"server_id,omitempty"`
-	UserID    *uuid.UUID      `json:"user_id,omitempty"`
-	Username  string          `json:"username,omitempty"`
-	Action    string          `json:"action"`
-	Changes   json.RawMessage `json:"changes,omitempty"`
-	Timestamp time.Time       `json:"timestamp"`
+	ID         uuid.UUID       `json:"id"`
+	UserID     *uuid.UUID      `json:"user_id,omitempty"`
+	Username   string          `json:"username,omitempty"`
+	Action     string          `json:"action"`
+	Changes    json.RawMessage `json:"changes,omitempty"`
+	Timestamp  time.Time       `json:"timestamp"`
 }
 
 // CreateAuditLog creates a new audit log entry
@@ -90,9 +89,10 @@ func (s *Server) ServerAuditLogs(c *gin.Context) {
 
 	// Build the query
 	query := `
-		SELECT al.id, al.server_id, al.user_id, u.username, al.action, al.changes, al.timestamp
+		SELECT al.id, al.server_id, s.name, al.user_id, u.username, al.action, al.changes, al.timestamp
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
+		LEFT JOIN servers s ON al.server_id = s.id
 		WHERE al.server_id = $1
 	`
 	countQuery := `
@@ -184,7 +184,6 @@ func (s *Server) ServerAuditLogs(c *gin.Context) {
 		var username sql.NullString
 		err := rows.Scan(
 			&log.ID,
-			&log.ServerID,
 			&log.UserID,
 			&username,
 			&log.Action,
