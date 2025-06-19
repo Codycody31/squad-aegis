@@ -509,24 +509,27 @@ func (s *SquadRcon) GetServerInfo() (ServerInfo, error) {
 
 // ParseTeamsAndSquads builds the teams/squads structure from parsed squads and players data
 func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData) ([]Team, error) {
-	teams := []Team{}
-	teamMap := make(map[int]*Team)
+	// Pre-build the teams slice to ensure its underlying array does not change later
+	teams := []Team{
+		{
+			ID:      1,
+			Name:    teamNames[0],
+			Squads:  []Squad{},
+			Players: []Player{},
+		},
+		{
+			ID:      2,
+			Name:    teamNames[1],
+			Squads:  []Squad{},
+			Players: []Player{},
+		},
+	}
 
-	teams = append(teams, Team{
-		ID:      1,
-		Name:    teamNames[0],
-		Squads:  []Squad{},
-		Players: []Player{},
-	})
-	teamMap[0] = &teams[0]
-
-	teams = append(teams, Team{
-		ID:      2,
-		Name:    teamNames[1],
-		Squads:  []Squad{},
-		Players: []Player{},
-	})
-	teamMap[1] = &teams[1]
+	// Map team ID (not index) to the corresponding team pointer
+	teamMap := map[int]*Team{
+		1: &teams[0],
+		2: &teams[1],
+	}
 
 	// Second pass: Assign players to squads and identify squad leaders
 	squadMap := make(map[int]*Squad)
@@ -555,7 +558,7 @@ func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData
 	// Third pass: Assign squads to teams and unassigned players to teams
 	// Assign squads to teams
 	for _, squad := range squads {
-		if team, ok := teamMap[squad.TeamId-1]; ok {
+		if team, ok := teamMap[squad.TeamId]; ok {
 			team.Squads = append(team.Squads, squad)
 		}
 	}
@@ -564,7 +567,7 @@ func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData
 	for _, player := range players.OnlinePlayers {
 		// Only process players that are not in a squad (SquadId is 0 or N/A)
 		if player.SquadId <= 0 {
-			if team, ok := teamMap[player.TeamId-1]; ok {
+			if team, ok := teamMap[player.TeamId]; ok {
 				team.Players = append(team.Players, player)
 			}
 		}
