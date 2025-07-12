@@ -8,6 +8,10 @@ A comprehensive control panel for Squad game server administration
 
 </div>
 
+## Notice
+
+The project is currently in the early stages of development and is not ready for production use. Expect breaking changes and bugs as I work on making this stable and not a bunch of ai written spaghetti code from the PoC.
+
 ## Overview
 
 **Squad Aegis** is an all-in-one control panel designed to manage multiple Squad game servers efficiently. Whether you're running a single server or a complex cluster, Squad Aegis provides a centralized interface to keep everything under control. Built with a robust Go backend, a sleek Nuxt 3 frontend, and a reliable PostgreSQL database, it is tailored to offer:
