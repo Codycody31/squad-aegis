@@ -1,1 +1,0 @@
-ALTER TABLE public.server_extensions DROP COLUMN IF EXISTS notes; 

@@ -509,6 +509,14 @@ func (s *SquadRcon) GetServerInfo() (ServerInfo, error) {
 
 // ParseTeamsAndSquads builds the teams/squads structure from parsed squads and players data
 func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData) ([]Team, error) {
+	if len(teamNames) != 2 {
+		return []Team{}, fmt.Errorf("expected 2 team names, got %d", len(teamNames))
+	}
+
+	if len(squads) == 0 {
+		return []Team{}, fmt.Errorf("no squads found")
+	}
+
 	// Pre-build the teams slice to ensure its underlying array does not change later
 	teams := []Team{
 		{

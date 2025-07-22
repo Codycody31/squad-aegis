@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.codycody31.dev/squad-aegis/core"
+	"go.codycody31.dev/squad-aegis/internal/core"
 	rcon "go.codycody31.dev/squad-aegis/internal/rcon"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"

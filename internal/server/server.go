@@ -7,11 +7,10 @@ import (
 	"net/url"
 	"strings"
 
-	"go.codycody31.dev/squad-aegis/internal/analytics"
 	"go.codycody31.dev/squad-aegis/internal/connector_manager"
 	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
-	"go.codycody31.dev/squad-aegis/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,7 +24,6 @@ type Dependencies struct {
 	RconManager      *rcon_manager.RconManager
 	ConnectorManager *connector_manager.ConnectorManager
 	ExtensionManager *extension_manager.ExtensionManager
-	MetricsCollector *analytics.MetricsCollector
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {

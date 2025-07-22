@@ -1,7 +1,7 @@
 package extension_manager
 
 import (
-	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
 
 // Extension represents a loaded extension instance

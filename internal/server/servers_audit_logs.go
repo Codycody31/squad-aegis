@@ -10,19 +10,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.codycody31.dev/squad-aegis/core"
+	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
-	"go.codycody31.dev/squad-aegis/shared/config"
 )
 
 // AuditLogEntry represents an audit log entry
 type AuditLogEntry struct {
-	ID         uuid.UUID       `json:"id"`
-	UserID     *uuid.UUID      `json:"user_id,omitempty"`
-	Username   string          `json:"username,omitempty"`
-	Action     string          `json:"action"`
-	Changes    json.RawMessage `json:"changes,omitempty"`
-	Timestamp  time.Time       `json:"timestamp"`
+	ID        uuid.UUID       `json:"id"`
+	UserID    *uuid.UUID      `json:"user_id,omitempty"`
+	Username  string          `json:"username,omitempty"`
+	Action    string          `json:"action"`
+	Changes   json.RawMessage `json:"changes,omitempty"`
+	Timestamp time.Time       `json:"timestamp"`
 }
 
 // CreateAuditLog creates a new audit log entry
@@ -38,18 +37,6 @@ func (s *Server) CreateAuditLog(ctx context.Context, serverID *uuid.UUID, userID
 		INSERT INTO audit_logs (server_id, user_id, action, changes)
 		VALUES ($1, $2, $3, $4)
 	`, serverID, userID, action, changesJSON)
-
-	// Track the audit log creation event
-	if s.Dependencies.MetricsCollector != nil {
-		data := map[string]interface{}{}
-
-		if config.Config.App.NonAnonymousTelemetry {
-			data["server_id"] = serverID
-			data["user_id"] = userID
-		}
-
-		s.Dependencies.MetricsCollector.GetCountly().TrackEvent(action, 1, 0, data)
-	}
 
 	return err
 }

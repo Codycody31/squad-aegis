@@ -4,7 +4,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/eventEmitter"
-	"go.codycody31.dev/squad-aegis/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
 
 // Connector represents a loaded connector instance
