@@ -39,7 +39,7 @@ CREATE TABLE "public"."server_rules" (
 
 CREATE TABLE "public"."players" (
     "id" uuid NOT NULL,
-    "steam_id" bigint NOT NULL,
+    "steam_id" bigint NOT NULL UNIQUE,
     "display_name" varchar,
     "avatar_url" varchar,
     "first_seen" timestamp NOT NULL,
@@ -223,3 +223,35 @@ ADD CONSTRAINT "fk_server_rules_server_id_servers_id" FOREIGN KEY("server_id") R
 
 ALTER TABLE "public"."sessions"
 ADD CONSTRAINT "fk_sessions_user_id_users_id" FOREIGN KEY("user_id") REFERENCES "public"."users"("id");
+
+
+
+CREATE INDEX "idx_audit_logs_server_id" ON "public"."audit_logs" ("server_id");
+CREATE INDEX "idx_audit_logs_user_id" ON "public"."audit_logs" ("user_id");
+CREATE INDEX "idx_audit_logs_timestamp" ON "public"."audit_logs" ("timestamp");
+
+CREATE INDEX "idx_players_steam_id" ON "public"."players" ("steam_id");
+CREATE INDEX "idx_players_last_seen" ON "public"."players" ("last_seen");
+
+CREATE INDEX "idx_play_sessions_player_id" ON "public"."play_sessions" ("player_id");
+CREATE INDEX "idx_play_sessions_server_id" ON "public"."play_sessions" ("server_id");
+CREATE INDEX "idx_play_sessions_connected_at" ON "public"."play_sessions" ("connected_at");
+
+CREATE INDEX "idx_server_players_server_id" ON "public"."server_players" ("server_id");
+CREATE INDEX "idx_server_players_player_id" ON "public"."server_players" ("player_id");
+
+CREATE INDEX "idx_server_player_chat_messages_server_id" ON "public"."server_player_chat_messages" ("server_id");
+CREATE INDEX "idx_server_player_chat_messages_player_id" ON "public"."server_player_chat_messages" ("player_id");
+CREATE INDEX "idx_server_player_chat_messages_sent_at" ON "public"."server_player_chat_messages" ("sent_at");
+
+CREATE INDEX "idx_server_bans_server_id" ON "public"."server_bans" ("server_id");
+CREATE INDEX "idx_server_bans_player_id" ON "public"."server_bans" ("player_id");
+CREATE INDEX "idx_server_bans_admin_id" ON "public"."server_bans" ("admin_id");
+CREATE INDEX "idx_server_bans_created_at" ON "public"."server_bans" ("created_at");
+
+CREATE INDEX "idx_server_admins_server_id" ON "public"."server_admins" ("server_id");
+CREATE INDEX "idx_server_admins_user_id" ON "public"."server_admins" ("user_id");
+CREATE INDEX "idx_server_admins_steam_id" ON "public"."server_admins" ("steam_id");
+
+CREATE INDEX "idx_sessions_user_id" ON "public"."sessions" ("user_id");
+CREATE INDEX "idx_sessions_expires_at" ON "public"."sessions" ("expires_at");
