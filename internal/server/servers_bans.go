@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
+	rcon "github.com/SquadGO/squad-rcon-go/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
-	rcon "go.codycody31.dev/squad-aegis/internal/rcon"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
@@ -250,7 +251,12 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 
 			// Execute the unban command
 			unbanCommand := fmt.Sprintf("AdminUnban %s", steamIDStr)
-			_, _ = r.Execute(unbanCommand) // Ignore errors, as the ban is already removed from the database
+			cmdResponse := r.Execute(unbanCommand)
+			if cmdResponse == "" {
+				log.Error().Msgf("Failed to execute unban command for banId %s: %s", banId.String(), unbanCommand)
+			} else {
+				log.Info().Msgf("Unban command executed for banId %s: %s", banId.String(), unbanCommand)
+			}
 		}
 	}
 
