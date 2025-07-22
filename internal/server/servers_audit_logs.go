@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
@@ -25,20 +26,24 @@ type AuditLogEntry struct {
 }
 
 // CreateAuditLog creates a new audit log entry
-func (s *Server) CreateAuditLog(ctx context.Context, serverID *uuid.UUID, userID *uuid.UUID, action string, changes interface{}) error {
+func (s *Server) CreateAuditLog(ctx context.Context, serverID *uuid.UUID, userID *uuid.UUID, action string, changes interface{}) {
 	// Convert changes to JSON
 	changesJSON, err := json.Marshal(changes)
 	if err != nil {
-		return err
+		log.Error().Err(err).Msg("Failed to marshal changes for audit log")
+		return
 	}
 
 	// Insert the audit log into the database
 	_, err = s.Dependencies.DB.ExecContext(ctx, `
-		INSERT INTO audit_logs (server_id, user_id, action, changes)
-		VALUES ($1, $2, $3, $4)
-	`, serverID, userID, action, changesJSON)
+		INSERT INTO audit_logs (id, server_id, user_id, action, changes, timestamp)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, uuid.New(), serverID, userID, action, changesJSON, time.Now())
 
-	return err
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create audit log")
+		return
+	}
 }
 
 // ServerAuditLogs handles listing audit logs for a server

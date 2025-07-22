@@ -16,26 +16,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"go.codycody31.dev/squad-aegis/internal/connector_manager"
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
-	"go.codycody31.dev/squad-aegis/internal/connectors/logwatcher"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/db"
-	"go.codycody31.dev/squad-aegis/internal/extension_manager"
-	"go.codycody31.dev/squad-aegis/internal/extensions/auto_kick_unassigned"
-	"go.codycody31.dev/squad-aegis/internal/extensions/auto_tk_warn"
-	"go.codycody31.dev/squad-aegis/internal/extensions/chat_commands"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_admin_broadcast"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_admin_cam_logs"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_admin_request"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_cbl_info"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_chat"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_fob_hab_explosion_damage"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_killfeed"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_squad_created"
-	"go.codycody31.dev/squad-aegis/internal/extensions/discord_teamkill"
-	"go.codycody31.dev/squad-aegis/internal/extensions/intervalled_broadcasts"
-	"go.codycody31.dev/squad-aegis/internal/extensions/team_randomizer"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server"
@@ -139,23 +121,6 @@ func run(ctx context.Context) error {
 	go rconManager.StartConnectionManager()
 	rconManager.ConnectToAllServers(ctx, database)
 
-	// Initialize connector manager
-	connectorManager := connector_manager.NewConnectorManager(ctx)
-	connectorManager.RegisterConnector("discord", discord.Registrar)
-	connectorManager.RegisterConnector("logwatcher", logwatcher.Registrar)
-	if err := connectorManager.InitializeConnectors(ctx, database); err != nil {
-		log.Error().Err(err).Msg("Failed to initialize connectors")
-	}
-
-	// Initialize extension manager
-	extensionManager := extension_manager.NewExtensionManager(ctx, database, connectorManager, rconManager)
-	for name, registrar := range getExtensionRegistrars() {
-		extensionManager.RegisterExtension(name, registrar)
-	}
-	if err := extensionManager.Initialize(ctx); err != nil {
-		log.Error().Err(err).Msg("Failed to initialize extensions")
-	}
-
 	// Initialize services
 	waitingGroup := errgroup.Group{}
 
@@ -169,10 +134,8 @@ func run(ctx context.Context) error {
 		}
 
 		deps := &server.Dependencies{
-			DB:               database,
-			RconManager:      rconManager,
-			ConnectorManager: connectorManager,
-			ExtensionManager: extensionManager,
+			DB:          database,
+			RconManager: rconManager,
 		}
 
 		// Initialize router
@@ -252,27 +215,4 @@ func setup(database db.Executor) error {
 	log.Info().Msg("admin user registered")
 
 	return nil
-}
-
-// Helper function to get all extension registrars
-func getExtensionRegistrars() map[string]extension_manager.ExtensionRegistrar {
-	registrars := make(map[string]extension_manager.ExtensionRegistrar)
-
-	// Add any extensions here
-	registrars["discord_chat"] = discord_chat.DiscordChatRegistrar{}
-	registrars["discord_admin_request"] = discord_admin_request.DiscordAdminRequestRegistrar{}
-	registrars["discord_admin_cam_logs"] = discord_admin_cam_logs.DiscordAdminCamLogsRegistrar{}
-	registrars["discord_cbl_info"] = discord_cbl_info.DiscordCBLInfoRegistrar{}
-	registrars["intervalled_broadcasts"] = intervalled_broadcasts.IntervalledBroadcastsRegistrar{}
-	registrars["team_randomizer"] = team_randomizer.TeamRandomizerRegistrar{}
-	registrars["chat_commands"] = chat_commands.ChatCommandsRegistrar{}
-	registrars["discord_squad_created"] = discord_squad_created.DiscordSquadCreatedRegistrar{}
-	registrars["discord_admin_broadcast"] = discord_admin_broadcast.DiscordAdminBroadcastRegistrar{}
-	registrars["discord_fob_hab_explosion_damage"] = discord_fob_hab_explosion_damage.DiscordFOBHabExplosionDamageRegistrar{}
-	registrars["discord_teamkill"] = discord_teamkill.DiscordTeamkillRegistrar{}
-	registrars["discord_killfeed"] = discord_killfeed.DiscordKillfeedRegistrar{}
-	registrars["auto_kick_unassigned"] = auto_kick_unassigned.AutoKickUnassignedRegistrar{}
-	registrars["auto_tk_warn"] = auto_tk_warn.AutoTKWarnRegistrar{}
-
-	return registrars
 }

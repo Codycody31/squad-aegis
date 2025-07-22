@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"go.codycody31.dev/squad-aegis/internal/connector_manager"
-	"go.codycody31.dev/squad-aegis/internal/extension_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 
@@ -20,10 +18,8 @@ type Server struct {
 }
 
 type Dependencies struct {
-	DB               *sql.DB
-	RconManager      *rcon_manager.RconManager
-	ConnectorManager *connector_manager.ConnectorManager
-	ExtensionManager *extension_manager.ExtensionManager
+	DB          *sql.DB
+	RconManager *rcon_manager.RconManager
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {
@@ -119,15 +115,6 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			usersGroup.DELETE("/:userId", server.UserDelete)
 		}
 
-		// Admin chat endpoints
-		adminChatGroup := apiGroup.Group("/admin-chat")
-		{
-			adminChatGroup.Use(server.AuthSession)
-
-			adminChatGroup.GET("", server.AdminChatList)
-			adminChatGroup.POST("", server.AdminChatCreate)
-		}
-
 		serversGroup := apiGroup.Group("/servers")
 		{
 			serversGroup.Use(server.AuthSession)
@@ -145,10 +132,6 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/metrics", server.ServerMetrics)
 				serverGroup.GET("/status", server.ServerStatus)
 				serverGroup.GET("/audit-logs", server.AuthHasServerPermission("manageserver"), server.ServerAuditLogs)
-
-				// Server admin chat endpoints
-				serverGroup.GET("/admin-chat", server.AuthHasServerPermission("canseeadminchat"), server.ServerAdminChatList)
-				serverGroup.POST("/admin-chat", server.AuthHasServerPermission("canseeadminchat"), server.ServerAdminChatCreate)
 
 				serverGroup.GET("/rcon/commands", server.RconCommandList)
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)
@@ -177,48 +160,12 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				// Server info endpoints
 				serverGroup.GET("/rcon/server-info", server.ServerRconServerInfo)
-
-				// Server-specific connector management endpoints
-				serverGroup.GET("/connectors", server.AuthHasServerPermission("manageserver"), server.ServerConnectorsList)
-				serverGroup.POST("/connectors", server.AuthHasServerPermission("manageserver"), server.CreateServerConnector)
-				serverGroup.GET("/connectors/:connectorId", server.AuthHasServerPermission("manageserver"), server.GetServerConnector)
-				serverGroup.PUT("/connectors/:connectorId", server.AuthHasServerPermission("manageserver"), server.UpdateServerConnector)
-				serverGroup.DELETE("/connectors/:connectorId", server.AuthHasServerPermission("manageserver"), server.DeleteServerConnector)
-
-				// Server-specific extension management endpoints
-				serverGroup.GET("/extensions", server.AuthHasServerPermission("manageserver"), server.ServerExtensionsList)
-				serverGroup.POST("/extensions", server.AuthHasServerPermission("manageserver"), server.ServerExtensionCreate)
-				serverGroup.GET("/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.ServerExtensionGet)
-				serverGroup.PUT("/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.ServerExtensionUpdate)
-				serverGroup.DELETE("/extensions/:extensionId", server.AuthHasServerPermission("manageserver"), server.ServerExtensionDelete)
-				serverGroup.POST("/extensions/:extensionId/toggle", server.AuthHasServerPermission("manageserver"), server.ServerExtensionToggle)
 			}
 		}
 
 		// Public Routes for the server
 		apiGroup.GET("/servers/:serverId/admins/cfg", server.ServerAdminsCfg)
 		apiGroup.GET("/servers/:serverId/bans/cfg", server.ServerBansCfg)
-
-		// Connector management endpoints
-		connectorGroup := apiGroup.Group("/connectors")
-		{
-			connectorGroup.Use(server.AuthSession)
-			connectorGroup.Use(server.AuthIsSuperAdmin())
-
-			connectorGroup.GET("/definitions", server.ListConnectorDefinitions)
-			connectorGroup.GET("/global", server.ListGlobalConnectors)
-			connectorGroup.POST("/global", server.CreateGlobalConnector)
-			connectorGroup.GET("/global/:id", server.GetGlobalConnector)
-			connectorGroup.DELETE("/global/:id", server.DeleteGlobalConnector)
-		}
-
-		// Extension management endpoints
-		extensionGroup := apiGroup.Group("/extensions")
-		{
-			extensionGroup.Use(server.AuthSession)
-
-			extensionGroup.GET("/definitions", server.ListExtensionDefinitions)
-		}
 	}
 
 	return router

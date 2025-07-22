@@ -573,15 +573,10 @@ async function executePlayerAction() {
         <CardTitle>Player Statistics</CardTitle>
       </CardHeader>
       <CardContent>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="bg-muted/30 p-4 rounded-lg">
             <div class="text-2xl font-bold">{{ connectedPlayers.length }}</div>
             <div class="text-sm text-muted-foreground">Total Players</div>
-          </div>
-          
-          <div class="bg-muted/30 p-4 rounded-lg">
-            <div class="text-2xl font-bold">{{ teams.length }}</div>
-            <div class="text-sm text-muted-foreground">Teams</div>
           </div>
           
           <div class="bg-muted/30 p-4 rounded-lg">
