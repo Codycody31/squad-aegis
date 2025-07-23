@@ -180,7 +180,7 @@ func GetServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UU
 
 	for rows.Next() {
 		var admin models.ServerAdmin
-		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.ServerRoleId, &admin.CreatedAt)
+		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
