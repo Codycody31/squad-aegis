@@ -44,7 +44,7 @@ const isActionLoading = ref(false);
 interface Player {
   playerId: number;
   eosId: string;
-  steamId: string;
+  steam_id: string;
   name: string;
   sinceDisconnect: string;
   teamId?: number;
@@ -69,7 +69,7 @@ const filteredPlayers = computed(() => {
   const query = searchQuery.value.toLowerCase();
   return disconnectedPlayers.value.filter(player => 
     player.name.toLowerCase().includes(query) || 
-    player.steamId.includes(query) ||
+    player.steam_id.includes(query) ||
     player.eosId.toLowerCase().includes(query)
   );
 });
@@ -247,7 +247,7 @@ async function executePlayerAction() {
   try {
     const endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`;
     const payload = {
-      steamId: selectedPlayer.value.steamId,
+      steam_id: selectedPlayer.value.steam_id,
       reason: actionReason.value,
       duration: parseInt(actionDuration.value) || 0
     };
@@ -358,7 +358,7 @@ async function executePlayerAction() {
                 <TableCell class="font-medium">{{ player.name }}</TableCell>
                 <TableCell>
                   <div class="flex flex-col">
-                    <span class="text-xs text-muted-foreground">Steam: {{ player.steamId }}</span>
+                    <span class="text-xs text-muted-foreground">Steam: {{ player.steam_id }}</span>
                     <span class="text-xs text-muted-foreground">EOS: {{ player.eosId }}</span>
                   </div>
                 </TableCell>
@@ -368,12 +368,12 @@ async function executePlayerAction() {
                   </span>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button variant="outline" size="sm" class="h-8 w-8 p-0" @click="copyToClipboard(player.steamId)">
+                  <Button variant="outline" size="sm" class="h-8 w-8 p-0" @click="copyToClipboard(player.steam_id)">
                     <span class="sr-only">Copy Steam ID</span>
                     <Icon 
-                      :name="copiedId === player.steamId ? 'lucide:check' : 'lucide:clipboard-copy'" 
+                      :name="copiedId === player.steam_id ? 'lucide:check' : 'lucide:clipboard-copy'" 
                       class="h-4 w-4" 
-                      :class="{ 'text-green-500': copiedId === player.steamId }"
+                      :class="{ 'text-green-500': copiedId === player.steam_id }"
                     />
                   </Button>
                   

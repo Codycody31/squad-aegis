@@ -29,7 +29,7 @@ const selectedPlayer = ref<Player | null>(null);
 const isActionLoading = ref(false);
 
 interface Player {
-  steamId: string;
+  steam_id: string;
   name: string;
   squadId: number | null;
   isSquadLeader: boolean;
@@ -309,7 +309,7 @@ async function removeFromSquad() {
                       <tbody>
                         <tr
                           v-for="player in squad.players"
-                          :key="player.steamId"
+                          :key="player.steam_id"
                           class="border-b border-gray-800"
                         >
                           <td class="py-1">
@@ -359,7 +359,7 @@ async function removeFromSquad() {
                   >
                     <div
                       v-for="player in team.players"
-                      :key="player.steamId"
+                      :key="player.steam_id"
                       class="p-2 border border-gray-700 rounded"
                     >
                       <div class="font-medium">{{ player.name }}</div>

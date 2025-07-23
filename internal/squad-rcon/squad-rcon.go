@@ -27,7 +27,7 @@ type SquadRcon struct {
 type Player struct {
 	Id              int    `json:"playerId"`
 	EosId           string `json:"eosId"`
-	SteamId         string `json:"steamId"`
+	SteamId         string `json:"steam_id"`
 	Name            string `json:"name"`
 	TeamId          int    `json:"teamId"`
 	SquadId         int    `json:"squadId"`

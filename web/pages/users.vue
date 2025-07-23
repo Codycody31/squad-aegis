@@ -69,7 +69,7 @@ interface UsersResponse {
 // Form schema for adding a user
 const formSchema = toTypedSchema(
   z.object({
-    steamId: z
+    steam_id: z
       .string()
       .min(1, "Steam ID is required")
       .regex(/^\d+$/, "Steam ID must contain only numbers"),
@@ -90,7 +90,7 @@ const formSchema = toTypedSchema(
 const form = useForm({
   validationSchema: formSchema,
   initialValues: {
-    steamId: "",
+    steam_id: "",
     name: "",
     username: "",
     password: "",
@@ -165,7 +165,7 @@ async function fetchUsers() {
 
 // Function to add a user
 async function addUser(values: any) {
-  const { steamId, name, username, password, superAdmin } = values;
+  const { steam_id, name, username, password, superAdmin } = values;
 
   addUserLoading.value = true;
   error.value = null;
@@ -188,7 +188,7 @@ async function addUser(values: any) {
       {
         method: "POST",
         body: {
-          steam_id: parseInt(steamId),
+          steam_id: parseInt(steam_id),
           name,
           username,
           password,
@@ -288,7 +288,7 @@ function refreshData() {
           keep-values
           :validation-schema="formSchema"
           :initial-values="{
-            steamId: '',
+            steam_id: '',
             name: '',
             username: '',
             password: '',
@@ -310,7 +310,7 @@ function refreshData() {
               </DialogHeader>
               <form id="dialogForm" @submit="handleSubmit($event, addUser)">
                 <div class="grid gap-4 py-4">
-                  <FormField name="steamId" v-slot="{ componentField }">
+                  <FormField name="steam_id" v-slot="{ componentField }">
                     <FormItem>
                       <FormLabel>Steam ID</FormLabel>
                       <FormControl>

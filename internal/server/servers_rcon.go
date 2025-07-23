@@ -14,17 +14,17 @@ import (
 
 // Request structs for player actions
 type KickPlayerRequest struct {
-	SteamId string `json:"steamId" binding:"required"`
+	SteamId string `json:"steam_id" binding:"required"`
 	Reason  string `json:"reason"`
 }
 
 type WarnPlayerRequest struct {
-	SteamId string `json:"steamId" binding:"required"`
+	SteamId string `json:"steam_id" binding:"required"`
 	Message string `json:"message" binding:"required"`
 }
 
 type MovePlayerRequest struct {
-	SteamId string `json:"steamId" binding:"required"`
+	SteamId string `json:"steam_id" binding:"required"`
 }
 
 // RconCommandList handles the listing of all commands that can be executed by the server

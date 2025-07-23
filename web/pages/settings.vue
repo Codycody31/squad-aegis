@@ -24,7 +24,7 @@ const authStore = useAuthStore();
 const profileFormSchema = toTypedSchema(
   z.object({
     name: z.string().min(1, "Name is required"),
-    steamId: z
+    steam_id: z
       .number()
       .optional(),
   })
@@ -52,7 +52,7 @@ const profileForm = useForm({
   validationSchema: profileFormSchema,
   initialValues: {
     name: "",
-    steamId: undefined,
+    steam_id: undefined,
   },
 });
 
@@ -123,7 +123,7 @@ async function fetchUserData() {
       // Update form values
       profileForm.setValues({
         name: user.value.name || "",
-        steamId: user.value.steam_id || undefined,
+        steam_id: user.value.steam_id || undefined,
       });
     }
   } catch (err: any) {
@@ -159,7 +159,7 @@ async function updateProfile(values: any) {
         method: "PATCH",
         body: {
           name: values.name,
-          steamId: values.steamId || null,
+          steam_id: values.steam_id || null,
         },
         headers: {
           Authorization: `Bearer ${token}`,
@@ -279,7 +279,7 @@ onMounted(() => {
             :validation-schema="profileFormSchema"
             :initial-values="{
               name: user?.name || '',
-              steamId: user?.steam_id || '',
+              steam_id: user?.steam_id || '',
             }"
           >
             <form @submit="handleSubmit($event, updateProfile)" class="space-y-4">
@@ -296,14 +296,14 @@ onMounted(() => {
                 </FormItem>
               </FormField>
 
-              <FormField name="steamId" v-slot="{ componentField }">
+              <FormField name="steam_id" v-slot="{ componentField }">
                 <FormItem>
                   <FormLabel>Steam ID</FormLabel>
                   <FormControl>
                     <Input type="number" placeholder="Your 17-digit Steam ID" v-bind="componentField" />
                   </FormControl>
                   <FormDescription>
-                    Your 17-digit Steam ID (SteamID64). This is used to identify you in Squad servers.
+                    Your 17-digit Steam ID (steam_id64). This is used to identify you in Squad servers.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
