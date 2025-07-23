@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog/log"
-	"go.codycody31.dev/squad-aegis/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 
 	"github.com/gin-gonic/gin"
 )

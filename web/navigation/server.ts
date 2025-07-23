@@ -60,21 +60,6 @@ export default [
     permissions: ["super_admin", "manageserver"],
   },
   {
-    title: "Connectors",
-    icon: "mdi:link",
-    to: {
-      name: "servers-serverId-connectors",
-    },
-  },
-  {
-    title: "Extensions",
-    icon: "mdi:extension",
-    to: {
-      name: "servers-serverId-extensions",
-    },
-    permissions: ["super_admin", "manageserver"],
-  },
-  {
     title: "Settings",
     icon: "mdi:cog",
     to: {

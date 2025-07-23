@@ -534,51 +534,8 @@ func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
 
 // StartConnectionManager starts the connection manager
 func (m *RconManager) StartConnectionManager() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			m.cleanupIdleConnections()
-		case <-m.ctx.Done():
-			m.cleanupAllConnections()
-			return
-		}
-	}
-}
-
-// cleanupIdleConnections closes idle connections
-func (m *RconManager) cleanupIdleConnections() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := time.Now()
-	idleTimeout := 30 * time.Minute
-
-	cleanedCount := 0 // Keep track of how many were cleaned
-	for serverID, conn := range m.connections {
-		conn.mu.Lock()
-		isDisconnected := conn.Disconnected // Read before potentially changing
-		lastUsed := conn.LastUsed
-		shouldClean := !isDisconnected && now.Sub(lastUsed) > idleTimeout
-
-		if shouldClean {
-			log.Info(). // Keep Info level for explicit idle cleanup
-					Str("serverID", serverID.String()).
-					Dur("idleDuration", now.Sub(lastUsed)).
-					Msg("Closing idle RCON connection due to inactivity")
-
-			conn.CommandRcon.Close()
-			conn.EventRcon.Close()
-			conn.Disconnected = true
-			cleanedCount++
-		}
-		conn.mu.Unlock() // Release lock before potentially long operation or next iteration
-	}
-	if cleanedCount > 0 {
-		log.Debug().Int("cleanedCount", cleanedCount).Msg("Idle RCON connection cleanup finished")
-	}
+	<-m.ctx.Done()
+	m.cleanupAllConnections()
 }
 
 // cleanupAllConnections closes all connections
