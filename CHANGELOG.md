@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-07-12
+## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-07-23
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- Refactor: cut down project into the working components [[#67](https://github.com/Codycody31/squad-aegis/pull/67)]
 - feat(logwatcher): refactor log processing and client broadcasting [[#45](https://github.com/Codycody31/squad-aegis/pull/45)]
 
 ### 📈 Enhancement
