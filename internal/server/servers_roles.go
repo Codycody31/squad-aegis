@@ -3,6 +3,7 @@ package server
 import (
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -118,10 +119,10 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 	// Insert the role into the database
 	var roleID string
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		INSERT INTO server_roles (server_id, name, permissions)
-		VALUES ($1, $2, $3)
+		INSERT INTO server_roles (id, server_id, name, permissions, created_at)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id
-	`, serverId, request.Name, permissionsStr).Scan(&roleID)
+	`, uuid.New(), serverId, request.Name, permissionsStr, time.Now()).Scan(&roleID)
 
 	if err != nil {
 		responses.BadRequest(c, "Failed to create role", &gin.H{"error": err.Error()})

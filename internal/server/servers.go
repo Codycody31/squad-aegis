@@ -55,22 +55,22 @@ type UnbanPlayerRequest struct {
 // ServerBan represents a ban in the database
 type ServerBan struct {
 	ID        string    `json:"id"`
-	ServerID  string    `json:"serverId"`
-	AdminID   string    `json:"adminId"`
-	AdminName string    `json:"adminName"`
-	SteamID   string    `json:"steamId"`
+	ServerID  string    `json:"server_id"`
+	AdminID   string    `json:"admin_id"`
+	AdminName string    `json:"admin_name"`
+	SteamID   string    `json:"steam_id"`
 	Name      string    `json:"name"` // Not stored in DB, populated from cache or external source
 	Reason    string    `json:"reason"`
 	Duration  int       `json:"duration"` // In minutes, 0 means permanent
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 	Permanent bool      `json:"permanent"`
 }
 
 // ServerBanCreateRequest represents a request to create a ban
 type ServerBanCreateRequest struct {
-	SteamID  string `json:"steamId"`
+	SteamID  string `json:"steam_id"`
 	Reason   string `json:"reason"`
 	Duration int    `json:"duration"` // In days, 0 means permanent
 }
@@ -78,21 +78,10 @@ type ServerBanCreateRequest struct {
 // ServerRole represents a role in the server
 type ServerRole struct {
 	ID          string    `json:"id"`
-	ServerID    string    `json:"serverId"`
+	ServerID    string    `json:"server_id"`
 	Name        string    `json:"name"`
 	Permissions []string  `json:"permissions"`
-	CreatedAt   time.Time `json:"createdAt"`
-}
-
-// ServerAdmin represents an admin in the server
-type ServerAdmin struct {
-	ID           string    `json:"id"`
-	ServerID     string    `json:"serverId"`
-	UserID       string    `json:"userId"`
-	Username     string    `json:"username"`
-	ServerRoleID string    `json:"serverRoleId"`
-	RoleName     string    `json:"roleName"`
-	CreatedAt    time.Time `json:"createdAt"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // ServerRoleCreateRequest represents a request to create a role
@@ -103,9 +92,9 @@ type ServerRoleCreateRequest struct {
 
 // ServerAdminCreateRequest represents a request to create an admin
 type ServerAdminCreateRequest struct {
-	UserID       *string `json:"userId,omitempty"`  // Optional: existing user ID
-	SteamID      *int64  `json:"steamId,omitempty"` // Optional: Steam ID for new admin
-	ServerRoleID string  `json:"serverRoleId"`      // Required: role to assign
+	UserID       *string `json:"user_id,omitempty"`  // Optional: existing user ID
+	SteamID      *int64  `json:"steam_id,omitempty"` // Optional: Steam ID for new admin
+	ServerRoleID string  `json:"server_role_id"`     // Required: role to assign
 }
 
 // ServerUpdateRequest represents a request to update a server

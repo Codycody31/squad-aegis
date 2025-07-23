@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -39,15 +40,10 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 			sa.server_id, 
 			sa.user_id, 
 			sa.steam_id,
-			COALESCE(u.username, CAST(sa.steam_id AS TEXT)) as username,
 			sa.server_role_id, 
-			sr.name as role_name, 
 			sa.created_at
 		FROM server_admins sa
-		LEFT JOIN users u ON sa.user_id = u.id
-		JOIN server_roles sr ON sa.server_role_id = sr.id
 		WHERE sa.server_id = $1
-		ORDER BY COALESCE(u.username, CAST(sa.steam_id AS TEXT)) ASC
 	`, serverId)
 	if err != nil {
 		responses.BadRequest(c, "Failed to query admins", &gin.H{"error": err.Error()})
@@ -59,10 +55,8 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 
 	for rows.Next() {
 		var admin models.ServerAdmin
-		var userID sql.NullString
-		var steamID sql.NullInt64
 
-		err := rows.Scan(&admin.Id, &admin.ServerId, &userID, &steamID, &admin.ServerRoleId, &admin.CreatedAt)
+		err := rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.CreatedAt)
 		if err != nil {
 			responses.BadRequest(c, "Failed to scan admin", &gin.H{"error": err.Error()})
 			return
@@ -218,19 +212,19 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 	if targetUserID != uuid.Nil {
 		// User exists, use user_id
 		query = `
-			INSERT INTO server_admins (server_id, user_id, server_role_id)
-			VALUES ($1, $2, $3)
+			INSERT INTO server_admins (id, server_id, user_id, server_role_id, created_at)
+			VALUES ($1, $2, $3, $4, $5)
 			RETURNING id
 		`
-		args = []interface{}{serverId, targetUserID, request.ServerRoleID}
+		args = []interface{}{uuid.New(), serverId, targetUserID, request.ServerRoleID, time.Now()}
 	} else {
 		// User doesn't exist, use steam_id
 		query = `
-			INSERT INTO server_admins (server_id, steam_id, server_role_id)
-			VALUES ($1, $2, $3)
+			INSERT INTO server_admins (id, server_id, steam_id, server_role_id, created_at)
+			VALUES ($1, $2, $3, $4, $5)
 			RETURNING id
 		`
-		args = []interface{}{serverId, *steamID, request.ServerRoleID}
+		args = []interface{}{uuid.New(), serverId, *steamID, request.ServerRoleID, time.Now()}
 	}
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&adminID)

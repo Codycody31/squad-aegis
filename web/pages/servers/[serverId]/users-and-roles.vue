@@ -110,18 +110,17 @@ interface ServerRole {
   serverId: string;
   name: string;
   permissions: string[];
-  createdAt: string;
+  created_at: string;
 }
 
 interface ServerAdmin {
   id: string;
-  serverId: string;
-  userId?: string;
-  steamId?: number;
+  server_id: string;
+  user_id?: string;
+  steam_id?: number;
   username: string;
-  serverRoleId: string;
-  roleName: string;
-  createdAt: string;
+  server_role_id: string;
+  created_at: string;
 }
 
 interface User {
@@ -129,7 +128,7 @@ interface User {
   username: string;
   email: string;
   superAdmin: boolean;
-  createdAt: string;
+  created_at: string;
   name?: string;
 }
 
@@ -180,7 +179,7 @@ const adminFormSchema = toTypedSchema(
         .refine((val) => !val || /^\d{17}$/.test(val), {
           message: "Steam ID must be exactly 17 digits",
         }),
-      serverRoleId: z.string().min(1, "Role is required"),
+      server_role_id: z.string().min(1, "Role is required"),
     })
     .refine(
       (data) => {
@@ -213,7 +212,7 @@ const adminForm = useForm({
     adminType: "user",
     userId: "",
     steamId: "",
-    serverRoleId: "",
+    server_role_id: "",
   },
 });
 
@@ -472,7 +471,7 @@ async function removeRole(roleId: string) {
 
 // Function to add an admin
 async function addAdmin(values: any) {
-  const { adminType, userId, steamId, serverRoleId } = values;
+  const { adminType, userId, steamId, server_role_id } = values;
 
   addAdminLoading.value = true;
   error.value = null;
@@ -492,7 +491,7 @@ async function addAdmin(values: any) {
   try {
     // Prepare request body based on admin type
     const requestBody: any = {
-      serverRoleId,
+      server_role_id,
     };
 
     if (adminType === "user") {
@@ -795,7 +794,7 @@ onMounted(() => {
                         </Badge>
                       </div>
                     </TableCell>
-                    <TableCell>{{ formatDate(role.createdAt) }}</TableCell>
+                    <TableCell>{{ formatDate(role.created_at) }}</TableCell>
                     <TableCell class="text-right">
                       <Button
                         variant="destructive"
@@ -828,7 +827,7 @@ onMounted(() => {
                 adminType: 'user',
                 userId: '',
                 steamId: '',
-                serverRoleId: '',
+                server_role_id: '',
               }"
             >
               <Dialog v-model:open="showAddAdminDialog">
@@ -923,7 +922,7 @@ onMounted(() => {
                       </FormField>
 
                       <FormField
-                        name="serverRoleId"
+                        name="server_role_id"
                         v-slot="{ componentField }"
                       >
                         <FormItem>
@@ -997,21 +996,23 @@ onMounted(() => {
                   >
                     <TableCell>
                       <div>
-                        {{ admin.username }}
                         <div
-                          v-if="admin.steamId"
+                          v-if="admin.steam_id"
                           class="text-xs text-muted-foreground"
                         >
-                          Steam ID: {{ admin.steamId }}
+                          Steam ID: {{ admin.steam_id }}
+                        </div>
+                        <div v-else>
+                          {{ users.find((u) => u.id === admin.user_id)?.name}} ({{ users.find((u) => u.id === admin.user_id)?.username }})
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">
-                        {{ admin.roleName }}
+                      <Badge variant="outline">                        
+                        {{ roles.find((r) => r.id === admin.server_role_id)?.name }}
                       </Badge>
                     </TableCell>
-                    <TableCell>{{ formatDate(admin.createdAt) }}</TableCell>
+                    <TableCell>{{ formatDate(admin.created_at) }}</TableCell>
                     <TableCell class="text-right">
                       <Button
                         variant="destructive"
