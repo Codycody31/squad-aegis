@@ -103,8 +103,9 @@ type ServerRoleCreateRequest struct {
 
 // ServerAdminCreateRequest represents a request to create an admin
 type ServerAdminCreateRequest struct {
-	UserID       string `json:"userId"`
-	ServerRoleID string `json:"serverRoleId"`
+	UserID       *string `json:"userId,omitempty"`  // Optional: existing user ID
+	SteamID      *int64  `json:"steamId,omitempty"` // Optional: Steam ID for new admin
+	ServerRoleID string  `json:"serverRoleId"`      // Required: role to assign
 }
 
 // ServerUpdateRequest represents a request to update a server

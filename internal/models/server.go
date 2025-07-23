@@ -41,12 +41,30 @@ type ServerBanCreateRequest struct {
 	RuleID   *string `json:"rule_id,omitempty"`
 }
 
+type ServerAdminCreateRequest struct {
+	UserID       *string `json:"userId,omitempty"`  // Optional: existing user ID
+	SteamID      *int64  `json:"steamId,omitempty"` // Optional: Steam ID for new admin
+	ServerRoleID string  `json:"serverRoleId"`      // Required: role to assign
+}
+
+// type ServerAdmin struct {
+// 	ID           string    `json:"id"`
+// 	ServerID     string    `json:"serverId"`
+// 	UserID       *string   `json:"userId,omitempty"`  // Optional: for existing users
+// 	SteamID      *int64    `json:"steamId,omitempty"` // Optional: for Steam ID only admins
+// 	Username     string    `json:"username"`
+// 	ServerRoleID string    `json:"serverRoleId"`
+// 	RoleName     string    `json:"roleName"`
+// 	CreatedAt    time.Time `json:"createdAt"`
+// }
+
 type ServerAdmin struct {
-	Id           uuid.UUID `json:"id"`
-	ServerId     uuid.UUID `json:"server_id"`
-	UserId       uuid.UUID `json:"user_id"`
-	ServerRoleId uuid.UUID `json:"server_role_id"`
-	CreatedAt    time.Time `json:"created_at"`
+	Id           uuid.UUID  `json:"id"`
+	ServerId     uuid.UUID  `json:"server_id"`
+	UserId       *uuid.UUID `json:"user_id,omitempty"`
+	SteamId      *int64     `json:"steam_id,omitempty"`
+	ServerRoleId uuid.UUID  `json:"server_role_id"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 type ServerRole struct {

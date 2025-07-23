@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -60,12 +60,19 @@ const showAddRoleDialog = ref(false);
 const showAddAdminDialog = ref(false);
 const addRoleLoading = ref(false);
 const addAdminLoading = ref(false);
+const selectedAdminType = ref("user");
 
 // Squad permission categories
 const permissionCategories = [
   {
     name: "Basic Admin",
-    permissions: ["reserve", "balance", "canseeadminchat", "manageserver", "teamchange"],
+    permissions: [
+      "reserve",
+      "balance",
+      "canseeadminchat",
+      "manageserver",
+      "teamchange",
+    ],
   },
   {
     name: "Chat",
@@ -109,8 +116,8 @@ interface ServerRole {
 interface ServerAdmin {
   id: string;
   serverId: string;
-  name: string;
-  userId: string;
+  userId?: string;
+  steamId?: number;
   username: string;
   serverRoleId: string;
   roleName: string;
@@ -161,10 +168,34 @@ const roleFormSchema = toTypedSchema(
 );
 
 const adminFormSchema = toTypedSchema(
-  z.object({
-    userId: z.string().min(1, "User is required"),
-    serverRoleId: z.string().min(1, "Role is required"),
-  })
+  z
+    .object({
+      adminType: z.enum(["user", "steamId"], {
+        required_error: "Please select admin type",
+      }),
+      userId: z.string().optional(),
+      steamId: z
+        .string()
+        .optional()
+        .refine((val) => !val || /^\d{17}$/.test(val), {
+          message: "Steam ID must be exactly 17 digits",
+        }),
+      serverRoleId: z.string().min(1, "Role is required"),
+    })
+    .refine(
+      (data) => {
+        if (data.adminType === "user") {
+          return data.userId && data.userId.length > 0;
+        } else if (data.adminType === "steamId") {
+          return data.steamId && data.steamId.length === 17;
+        }
+        return false;
+      },
+      {
+        message: "Please select a user or enter a valid Steam ID",
+        path: ["userId"], // This will show the error on the userId field
+      }
+    )
 );
 
 // Setup forms
@@ -179,9 +210,29 @@ const roleForm = useForm({
 const adminForm = useForm({
   validationSchema: adminFormSchema,
   initialValues: {
+    adminType: "user",
     userId: "",
+    steamId: "",
     serverRoleId: "",
   },
+});
+
+// Watch for changes in adminType to update our reactive reference
+watch(
+  () => adminForm.values.adminType,
+  (newValue) => {
+    selectedAdminType.value = newValue || "user";
+  },
+  { immediate: true }
+);
+
+// Watch for dialog state changes to reset form
+watch(showAddAdminDialog, (isOpen) => {
+  if (isOpen) {
+    // Reset to default when dialog opens
+    selectedAdminType.value = "user";
+    adminForm.resetForm();
+  }
 });
 
 // Function to fetch roles
@@ -421,7 +472,7 @@ async function removeRole(roleId: string) {
 
 // Function to add an admin
 async function addAdmin(values: any) {
-  const { name, userId, serverRoleId } = values;
+  const { adminType, userId, steamId, serverRoleId } = values;
 
   addAdminLoading.value = true;
   error.value = null;
@@ -439,15 +490,22 @@ async function addAdmin(values: any) {
   }
 
   try {
+    // Prepare request body based on admin type
+    const requestBody: any = {
+      serverRoleId,
+    };
+
+    if (adminType === "user") {
+      requestBody.userId = userId;
+    } else if (adminType === "steamId") {
+      requestBody.steamId = parseInt(steamId, 10);
+    }
+
     const { data, error: fetchError } = await useFetch(
       `${runtimeConfig.public.backendApi}/servers/${serverId}/admins`,
       {
         method: "POST",
-        body: {
-          name,
-          userId,
-          serverRoleId,
-        },
+        body: requestBody,
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -536,7 +594,9 @@ function formatDate(dateString: string): string {
 
 // Get available users (not already admins)
 const availableUsers = computed(() => {
-  const adminUserIds = admins.value.map((admin) => admin.userId);
+  const adminUserIds = admins.value
+    .filter((admin) => admin.userId) // Only include admins that have a userId
+    .map((admin) => admin.userId);
   return users.value.filter((user) => !adminUserIds.includes(user.id));
 });
 
@@ -765,8 +825,9 @@ onMounted(() => {
               keep-values
               :validation-schema="adminFormSchema"
               :initial-values="{
-                name: '',
+                adminType: 'user',
                 userId: '',
+                steamId: '',
                 serverRoleId: '',
               }"
             >
@@ -788,8 +849,39 @@ onMounted(() => {
                     @submit="handleSubmit($event, addAdmin)"
                   >
                     <div class="grid gap-4 py-4">
-                      <FormField name="userId" v-slot="{ componentField }">
+                      <FormField name="adminType" v-slot="{ componentField }">
                         <FormItem>
+                          <FormLabel>Admin Type</FormLabel>
+                          <Select 
+                            v-bind="componentField"
+                            @update:model-value="(value) => selectedAdminType = value"
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select admin type" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectItem value="user">
+                                  Existing User
+                                </SelectItem>
+                                <SelectItem value="steamId">
+                                  Steam ID Only
+                                </SelectItem>
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Choose whether to assign an existing user or add an
+                            admin by Steam ID only.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
+
+                      <FormField name="userId" v-slot="{ componentField }">
+                        <FormItem v-if="selectedAdminType === 'user'">
                           <FormLabel>User</FormLabel>
                           <Select v-bind="componentField">
                             <FormControl>
@@ -809,6 +901,23 @@ onMounted(() => {
                               </SelectGroup>
                             </SelectContent>
                           </Select>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
+
+                      <FormField name="steamId" v-slot="{ componentField }">
+                        <FormItem v-if="selectedAdminType === 'steamId'">
+                          <FormLabel>Steam ID</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="76561198012345678"
+                              v-bind="componentField"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Enter the 17-digit Steam ID of the player you want
+                            to make an admin.
+                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       </FormField>
@@ -886,7 +995,17 @@ onMounted(() => {
                     :key="admin.id"
                     class="hover:bg-muted/50"
                   >
-                    <TableCell>{{ admin.username }}</TableCell>
+                    <TableCell>
+                      <div>
+                        {{ admin.username }}
+                        <div
+                          v-if="admin.steamId"
+                          class="text-xs text-muted-foreground"
+                        >
+                          Steam ID: {{ admin.steamId }}
+                        </div>
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline">
                         {{ admin.roleName }}
