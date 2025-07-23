@@ -8,113 +8,11 @@ import (
 	"github.com/gin-gonic/gin"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/google/uuid"
-	"go.codycody31.dev/squad-aegis/core"
+	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
-
-type ServerCreateRequest struct {
-	Name         string `json:"name"`
-	IpAddress    string `json:"ip_address"`
-	GamePort     int    `json:"game_port"`
-	RconPort     int    `json:"rcon_port"`
-	RconPassword string `json:"rcon_password"`
-}
-
-type ServerRconExecuteRequest struct {
-	Command string `json:"command"`
-}
-
-// BannedPlayer represents a banned player
-type BannedPlayer struct {
-	ID        string     `json:"id"`
-	SteamID   string     `json:"steamId"`
-	Name      string     `json:"name"`
-	Reason    string     `json:"reason"`
-	BannedBy  string     `json:"bannedBy"`
-	BannedAt  time.Time  `json:"bannedAt"`
-	ExpiresAt *time.Time `json:"expiresAt"`
-	Duration  string     `json:"duration"`
-	Permanent bool       `json:"permanent"`
-}
-
-// BanPlayerRequest represents a request to ban a player
-type BanPlayerRequest struct {
-	SteamID  string `json:"steamId"`
-	Name     string `json:"name"`
-	Reason   string `json:"reason"`
-	Duration string `json:"duration"` // "permanent" or a duration like "24h"
-}
-
-// UnbanPlayerRequest represents a request to unban a player
-type UnbanPlayerRequest struct {
-	SteamID string `json:"steamId"`
-}
-
-// ServerBan represents a ban in the database
-type ServerBan struct {
-	ID        string    `json:"id"`
-	ServerID  string    `json:"serverId"`
-	AdminID   string    `json:"adminId"`
-	AdminName string    `json:"adminName"`
-	SteamID   string    `json:"steamId"`
-	Name      string    `json:"name"` // Not stored in DB, populated from cache or external source
-	Reason    string    `json:"reason"`
-	Duration  int       `json:"duration"` // In minutes, 0 means permanent
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	Permanent bool      `json:"permanent"`
-}
-
-// ServerBanCreateRequest represents a request to create a ban
-type ServerBanCreateRequest struct {
-	SteamID  string `json:"steamId"`
-	Reason   string `json:"reason"`
-	Duration int    `json:"duration"` // In days, 0 means permanent
-}
-
-// ServerRole represents a role in the server
-type ServerRole struct {
-	ID          string    `json:"id"`
-	ServerID    string    `json:"serverId"`
-	Name        string    `json:"name"`
-	Permissions []string  `json:"permissions"`
-	CreatedAt   time.Time `json:"createdAt"`
-}
-
-// ServerAdmin represents an admin in the server
-type ServerAdmin struct {
-	ID           string    `json:"id"`
-	ServerID     string    `json:"serverId"`
-	UserID       string    `json:"userId"`
-	Username     string    `json:"username"`
-	ServerRoleID string    `json:"serverRoleId"`
-	RoleName     string    `json:"roleName"`
-	CreatedAt    time.Time `json:"createdAt"`
-}
-
-// ServerRoleCreateRequest represents a request to create a role
-type ServerRoleCreateRequest struct {
-	Name        string   `json:"name"`
-	Permissions []string `json:"permissions"`
-}
-
-// ServerAdminCreateRequest represents a request to create an admin
-type ServerAdminCreateRequest struct {
-	UserID       string `json:"userId"`
-	ServerRoleID string `json:"serverRoleId"`
-}
-
-// ServerUpdateRequest represents a request to update a server
-type ServerUpdateRequest struct {
-	Name         string `json:"name" binding:"required"`
-	IpAddress    string `json:"ip_address" binding:"required"`
-	GamePort     int    `json:"game_port" binding:"required"`
-	RconPort     int    `json:"rcon_port" binding:"required"`
-	RconPassword string `json:"rcon_password"`
-}
 
 func (s *Server) ServersList(c *gin.Context) {
 	user := s.getUserFromSession(c)
@@ -129,7 +27,7 @@ func (s *Server) ServersList(c *gin.Context) {
 }
 
 func (s *Server) ServersCreate(c *gin.Context) {
-	var request ServerCreateRequest
+	var request models.ServerCreateRequest
 
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
@@ -475,7 +373,7 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		return
 	}
 
-	var request ServerUpdateRequest
+	var request models.ServerUpdateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
 		return

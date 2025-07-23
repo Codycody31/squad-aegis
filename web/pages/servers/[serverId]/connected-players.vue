@@ -45,7 +45,7 @@ const showActionDialog = ref(false);
 const actionType = ref<'kick' | 'ban' | 'warn' | 'move' | null>(null);
 const selectedPlayer = ref<Player | null>(null);
 const actionReason = ref("");
-const actionDuration = ref(""); // For ban duration
+const actionDuration = ref(1); // For ban duration
 const targetTeamId = ref<number | null>(null); // For move action
 const isActionLoading = ref(false);
 
@@ -243,7 +243,7 @@ function openActionDialog(player: Player, action: 'kick' | 'ban' | 'warn' | 'mov
   selectedPlayer.value = player;
   actionType.value = action;
   actionReason.value = "";
-  actionDuration.value = action === 'ban' ? "1" : "";
+  actionDuration.value = action === 'ban' ? 1 : 0;
   showActionDialog.value = true;
 }
 
@@ -253,7 +253,7 @@ function closeActionDialog() {
   selectedPlayer.value = null;
   actionType.value = null;
   actionReason.value = "";
-  actionDuration.value = "";
+  actionDuration.value = 0;
   targetTeamId.value = null;
 }
 
@@ -573,15 +573,10 @@ async function executePlayerAction() {
         <CardTitle>Player Statistics</CardTitle>
       </CardHeader>
       <CardContent>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="bg-muted/30 p-4 rounded-lg">
             <div class="text-2xl font-bold">{{ connectedPlayers.length }}</div>
             <div class="text-sm text-muted-foreground">Total Players</div>
-          </div>
-          
-          <div class="bg-muted/30 p-4 rounded-lg">
-            <div class="text-2xl font-bold">{{ teams.length }}</div>
-            <div class="text-sm text-muted-foreground">Teams</div>
           </div>
           
           <div class="bg-muted/30 p-4 rounded-lg">
@@ -627,6 +622,7 @@ async function executePlayerAction() {
               v-model="actionDuration"
               placeholder="7"
               class="col-span-3"
+              type="number"
             />
             <div class="col-span-1"></div>
             <div class="text-xs text-muted-foreground col-span-3">

@@ -10,48 +10,40 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.codycody31.dev/squad-aegis/core"
+	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
-	"go.codycody31.dev/squad-aegis/shared/config"
 )
 
 // AuditLogEntry represents an audit log entry
 type AuditLogEntry struct {
-	ID         uuid.UUID       `json:"id"`
-	UserID     *uuid.UUID      `json:"user_id,omitempty"`
-	Username   string          `json:"username,omitempty"`
-	Action     string          `json:"action"`
-	Changes    json.RawMessage `json:"changes,omitempty"`
-	Timestamp  time.Time       `json:"timestamp"`
+	ID        uuid.UUID       `json:"id"`
+	UserID    *uuid.UUID      `json:"user_id,omitempty"`
+	Username  string          `json:"username,omitempty"`
+	Action    string          `json:"action"`
+	Changes   json.RawMessage `json:"changes,omitempty"`
+	Timestamp time.Time       `json:"timestamp"`
 }
 
 // CreateAuditLog creates a new audit log entry
-func (s *Server) CreateAuditLog(ctx context.Context, serverID *uuid.UUID, userID *uuid.UUID, action string, changes interface{}) error {
+func (s *Server) CreateAuditLog(ctx context.Context, serverID *uuid.UUID, userID *uuid.UUID, action string, changes interface{}) {
 	// Convert changes to JSON
 	changesJSON, err := json.Marshal(changes)
 	if err != nil {
-		return err
+		log.Error().Err(err).Msg("Failed to marshal changes for audit log")
+		return
 	}
 
 	// Insert the audit log into the database
 	_, err = s.Dependencies.DB.ExecContext(ctx, `
-		INSERT INTO audit_logs (server_id, user_id, action, changes)
-		VALUES ($1, $2, $3, $4)
-	`, serverID, userID, action, changesJSON)
+		INSERT INTO audit_logs (id, server_id, user_id, action, changes, timestamp)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, uuid.New(), serverID, userID, action, changesJSON, time.Now())
 
-	// Track the audit log creation event
-	if s.Dependencies.MetricsCollector != nil {
-		data := map[string]interface{}{}
-
-		if config.Config.App.NonAnonymousTelemetry {
-			data["server_id"] = serverID
-			data["user_id"] = userID
-		}
-
-		s.Dependencies.MetricsCollector.GetCountly().TrackEvent(action, 1, 0, data)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create audit log")
+		return
 	}
-
-	return err
 }
 
 // ServerAuditLogs handles listing audit logs for a server

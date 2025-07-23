@@ -23,9 +23,9 @@ import (
 	"golang.org/x/crypto/ssh"
 	"google.golang.org/grpc"
 
+	"go.codycody31.dev/squad-aegis/internal/shared/logger"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	pb "go.codycody31.dev/squad-aegis/proto/logwatcher"
-	"go.codycody31.dev/squad-aegis/shared/logger"
-	"go.codycody31.dev/squad-aegis/shared/utils"
 )
 
 // Auth token (configurable via CLI)

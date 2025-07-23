@@ -3,10 +3,12 @@ package server
 import (
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.codycody31.dev/squad-aegis/core"
+	"go.codycody31.dev/squad-aegis/internal/core"
+	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
@@ -42,13 +44,13 @@ func (s *Server) ServerRolesList(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	roles := []ServerRole{}
+	roles := []models.ServerRole{}
 
 	for rows.Next() {
-		var role ServerRole
+		var role models.ServerRole
 		var permissionsStr string
 
-		err := rows.Scan(&role.ID, &role.ServerID, &role.Name, &permissionsStr, &role.CreatedAt)
+		err := rows.Scan(&role.Id, &role.ServerId, &role.Name, &permissionsStr, &role.CreatedAt)
 		if err != nil {
 			responses.BadRequest(c, "Failed to scan role", &gin.H{"error": err.Error()})
 			return
@@ -83,7 +85,7 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 	}
 	_ = server // Ensure server is used
 
-	var request ServerRoleCreateRequest
+	var request models.ServerRoleCreateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
 		return
@@ -118,10 +120,10 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 	// Insert the role into the database
 	var roleID string
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		INSERT INTO server_roles (server_id, name, permissions)
-		VALUES ($1, $2, $3)
+		INSERT INTO server_roles (id, server_id, name, permissions, created_at)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id
-	`, serverId, request.Name, permissionsStr).Scan(&roleID)
+	`, uuid.New(), serverId, request.Name, permissionsStr, time.Now()).Scan(&roleID)
 
 	if err != nil {
 		responses.BadRequest(c, "Failed to create role", &gin.H{"error": err.Error()})

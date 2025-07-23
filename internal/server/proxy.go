@@ -6,7 +6,7 @@ import (
 	"net/url"
 
 	"github.com/gin-gonic/gin"
-	"go.codycody31.dev/squad-aegis/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
 func (s *Server) proxyHandler(c *gin.Context) {
