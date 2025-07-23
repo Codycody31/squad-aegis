@@ -20,7 +20,6 @@ The project is currently in the early stages of development and is not ready for
 - **Role-Based Access Control**: Establish granular permissions to secure server operations.
 - **RCON Command Interface**: Send RCON commands directly via an intuitive web UI.
 - **Comprehensive Audit Logging**: Keep a detailed record of all administrative actions for accountability.
-- **Extensible Architecture**: Utilize connectors and extensions to integrate and extend functionalities.
 
 ## Acknowledgments
 
@@ -35,11 +34,6 @@ The project is currently in the early stages of development and is not ready for
 - **Role-Based Access**: Define specific permissions for users to ensure only authorized actions are executed.
 - **RCON Interface**: Engage with server commands using a user-friendly web-based interface.
 - **Audit System**: Detailed logging of administrative activities for transparency and security.
-
-### Extensibility
-
-- **Connectors**: Provide integrations with external services, such as Discord, to enhance your server capabilities.
-- **Extensions**: Introduce additional functionalities without altering the core codebase, ensuring flexibility and adaptability.
 
 ## Installation Guide
 
@@ -118,34 +112,6 @@ docker compose -f docker-compose.logwatcher.yml up -d
 ```
 
 By default, the Log Watcher broadcasts new log entries from the point it starts, akin to `tail -f`. To process entire log data, adjust `LOGWATCHER_READ_FROM_START`.
-
-### Analytics & Telemetry
-
-Squad Aegis incorporates anonymous telemetry to refine performance and user experience. By default, this feature is active and collects:
-
-- Basic system information (OS, CPU architecture, memory usage)
-- Statistics on feature usage
-- Crash reports, if any
-- Performance metrics
-
-#### Telemetry Configuration
-
-Adjust telemetry settings via environment variables:
-
-```yaml
-environment:
-  # Enable/disable telemetry
-  - APP_TELEMETRY=true
-  # Non-anonymous telemetry
-  - APP_NON_ANONYMOUS_TELEMETRY=false
-```
-
-To completely turn off telemetry, configure:
-
-```yaml
-environment:
-  - APP_TELEMETRY=false
-```
 
 ## Configuration
 
