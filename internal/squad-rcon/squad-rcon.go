@@ -322,6 +322,12 @@ func (s *SquadRcon) BanPlayer(steamId string, duration int, reason string) error
 	return err
 }
 
+// KickPlayer kicks a player from the server
+func (s *SquadRcon) KickPlayer(steamId string, reason string) error {
+	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminKick %s %s", steamId, reason))
+	return err
+}
+
 // GetServerPlayers gets the online and disconnected players from the server
 func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
 	playersResponse, err := s.Manager.ExecuteCommand(s.ServerID, "ListPlayers")

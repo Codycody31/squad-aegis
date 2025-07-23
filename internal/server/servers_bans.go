@@ -210,7 +210,15 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	// Also apply the ban via RCON if the server is online
 	if server != nil {
 		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-		_ = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
+		err = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
+		if err != nil {
+			log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to apply ban via RCON")
+		}
+
+		err = r.KickPlayer(request.SteamID, request.Reason)
+		if err != nil {
+			log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to kick player via RCON")
+		}
 	}
 
 	// Create detailed audit log
