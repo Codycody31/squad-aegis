@@ -35,10 +35,10 @@ type ServerBan struct {
 }
 
 type ServerBanCreateRequest struct {
-	SteamID  string  `json:"steam_id" binding:"required"`
-	Reason   string  `json:"reason" binding:"required"`
+	SteamID  string  `json:"steamId"`
+	Reason   string  `json:"reason"`
 	Duration int     `json:"duration"`
-	RuleID   *string `json:"rule_id,omitempty"`
+	RuleID   *string `json:"ruleId,omitempty"`
 }
 
 type ServerAdminCreateRequest struct {

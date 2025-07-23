@@ -180,11 +180,11 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	now := time.Now()
 
 	query := `
-		INSERT INTO server_bans (server_id, admin_id, player_id, reason, duration, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO server_bans (id, server_id, admin_id, player_id, reason, duration, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id
 	`
-	args := []interface{}{serverId, user.Id, playerID, request.Reason, request.Duration, now, now}
+	args := []interface{}{uuid.New(), serverId, user.Id, playerID, request.Reason, request.Duration, now, now}
 
 	// Add rule_id if provided
 	if request.RuleID != nil && *request.RuleID != "" {
@@ -194,8 +194,8 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 			return
 		}
 		query = `
-			INSERT INTO server_bans (server_id, admin_id, player_id, reason, duration, rule_id, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO server_bans (id, server_id, admin_id, player_id, reason, duration, rule_id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING id
 		`
 		args = append(args[:5], ruleUUID, now, now)

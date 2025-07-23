@@ -57,12 +57,18 @@ const addBanLoading = ref(false);
 
 interface BannedPlayer {
     id: string;
-    steamId: string;
+    server_id: string;
+    admin_id: string;
+    admin_name: string;
+    player_id: string;
+    steam_id: string;
     name: string;
     reason: string;
-    bannedAt: string;
     duration: number;
-    createdAt: string;
+    permanent: boolean;
+    expires_at: string;
+    created_at: string;
+    updated_at: string;
 }
 
 interface BannedPlayersResponse {
@@ -488,12 +494,12 @@ function copyBanCfgUrl() {
                             >
                                 <TableCell>
                                     <div class="font-medium">
-                                        {{ player.steamId }}
+                                        {{ player.steam_id }}
                                     </div>
                                 </TableCell>
                                 <TableCell>{{ player.reason }}</TableCell>
                                 <TableCell>{{
-                                    formatDate(player.createdAt)
+                                    formatDate(player.created_at)
                                 }}</TableCell>
                                 <TableCell>
                                     <Badge
@@ -506,7 +512,7 @@ function copyBanCfgUrl() {
                                         {{
                                             player.duration == 0
                                                 ? "Permanent"
-                                                : player.duration
+                                                : player.duration + " days"
                                         }}
                                     </Badge>
                                 </TableCell>
@@ -516,7 +522,7 @@ function copyBanCfgUrl() {
                                         size="sm"
                                         @click="removeBan(player.id)"
                                         :disabled="loading"
-                                        v-if="authStore.getServerPermissions(serverId as string).includes('ban')"
+                                        v-if="authStore.getServerPermission(serverId, 'ban')"
                                     >
                                         Unban
                                     </Button>
