@@ -169,11 +169,11 @@ const roleFormSchema = toTypedSchema(
 const adminFormSchema = toTypedSchema(
   z
     .object({
-      adminType: z.enum(["user", "steamId"], {
+      adminType: z.enum(["user", "steam_id"], {
         required_error: "Please select admin type",
       }),
-      userId: z.string().optional(),
-      steamId: z
+      user_id: z.string().optional(),
+      steam_id: z
         .string()
         .optional()
         .refine((val) => !val || /^\d{17}$/.test(val), {
@@ -184,15 +184,15 @@ const adminFormSchema = toTypedSchema(
     .refine(
       (data) => {
         if (data.adminType === "user") {
-          return data.userId && data.userId.length > 0;
-        } else if (data.adminType === "steamId") {
-          return data.steamId && data.steamId.length === 17;
+          return data.user_id && data.user_id.length > 0;
+        } else if (data.adminType === "steam_id") {
+          return data.steam_id && data.steam_id.length === 17;
         }
         return false;
       },
       {
         message: "Please select a user or enter a valid Steam ID",
-        path: ["userId"], // This will show the error on the userId field
+        path: ["user_id"], // This will show the error on the user_id field
       }
     )
 );
@@ -210,8 +210,8 @@ const adminForm = useForm({
   validationSchema: adminFormSchema,
   initialValues: {
     adminType: "user",
-    userId: "",
-    steamId: "",
+    user_id: "",
+    steam_id: "",
     server_role_id: "",
   },
 });
@@ -471,7 +471,7 @@ async function removeRole(roleId: string) {
 
 // Function to add an admin
 async function addAdmin(values: any) {
-  const { adminType, userId, steamId, server_role_id } = values;
+  const { adminType, user_id, steam_id, server_role_id } = values;
 
   addAdminLoading.value = true;
   error.value = null;
@@ -495,9 +495,9 @@ async function addAdmin(values: any) {
     };
 
     if (adminType === "user") {
-      requestBody.userId = userId;
-    } else if (adminType === "steamId") {
-      requestBody.steamId = parseInt(steamId, 10);
+      requestBody.user_id = user_id;
+    } else if (adminType === "steam_id") {
+      requestBody.steam_id = parseInt(steam_id, 10);
     }
 
     const { data, error: fetchError } = await useFetch(
@@ -593,10 +593,10 @@ function formatDate(dateString: string): string {
 
 // Get available users (not already admins)
 const availableUsers = computed(() => {
-  const adminUserIds = admins.value
-    .filter((admin) => admin.userId) // Only include admins that have a userId
-    .map((admin) => admin.userId);
-  return users.value.filter((user) => !adminUserIds.includes(user.id));
+  const adminuser_ids = admins.value
+    .filter((admin) => admin.user_id) // Only include admins that have a user_id
+    .map((admin) => admin.user_id);
+  return users.value.filter((user) => !adminuser_ids.includes(user.id));
 });
 
 // Setup initial data load
@@ -825,8 +825,8 @@ onMounted(() => {
               :validation-schema="adminFormSchema"
               :initial-values="{
                 adminType: 'user',
-                userId: '',
-                steamId: '',
+                user_id: '',
+                steam_id: '',
                 server_role_id: '',
               }"
             >
@@ -865,7 +865,7 @@ onMounted(() => {
                                 <SelectItem value="user">
                                   Existing User
                                 </SelectItem>
-                                <SelectItem value="steamId">
+                                <SelectItem value="steam_id">
                                   Steam ID Only
                                 </SelectItem>
                               </SelectGroup>
@@ -879,7 +879,7 @@ onMounted(() => {
                         </FormItem>
                       </FormField>
 
-                      <FormField name="userId" v-slot="{ componentField }">
+                      <FormField name="user_id" v-slot="{ componentField }">
                         <FormItem v-if="selectedAdminType === 'user'">
                           <FormLabel>User</FormLabel>
                           <Select v-bind="componentField">
@@ -904,8 +904,8 @@ onMounted(() => {
                         </FormItem>
                       </FormField>
 
-                      <FormField name="steamId" v-slot="{ componentField }">
-                        <FormItem v-if="selectedAdminType === 'steamId'">
+                      <FormField name="steam_id" v-slot="{ componentField }">
+                        <FormItem v-if="selectedAdminType === 'steam_id'">
                           <FormLabel>Steam ID</FormLabel>
                           <FormControl>
                             <Input
