@@ -14,98 +14,6 @@ import (
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
-type ServerCreateRequest struct {
-	Name         string `json:"name"`
-	IpAddress    string `json:"ip_address"`
-	GamePort     int    `json:"game_port"`
-	RconPort     int    `json:"rcon_port"`
-	RconPassword string `json:"rcon_password"`
-}
-
-type ServerRconExecuteRequest struct {
-	Command string `json:"command"`
-}
-
-// BannedPlayer represents a banned player
-type BannedPlayer struct {
-	ID        string     `json:"id"`
-	SteamID   string     `json:"steamId"`
-	Name      string     `json:"name"`
-	Reason    string     `json:"reason"`
-	BannedBy  string     `json:"bannedBy"`
-	BannedAt  time.Time  `json:"bannedAt"`
-	ExpiresAt *time.Time `json:"expiresAt"`
-	Duration  string     `json:"duration"`
-	Permanent bool       `json:"permanent"`
-}
-
-// BanPlayerRequest represents a request to ban a player
-type BanPlayerRequest struct {
-	SteamID  string `json:"steamId"`
-	Name     string `json:"name"`
-	Reason   string `json:"reason"`
-	Duration string `json:"duration"` // "permanent" or a duration like "24h"
-}
-
-// UnbanPlayerRequest represents a request to unban a player
-type UnbanPlayerRequest struct {
-	SteamID string `json:"steamId"`
-}
-
-// ServerBan represents a ban in the database
-type ServerBan struct {
-	ID        string    `json:"id"`
-	ServerID  string    `json:"server_id"`
-	AdminID   string    `json:"admin_id"`
-	AdminName string    `json:"admin_name"`
-	SteamID   string    `json:"steam_id"`
-	Name      string    `json:"name"` // Not stored in DB, populated from cache or external source
-	Reason    string    `json:"reason"`
-	Duration  int       `json:"duration"` // In minutes, 0 means permanent
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Permanent bool      `json:"permanent"`
-}
-
-// ServerBanCreateRequest represents a request to create a ban
-type ServerBanCreateRequest struct {
-	SteamID  string `json:"steam_id"`
-	Reason   string `json:"reason"`
-	Duration int    `json:"duration"` // In days, 0 means permanent
-}
-
-// ServerRole represents a role in the server
-type ServerRole struct {
-	ID          string    `json:"id"`
-	ServerID    string    `json:"server_id"`
-	Name        string    `json:"name"`
-	Permissions []string  `json:"permissions"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-// ServerRoleCreateRequest represents a request to create a role
-type ServerRoleCreateRequest struct {
-	Name        string   `json:"name"`
-	Permissions []string `json:"permissions"`
-}
-
-// ServerAdminCreateRequest represents a request to create an admin
-type ServerAdminCreateRequest struct {
-	UserID       *string `json:"user_id,omitempty"`  // Optional: existing user ID
-	SteamID      *int64  `json:"steam_id,omitempty"` // Optional: Steam ID for new admin
-	ServerRoleID string  `json:"server_role_id"`     // Required: role to assign
-}
-
-// ServerUpdateRequest represents a request to update a server
-type ServerUpdateRequest struct {
-	Name         string `json:"name" binding:"required"`
-	IpAddress    string `json:"ip_address" binding:"required"`
-	GamePort     int    `json:"game_port" binding:"required"`
-	RconPort     int    `json:"rcon_port" binding:"required"`
-	RconPassword string `json:"rcon_password"`
-}
-
 func (s *Server) ServersList(c *gin.Context) {
 	user := s.getUserFromSession(c)
 
@@ -119,7 +27,7 @@ func (s *Server) ServersList(c *gin.Context) {
 }
 
 func (s *Server) ServersCreate(c *gin.Context) {
-	var request ServerCreateRequest
+	var request models.ServerCreateRequest
 
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
@@ -465,7 +373,7 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		return
 	}
 
-	var request ServerUpdateRequest
+	var request models.ServerUpdateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
 		return

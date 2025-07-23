@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/core"
+	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
@@ -43,13 +44,13 @@ func (s *Server) ServerRolesList(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	roles := []ServerRole{}
+	roles := []models.ServerRole{}
 
 	for rows.Next() {
-		var role ServerRole
+		var role models.ServerRole
 		var permissionsStr string
 
-		err := rows.Scan(&role.ID, &role.ServerID, &role.Name, &permissionsStr, &role.CreatedAt)
+		err := rows.Scan(&role.Id, &role.ServerId, &role.Name, &permissionsStr, &role.CreatedAt)
 		if err != nil {
 			responses.BadRequest(c, "Failed to scan role", &gin.H{"error": err.Error()})
 			return
@@ -84,7 +85,7 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 	}
 	_ = server // Ensure server is used
 
-	var request ServerRoleCreateRequest
+	var request models.ServerRoleCreateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
 		return
