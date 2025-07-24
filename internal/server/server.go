@@ -111,7 +111,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 			usersGroup.GET("", server.UsersList)
 			usersGroup.POST("", server.UserCreate)
-			// usersGroup.PUT("/:userId", server.UserUpdate)
+			usersGroup.PUT("/:userId", server.UserUpdate)
 			usersGroup.DELETE("/:userId", server.UserDelete)
 		}
 

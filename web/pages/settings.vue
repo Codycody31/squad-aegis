@@ -25,8 +25,11 @@ const profileFormSchema = toTypedSchema(
   z.object({
     name: z.string().min(1, "Name is required"),
     steam_id: z
-      .number()
-      .optional(),
+      .string()
+      .optional()
+      .refine((val) => !val || val === "" || /^\d{17}$/.test(val), {
+        message: "Steam ID must be exactly 17 digits",
+      }),
   })
 );
 
@@ -153,13 +156,19 @@ async function updateProfile(values: any) {
   }
 
   try {
+    // Convert steam_id to number if provided
+    let steamIdNumber = null;
+    if (values.steam_id && values.steam_id.trim() !== "") {
+      steamIdNumber = parseInt(values.steam_id, 10);
+    }
+
     const { data, error: fetchError } = await useFetch(
       `${runtimeConfig.public.backendApi}/auth/me`,
       {
         method: "PATCH",
         body: {
           name: values.name,
-          steam_id: values.steam_id || null,
+          steam_id: steamIdNumber,
         },
         headers: {
           Authorization: `Bearer ${token}`,
@@ -300,7 +309,7 @@ onMounted(() => {
                 <FormItem>
                   <FormLabel>Steam ID</FormLabel>
                   <FormControl>
-                    <Input type="number" placeholder="Your 17-digit Steam ID" v-bind="componentField" />
+                    <Input placeholder="Your 17-digit Steam ID" v-bind="componentField" />
                   </FormControl>
                   <FormDescription>
                     Your 17-digit Steam ID (steam_id64). This is used to identify you in Squad servers.

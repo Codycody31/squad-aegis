@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -37,10 +37,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
+import { Checkbox } from "~/components/ui/checkbox";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
+import { useAuthStore } from "@/stores/auth";
 
+const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -48,7 +51,10 @@ const users = ref<User[]>([]);
 const refreshInterval = ref<NodeJS.Timeout | null>(null);
 const searchQuery = ref("");
 const showAddUserDialog = ref(false);
+const showEditUserDialog = ref(false);
 const addUserLoading = ref(false);
+const editUserLoading = ref(false);
+const editingUser = ref<User | null>(null);
 
 interface User {
   id: string;
@@ -67,7 +73,7 @@ interface UsersResponse {
 }
 
 // Form schema for adding a user
-const formSchema = toTypedSchema(
+const addFormSchema = toTypedSchema(
   z.object({
     steam_id: z
       .string()
@@ -86,14 +92,37 @@ const formSchema = toTypedSchema(
   })
 );
 
-// Setup form
-const form = useForm({
-  validationSchema: formSchema,
+// Form schema for editing a user
+const editFormSchema = toTypedSchema(
+  z.object({
+    steam_id: z
+      .string()
+      .optional()
+      .refine((val) => !val || val === "" || /^\d{17}$/.test(val), {
+        message: "Steam ID must be exactly 17 digits",
+      }),
+    name: z.string().min(1, "Name is required"),
+    superAdmin: z.boolean().default(false),
+  })
+);
+
+// Setup forms
+const addForm = useForm({
+  validationSchema: addFormSchema,
   initialValues: {
     steam_id: "",
     name: "",
     username: "",
     password: "",
+    superAdmin: false,
+  },
+});
+
+const editForm = useForm({
+  validationSchema: editFormSchema,
+  initialValues: {
+    steam_id: "",
+    name: "",
     superAdmin: false,
   },
 });
@@ -205,7 +234,7 @@ async function addUser(values: any) {
     }
 
     // Reset form and close dialog
-    form.resetForm();
+    addForm.resetForm();
     showAddUserDialog.value = false;
 
     // Refresh the users list
@@ -215,6 +244,80 @@ async function addUser(values: any) {
     console.error(err);
   } finally {
     addUserLoading.value = false;
+  }
+}
+
+// Function to open edit dialog
+function openEditDialog(user: User) {
+  editingUser.value = user;
+  
+  // Set the form values directly
+  editForm.setFieldValue('name', user.name);
+  editForm.setFieldValue('steam_id', user.steam_id ? user.steam_id.toString() : '');
+  editForm.setFieldValue('superAdmin', user.super_admin);
+  
+  showEditUserDialog.value = true;
+}
+
+// Function to edit a user
+async function editUser(values: any) {
+  if (!editingUser.value) return;
+
+  const { steam_id, name, superAdmin } = values;
+
+  editUserLoading.value = true;
+  error.value = null;
+
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
+  const token = cookieToken.value;
+
+  if (!token) {
+    error.value = "Authentication required";
+    editUserLoading.value = false;
+    return;
+  }
+
+  try {
+    // Convert steam_id to number if provided
+    let steamIdNumber = null;
+    if (steam_id && steam_id.trim() !== "") {
+      steamIdNumber = parseInt(steam_id, 10);
+    }
+
+    const { data, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/users/${editingUser.value.id}`,
+      {
+        method: "PUT",
+        body: {
+          steam_id: steamIdNumber,
+          name,
+          super_admin: superAdmin,
+        },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      throw new Error(fetchError.value.message || "Failed to update user");
+    }
+
+    // Reset form and close dialog
+    editForm.resetForm();
+    showEditUserDialog.value = false;
+    editingUser.value = null;
+
+    // Refresh the users list
+    fetchUsers();
+  } catch (err: any) {
+    error.value = err.message || "An error occurred while updating the user";
+    console.error(err);
+  } finally {
+    editUserLoading.value = false;
   }
 }
 
@@ -271,6 +374,14 @@ function formatDate(dateString: string): string {
 
 fetchUsers();
 
+// Watch for dialog close to reset form
+watch(showEditUserDialog, (isOpen) => {
+  if (!isOpen) {
+    editForm.resetForm();
+    editingUser.value = null;
+  }
+});
+
 // Manual refresh function
 function refreshData() {
   fetchUsers();
@@ -286,7 +397,7 @@ function refreshData() {
           v-slot="{ handleSubmit }"
           as=""
           keep-values
-          :validation-schema="formSchema"
+          :validation-schema="addFormSchema"
           :initial-values="{
             steam_id: '',
             name: '',
@@ -295,7 +406,7 @@ function refreshData() {
             superAdmin: false,
           }"
         >
-          <Dialog v-model:open="showAddUserDialog">
+          <Dialog v-model:open="showAddUserDialog" v-if="authStore.user?.super_admin">
             <DialogTrigger asChild>
               <Button>Add User</Button>
             </DialogTrigger>
@@ -396,6 +507,82 @@ function refreshData() {
             </DialogContent>
           </Dialog>
         </Form>
+
+        <!-- Edit User Dialog -->
+        <Dialog v-model:open="showEditUserDialog">
+          <DialogContent class="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edit User</DialogTitle>
+              <DialogDescription>
+                Update the user's information.
+              </DialogDescription>
+            </DialogHeader>
+            <form @submit.prevent="editUser(editForm.values)">
+              <div class="grid gap-4 py-4">
+                <div>
+                  <label class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Name
+                  </label>
+                  <Input 
+                    v-model="editForm.values.name"
+                    @input="editForm.setFieldValue('name', $event.target.value)"
+                    placeholder="John Doe" 
+                    class="mt-1"
+                  />
+                  <p v-if="editForm.errors.value.name" class="text-sm text-red-500 mt-1">
+                    {{ editForm.errors.value.name }}
+                  </p>
+                </div>
+                
+                <div>
+                  <label class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Steam ID
+                  </label>
+                  <Input 
+                    v-model="editForm.values.steam_id"
+                    @input="editForm.setFieldValue('steam_id', $event.target.value.replace(/[^0-9]/g, ''))"
+                    placeholder="76561198012345678" 
+                    class="mt-1"
+                  />
+                  <p class="text-sm text-muted-foreground mt-1">
+                    17-digit Steam ID (optional)
+                  </p>
+                  <p v-if="editForm.errors.value.steam_id" class="text-sm text-red-500 mt-1">
+                    {{ editForm.errors.value.steam_id }}
+                  </p>
+                </div>
+                
+                <div class="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                  <Checkbox
+                    :model-value="editForm.values.superAdmin"
+                    @update:model-value="editForm.setFieldValue('superAdmin', !editForm.values.superAdmin)"
+                  />
+                  <div class="space-y-1 leading-none">
+                    <label class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                      Super Admin
+                    </label>
+                    <p class="text-sm text-muted-foreground">
+                      Grant super admin privileges to this user
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="flex justify-end space-x-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  @click="showEditUserDialog = false"
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" :disabled="editUserLoading">
+                  {{ editUserLoading ? "Updating..." : "Update User" }}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
         <Button @click="refreshData" :disabled="loading" variant="outline">
           {{ loading ? "Refreshing..." : "Refresh" }}
         </Button>
@@ -473,14 +660,27 @@ function refreshData() {
                   </Badge>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    @click="deleteUser(user.id)"
-                    :disabled="loading"
-                  >
-                    Delete
-                  </Button>
+                  <div class="flex gap-2 justify-end" v-if="authStore.user?.super_admin">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      @click="openEditDialog(user)"
+                      :disabled="loading"
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      @click="deleteUser(user.id)"
+                      :disabled="loading"
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                  <div v-else class="text-sm text-muted-foreground">
+                    No actions available
+                  </div>
                 </TableCell>
               </TableRow>
             </TableBody>

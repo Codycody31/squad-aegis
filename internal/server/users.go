@@ -19,9 +19,8 @@ type UserCreateRequest struct {
 }
 
 type UserUpdateRequest struct {
-	SteamId    int    `json:"steam_id" binding:"required"`
+	SteamId    *int64 `json:"steam_id"`
 	Name       string `json:"name" binding:"required"`
-	Username   string `json:"username" binding:"required"`
 	SuperAdmin bool   `json:"super_admin"`
 }
 
@@ -64,29 +63,63 @@ func (s *Server) UserCreate(c *gin.Context) {
 }
 
 func (s *Server) UserUpdate(c *gin.Context) {
+	currentUser := s.getUserFromSession(c)
+
+	// Only super admins can update other users
+	if !currentUser.SuperAdmin {
+		responses.Forbidden(c, "Only super admins can update users", nil)
+		return
+	}
+
 	var request UserUpdateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
 		return
 	}
 
-	user, err := core.GetUserById(c.Request.Context(), s.Dependencies.DB, uuid.MustParse(c.Param("userId")), nil)
+	userId, err := uuid.Parse(c.Param("userId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid user ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := core.GetUserById(c.Request.Context(), s.Dependencies.DB, userId, nil)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 
-	user.Name = request.Name
-	user.Username = request.Username
-	user.SuperAdmin = request.SuperAdmin
+	// Prevent users from removing their own super admin status
+	if user.Id == currentUser.Id && currentUser.SuperAdmin && !request.SuperAdmin {
+		responses.BadRequest(c, "Cannot remove your own super admin status", nil)
+		return
+	}
 
-	user, err = core.UpdateUser(c.Request.Context(), s.Dependencies.DB, user)
+	// Update the user profile using the existing core function
+	err = core.UpdateUserProfile(c.Request.Context(), s.Dependencies.DB, userId, request.Name, request.SteamId)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 
-	responses.Success(c, "User updated successfully", &gin.H{"user": user})
+	// Update super admin status separately if it changed
+	if user.SuperAdmin != request.SuperAdmin {
+		user.SuperAdmin = request.SuperAdmin
+		_, err = core.UpdateUser(c.Request.Context(), s.Dependencies.DB, user)
+		if err != nil {
+			responses.InternalServerError(c, err, nil)
+			return
+		}
+	}
+
+	// Get updated user data
+	updatedUser, err := core.GetUserById(c.Request.Context(), s.Dependencies.DB, userId, nil)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
+	responses.Success(c, "User updated successfully", &gin.H{"user": updatedUser})
 }
 
 func (s *Server) UserDelete(c *gin.Context) {
