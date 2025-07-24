@@ -20,7 +20,7 @@ type AuthLoginRequest struct {
 
 type UpdateProfileRequest struct {
 	Name    string `json:"name" binding:"required"`
-	SteamId *int64 `json:"steamId"`
+	SteamId *int64 `json:"steam_id"`
 }
 
 type UpdatePasswordRequest struct {
@@ -135,20 +135,8 @@ func (s *Server) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
-	tx, err := s.Dependencies.DB.BeginTx(c.Copy(), nil)
+	err := core.UpdateUserProfile(c.Copy(), s.Dependencies.DB, session.UserId, req.Name, req.SteamId)
 	if err != nil {
-		responses.InternalServerError(c, err, nil)
-		return
-	}
-	defer tx.Rollback()
-
-	err = core.UpdateUserProfile(c.Copy(), tx, session.UserId, req.Name, req.SteamId)
-	if err != nil {
-		responses.InternalServerError(c, err, nil)
-		return
-	}
-
-	if err := tx.Commit(); err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}

@@ -56,10 +56,10 @@ type ServerRole struct {
 // ------------------------------------------
 
 type ServerBanCreateRequest struct {
-	SteamID  string  `json:"steam_dd"`
+	SteamID  string  `json:"steam_id"`
 	Reason   string  `json:"reason"`
 	Duration int     `json:"duration"`
-	RuleID   *string `json:"ruleId,omitempty"`
+	RuleID   *string `json:"rule_id,omitempty"`
 }
 
 type ServerAdminCreateRequest struct {
@@ -82,7 +82,7 @@ type ServerRconExecuteRequest struct {
 
 // BanPlayerRequest represents a request to ban a player
 type BanPlayerRequest struct {
-	SteamID  string `json:"steamId"`
+	SteamID  string `json:"steam_id"`
 	Name     string `json:"name"`
 	Reason   string `json:"reason"`
 	Duration string `json:"duration"` // "permanent" or a duration like "24h"
@@ -90,7 +90,7 @@ type BanPlayerRequest struct {
 
 // UnbanPlayerRequest represents a request to unban a player
 type UnbanPlayerRequest struct {
-	SteamID string `json:"steamId"`
+	SteamID string `json:"steam_id"`
 }
 
 // ServerRoleCreateRequest represents a request to create a role

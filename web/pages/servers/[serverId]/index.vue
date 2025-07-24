@@ -73,7 +73,7 @@ const changingLayer = ref(false);
 
 // Define interfaces for teams and squads data
 interface Player {
-  steamId: string;
+  steam_id: string;
   name: string;
   squadId: number | null;
   isSquadLeader: boolean;
@@ -794,7 +794,7 @@ refresh();
                   <TableBody>
                     <TableRow
                       v-for="player in connectedPlayers.slice(0, 5)"
-                      :key="player.steamId"
+                      :key="player.steam_id"
                     >
                       <TableCell>
                         <div class="flex items-center">

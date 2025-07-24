@@ -80,7 +80,7 @@ interface BannedPlayersResponse {
 // Form schema for adding a ban
 const formSchema = toTypedSchema(
     z.object({
-        steamId: z
+        steam_id: z
             .string()
             .min(17, "Steam ID must be at least 17 characters")
             .max(17, "Steam ID must be exactly 17 characters")
@@ -94,7 +94,7 @@ const formSchema = toTypedSchema(
 const form = useForm({
     validationSchema: formSchema,
     initialValues: {
-        steamId: "",
+        steam_id: "",
         reason: "",
         duration: 24,
     },
@@ -110,7 +110,7 @@ const filteredBannedPlayers = computed(() => {
     return bannedPlayers.value.filter(
         (player) =>
             player.name.toLowerCase().includes(query) ||
-            player.steamId.includes(query) ||
+            player.steam_id.includes(query) ||
             player.reason.toLowerCase().includes(query),
     );
 });
@@ -174,7 +174,7 @@ async function fetchBannedPlayers() {
 
 // Function to add a ban
 async function addBan(values: any) {
-    const { steamId, reason, duration } = values;
+    const { steam_id, reason, duration } = values;
 
     addBanLoading.value = true;
     error.value = null;
@@ -197,7 +197,7 @@ async function addBan(values: any) {
             {
                 method: "POST",
                 body: {
-                    steamId,
+                    steam_id,
                     reason,
                     duration,
                 },
@@ -316,7 +316,7 @@ function copyBanCfgUrl() {
                     keep-values
                     :validation-schema="formSchema"
                     :initial-values="{
-                        steamId: '',
+                        steam_id: '',
                         reason: '',
                         duration: 1,
                     }"
@@ -339,7 +339,7 @@ function copyBanCfgUrl() {
                             >
                                 <div class="grid gap-4 py-4">
                                     <FormField
-                                        name="steamId"
+                                        name="steam_id"
                                         v-slot="{ componentField }"
                                     >
                                         <FormItem>

@@ -27,7 +27,7 @@ type SquadRcon struct {
 type Player struct {
 	Id              int    `json:"playerId"`
 	EosId           string `json:"eosId"`
-	SteamId         string `json:"steamId"`
+	SteamId         string `json:"steam_id"`
 	Name            string `json:"name"`
 	TeamId          int    `json:"teamId"`
 	SquadId         int    `json:"squadId"`
@@ -319,6 +319,12 @@ func NewSquadRconWithConnection(manager *rcon_manager.RconManager, serverID uuid
 // BanPlayer bans a player from the server
 func (s *SquadRcon) BanPlayer(steamId string, duration int, reason string) error {
 	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %dd %s", steamId, duration, reason))
+	return err
+}
+
+// KickPlayer kicks a player from the server
+func (s *SquadRcon) KickPlayer(steamId string, reason string) error {
+	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminKick %s %s", steamId, reason))
 	return err
 }
 

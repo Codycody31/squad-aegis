@@ -52,7 +52,7 @@ const isActionLoading = ref(false);
 interface Player {
   playerId: number;
   eosId: string;
-  steamId: string;
+  steam_id: string;
   name: string;
   teamId: number;
   squadId: number;
@@ -110,7 +110,7 @@ const filteredPlayers = computed(() => {
     const query = searchQuery.value.toLowerCase();
     filtered = filtered.filter(player => 
       player.name.toLowerCase().includes(query) || 
-      player.steamId.includes(query) ||
+      player.steam_id.includes(query) ||
       player.eosId.toLowerCase().includes(query)
     );
   }
@@ -299,14 +299,14 @@ async function executePlayerAction() {
       case 'kick':
         endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/kick-player`;
         payload = {
-          steamId: selectedPlayer.value.steamId,
+          steam_id: selectedPlayer.value.steam_id,
           reason: actionReason.value
         };
         break;
       case 'ban':
         endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`;
         payload = {
-          steamId: selectedPlayer.value.steamId,
+          steam_id: selectedPlayer.value.steam_id,
           reason: actionReason.value,
           duration: actionDuration.value
         };
@@ -314,14 +314,14 @@ async function executePlayerAction() {
       case 'warn':
         endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/warn-player`;
         payload = {
-          steamId: selectedPlayer.value.steamId,
+          steam_id: selectedPlayer.value.steam_id,
           message: actionReason.value
         };
         break;
       case 'move':
         endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/move-player`;
         payload = {
-          steamId: selectedPlayer.value.steamId
+          steam_id: selectedPlayer.value.steam_id
         };
         break;
     }
@@ -524,12 +524,12 @@ async function executePlayerAction() {
                 <TableCell>{{ player.role || 'Unknown' }}</TableCell>
                 <TableCell class="text-right">
                   <div class="flex items-center justify-end gap-2">
-                    <Button variant="outline" size="sm" class="h-8 w-8 p-0" @click="copyToClipboard(player.steamId)">
+                    <Button variant="outline" size="sm" class="h-8 w-8 p-0" @click="copyToClipboard(player.steam_id)">
                       <span class="sr-only">Copy Steam ID</span>
                       <Icon 
-                        :name="copiedId === player.steamId ? 'lucide:check' : 'lucide:clipboard-copy'" 
+                        :name="copiedId === player.steam_id ? 'lucide:check' : 'lucide:clipboard-copy'" 
                         class="h-4 w-4" 
-                        :class="{ 'text-green-500': copiedId === player.steamId }"
+                        :class="{ 'text-green-500': copiedId === player.steam_id }"
                       />
                     </Button>
                     
