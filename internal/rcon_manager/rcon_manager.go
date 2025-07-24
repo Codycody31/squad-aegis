@@ -38,8 +38,7 @@ type CommandResponse struct {
 // ServerConnection represents a connection to an RCON server
 type ServerConnection struct {
 	ServerID             uuid.UUID
-	CommandRcon          *rcon.Rcon // Connection for executing commands
-	EventRcon            *rcon.Rcon // Connection for listening to events
+	Rcon                 *rcon.Rcon // Single connection for both commands and events
 	CommandChan          chan RconCommand
 	EventChan            chan RconEvent
 	Disconnected         bool
@@ -49,7 +48,6 @@ type ServerConnection struct {
 	host                 string
 	port                 string
 	password             string
-	activeConnections    int
 	wasForceDisconnected bool
 }
 
@@ -139,8 +137,8 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 					Msg("Reconnecting to disconnected RCON server")
 			}
 
-			// Create command connection
-			commandRcon, err := rcon.NewRcon(rcon.RconConfig{
+			// Create single RCON connection
+			rconConn, err := rcon.NewRcon(rcon.RconConfig{
 				Host:               host,
 				Port:               portStr,
 				Password:           password,
@@ -151,29 +149,11 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 				log.Error().
 					Str("serverID", serverID.String()).
 					Err(err).
-					Msg("Failed to connect to command RCON")
-				return fmt.Errorf("failed to connect to command RCON: %w", err)
+					Msg("Failed to connect to RCON")
+				return fmt.Errorf("failed to connect to RCON: %w", err)
 			}
 
-			// Create event connection
-			eventRcon, err := rcon.NewRcon(rcon.RconConfig{
-				Host:               host,
-				Port:               portStr,
-				Password:           password,
-				AutoReconnect:      true,
-				AutoReconnectDelay: 5,
-			})
-			if err != nil {
-				commandRcon.Close() // Close the command connection if event connection fails
-				log.Error().
-					Str("serverID", serverID.String()).
-					Err(err).
-					Msg("Failed to connect to event RCON")
-				return fmt.Errorf("failed to connect to event RCON: %w", err)
-			}
-
-			conn.CommandRcon = commandRcon
-			conn.EventRcon = eventRcon
+			conn.Rcon = rconConn
 			conn.Disconnected = false
 			conn.LastUsed = time.Now()
 			// Store connection details
@@ -182,7 +162,7 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 			conn.password = password
 
 			// Start listening for events and processing commands
-			go m.listenForEvents(serverID, eventRcon)
+			go m.listenForEvents(serverID, rconConn)
 			go m.processCommands(serverID, conn)
 
 			log.Info().
@@ -194,13 +174,12 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 
 		// Connection already exists and is connected
 		conn.LastUsed = time.Now()
-		conn.activeConnections++
 
 		return nil
 	}
 
-	// Create command connection
-	commandRcon, err := rcon.NewRcon(rcon.RconConfig{
+	// Create single RCON connection
+	rconConn, err := rcon.NewRcon(rcon.RconConfig{
 		Host:               host,
 		Port:               portStr,
 		Password:           password,
@@ -211,49 +190,30 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 		log.Error().
 			Str("serverID", serverID.String()).
 			Err(err).
-			Msg("Failed to connect to command RCON")
-		return fmt.Errorf("failed to connect to command RCON: %w", err)
-	}
-
-	// Create event connection
-	eventRcon, err := rcon.NewRcon(rcon.RconConfig{
-		Host:               host,
-		Port:               portStr,
-		Password:           password,
-		AutoReconnect:      true,
-		AutoReconnectDelay: 5,
-	})
-	if err != nil {
-		commandRcon.Close() // Close the command connection if event connection fails
-		log.Error().
-			Str("serverID", serverID.String()).
-			Err(err).
-			Msg("Failed to connect to event RCON")
-		return fmt.Errorf("failed to connect to event RCON: %w", err)
+			Msg("Failed to connect to RCON")
+		return fmt.Errorf("failed to connect to RCON: %w", err)
 	}
 
 	// Create a semaphore to ensure only one command executes at a time
 	cmdSemaphore := make(chan struct{}, 1)
 
 	conn := &ServerConnection{
-		ServerID:          serverID,
-		CommandRcon:       commandRcon,
-		EventRcon:         eventRcon,
-		CommandChan:       make(chan RconCommand, 100),
-		EventChan:         make(chan RconEvent, 100),
-		Disconnected:      false,
-		LastUsed:          time.Now(),
-		cmdSemaphore:      cmdSemaphore,
-		host:              host,
-		port:              portStr,
-		password:          password,
-		activeConnections: 1,
+		ServerID:     serverID,
+		Rcon:         rconConn,
+		CommandChan:  make(chan RconCommand, 100),
+		EventChan:    make(chan RconEvent, 100),
+		Disconnected: false,
+		LastUsed:     time.Now(),
+		cmdSemaphore: cmdSemaphore,
+		host:         host,
+		port:         portStr,
+		password:     password,
 	}
 
 	m.connections[serverID] = conn
 
 	// Start listening for events and processing commands
-	go m.listenForEvents(serverID, eventRcon)
+	go m.listenForEvents(serverID, rconConn)
 	go m.processCommands(serverID, conn)
 
 	return nil
@@ -277,25 +237,15 @@ func (m *RconManager) DisconnectFromServer(serverID uuid.UUID, force bool) error
 	}
 
 	if force {
-		conn.CommandRcon.Close()
-		conn.EventRcon.Close()
+		conn.Rcon.Close()
 		conn.Disconnected = true
-		conn.activeConnections = 0
 		conn.wasForceDisconnected = true
 		return nil
 	}
 
-	// Decrement active connections
-	conn.activeConnections--
-
-	// Only close the connection if there are no active connections
-	if conn.activeConnections <= 0 {
-		// Close both connections
-		conn.CommandRcon.Close()
-		conn.EventRcon.Close()
-		conn.Disconnected = true
-		conn.activeConnections = 0
-	}
+	// Close the connection
+	conn.Rcon.Close()
+	conn.Disconnected = true
 
 	return nil
 }
@@ -397,8 +347,8 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 
 			startTime := time.Now()
 			go func() {
-				// Execute command using the command connection
-				response := conn.CommandRcon.Execute(cmd.Command)
+				// Execute command using the single RCON connection
+				response := conn.Rcon.Execute(cmd.Command)
 				// Only log on errors, not every execution time
 				if response == "" {
 					execTime := time.Since(startTime)
@@ -547,8 +497,7 @@ func (m *RconManager) cleanupAllConnections() {
 		conn.mu.Lock()
 		if !conn.Disconnected {
 			// A single log for shutdown is better than per-connection logs
-			conn.CommandRcon.Close()
-			conn.EventRcon.Close()
+			conn.Rcon.Close()
 			conn.Disconnected = true
 		}
 		conn.mu.Unlock()
