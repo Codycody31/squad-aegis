@@ -49,6 +49,8 @@ type ServerConnection struct {
 	port                 string
 	password             string
 	wasForceDisconnected bool
+	reconnectAttempts    int
+	lastReconnectTime    time.Time
 }
 
 // RconManager manages RCON connections to multiple servers
@@ -113,6 +115,27 @@ func (m *RconManager) broadcastEvent(event RconEvent) {
 	}
 }
 
+// calculateReconnectDelay calculates the delay for reconnection attempts using exponential backoff
+// Starting at 5 seconds, doubling each attempt, capped at 1 minute
+func (m *RconManager) calculateReconnectDelay(attempts int) time.Duration {
+	const (
+		baseDelay = 5 * time.Second
+		maxDelay  = 60 * time.Second
+	)
+
+	if attempts == 0 {
+		return 0 // First attempt has no delay
+	}
+
+	// Calculate exponential backoff: 5s, 10s, 20s, 40s, 60s (capped)
+	delay := baseDelay * time.Duration(1<<uint(attempts-1))
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+
+	return delay
+}
+
 // ConnectToServer connects to an RCON server
 func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int, password string) error {
 	m.mu.Lock()
@@ -125,15 +148,36 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 		conn.mu.Lock()
 		defer conn.mu.Unlock()
 
-		// If connection is disconnected, reconnect
+		// If connection is disconnected, reconnect with backoff
 		if conn.Disconnected {
+			// Calculate reconnection delay with exponential backoff
+			delay := m.calculateReconnectDelay(conn.reconnectAttempts)
+
+			// Check if enough time has passed since last reconnect attempt
+			if time.Since(conn.lastReconnectTime) < delay {
+				remainingDelay := delay - time.Since(conn.lastReconnectTime)
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Dur("remainingDelay", remainingDelay).
+					Int("attempts", conn.reconnectAttempts).
+					Msg("Reconnection attempt too soon, waiting")
+				return fmt.Errorf("reconnection delayed, try again in %v", remainingDelay)
+			}
+
+			conn.reconnectAttempts++
+			conn.lastReconnectTime = time.Now()
+
 			if conn.wasForceDisconnected {
 				log.Debug().
 					Str("serverID", serverID.String()).
+					Int("attempts", conn.reconnectAttempts).
+					Dur("delay", delay).
 					Msg("Reconnecting to force-disconnected RCON server")
 			} else {
 				log.Debug().
 					Str("serverID", serverID.String()).
+					Int("attempts", conn.reconnectAttempts).
+					Dur("delay", delay).
 					Msg("Reconnecting to disconnected RCON server")
 			}
 
@@ -149,6 +193,7 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 				log.Error().
 					Str("serverID", serverID.String()).
 					Err(err).
+					Int("attempts", conn.reconnectAttempts).
 					Msg("Failed to connect to RCON")
 				return fmt.Errorf("failed to connect to RCON: %w", err)
 			}
@@ -160,6 +205,9 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 			conn.host = host
 			conn.port = portStr
 			conn.password = password
+			// Reset reconnect attempts on successful connection
+			conn.reconnectAttempts = 0
+			conn.wasForceDisconnected = false
 
 			// Start listening for events and processing commands
 			go m.listenForEvents(serverID, rconConn)
@@ -198,16 +246,18 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	cmdSemaphore := make(chan struct{}, 1)
 
 	conn := &ServerConnection{
-		ServerID:     serverID,
-		Rcon:         rconConn,
-		CommandChan:  make(chan RconCommand, 100),
-		EventChan:    make(chan RconEvent, 100),
-		Disconnected: false,
-		LastUsed:     time.Now(),
-		cmdSemaphore: cmdSemaphore,
-		host:         host,
-		port:         portStr,
-		password:     password,
+		ServerID:          serverID,
+		Rcon:              rconConn,
+		CommandChan:       make(chan RconCommand, 100),
+		EventChan:         make(chan RconEvent, 100),
+		Disconnected:      false,
+		LastUsed:          time.Now(),
+		cmdSemaphore:      cmdSemaphore,
+		host:              host,
+		port:              portStr,
+		password:          password,
+		reconnectAttempts: 0,
+		lastReconnectTime: time.Time{},
 	}
 
 	m.connections[serverID] = conn
@@ -467,6 +517,19 @@ func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
 				Str("serverID", serverID.String()).
 				Interface("data", data).
 				Msg("RCON event connection closed")
+
+		// Mark connection as disconnected and reset reconnect attempts
+		m.mu.RLock()
+		conn, exists := m.connections[serverID]
+		m.mu.RUnlock()
+
+		if exists {
+			conn.mu.Lock()
+			conn.Disconnected = true
+			// Don't reset reconnect attempts here - let them accumulate for backoff
+			conn.mu.Unlock()
+		}
+
 		updateAndBroadcast("CONNECTION_CLOSED", data)
 	})
 
@@ -475,6 +538,19 @@ func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
 				Str("serverID", serverID.String()).
 				Interface("data", data). // Often the error itself
 				Msg("RCON event connection error")
+
+		// Mark connection as disconnected on error
+		m.mu.RLock()
+		conn, exists := m.connections[serverID]
+		m.mu.RUnlock()
+
+		if exists {
+			conn.mu.Lock()
+			conn.Disconnected = true
+			// Don't reset reconnect attempts here - let them accumulate for backoff
+			conn.mu.Unlock()
+		}
+
 		updateAndBroadcast("CONNECTION_ERROR", data)
 	})
 
