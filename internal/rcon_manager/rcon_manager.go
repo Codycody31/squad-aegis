@@ -333,7 +333,7 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 	select {
 	case conn.CommandChan <- RconCommand{Command: command, Response: responseChan}:
 		// Command queued successfully
-	case <-time.After(15 * time.Second): // Increased timeout
+	case <-time.After(30 * time.Second):
 		log.Error().
 			Str("serverID", serverID.String()).
 			Str("command", command).
@@ -353,7 +353,7 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 				Msg("Command execution failed")
 		}
 		return response.Response, response.Error
-	case <-time.After(15 * time.Second): // Increased timeout
+	case <-time.After(30 * time.Second):
 		log.Error().
 			Str("serverID", serverID.String()).
 			Str("command", command).
@@ -428,7 +428,7 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 			select {
 			case response := <-responseChan:
 				cmdResponse = response
-			case <-time.After(15 * time.Second): // Increased timeout (Match client timeout)
+			case <-time.After(30 * time.Second):
 				cmdResponse = CommandResponse{
 					Response: "",
 					Error:    errors.New("command execution timed out"),

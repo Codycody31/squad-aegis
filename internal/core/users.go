@@ -78,7 +78,7 @@ func UpdateUserPassword(ctx context.Context, db db.Executor, userId uuid.UUID, n
 
 	query := `
 		UPDATE users
-		SET password_hash = $1, updated_at = NOW()
+		SET password = $1, updated_at = NOW()
 		WHERE id = $2
 	`
 
