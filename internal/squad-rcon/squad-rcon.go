@@ -542,9 +542,11 @@ func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData
 	}
 
 	// Second pass: Assign players to squads and identify squad leaders
-	squadMap := make(map[int]*Squad)
+	// Note: Squad IDs are not globally unique; key by TeamId + SquadId
+	squadMap := make(map[string]*Squad)
 	for i := range squads {
-		squadMap[squads[i].ID] = &squads[i]
+		key := fmt.Sprintf("%d:%d", squads[i].TeamId, squads[i].ID)
+		squadMap[key] = &squads[i]
 	}
 
 	for _, player := range players.OnlinePlayers {
@@ -554,13 +556,14 @@ func ParseTeamsAndSquads(squads []Squad, teamNames []string, players PlayersData
 		}
 
 		// Find the squad for this player
-		if squad, ok := squadMap[player.SquadId]; ok {
+		if squad, ok := squadMap[fmt.Sprintf("%d:%d", player.TeamId, player.SquadId)]; ok {
 			// Add player to squad
 			squad.Players = append(squad.Players, player)
 
 			// Set squad leader if applicable
 			if player.IsSquadLeader {
-				squad.Leader = &player
+				// Point to the player stored within the squad's Players slice
+				squad.Leader = &squad.Players[len(squad.Players)-1]
 			}
 		}
 	}
