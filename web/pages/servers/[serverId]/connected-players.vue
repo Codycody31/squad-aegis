@@ -6,23 +6,36 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Badge } from "~/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogFooter, 
-  DialogHeader, 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
   DialogTrigger
 } from "~/components/ui/dialog";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
 } from "~/components/ui/dropdown-menu";
 import { Textarea } from "~/components/ui/textarea";
 import { useToast } from "~/components/ui/toast";
+import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
+import type { Player } from "~/types";
+
+interface Squad {
+  id: number;
+  name: string;
+}
+
+interface Team {
+  id: number;
+  name: string;
+  squads?: Squad[];
+}
 
 const authStore = useAuthStore();
 const route = useRoute();
@@ -42,23 +55,12 @@ const filterRole = ref<string>("all");
 
 // Action dialog state
 const showActionDialog = ref(false);
-const actionType = ref<'kick' | 'ban' | 'warn' | 'move' | null>(null);
+const actionType = ref<'kick' | 'ban' | 'warn' | 'move' | 'remove-from-squad' | null>(null);
 const selectedPlayer = ref<Player | null>(null);
 const actionReason = ref("");
 const actionDuration = ref(1); // For ban duration
 const targetTeamId = ref<number | null>(null); // For move action
 const isActionLoading = ref(false);
-
-interface Player {
-  playerId: number;
-  eosId: string;
-  steam_id: string;
-  name: string;
-  teamId: number;
-  squadId: number;
-  isSquadLeader: boolean;
-  role: string;
-}
 
 interface PlayersResponse {
   data: {
@@ -75,7 +77,7 @@ interface PlayersResponse {
 // Get unique squads from players
 const squads = computed(() => {
   const uniqueSquads = new Map();
-  
+
   connectedPlayers.value.forEach(player => {
     if (player.squadId && !uniqueSquads.has(player.squadId)) {
       uniqueSquads.set(player.squadId, {
@@ -84,43 +86,43 @@ const squads = computed(() => {
       });
     }
   });
-  
+
   return Array.from(uniqueSquads.values());
 });
 
 // Get unique roles from players
 const roles = computed(() => {
   const uniqueRoles = new Set();
-  
+
   connectedPlayers.value.forEach(player => {
     if (player.role) {
       uniqueRoles.add(player.role);
     }
   });
-  
+
   return Array.from(uniqueRoles) as string[];
 });
 
 // Computed property for filtered players
 const filteredPlayers = computed(() => {
   let filtered = connectedPlayers.value;
-  
+
   // Apply search filter
   if (searchQuery.value.trim()) {
     const query = searchQuery.value.toLowerCase();
-    filtered = filtered.filter(player => 
-      player.name.toLowerCase().includes(query) || 
+    filtered = filtered.filter(player =>
+      player.name.toLowerCase().includes(query) ||
       player.steam_id.includes(query) ||
       player.eosId.toLowerCase().includes(query)
     );
   }
-  
+
   // Apply team filter
   if (filterTeam.value !== "all") {
     const teamId = parseInt(filterTeam.value);
     filtered = filtered.filter(player => player.teamId === teamId);
   }
-  
+
   // Apply squad filter
   if (filterSquad.value !== "all") {
     if (filterSquad.value === "none") {
@@ -130,12 +132,12 @@ const filteredPlayers = computed(() => {
       filtered = filtered.filter(player => player.squadId === squadId);
     }
   }
-  
+
   // Apply role filter
   if (filterRole.value !== "all") {
     filtered = filtered.filter(player => player.role === filterRole.value);
   }
-  
+
   return filtered;
 });
 
@@ -172,17 +174,17 @@ async function fetchConnectedPlayers() {
     if (data.value && data.value.data && data.value.data.players) {
       connectedPlayers.value = data.value.data.players.onlinePlayers || [];
       teams.value = data.value.data.teams || [];
-      
+
       // Sort by team, then squad, then name
       connectedPlayers.value.sort((a, b) => {
         if (a.teamId !== b.teamId) {
           return a.teamId - b.teamId;
         }
-        
+
         if (a.squadId !== b.squadId) {
           return (a.squadId || 999) - (b.squadId || 999);
         }
-        
+
         return a.name.localeCompare(b.name);
       });
     }
@@ -196,14 +198,14 @@ async function fetchConnectedPlayers() {
 
 // Get team name by ID
 function getTeamName(teamId: number): string {
-  const team = teams.value.find(t => t.id === teamId);
+  const team = teams.value.find((t: Team) => t.id === teamId);
   return team ? team.name : `Team ${teamId}`;
 }
 
 // Get squad name by ID
 function getSquadName(teamId: number, squadId: number | null): string {
   if (!squadId) return "Unassigned";
-  const squad = teams.value.find(t => t.id === teamId)?.squads.find(s => s.id === squadId);
+  const squad = teams.value.find((t: Team) => t.id === teamId)?.squads?.find((s: Squad) => s.id === squadId);
   return squad ? squad.name : `Squad ${squadId}`;
 }
 
@@ -239,9 +241,10 @@ function resetFilters() {
 }
 
 // Open action dialog
-function openActionDialog(player: Player, action: 'kick' | 'ban' | 'warn' | 'move') {
+function openActionDialog(player: Player, action: 'kick' | 'ban' | 'warn' | 'move' | 'remove-from-squad') {
   selectedPlayer.value = player;
   actionType.value = action;
+
   actionReason.value = "";
   actionDuration.value = action === 'ban' ? 1 : 0;
   showActionDialog.value = true;
@@ -260,26 +263,27 @@ function closeActionDialog() {
 // Get action title
 function getActionTitle() {
   if (!actionType.value || !selectedPlayer.value) return "";
-  
+
   const actionMap = {
     kick: "Kick",
     ban: "Ban",
     warn: "Warn",
-    move: "Move"
+    move: "Move",
+    "remove-from-squad": "Remove from Squad"
   };
-  
+
   return `${actionMap[actionType.value]} ${selectedPlayer.value.name}`;
 }
 
 // Execute player action
 async function executePlayerAction() {
   if (!actionType.value || !selectedPlayer.value) return;
-  
+
   isActionLoading.value = true;
   const runtimeConfig = useRuntimeConfig();
   const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
   const token = cookieToken.value;
-  
+
   if (!token) {
     toast({
       title: "Authentication Error",
@@ -290,11 +294,11 @@ async function executePlayerAction() {
     closeActionDialog();
     return;
   }
-  
+
   try {
     let endpoint = "";
     let payload: any = {};
-    
+
     switch (actionType.value) {
       case 'kick':
         endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/kick-player`;
@@ -324,8 +328,14 @@ async function executePlayerAction() {
           steam_id: selectedPlayer.value.steam_id
         };
         break;
+      case 'remove-from-squad':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
+        payload = {
+          command: `AdminRemovePlayerFromSquadById ${selectedPlayer.value.playerId}`
+        };
+        break;
     }
-    
+
     const { data, error: fetchError } = await useFetch(endpoint, {
       method: "POST",
       headers: {
@@ -334,11 +344,11 @@ async function executePlayerAction() {
       },
       body: JSON.stringify(payload)
     });
-    
+
     if (fetchError.value) {
       throw new Error(fetchError.value.message || `Failed to ${actionType.value} player`);
     }
-    
+
     // Show success message
     let successMessage = `Player ${selectedPlayer.value.name} has been `;
     if (actionType.value === 'move') {
@@ -351,19 +361,21 @@ async function executePlayerAction() {
       } else {
         successMessage += ' permanently';
       }
+    } else if (actionType.value === 'remove-from-squad') {
+      successMessage += 'removed from squad';
     } else {
       successMessage += actionType.value + 'ed';
     }
-    
+
     toast({
       title: "Success",
       description: successMessage,
       variant: "default"
     });
-    
+
     // Refresh player list
     fetchConnectedPlayers();
-    
+
   } catch (err: any) {
     console.error(err);
     toast({
@@ -401,13 +413,9 @@ async function executePlayerAction() {
       <CardContent>
         <div class="flex flex-col md:flex-row gap-4 mb-4">
           <div class="flex-grow">
-            <Input 
-              v-model="searchQuery" 
-              placeholder="Search by name, Steam ID, or EOS ID..." 
-              class="w-full"
-            />
+            <Input v-model="searchQuery" placeholder="Search by name, Steam ID, or EOS ID..." class="w-full" />
           </div>
-          
+
           <div class="flex flex-wrap gap-2">
             <Select v-model="filterTeam">
               <SelectTrigger class="w-[140px]">
@@ -415,16 +423,12 @@ async function executePlayerAction() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Teams</SelectItem>
-                <SelectItem 
-                  v-for="team in teams" 
-                  :key="team.id" 
-                  :value="team.id.toString()"
-                >
+                <SelectItem v-for="team in teams" :key="team.id" :value="team.id.toString()">
                   {{ team.name }}
                 </SelectItem>
               </SelectContent>
             </Select>
-            
+
             <Select v-model="filterSquad">
               <SelectTrigger class="w-[140px]">
                 <SelectValue placeholder="Squad" />
@@ -432,32 +436,24 @@ async function executePlayerAction() {
               <SelectContent>
                 <SelectItem value="all">All Squads</SelectItem>
                 <SelectItem value="none">Unassigned</SelectItem>
-                <SelectItem 
-                  v-for="squad in squads" 
-                  :key="squad.id" 
-                  :value="squad.id.toString()"
-                >
+                <SelectItem v-for="squad in squads" :key="squad.id" :value="squad.id.toString()">
                   {{ squad.name }}
                 </SelectItem>
               </SelectContent>
             </Select>
-            
+
             <Select v-model="filterRole">
               <SelectTrigger class="w-[140px]">
                 <SelectValue placeholder="Role" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Roles</SelectItem>
-                <SelectItem 
-                  v-for="role in roles" 
-                  :key="role" 
-                  :value="role"
-                >
+                <SelectItem v-for="role in roles" :key="role" :value="role">
                   {{ role }}
                 </SelectItem>
               </SelectContent>
             </Select>
-            
+
             <Button variant="outline" size="icon" @click="resetFilters" title="Reset Filters">
               <Icon name="lucide:x" class="h-4 w-4" />
             </Button>
@@ -469,7 +465,8 @@ async function executePlayerAction() {
         </div>
 
         <div v-if="loading && connectedPlayers.length === 0" class="text-center py-8">
-          <div class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
+          <div class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4">
+          </div>
           <p>Loading connected players...</p>
         </div>
 
@@ -493,11 +490,7 @@ async function executePlayerAction() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow 
-                v-for="player in filteredPlayers" 
-                :key="player.playerId"
-                class="hover:bg-muted/50"
-              >
+              <TableRow v-for="player in filteredPlayers" :key="player.playerId" class="hover:bg-muted/50">
                 <TableCell class="font-medium">
                   <div class="flex items-center">
                     <span v-if="player.isSquadLeader" class="mr-1 text-yellow-500">★</span>
@@ -505,13 +498,10 @@ async function executePlayerAction() {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge 
-                    variant="outline" 
-                    :class="{ 
-                      'bg-red-50 text-red-700 ring-red-600/20': player.teamId === 1,
-                      'bg-blue-50 text-blue-700 ring-blue-600/20': player.teamId === 2 
-                    }"
-                  >
+                  <Badge variant="outline" :class="{
+                    'bg-red-50 text-red-700 ring-red-600/20': player.teamId === 1,
+                    'bg-blue-50 text-blue-700 ring-blue-600/20': player.teamId === 2
+                  }">
                     {{ getTeamName(player.teamId) }}
                   </Badge>
                 </TableCell>
@@ -524,41 +514,10 @@ async function executePlayerAction() {
                 <TableCell>{{ player.role || 'Unknown' }}</TableCell>
                 <TableCell class="text-right">
                   <div class="flex items-center justify-end gap-2">
-                    <Button variant="outline" size="sm" class="h-8 w-8 p-0" @click="copyToClipboard(player.steam_id)">
-                      <span class="sr-only">Copy Steam ID</span>
-                      <Icon 
-                        :name="copiedId === player.steam_id ? 'lucide:check' : 'lucide:clipboard-copy'" 
-                        class="h-4 w-4" 
-                        :class="{ 'text-green-500': copiedId === player.steam_id }"
-                      />
-                    </Button>
-                    
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" class="h-8 w-8 p-0">
-                          <span class="sr-only">Open menu</span>
-                          <Icon name="lucide:more-vertical" class="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem @click="openActionDialog(player, 'warn')" v-if="authStore.getServerPermission(serverId as string, 'warn')">
-                          <Icon name="lucide:alert-triangle" class="mr-2 h-4 w-4 text-yellow-500" />
-                          <span>Warn Player</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'move')" v-if="authStore.getServerPermission(serverId as string, 'forceteamchange')">
-                          <Icon name="lucide:move" class="mr-2 h-4 w-4 text-blue-500" />
-                          <span>Move to Other Team</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'kick')" v-if="authStore.getServerPermission(serverId as string, 'kick')">
-                          <Icon name="lucide:log-out" class="mr-2 h-4 w-4 text-orange-500" />
-                          <span>Kick Player</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem @click="openActionDialog(player, 'ban')" v-if="authStore.getServerPermission(serverId as string, 'ban')">
-                          <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
-                          <span>Ban Player</span>
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <PlayerActionMenu :player="player" :serverId="serverId as string"
+                      @warn="openActionDialog(player, 'warn')" @move="openActionDialog(player, 'move')"
+                      @kick="openActionDialog(player, 'kick')" @ban="openActionDialog(player, 'ban')"
+                      @remove-from-squad="openActionDialog(player, 'remove-from-squad')" />
                   </div>
                 </TableCell>
               </TableRow>
@@ -578,21 +537,22 @@ async function executePlayerAction() {
             <div class="text-2xl font-bold">{{ connectedPlayers.length }}</div>
             <div class="text-sm text-muted-foreground">Total Players</div>
           </div>
-          
+
           <div class="bg-muted/30 p-4 rounded-lg">
             <div class="text-2xl font-bold">{{ squads.length }}</div>
             <div class="text-sm text-muted-foreground">Squads</div>
           </div>
         </div>
-        
+
         <div class="mt-4 text-sm text-muted-foreground">
-          <p>This page shows players currently connected to the server. You can filter players by team, squad, role, or search for specific players.</p>
+          <p>This page shows players currently connected to the server. You can filter players by team, squad, role, or
+            search for specific players.</p>
           <p class="mt-2">Squad leaders are marked with a star (★) next to their name.</p>
           <p class="mt-2">You can warn, kick, ban, or move players using the actions menu.</p>
         </div>
       </CardContent>
     </Card>
-    
+
     <!-- Action Dialog -->
     <Dialog v-model:open="showActionDialog">
       <DialogContent class="sm:max-w-[425px]">
@@ -611,47 +571,40 @@ async function executePlayerAction() {
             <template v-else-if="actionType === 'move'">
               Force this player to switch to another team.
             </template>
+            <template v-else-if="actionType === 'remove-from-squad'">
+              Remove this player from their squad.
+            </template>
           </DialogDescription>
         </DialogHeader>
-        
+
         <div class="grid gap-4 py-4">
           <div v-if="actionType === 'ban'" class="grid grid-cols-4 items-center gap-4">
             <label for="duration" class="text-right col-span-1">Duration</label>
-            <Input
-              id="duration"
-              v-model="actionDuration"
-              placeholder="7"
-              class="col-span-3"
-              type="number"
-            />
+            <Input id="duration" v-model="actionDuration" placeholder="7" class="col-span-3" type="number" />
             <div class="col-span-1"></div>
             <div class="text-xs text-muted-foreground col-span-3">
               Ban duration in days. Use 0 for a permanent ban.
             </div>
           </div>
-        
-          
-          <div v-if="actionType !== 'move'" class="grid grid-cols-4 items-center gap-4">
+
+
+          <div v-if="actionType !== 'move' && actionType !== 'remove-from-squad'" class="grid grid-cols-4 items-center gap-4">
             <label for="reason" class="text-right col-span-1">
               {{ actionType === 'warn' ? 'Message' : 'Reason' }}
             </label>
-            <Textarea
-              id="reason"
-              v-model="actionReason"
-              :placeholder="actionType === 'warn' ? 'Warning message' : 'Reason for action'"
-              class="col-span-3"
-              rows="3"
-            />
+            <Textarea id="reason" v-model="actionReason"
+              :placeholder="actionType === 'warn' ? 'Warning message' : 'Reason for action'" class="col-span-3"
+              rows="3" />
+          </div>
+          <div v-if="actionType === 'remove-from-squad'" class="text-sm text-muted-foreground">
+            Are you sure you want to remove {{ selectedPlayer?.name }} from their squad?
           </div>
         </div>
-        
+
         <DialogFooter>
           <Button variant="outline" @click="closeActionDialog">Cancel</Button>
-          <Button 
-            :variant="actionType === 'warn' || actionType === 'move' ? 'default' : 'destructive'" 
-            @click="executePlayerAction"
-            :disabled="isActionLoading"
-          >
+          <Button :variant="actionType === 'warn' || actionType === 'move' ? 'default' : 'destructive'"
+            @click="executePlayerAction" :disabled="isActionLoading">
             <span v-if="isActionLoading" class="mr-2">
               <Icon name="lucide:loader-2" class="h-4 w-4 animate-spin" />
             </span>
@@ -659,6 +612,7 @@ async function executePlayerAction() {
             <template v-else-if="actionType === 'ban'">Ban Player</template>
             <template v-else-if="actionType === 'warn'">Send Warning</template>
             <template v-else-if="actionType === 'move'">Move Player</template>
+            <template v-else-if="actionType === 'remove-from-squad'">Remove from Squad</template>
           </Button>
         </DialogFooter>
       </DialogContent>

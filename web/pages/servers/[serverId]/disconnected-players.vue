@@ -20,6 +20,8 @@ import {
 } from "~/components/ui/dropdown-menu";
 import { Textarea } from "~/components/ui/textarea";
 import { useToast } from "~/components/ui/toast";
+import type { Player } from "~/types";
+import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
 
 const authStore = useAuthStore();
 const route = useRoute();
@@ -40,17 +42,6 @@ const selectedPlayer = ref<Player | null>(null);
 const actionReason = ref("");
 const actionDuration = ref("1"); // Default to 1 day
 const isActionLoading = ref(false);
-
-interface Player {
-  playerId: number;
-  eosId: string;
-  steam_id: string;
-  name: string;
-  sinceDisconnect: string;
-  teamId?: number;
-  squadId?: number;
-  role?: string;
-}
 
 interface PlayersResponse {
   data: {
@@ -368,29 +359,7 @@ async function executePlayerAction() {
                   </span>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button variant="outline" size="sm" class="h-8 w-8 p-0" @click="copyToClipboard(player.steam_id)">
-                    <span class="sr-only">Copy Steam ID</span>
-                    <Icon 
-                      :name="copiedId === player.steam_id ? 'lucide:check' : 'lucide:clipboard-copy'" 
-                      class="h-4 w-4" 
-                      :class="{ 'text-green-500': copiedId === player.steam_id }"
-                    />
-                  </Button>
-                  
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" class="h-8 w-8 p-0 ml-2">
-                        <span class="sr-only">Open menu</span>
-                        <Icon name="lucide:more-vertical" class="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem @click="openActionDialog(player, 'ban')" v-if="authStore.getServerPermission(serverId as string, 'ban')">
-                        <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
-                        <span>Ban Player</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <PlayerActionMenu :player="player" :serverId="serverId as string" @ban="openActionDialog(player, 'ban')" />
                 </TableCell>
               </TableRow>
             </TableBody>
