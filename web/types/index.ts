@@ -56,6 +56,18 @@ export interface ServerRole {
   created_at: string;
 }
 
+export interface Player {
+  playerId: number;
+  eosId: string;
+  steam_id: string;
+  name: string;
+  teamId: number;
+  squadId: number;
+  isSquadLeader: boolean;
+  role: string;
+  sinceDisconnect: string;
+}
+
 export interface NavigationItem {
   heading?: string;
   title?: string;
