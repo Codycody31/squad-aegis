@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/leighmacdonald/steamid/v3/steamid"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
@@ -399,13 +400,14 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 				return
 			}
 
-			if user.SteamId == 0 {
+			sid64 := steamid.New(user.SteamId)
+			if !sid64.Valid() {
 				continue
 			}
 
-			configBuilder.WriteString(fmt.Sprintf("Admin=%d:%s\n", user.SteamId, roleName))
+			configBuilder.WriteString(fmt.Sprintf("Admin=%d:%s // %s\n", user.SteamId, roleName, user.Username))
 		} else if admin.SteamId != nil {
-			configBuilder.WriteString(fmt.Sprintf("Admin=%d:%s\n", *admin.SteamId, roleName))
+			configBuilder.WriteString(fmt.Sprintf("Admin=%d:%s // Unknown\n", *admin.SteamId, roleName))
 		}
 	}
 

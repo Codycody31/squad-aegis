@@ -58,7 +58,7 @@ const editingUser = ref<User | null>(null);
 
 interface User {
   id: string;
-  steam_id: number;
+  steam_id: string;
   name: string;
   username: string;
   super_admin: boolean;
@@ -217,7 +217,7 @@ async function addUser(values: any) {
       {
         method: "POST",
         body: {
-          steam_id: parseInt(steam_id),
+          steam_id,
           name,
           username,
           password,
@@ -253,7 +253,7 @@ function openEditDialog(user: User) {
   
   // Set the form values directly
   editForm.setFieldValue('name', user.name);
-  editForm.setFieldValue('steam_id', user.steam_id ? user.steam_id.toString() : '');
+  editForm.setFieldValue('steam_id', user.steam_id);
   editForm.setFieldValue('superAdmin', user.super_admin);
   
   showEditUserDialog.value = true;
@@ -281,18 +281,12 @@ async function editUser(values: any) {
   }
 
   try {
-    // Convert steam_id to number if provided
-    let steamIdNumber = null;
-    if (steam_id && steam_id.trim() !== "") {
-      steamIdNumber = parseInt(steam_id, 10);
-    }
-
     const { data, error: fetchError } = await useFetch(
       `${runtimeConfig.public.backendApi}/users/${editingUser.value.id}`,
       {
         method: "PUT",
         body: {
-          steam_id: steamIdNumber,
+          steam_id,
           name,
           super_admin: superAdmin,
         },

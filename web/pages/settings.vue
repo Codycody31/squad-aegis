@@ -55,7 +55,7 @@ const profileForm = useForm({
   validationSchema: profileFormSchema,
   initialValues: {
     name: "",
-    steam_id: undefined,
+    steam_id: "",
   },
 });
 
@@ -126,7 +126,7 @@ async function fetchUserData() {
       // Update form values
       profileForm.setValues({
         name: user.value.name || "",
-        steam_id: user.value.steam_id || undefined,
+        steam_id: user.value.steam_id || "",
       });
     }
   } catch (err: any) {
@@ -156,19 +156,13 @@ async function updateProfile(values: any) {
   }
 
   try {
-    // Convert steam_id to number if provided
-    let steamIdNumber = null;
-    if (values.steam_id && values.steam_id.trim() !== "") {
-      steamIdNumber = parseInt(values.steam_id, 10);
-    }
-
     const { data, error: fetchError } = await useFetch(
       `${runtimeConfig.public.backendApi}/auth/me`,
       {
         method: "PATCH",
         body: {
           name: values.name,
-          steam_id: steamIdNumber,
+          steam_id: values.steam_id || null,
         },
         headers: {
           Authorization: `Bearer ${token}`,
