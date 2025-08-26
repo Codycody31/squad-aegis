@@ -73,7 +73,8 @@ var CommandMatrix = []CommandInfo{
 	{false, "AdminForceNetUpdateOnClientSaturation", "debug", "AdminForceNetUpdateOnClientSaturation <0>|<1>", "If true, when a connection becomes saturated, all remaining actors that couldn't complete replication will have ForceNetUpdate called on them.", AdminCommand},
 	{false, "AdminProfileServer", "debug", "AdminProfileServer <SecondsToProfileFor> <0>|<1>", "Starts profiling on the server for a fixed length of time, after which the profiling data is saved to disk.", AdminCommand},
 	{true, "AdminRestartMatch", "pause", "AdminRestartMatch", "Tell the server to restart the match.", AdminCommand},
-	{false, "AdminSetPublicQueueLimit", "config", "AdminSetPublicQueueLimit <value>", "=25 will cap public queue at 25. =0 means that there won't be public queue so non admins and all other players won't be able to join. =-1 is unlimited queue.", AdminCommand},
+	{true, "AdminSetPublicQueueLimit", "config", "AdminSetPublicQueueLimit <value>", "=25 will cap public queue at 25. =0 means that there won't be public queue so non admins and all other players won't be able to join. =-1 is unlimited queue.", AdminCommand},
+	{true, "AdminReloadServerConfig", "config", "AdminReloadServerConfig", "Reloads the server configuration.", AdminCommand},
 
 	// Public commands
 	{true, "ListCommands", "help", "ListCommands <1>|<0>", "Prints out the information for all commands in the game. ", PublicCommand},
