@@ -44,7 +44,7 @@ func UpdateUser(ctx context.Context, db db.Executor, user *models.User) (*models
 }
 
 // UpdateUserProfile updates a user's profile information
-func UpdateUserProfile(ctx context.Context, db db.Executor, userId uuid.UUID, name string, steamId *int64) error {
+func UpdateUserProfile(ctx context.Context, db db.Executor, userId uuid.UUID, name string, steamId int) error {
 	query := `
 		UPDATE users
 		SET name = $1, steam_id = $2, updated_at = NOW()

@@ -8,6 +8,7 @@ import (
 	"github.com/Masterminds/squirrel"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/leighmacdonald/steamid/v3/steamid"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
@@ -19,8 +20,8 @@ type AuthLoginRequest struct {
 }
 
 type UpdateProfileRequest struct {
-	Name    string `json:"name" binding:"required"`
-	SteamId *int64 `json:"steam_id"`
+	Name    string         `json:"name" binding:"required"`
+	SteamId *steamid.SID64 `json:"steam_id"`
 }
 
 type UpdatePasswordRequest struct {
@@ -135,7 +136,13 @@ func (s *Server) UpdateUserProfile(c *gin.Context) {
 		return
 	}
 
-	err := core.UpdateUserProfile(c.Copy(), s.Dependencies.DB, session.UserId, req.Name, req.SteamId)
+	sid64 := steamid.New(req.SteamId)
+	if !sid64.Valid() {
+		responses.BadRequest(c, "Invalid Steam ID", nil)
+		return
+	}
+
+	err := core.UpdateUserProfile(c.Copy(), s.Dependencies.DB, session.UserId, req.Name, int(sid64.Int64()))
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return

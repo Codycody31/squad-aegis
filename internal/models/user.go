@@ -17,7 +17,7 @@ var (
 
 type User struct {
 	Id         uuid.UUID `json:"id"`
-	SteamId    int       `json:"steam_id"`
+	SteamId    int64     `json:"steam_id,string"`
 	Name       string    `json:"name"`
 	Username   string    `json:"username"`
 	Password   string    `json:"-"`
