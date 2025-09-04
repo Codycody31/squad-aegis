@@ -7,14 +7,15 @@ import (
 )
 
 type Server struct {
-	Id           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	IpAddress    string    `json:"ip_address"`
-	GamePort     int       `json:"game_port"`
-	RconPort     int       `json:"rcon_port"`
-	RconPassword string    `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Id            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	IpAddress     string    `json:"ip_address"`
+	GamePort      int       `json:"game_port"`
+	RconIpAddress *string   `json:"rcon_ip_address"`
+	RconPort      int       `json:"rcon_port"`
+	RconPassword  string    `json:"-"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type ServerBan struct {
@@ -69,11 +70,12 @@ type ServerAdminCreateRequest struct {
 }
 
 type ServerCreateRequest struct {
-	Name         string `json:"name"`
-	IpAddress    string `json:"ip_address"`
-	GamePort     int    `json:"game_port"`
-	RconPort     int    `json:"rcon_port"`
-	RconPassword string `json:"rcon_password"`
+	Name          string  `json:"name"`
+	IpAddress     string  `json:"ip_address"`
+	GamePort      int     `json:"game_port"`
+	RconIpAddress *string `json:"rcon_ip_address"`
+	RconPort      int     `json:"rcon_port"`
+	RconPassword  string  `json:"rcon_password"`
 }
 
 type ServerRconExecuteRequest struct {
@@ -101,9 +103,10 @@ type ServerRoleCreateRequest struct {
 
 // ServerUpdateRequest represents a request to update a server
 type ServerUpdateRequest struct {
-	Name         string `json:"name" binding:"required"`
-	IpAddress    string `json:"ip_address" binding:"required"`
-	GamePort     int    `json:"game_port" binding:"required"`
-	RconPort     int    `json:"rcon_port" binding:"required"`
-	RconPassword string `json:"rcon_password"`
+	Name          string  `json:"name" binding:"required"`
+	IpAddress     string  `json:"ip_address" binding:"required"`
+	GamePort      int     `json:"game_port" binding:"required"`
+	RconIpAddress *string `json:"rcon_ip_address"`
+	RconPort      int     `json:"rcon_port" binding:"required"`
+	RconPassword  string  `json:"rcon_password"`
 }

@@ -113,6 +113,16 @@ async function fetchTeamsData() {
   }
 }
 
+// Return squad players with the squad leader at the top (without mutating original array)
+function getSortedSquadPlayers(squad: Squad): Player[] {
+  return [...squad.players].sort((a, b) => {
+    if (a.isSquadLeader && !b.isSquadLeader) return -1;
+    if (!a.isSquadLeader && b.isSquadLeader) return 1;
+    // Fallback secondary sort by name for stable ordering
+    return a.name.localeCompare(b.name);
+  });
+}
+
 // Function to get player count in a team
 function getTeamPlayerCount(team: Team): number {
   let count = team.players.length; // Unassigned players
@@ -448,7 +458,7 @@ async function executePlayerAction() {
                         </tr>
                       </thead>
                       <tbody>
-                        <tr v-for="player in squad.players" :key="player.steam_id" class="border-b border-gray-800">
+                        <tr v-for="player in getSortedSquadPlayers(squad)" :key="player.steam_id" class="border-b border-gray-800">
                           <td class="py-1">
                             <div class="flex items-center">
                               <span v-if="player.isSquadLeader" class="mr-1 text-yellow-500">★</span>

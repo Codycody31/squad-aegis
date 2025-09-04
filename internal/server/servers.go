@@ -48,14 +48,15 @@ func (s *Server) ServersCreate(c *gin.Context) {
 	}
 
 	serverToCreate := models.Server{
-		Id:           uuid.New(),
-		Name:         request.Name,
-		IpAddress:    request.IpAddress,
-		GamePort:     request.GamePort,
-		RconPort:     request.RconPort,
-		RconPassword: request.RconPassword,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		Id:            uuid.New(),
+		Name:          request.Name,
+		IpAddress:     request.IpAddress,
+		GamePort:      request.GamePort,
+		RconIpAddress: request.RconIpAddress,
+		RconPort:      request.RconPort,
+		RconPassword:  request.RconPassword,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 
 	server, err := core.CreateServer(c.Request.Context(), s.Dependencies.DB, &serverToCreate)
@@ -64,8 +65,14 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		return
 	}
 
+	ipAddress := server.IpAddress
+	if server.RconIpAddress != nil {
+		ipAddress = *server.RconIpAddress
+	}
+
 	// Connect to RCON
-	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, server.IpAddress, server.RconPort, server.RconPassword)
+
+	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
 
 	responses.Success(c, "Server created successfully", &gin.H{"server": server})
 }
@@ -396,6 +403,7 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 	server.Name = request.Name
 	server.IpAddress = request.IpAddress
 	server.GamePort = request.GamePort
+	server.RconIpAddress = request.RconIpAddress
 	server.RconPort = request.RconPort
 
 	if request.RconPassword != "" {
@@ -408,8 +416,13 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		return
 	}
 
+	ipAddress := server.IpAddress
+	if server.RconIpAddress != nil {
+		ipAddress = *server.RconIpAddress
+	}
+
 	// Reconnect RCON with new credentials
-	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, server.IpAddress, server.RconPort, server.RconPassword)
+	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
 
 	// Create audit log entry
 	auditData := map[string]interface{}{
@@ -417,6 +430,7 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		"name":        server.Name,
 		"ipAddress":   server.IpAddress,
 		"gamePort":    server.GamePort,
+		"rconIp":      server.RconIpAddress,
 		"rconPort":    server.RconPort,
 		"rconUpdated": true,
 	}

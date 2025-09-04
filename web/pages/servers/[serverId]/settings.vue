@@ -56,6 +56,7 @@
                                 v-model="serverForm.name"
                                 class="col-span-3"
                                 required
+                                placeholder="My Squad Server"
                             />
                         </div>
 
@@ -68,6 +69,7 @@
                                 v-model="serverForm.ip_address"
                                 class="col-span-3"
                                 required
+                                placeholder="e.g., 192.168.1.1"
                             />
                         </div>
 
@@ -81,6 +83,19 @@
                                 type="number"
                                 class="col-span-3"
                                 required
+                                placeholder="Default: 2302"
+                            />
+                        </div>
+
+                        <div class="grid grid-cols-4 items-center gap-4">
+                            <label for="rcon_ip_address" class="text-right"
+                                >RCON IP Address</label
+                            >
+                            <Input
+                                id="rcon_ip_address"
+                                v-model="serverForm.rcon_ip_address"
+                                class="col-span-3"
+                                placeholder="Leave blank to use server IP"
                             />
                         </div>
 
@@ -94,6 +109,7 @@
                                 type="number"
                                 class="col-span-3"
                                 required
+                                placeholder="Default: 2302"
                             />
                         </div>
 
@@ -106,6 +122,8 @@
                                 v-model="serverForm.rcon_password"
                                 type="password"
                                 class="col-span-3"
+                                required
+                                placeholder="••••••••"
                             />
                         </div>
                     </div>
@@ -251,6 +269,7 @@ const serverForm = ref({
     name: "",
     ip_address: "",
     game_port: "",
+    rcon_ip_address: "",
     rcon_port: "",
     rcon_password: "",
 });
@@ -274,6 +293,7 @@ const fetchServerDetails = async () => {
             serverForm.value = {
                 name: data.data.server.name,
                 ip_address: data.data.server.ip_address,
+                rcon_ip_address: data.data.server.rcon_ip_address,
                 game_port: data.data.server.game_port,
                 rcon_port: data.data.server.rcon_port,
                 rcon_password: data.data.server.rcon_password,

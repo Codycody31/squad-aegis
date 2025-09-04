@@ -55,6 +55,7 @@ interface Server {
   name: string;
   ip_address: string;
   game_port: number;
+  rcon_ip_address: string | null;
   rcon_port: number;
   created_at: string;
   updated_at: string;
@@ -75,6 +76,7 @@ const formSchema = toTypedSchema(
       .number()
       .min(1, "Game port is required")
       .max(65535, "Port must be between 1 and 65535"),
+    rcon_ip_address: z.string().optional().nullable(),
     rcon_port: z.coerce
       .number()
       .min(1, "RCON port is required")
@@ -90,6 +92,7 @@ const form = useForm({
     name: "",
     ip_address: "",
     game_port: 7787,
+    rcon_ip_address: null,
     rcon_port: 21114,
     rcon_password: "",
   },
@@ -164,7 +167,7 @@ async function fetchServers() {
 
 // Function to add a server
 async function addServer(values: any) {
-  const { name, ip_address, game_port, rcon_port, rcon_password } = values;
+  const { name, ip_address, game_port, rcon_ip_address, rcon_port, rcon_password } = values;
 
   addServerLoading.value = true;
   error.value = null;
@@ -190,6 +193,7 @@ async function addServer(values: any) {
           name,
           ip_address,
           game_port: parseInt(game_port),
+          rcon_ip_address,
           rcon_port: parseInt(rcon_port),
           rcon_password,
         },
@@ -354,6 +358,22 @@ function refreshData() {
                       <FormMessage />
                     </FormItem>
                   </FormField>
+                  <FormField name="rcon_ip_address" v-slot="{ componentField }">
+                    <FormItem>
+                      <FormLabel>RCON IP Address</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="e.g., 192.168.1.1"
+                          v-bind="componentField"
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        If your RCON IP address is different from the game IP
+                        address, specify it here. Otherwise, leave it blank.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  </FormField>
                   <FormField name="rcon_port" v-slot="{ componentField }">
                     <FormItem>
                       <FormLabel>RCON Port</FormLabel>
@@ -456,6 +476,7 @@ function refreshData() {
                 <TableHead>Name</TableHead>
                 <TableHead>IP Address</TableHead>
                 <TableHead>Game Port</TableHead>
+                <TableHead>RCON IP Address</TableHead>
                 <TableHead>RCON Port</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead class="text-right">Actions</TableHead>
@@ -474,6 +495,7 @@ function refreshData() {
                 </TableCell>
                 <TableCell>{{ server.ip_address }}</TableCell>
                 <TableCell>{{ server.game_port }}</TableCell>
+                <TableCell>{{ server.rcon_ip_address || "Unknown" }}</TableCell>
                 <TableCell>{{ server.rcon_port }}</TableCell>
                 <TableCell>{{ formatDate(server.created_at) }}</TableCell>
                 <TableCell class="text-right">
