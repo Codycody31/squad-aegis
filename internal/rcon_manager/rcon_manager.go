@@ -634,7 +634,6 @@ func (m *RconManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 		log.Info().
 			Str("serverID", id.String()).
 			Str("ipAddress", ipAddress).
-			Str("rconIpAddress", *rconIpAddress).
 			Int("rconPort", rconPort).
 			Msg("Connected to server RCON")
 	}
