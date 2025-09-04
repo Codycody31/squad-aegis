@@ -22,6 +22,7 @@ export interface Server {
   name: string;
   ip_address: string;
   game_port: number;
+  rcon_ip_address: string | null;
   rcon_port: number;
   rcon_password: string;
   created_at: string;

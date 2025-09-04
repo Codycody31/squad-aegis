@@ -29,8 +29,13 @@ func (s *Server) ServerRconEvents(c *gin.Context) {
 		return
 	}
 
+	ipAddress := server.IpAddress
+	if server.RconIpAddress != nil {
+		ipAddress = *server.RconIpAddress
+	}
+
 	// Ensure server is connected to RCON manager
-	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword)
+	err = s.Dependencies.RconManager.ConnectToServer(serverId, ipAddress, server.RconPort, server.RconPassword)
 	if err != nil {
 		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
 		return

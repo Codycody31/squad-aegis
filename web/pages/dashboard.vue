@@ -352,6 +352,7 @@ await fetchServers();
                             <TableHead>Server Name</TableHead>
                             <TableHead>IP Address</TableHead>
                             <TableHead>Game Port</TableHead>
+                            <TableHead>RCON IP Address</TableHead>
                             <TableHead>RCON Port</TableHead>
                             <TableHead>Status</TableHead>
                             <TableHead class="text-right">Actions</TableHead>
@@ -364,6 +365,7 @@ await fetchServers();
                             }}</TableCell>
                             <TableCell>{{ server.ip_address }}</TableCell>
                             <TableCell>{{ server.game_port }}</TableCell>
+                            <TableCell>{{ server.rcon_ip_address || "Unknown" }}</TableCell>
                             <TableCell>{{ server.rcon_port }}</TableCell>
                             <TableCell>
                                 <span

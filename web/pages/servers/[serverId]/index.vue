@@ -568,6 +568,12 @@ refresh();
                     }}</span>
                   </div>
                   <div class="flex justify-between">
+                    <span class="text-sm font-medium">RCON IP Address:</span>
+                    <span class="text-sm">{{
+                      serverInfo?.server?.rcon_ip_address || "Unknown"
+                    }}</span>
+                  </div>
+                  <div class="flex justify-between">
                     <span class="text-sm font-medium">RCON Port:</span>
                     <span class="text-sm">{{
                       serverInfo?.server?.rcon_port || "Unknown"

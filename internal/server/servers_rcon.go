@@ -83,8 +83,13 @@ func (s *Server) ServerRconExecute(c *gin.Context) {
 		return
 	}
 
+	ipAddress := server.IpAddress
+	if server.RconIpAddress != nil {
+		ipAddress = *server.RconIpAddress
+	}
+
 	// Ensure server is connected to RCON manager
-	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword)
+	err = s.Dependencies.RconManager.ConnectToServer(serverId, ipAddress, server.RconPort, server.RconPassword)
 	if err != nil {
 		responses.BadRequest(c, "Failed to connect to RCON", &gin.H{"error": err.Error()})
 		return
@@ -313,8 +318,13 @@ func (s *Server) ServerRconForceRestart(c *gin.Context) {
 		return
 	}
 
+	ipAddress := server.IpAddress
+	if server.RconIpAddress != nil {
+		ipAddress = *server.RconIpAddress
+	}
+
 	// Then reconnect to the server
-	err = s.Dependencies.RconManager.ConnectToServer(serverId, server.IpAddress, server.RconPort, server.RconPassword)
+	err = s.Dependencies.RconManager.ConnectToServer(serverId, ipAddress, server.RconPort, server.RconPassword)
 	if err != nil {
 		responses.BadRequest(c, "Failed to reconnect to RCON", &gin.H{"error": err.Error()})
 		return

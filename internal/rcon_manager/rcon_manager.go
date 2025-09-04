@@ -591,7 +591,7 @@ func (m *RconManager) Shutdown() {
 func (m *RconManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 	// Get all servers from the database
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, ip_address, rcon_port, rcon_password
+		SELECT id, ip_address, rcon_ip_address, rcon_port, rcon_password
 		FROM servers
 		WHERE rcon_port > 0 AND rcon_password != ''
 	`)
@@ -605,16 +605,22 @@ func (m *RconManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 	for rows.Next() {
 		var id uuid.UUID
 		var ipAddress string
+		var rconIpAddress *string
 		var rconPort int
 		var rconPassword string
 
-		if err := rows.Scan(&id, &ipAddress, &rconPort, &rconPassword); err != nil {
+		if err := rows.Scan(&id, &ipAddress, &rconIpAddress, &rconPort, &rconPassword); err != nil {
 			log.Error().Err(err).Msg("Failed to scan server row")
 			continue
 		}
 
+		ipAddressForRcon := ipAddress
+		if rconIpAddress != nil && *rconIpAddress != "" {
+			ipAddressForRcon = *rconIpAddress
+		}
+
 		// Try to connect to the server
-		err := m.ConnectToServer(id, ipAddress, rconPort, rconPassword)
+		err := m.ConnectToServer(id, ipAddressForRcon, rconPort, rconPassword)
 		if err != nil {
 			log.Warn().
 				Err(err).
@@ -628,6 +634,7 @@ func (m *RconManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 		log.Info().
 			Str("serverID", id.String()).
 			Str("ipAddress", ipAddress).
+			Str("rconIpAddress", *rconIpAddress).
 			Int("rconPort", rconPort).
 			Msg("Connected to server RCON")
 	}
