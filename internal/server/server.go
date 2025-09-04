@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 
+	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 
@@ -18,8 +20,10 @@ type Server struct {
 }
 
 type Dependencies struct {
-	DB          *sql.DB
-	RconManager *rcon_manager.RconManager
+	DB                *sql.DB
+	RconManager       *rcon_manager.RconManager
+	EventManager      *event_manager.EventManager
+	LogwatcherManager *logwatcher_manager.LogwatcherManager
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {

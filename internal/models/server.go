@@ -14,8 +14,19 @@ type Server struct {
 	RconIpAddress *string   `json:"rcon_ip_address"`
 	RconPort      int       `json:"rcon_port"`
 	RconPassword  string    `json:"-"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+
+	// Log configuration fields
+	LogSourceType    *string `json:"log_source_type,omitempty"`     // "local", "sftp", "ftp"
+	LogFilePath      *string `json:"log_file_path,omitempty"`       // Path to log file
+	LogHost          *string `json:"log_host,omitempty"`            // Host for SFTP/FTP
+	LogPort          *int    `json:"log_port,omitempty"`            // Port for SFTP/FTP
+	LogUsername      *string `json:"log_username,omitempty"`        // Username for SFTP/FTP
+	LogPassword      *string `json:"-"`                             // Password for SFTP/FTP (hidden in JSON)
+	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`  // Poll frequency in seconds for SFTP/FTP
+	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"` // Whether to read from start of file
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type ServerBan struct {
@@ -76,6 +87,16 @@ type ServerCreateRequest struct {
 	RconIpAddress *string `json:"rcon_ip_address"`
 	RconPort      int     `json:"rcon_port"`
 	RconPassword  string  `json:"rcon_password"`
+
+	// Log configuration fields
+	LogSourceType    *string `json:"log_source_type,omitempty"`
+	LogFilePath      *string `json:"log_file_path,omitempty"`
+	LogHost          *string `json:"log_host,omitempty"`
+	LogPort          *int    `json:"log_port,omitempty"`
+	LogUsername      *string `json:"log_username,omitempty"`
+	LogPassword      *string `json:"log_password,omitempty"`
+	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
+	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
 }
 
 type ServerRconExecuteRequest struct {
@@ -109,4 +130,14 @@ type ServerUpdateRequest struct {
 	RconIpAddress *string `json:"rcon_ip_address"`
 	RconPort      int     `json:"rcon_port" binding:"required"`
 	RconPassword  string  `json:"rcon_password"`
+
+	// Log configuration fields
+	LogSourceType    *string `json:"log_source_type,omitempty"`
+	LogFilePath      *string `json:"log_file_path,omitempty"`
+	LogHost          *string `json:"log_host,omitempty"`
+	LogPort          *int    `json:"log_port,omitempty"`
+	LogUsername      *string `json:"log_username,omitempty"`
+	LogPassword      *string `json:"log_password,omitempty"`
+	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
+	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
 }

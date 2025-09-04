@@ -15,7 +15,15 @@ import (
 
 func CreateServer(ctx context.Context, database db.Executor, server *models.Server) (*models.Server, error) {
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-	sql, args, err := psql.Insert("servers").Columns("id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "created_at", "updated_at").Values(server.Id, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword, server.CreatedAt, server.UpdatedAt).ToSql()
+	sql, args, err := psql.Insert("servers").Columns(
+		"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
+		"log_source_type", "log_file_path", "log_host", "log_port", "log_username", "log_password",
+		"log_poll_frequency", "log_read_from_start", "created_at", "updated_at",
+	).Values(
+		server.Id, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword,
+		server.LogSourceType, server.LogFilePath, server.LogHost, server.LogPort, server.LogUsername, server.LogPassword,
+		server.LogPollFrequency, server.LogReadFromStart, server.CreatedAt, server.UpdatedAt,
+	).ToSql()
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +66,11 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 
 	for rows.Next() {
 		var server models.Server
-		err = rows.Scan(&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword, &server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress)
+		err = rows.Scan(
+			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword,
+			&server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress, &server.LogSourceType, &server.LogFilePath,
+			&server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword, &server.LogPollFrequency, &server.LogReadFromStart,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -85,7 +97,11 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 		server := &models.Server{}
 
 		for rows.Next() {
-			err = rows.Scan(&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword, &server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress)
+			err = rows.Scan(
+				&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword,
+				&server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress, &server.LogSourceType, &server.LogFilePath,
+				&server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword, &server.LogPollFrequency, &server.LogReadFromStart,
+			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to scan row: %w", err)
 			}
@@ -122,7 +138,11 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 	server := &models.Server{}
 
 	for rows.Next() {
-		err = rows.Scan(&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword, &server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress)
+		err = rows.Scan(
+			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword,
+			&server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress, &server.LogSourceType, &server.LogFilePath,
+			&server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword, &server.LogPollFrequency, &server.LogReadFromStart,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
@@ -268,9 +288,15 @@ func GetUserServerPermissions(ctx context.Context, database db.Executor, userId 
 func UpdateServer(ctx context.Context, db *sql.DB, server *models.Server) error {
 	_, err := db.ExecContext(ctx, `
 		UPDATE servers
-		SET name = $1, ip_address = $2, game_port = $3, rcon_ip_address = $8, rcon_port = $4, rcon_password = $5, updated_at = $6
-		WHERE id = $7
-	`, server.Name, server.IpAddress, server.GamePort, server.RconPort, server.RconPassword, time.Now(), server.Id, server.RconIpAddress)
+		SET name = $1, ip_address = $2, game_port = $3, rcon_ip_address = $4, rcon_port = $5, rcon_password = $6,
+		    log_source_type = $7, log_file_path = $8, log_host = $9, log_port = $10, log_username = $11, 
+		    log_password = $12, log_poll_frequency = $13, log_read_from_start = $14,
+		    updated_at = $15
+		WHERE id = $16
+	`, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword,
+		server.LogSourceType, server.LogFilePath, server.LogHost, server.LogPort, server.LogUsername,
+		server.LogPassword, server.LogPollFrequency, server.LogReadFromStart,
+		time.Now(), server.Id)
 
 	if err != nil {
 		return fmt.Errorf("failed to update server: %w", err)

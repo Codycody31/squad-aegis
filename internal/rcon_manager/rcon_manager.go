@@ -13,6 +13,7 @@ import (
 	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/event_manager"
 )
 
 // RconEvent represents an event from the RCON server
@@ -57,17 +58,19 @@ type ServerConnection struct {
 type RconManager struct {
 	connections      map[uuid.UUID]*ServerConnection
 	eventSubscribers []chan<- RconEvent
+	eventManager     *event_manager.EventManager
 	mu               sync.RWMutex
 	ctx              context.Context
 	cancel           context.CancelFunc
 }
 
 // NewRconManager creates a new RCON manager
-func NewRconManager(ctx context.Context) *RconManager {
+func NewRconManager(ctx context.Context, eventManager *event_manager.EventManager) *RconManager {
 	ctx, cancel := context.WithCancel(ctx)
 	return &RconManager{
 		connections:      make(map[uuid.UUID]*ServerConnection),
 		eventSubscribers: []chan<- RconEvent{},
+		eventManager:     eventManager,
 		ctx:              ctx,
 		cancel:           cancel,
 	}
@@ -97,11 +100,12 @@ func (m *RconManager) UnsubscribeFromEvents(eventChan chan RconEvent) {
 	}
 }
 
-// broadcastEvent broadcasts an event to all subscribers
+// broadcastEvent broadcasts an event to all subscribers and the centralized event manager
 func (m *RconManager) broadcastEvent(event RconEvent) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// Broadcast to legacy subscribers (for backward compatibility)
 	for _, subscriber := range m.eventSubscribers {
 		select {
 		case subscriber <- event:
@@ -112,6 +116,58 @@ func (m *RconManager) broadcastEvent(event RconEvent) {
 				Str("eventType", event.Type).
 				Msg("Event channel full, dropping event")
 		}
+	}
+
+	// Publish to centralized event manager
+	if m.eventManager != nil {
+		var eventType event_manager.EventType
+		var eventData map[string]interface{}
+
+		switch event.Type {
+		case "CHAT_MESSAGE":
+			eventType = event_manager.EventTypeRconChatMessage
+		case "CHAT_COMMAND":
+			eventType = event_manager.EventTypeRconChatCommand
+		case "PLAYER_WARNED":
+			eventType = event_manager.EventTypeRconPlayerWarned
+		case "PLAYER_KICKED":
+			eventType = event_manager.EventTypeRconPlayerKicked
+		case "POSSESSED_ADMIN_CAMERA":
+			eventType = event_manager.EventTypeRconPossessedAdminCamera
+		case "UNPOSSESSED_ADMIN_CAMERA":
+			eventType = event_manager.EventTypeRconUnpossessedAdminCamera
+		case "SQUAD_CREATED":
+			eventType = event_manager.EventTypeRconSquadCreated
+		case "CONNECTION_CLOSED":
+			eventType = event_manager.EventTypeRconConnectionClosed
+		case "CONNECTION_ERROR":
+			eventType = event_manager.EventTypeRconConnectionError
+		default:
+			// Unknown event type, skip
+			return
+		}
+
+		// Convert event data to map
+		eventData = make(map[string]interface{})
+		if event.Data != nil {
+			// Try to convert to map or use reflection
+			switch data := event.Data.(type) {
+			case map[string]interface{}:
+				eventData = data
+			case rconTypes.Message:
+				eventData = map[string]interface{}{
+					"message": data.Message,
+					"name":    data.PlayerName,
+					"steamId": data.SteamID,
+					"raw":     data.Raw,
+				}
+			default:
+				eventData["data"] = event.Data
+			}
+		}
+		eventData["time"] = event.Time
+
+		m.eventManager.PublishEvent(event.ServerID, eventType, eventData, event.Data)
 	}
 }
 

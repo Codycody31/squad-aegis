@@ -3,6 +3,8 @@ import { ref, onMounted, onUnmounted, computed } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
+import { Checkbox } from "~/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -45,6 +47,9 @@ const showAddServerDialog = ref(false);
 const addServerLoading = ref(false);
 const authStore = useAuthStore();
 
+// Track selected log source type for conditional fields
+const selectedLogSourceType = ref<string | null>(null);
+
 // Check if user is super admin
 const isSuperAdmin = computed(() => {
   return authStore.user?.super_admin || false;
@@ -82,6 +87,16 @@ const formSchema = toTypedSchema(
       .min(1, "RCON port is required")
       .max(65535, "Port must be between 1 and 65535"),
     rcon_password: z.string().min(1, "RCON password is required"),
+    
+    // Log configuration fields
+    log_source_type: z.enum(["local", "sftp", "ftp"]).optional().nullable(),
+    log_file_path: z.string().optional().nullable(),
+    log_host: z.string().optional().nullable(),
+    log_port: z.coerce.number().min(1).max(65535).optional().nullable(),
+    log_username: z.string().optional().nullable(),
+    log_password: z.string().optional().nullable(),
+    log_poll_frequency: z.coerce.number().min(1).max(300).optional().nullable(),
+    log_read_from_start: z.boolean().optional().nullable(),
   })
 );
 
@@ -95,6 +110,16 @@ const form = useForm({
     rcon_ip_address: null,
     rcon_port: 21114,
     rcon_password: "",
+    
+    // Log configuration defaults
+    log_source_type: null,
+    log_file_path: null,
+    log_host: null,
+    log_port: null,
+    log_username: null,
+    log_password: null,
+    log_poll_frequency: 5,
+    log_read_from_start: false,
   },
 });
 
@@ -167,7 +192,11 @@ async function fetchServers() {
 
 // Function to add a server
 async function addServer(values: any) {
-  const { name, ip_address, game_port, rcon_ip_address, rcon_port, rcon_password } = values;
+  const { 
+    name, ip_address, game_port, rcon_ip_address, rcon_port, rcon_password,
+    log_source_type, log_file_path, log_host, log_port, log_username, 
+    log_password, log_poll_frequency, log_read_from_start 
+  } = values;
 
   addServerLoading.value = true;
   error.value = null;
@@ -196,6 +225,16 @@ async function addServer(values: any) {
           rcon_ip_address,
           rcon_port: parseInt(rcon_port),
           rcon_password,
+          
+          // Log configuration
+          log_source_type: log_source_type || null,
+          log_file_path: log_file_path || null,
+          log_host: log_host || null,
+          log_port: log_port ? parseInt(log_port) : null,
+          log_username: log_username || null,
+          log_password: log_password || null,
+          log_poll_frequency: log_poll_frequency ? parseInt(log_poll_frequency) : null,
+          log_read_from_start: log_read_from_start || false,
         },
         headers: {
           Authorization: `Bearer ${token}`,
@@ -301,6 +340,14 @@ function refreshData() {
             game_port: 7787,
             rcon_port: 21114,
             rcon_password: '',
+            log_source_type: null,
+            log_file_path: null,
+            log_host: null,
+            log_port: null,
+            log_username: null,
+            log_password: null,
+            log_poll_frequency: 5,
+            log_read_from_start: false,
           }"
         >
           <Dialog v-model:open="showAddServerDialog">
@@ -406,6 +453,163 @@ function refreshData() {
                       <FormMessage />
                     </FormItem>
                   </FormField>
+
+                  <!-- Log Configuration Section -->
+                  <div class="border-t pt-4 mt-4">
+                    <h4 class="text-sm font-medium mb-3">Log Configuration (Optional)</h4>
+                    <p class="text-xs text-muted-foreground mb-4">
+                      Configure log monitoring to enable advanced event tracking and analytics.
+                    </p>
+
+                    <FormField name="log_source_type" v-slot="{ componentField }">
+                      <FormItem>
+                        <FormLabel>Log Source Type</FormLabel>
+                        <Select v-model="selectedLogSourceType" @update:modelValue="componentField.onChange">
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select log source type" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="local">Local File</SelectItem>
+                            <SelectItem value="sftp">SFTP</SelectItem>
+                            <SelectItem value="ftp">FTP</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>
+                          Choose how to access your server's log files
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    </FormField>
+
+                    <FormField name="log_file_path" v-slot="{ componentField }" v-if="selectedLogSourceType">
+                      <FormItem>
+                        <FormLabel>Log File Path</FormLabel>
+                        <FormControl>
+                          <Input
+                            :placeholder="selectedLogSourceType === 'local' 
+                              ? '/path/to/SquadGame.log' 
+                              : '/remote/path/to/SquadGame.log'"
+                            v-bind="componentField"
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {{ selectedLogSourceType === 'local' 
+                            ? 'Full path to the Squad log file on the local system' 
+                            : 'Path to the Squad log file on the remote server' }}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    </FormField>
+
+                    <!-- Remote connection fields for SFTP/FTP -->
+                    <template v-if="selectedLogSourceType === 'sftp' || selectedLogSourceType === 'ftp'">
+                      <FormField name="log_host" v-slot="{ componentField }">
+                        <FormItem>
+                          <FormLabel>{{ selectedLogSourceType?.toUpperCase() }} Host</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="192.168.1.100"
+                              v-bind="componentField"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Hostname or IP address of the {{ selectedLogSourceType?.toUpperCase() }} server
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
+
+                      <FormField name="log_port" v-slot="{ componentField }">
+                        <FormItem>
+                          <FormLabel>{{ selectedLogSourceType?.toUpperCase() }} Port</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              :placeholder="selectedLogSourceType === 'sftp' ? '22' : '21'"
+                              v-bind="componentField"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Port for {{ selectedLogSourceType?.toUpperCase() }} connection
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
+
+                      <FormField name="log_username" v-slot="{ componentField }">
+                        <FormItem>
+                          <FormLabel>Username</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="username"
+                              v-bind="componentField"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Username for {{ selectedLogSourceType?.toUpperCase() }} authentication
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
+
+                      <FormField name="log_password" v-slot="{ componentField }">
+                        <FormItem>
+                          <FormLabel>Password</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="password"
+                              placeholder="********"
+                              v-bind="componentField"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Password for {{ selectedLogSourceType?.toUpperCase() }} authentication
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
+
+
+                      <FormField name="log_poll_frequency" v-slot="{ componentField }">
+                        <FormItem>
+                          <FormLabel>Poll Frequency (seconds)</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              placeholder="5"
+                              v-bind="componentField"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            How often to check for new log entries (1-300 seconds)
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
+                    </template>
+
+                    <FormField name="log_read_from_start" v-slot="{ componentField }" v-if="selectedLogSourceType">
+                      <FormItem class="flex flex-row items-start space-x-3 space-y-0">
+                        <FormControl>
+                          <Checkbox
+                            :checked="componentField.modelValue"
+                            @update:checked="componentField.onChange"
+                          />
+                        </FormControl>
+                        <div class="space-y-1 leading-none">
+                          <FormLabel>
+                            Read from start of file
+                          </FormLabel>
+                          <FormDescription>
+                            Process the entire log file from the beginning instead of just new entries
+                          </FormDescription>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
+                    </FormField>
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button

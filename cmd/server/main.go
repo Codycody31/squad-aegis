@@ -12,12 +12,16 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"github.com/samber/oops"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/db"
+	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server"
@@ -113,13 +117,68 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
+	// Create event manager for centralized event handling
+	eventManager := event_manager.NewEventManager(ctx, 10000)
+	defer eventManager.Shutdown()
+
+	// Initialize ClickHouse if enabled
+	var clickhouseClient *clickhouse.Client
+	var eventIngester *clickhouse.EventIngester
+	if config.Config.ClickHouse.Enabled {
+		clickhouseConfig := clickhouse.Config{
+			Host:     config.Config.ClickHouse.Host,
+			Port:     config.Config.ClickHouse.Port,
+			Database: config.Config.ClickHouse.Database,
+			Username: config.Config.ClickHouse.Username,
+			Password: config.Config.ClickHouse.Password,
+			Debug:    config.Config.ClickHouse.Debug,
+		}
+
+		var err error
+		clickhouseClient, err = clickhouse.NewClient(clickhouseConfig)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to connect to ClickHouse")
+		}
+		defer clickhouseClient.Close()
+
+		// Ping clickhouse
+		err = clickhouseClient.Ping(ctx)
+		if err != nil {
+			return oops.Wrapf(err, "failed to ping clickhouse")
+		}
+
+		// Migrate clickhouse
+		log.Info().Msg("Migrating clickhouse...")
+		err = clickhouse.Migrate(clickhouseClient.GetConnection(), config.Config.ClickHouse.Debug)
+		if err != nil {
+			return oops.Wrapf(err, "failed to migrate clickhouse")
+		}
+
+		// Create and start event ingester
+		eventIngester = clickhouse.NewEventIngester(ctx, clickhouseClient, eventManager)
+		eventIngester.Start()
+		defer eventIngester.Stop()
+
+		log.Info().Msg("ClickHouse event ingestion enabled")
+	} else {
+		log.Warn().Msg("ClickHouse event ingestion disabled")
+	}
+
 	// Create RCON manager
-	rconManager := rcon_manager.NewRconManager(ctx)
+	rconManager := rcon_manager.NewRconManager(ctx, eventManager)
 	defer rconManager.Shutdown()
 
-	// Start RCON connection manager
+	// Create logwatcher manager
+	logwatcherManager := logwatcher_manager.NewLogwatcherManager(ctx, eventManager)
+	defer logwatcherManager.Shutdown()
+
+	// Start connection managers
 	go rconManager.StartConnectionManager()
+	go logwatcherManager.StartConnectionManager()
+
+	// Connect to all servers
 	rconManager.ConnectToAllServers(ctx, database)
+	logwatcherManager.ConnectToAllServers(ctx, database)
 
 	// Initialize services
 	waitingGroup := errgroup.Group{}
@@ -134,8 +193,10 @@ func run(ctx context.Context) error {
 		}
 
 		deps := &server.Dependencies{
-			DB:          database,
-			RconManager: rconManager,
+			DB:                database,
+			RconManager:       rconManager,
+			EventManager:      eventManager,
+			LogwatcherManager: logwatcherManager,
 		}
 
 		// Initialize router
