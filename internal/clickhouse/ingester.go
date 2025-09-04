@@ -181,11 +181,6 @@ func (i *EventIngester) ingestBatch(events []*IngestEvent) {
 				Str("eventType", string(eventType)).
 				Int("count", len(typeEvents)).
 				Msg("Failed to ingest events")
-		} else {
-			log.Debug().
-				Str("eventType", string(eventType)).
-				Int("count", len(typeEvents)).
-				Msg("Successfully ingested events")
 		}
 	}
 }

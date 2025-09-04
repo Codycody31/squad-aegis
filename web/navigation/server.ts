@@ -60,6 +60,14 @@ export default [
     permissions: ["super_admin", "manageserver"],
   },
   {
+    title: "Plugins",
+    icon: "lucide:puzzle",
+    to: {
+      name: "servers-serverId-plugins",
+    },
+    permissions: ["super_admin", "manageserver"],
+  },
+  {
     title: "Settings",
     icon: "mdi:cog",
     to: {

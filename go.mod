@@ -8,6 +8,7 @@ require (
 	github.com/Masterminds/squirrel v1.5.4
 	github.com/MuhammadSaim/goavatar v0.1.0
 	github.com/SquadGO/squad-rcon-go/v2 v2.0.4
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/cristalhq/aconfig v0.19.0
 	github.com/cristalhq/aconfig/aconfigyaml v0.17.1
 	github.com/gin-gonic/gin v1.10.0
@@ -34,7 +35,6 @@ require (
 require (
 	github.com/ClickHouse/ch-go v0.67.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
-	github.com/bwmarrin/discordgo v0.29.0 // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect

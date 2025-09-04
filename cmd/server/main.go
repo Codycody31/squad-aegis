@@ -23,6 +23,8 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
+	"go.codycody31.dev/squad-aegis/internal/plugin_registry"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
@@ -172,6 +174,24 @@ func run(ctx context.Context) error {
 	logwatcherManager := logwatcher_manager.NewLogwatcherManager(ctx, eventManager)
 	defer logwatcherManager.Shutdown()
 
+	// Create plugin manager
+	pluginManager := plugin_manager.NewPluginManager(ctx, database, eventManager, rconManager)
+	defer pluginManager.Stop()
+
+	// Register all available plugins and connectors
+	if err := plugin_registry.RegisterAllConnectors(pluginManager); err != nil {
+		return fmt.Errorf("failed to register connectors: %w", err)
+	}
+
+	if err := plugin_registry.RegisterAllPlugins(pluginManager); err != nil {
+		return fmt.Errorf("failed to register plugins: %w", err)
+	}
+
+	// Start plugin manager
+	if err := pluginManager.Start(); err != nil {
+		return fmt.Errorf("failed to start plugin manager: %w", err)
+	}
+
 	// Start connection managers
 	go rconManager.StartConnectionManager()
 	go logwatcherManager.StartConnectionManager()
@@ -197,6 +217,7 @@ func run(ctx context.Context) error {
 			RconManager:       rconManager,
 			EventManager:      eventManager,
 			LogwatcherManager: logwatcherManager,
+			PluginManager:     pluginManager,
 		}
 
 		// Initialize router
