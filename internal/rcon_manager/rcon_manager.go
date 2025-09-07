@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
+	rcon "github.com/SquadGO/squad-rcon-go/v2"
+	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
-	rcon "go.codycody31.dev/squad-aegis/internal/squad-rcon-go"
-	"go.codycody31.dev/squad-aegis/internal/squad-rcon-go/rconTypes"
 )
 
 // RconEvent represents an event from the RCON server

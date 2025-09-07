@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"go.codycody31.dev/squad-aegis/internal/squad-rcon-go/rconTypes"
+	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 )
 
 type CommandMessage struct {
