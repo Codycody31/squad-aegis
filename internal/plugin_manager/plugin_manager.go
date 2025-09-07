@@ -560,7 +560,7 @@ func (pm *PluginManager) distributeEventToPlugins(event *event_manager.Event) {
 		ServerID:  event.ServerID,
 		Source:    pm.convertEventSource(event.Type),
 		Type:      string(event.Type),
-		Data:      eventDataToMap(event.Data),
+		Data:      event.Data,
 		Raw:       rawString,
 		Timestamp: event.Timestamp,
 	}

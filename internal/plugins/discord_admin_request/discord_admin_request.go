@@ -243,36 +243,20 @@ func (p *DiscordAdminRequestPlugin) UpdateConfig(config map[string]interface{}) 
 }
 
 // handleChatMessage processes chat messages looking for admin requests
-func (p *DiscordAdminRequestPlugin) handleChatMessage(event *plugin_manager.PluginEvent) error {
+func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
 	// TODO: Array of roles that are considered admins
-	// event, ok := rawEvent.Data["event"].()
-
-	// Extract message data
-	message, ok := event.Data["message"].(string)
+	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
 	if !ok {
-		return nil // No message data
+		return fmt.Errorf("invalid event data type")
 	}
-
-	chatType, ok := event.Data["chat"].(string)
-	if !ok {
-		chatType = "Unknown"
-	}
-
-	playerName, ok := event.Data["name"].(string)
-	if !ok {
-		playerName = "Unknown Player"
-	}
-
-	playerID, _ := event.Data["id"].(string)
-	steamID, _ := event.Data["steamId"].(string)
 
 	// Check if this is an admin request
-	if !p.isAdminRequest(message) {
+	if !p.isAdminRequest(event.Message) {
 		return nil
 	}
 
 	// Check if we should ignore this chat type
-	if p.shouldIgnoreChat(chatType) {
+	if p.shouldIgnoreChat(event.ChatType) {
 		return nil
 	}
 
@@ -300,33 +284,33 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(event *plugin_manager.Plug
 	}
 
 	// Send Discord notification
-	if err := p.sendAdminRequestNotification(serverInfo, playerName, playerID, steamID, message, onlineAdmins); err != nil {
+	if err := p.sendAdminRequestNotification(serverInfo, event.PlayerName, event.PlayerName, event.SteamID, event.Message, onlineAdmins); err != nil {
 		p.apis.LogAPI.Error("Failed to send Discord notification", err, map[string]interface{}{
-			"player":  playerName,
-			"message": message,
+			"player":  event.PlayerName,
+			"message": event.Message,
 		})
 		return err
 	}
 
 	// Send in-game response
-	if err := p.sendInGameResponse(steamID, onlineAdmins); err != nil {
+	if err := p.sendInGameResponse(event.SteamID, onlineAdmins); err != nil {
 		p.apis.LogAPI.Error("Failed to send in-game response", err, map[string]interface{}{
-			"player": playerName,
+			"player": event.PlayerName,
 		})
 	}
 
 	// Warn in-game admins if configured
 	if p.getBoolConfig("warn_in_game_admins") {
-		if err := p.warnInGameAdmins(playerName, message); err != nil {
+		if err := p.warnInGameAdmins(event.PlayerName, event.Message); err != nil {
 			p.apis.LogAPI.Error("Failed to warn in-game admins", err, map[string]interface{}{
-				"player": playerName,
+				"player": event.PlayerName,
 			})
 		}
 	}
 
 	p.apis.LogAPI.Info("Processed admin request", map[string]interface{}{
-		"player":       playerName,
-		"message":      message,
+		"player":       event.PlayerName,
+		"message":      event.Message,
 		"onlineAdmins": onlineAdmins,
 	})
 

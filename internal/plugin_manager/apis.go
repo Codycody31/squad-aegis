@@ -454,7 +454,7 @@ func (api *eventAPI) SubscribeToEvents(eventTypes []string, handler func(*Plugin
 				ServerID:  event.ServerID,
 				Source:    EventSourceSystem,
 				Type:      string(event.Type),
-				Data:      eventDataToMap(event.Data),
+				Data:      event.Data,
 				Raw:       rawString,
 				Timestamp: event.Timestamp,
 			}

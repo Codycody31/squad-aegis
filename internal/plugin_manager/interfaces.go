@@ -72,13 +72,13 @@ const (
 
 // PluginEvent represents an event passed to plugins
 type PluginEvent struct {
-	ID        uuid.UUID              `json:"id"`
-	ServerID  uuid.UUID              `json:"server_id"`
-	Source    EventSource            `json:"source"`
-	Type      string                 `json:"type"`
-	Data      map[string]interface{} `json:"data"`
-	Raw       string                 `json:"raw,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
+	ID        uuid.UUID   `json:"id"`
+	ServerID  uuid.UUID   `json:"server_id"`
+	Source    EventSource `json:"source"`
+	Type      string      `json:"type"`
+	Data      interface{} `json:"data"`
+	Raw       string      `json:"raw,omitempty"`
+	Timestamp time.Time   `json:"timestamp"`
 }
 
 // PluginStatus represents the current status of a plugin
