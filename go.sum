@@ -14,8 +14,6 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/MuhammadSaim/goavatar v0.1.0 h1:qEHzlaUqxJFRG7NM+xshhnDq0KbDfySNhf+z/3E519A=
 github.com/MuhammadSaim/goavatar v0.1.0/go.mod h1:nrVAlNPAk6R92ch9Gt5RvP7qB3ShZJPENMeEAL88qds=
-github.com/SquadGO/squad-rcon-go/v2 v2.0.4 h1:Y10yxoWA8cUKJWf0RAq49U8X6ggDbH94zQ8/OX0EzKk=
-github.com/SquadGO/squad-rcon-go/v2 v2.0.4/go.mod h1:6km4XiO2+pLhLuouKyXIwISTC9ju1lfmhzCS9SlHYIs=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/asaskevich/govalidator v0.0.0-20200108200545-475eaeb16496 h1:zV3ejI06GQ59hwDQAvmK1qxOQGB3WuVTRoY0okPTAv0=
@@ -230,8 +228,6 @@ github.com/uptrace/go-clickhouse v0.3.1 h1:5wIoHZ0vCqX48gPgNHBIgW4089TkNZZOd+6Bs
 github.com/uptrace/go-clickhouse v0.3.1/go.mod h1:ZkFYp+b3tn7YiHR6yMnHqGetPfFZhbVYVTsTGBIbdCY=
 github.com/uptrace/go-clickhouse/chdebug v0.3.1 h1:eAMrKXmF3MQ2ggdvRb+JZ3wELwLWaE4kTudxNLppgRc=
 github.com/uptrace/go-clickhouse/chdebug v0.3.1/go.mod h1:g1TT4y+3ooH/15oJyiE0TiQrWWowtTLEgEtV9P0/PvE=
-github.com/urfave/cli/v3 v3.0.0-beta1 h1:6DTaaUarcM0wX7qj5Hcvs+5Dm3dyUTBbEwIWAjcw9Zg=
-github.com/urfave/cli/v3 v3.0.0-beta1/go.mod h1:FnIeEMYu+ko8zP1F9Ypr3xkZMIDqW3DR92yUtY39q1Y=
 github.com/xdg-go/pbkdf2 v1.0.0/go.mod h1:jrpuAogTd400dnrH08LKmI/xc1MbPOebTwRqcT5RDeI=
 github.com/xdg-go/scram v1.1.1/go.mod h1:RaEWvsqvNKKvBPvcKeFjrG2cJqOkHTiyTpzz23ni57g=
 github.com/xdg-go/stringprep v1.0.3/go.mod h1:W3f5j4i+9rC0kuIEJL0ky1VpHXQU3ocBgklLGvcBnW8=

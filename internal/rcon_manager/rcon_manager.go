@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	rcon "github.com/SquadGO/squad-rcon-go/v2"
-	"github.com/SquadGO/squad-rcon-go/v2/rconTypes"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	rcon "go.codycody31.dev/squad-aegis/internal/squad-rcon-go"
+	"go.codycody31.dev/squad-aegis/internal/squad-rcon-go/rconTypes"
 )
 
 // RconEvent represents an event from the RCON server
@@ -38,20 +38,13 @@ type CommandResponse struct {
 
 // ServerConnection represents a connection to an RCON server
 type ServerConnection struct {
-	ServerID             uuid.UUID
-	Rcon                 *rcon.Rcon // Single connection for both commands and events
-	CommandChan          chan RconCommand
-	EventChan            chan RconEvent
-	Disconnected         bool
-	LastUsed             time.Time
-	mu                   sync.Mutex
-	cmdSemaphore         chan struct{}
-	host                 string
-	port                 string
-	password             string
-	wasForceDisconnected bool
-	reconnectAttempts    int
-	lastReconnectTime    time.Time
+	ServerID     uuid.UUID
+	Rcon         *rcon.Rcon // Single connection for both commands and events
+	CommandChan  chan RconCommand
+	EventChan    chan RconEvent
+	LastUsed     time.Time
+	mu           sync.Mutex
+	cmdSemaphore chan struct{}
 }
 
 // RconManager manages RCON connections to multiple servers
@@ -181,27 +174,6 @@ func (m *RconManager) broadcastEvent(event RconEvent) {
 	}
 }
 
-// calculateReconnectDelay calculates the delay for reconnection attempts using exponential backoff
-// Starting at 5 seconds, doubling each attempt, capped at 1 minute
-func (m *RconManager) calculateReconnectDelay(attempts int) time.Duration {
-	const (
-		baseDelay = 5 * time.Second
-		maxDelay  = 60 * time.Second
-	)
-
-	if attempts == 0 {
-		return 0 // First attempt has no delay
-	}
-
-	// Calculate exponential backoff: 5s, 10s, 20s, 40s, 60s (capped)
-	delay := baseDelay * time.Duration(1<<uint(attempts-1))
-	if delay > maxDelay {
-		delay = maxDelay
-	}
-
-	return delay
-}
-
 // ConnectToServer connects to an RCON server
 func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int, password string) error {
 	m.mu.Lock()
@@ -214,86 +186,13 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 		conn.mu.Lock()
 		defer conn.mu.Unlock()
 
-		// If connection is disconnected, reconnect with backoff
-		if conn.Disconnected {
-			// Calculate reconnection delay with exponential backoff
-			delay := m.calculateReconnectDelay(conn.reconnectAttempts)
-
-			// Check if enough time has passed since last reconnect attempt
-			if time.Since(conn.lastReconnectTime) < delay {
-				remainingDelay := delay - time.Since(conn.lastReconnectTime)
-				log.Debug().
-					Str("serverID", serverID.String()).
-					Dur("remainingDelay", remainingDelay).
-					Int("attempts", conn.reconnectAttempts).
-					Msg("Reconnection attempt too soon, waiting")
-				return fmt.Errorf("reconnection delayed, try again in %v", remainingDelay)
-			}
-
-			conn.reconnectAttempts++
-			conn.lastReconnectTime = time.Now()
-
-			if conn.wasForceDisconnected {
-				log.Debug().
-					Str("serverID", serverID.String()).
-					Int("attempts", conn.reconnectAttempts).
-					Dur("delay", delay).
-					Msg("Reconnecting to force-disconnected RCON server")
-			} else {
-				log.Debug().
-					Str("serverID", serverID.String()).
-					Int("attempts", conn.reconnectAttempts).
-					Dur("delay", delay).
-					Msg("Reconnecting to disconnected RCON server")
-			}
-
-			// Create single RCON connection
-			rconConn, err := rcon.NewRcon(rcon.RconConfig{
-				Host:               host,
-				Port:               portStr,
-				Password:           password,
-				AutoReconnect:      true,
-				AutoReconnectDelay: 5,
-			})
-			if err != nil {
-				log.Error().
-					Str("serverID", serverID.String()).
-					Err(err).
-					Int("attempts", conn.reconnectAttempts).
-					Msg("Failed to connect to RCON")
-				return fmt.Errorf("failed to connect to RCON: %w", err)
-			}
-
-			conn.Rcon = rconConn
-			conn.Disconnected = false
-			conn.LastUsed = time.Now()
-			// Store connection details
-			conn.host = host
-			conn.port = portStr
-			conn.password = password
-			// Reset reconnect attempts on successful connection
-			conn.reconnectAttempts = 0
-			conn.wasForceDisconnected = false
-
-			// Start listening for events and processing commands
-			go m.listenForEvents(serverID, rconConn)
-			go m.processCommands(serverID, conn)
-
-			log.Info().
-				Str("serverID", serverID.String()).
-				Msg("Successfully reconnected to RCON server")
-
-			return nil
-		}
-
-		// Connection already exists and is connected
+		// Connection already exists, update last used time
 		conn.LastUsed = time.Now()
-
 		return nil
 	}
 
 	// Create single RCON connection
-	rconConn, err := rcon.NewRcon(rcon.RconConfig{
+	rconConn, err := rcon.NewRconWithContext(m.ctx, rcon.RconConfig{
 		Host:               host,
 		Port:               portStr,
 		Password:           password,
@@ -312,18 +211,12 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	cmdSemaphore := make(chan struct{}, 1)
 
 	conn := &ServerConnection{
-		ServerID:          serverID,
-		Rcon:              rconConn,
-		CommandChan:       make(chan RconCommand, 100),
-		EventChan:         make(chan RconEvent, 100),
-		Disconnected:      false,
-		LastUsed:          time.Now(),
-		cmdSemaphore:      cmdSemaphore,
-		host:              host,
-		port:              portStr,
-		password:          password,
-		reconnectAttempts: 0,
-		lastReconnectTime: time.Time{},
+		ServerID:     serverID,
+		Rcon:         rconConn,
+		CommandChan:  make(chan RconCommand, 100),
+		EventChan:    make(chan RconEvent, 100),
+		LastUsed:     time.Now(),
+		cmdSemaphore: cmdSemaphore,
 	}
 
 	m.connections[serverID] = conn
@@ -331,6 +224,10 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	// Start listening for events and processing commands
 	go m.listenForEvents(serverID, rconConn)
 	go m.processCommands(serverID, conn)
+
+	log.Info().
+		Str("serverID", serverID.String()).
+		Msg("Connected to RCON server")
 
 	return nil
 }
@@ -348,20 +245,15 @@ func (m *RconManager) DisconnectFromServer(serverID uuid.UUID, force bool) error
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 
-	if conn.Disconnected {
-		return errors.New("server already disconnected")
-	}
-
-	if force {
-		conn.Rcon.Close()
-		conn.Disconnected = true
-		conn.wasForceDisconnected = true
-		return nil
-	}
-
 	// Close the connection
 	conn.Rcon.Close()
-	conn.Disconnected = true
+
+	// Remove the connection from the map
+	delete(m.connections, serverID)
+
+	log.Info().
+		Str("serverID", serverID.String()).
+		Msg("Disconnected from RCON server")
 
 	return nil
 }
@@ -381,18 +273,9 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 	}
 
 	conn.mu.Lock()
-	if conn.Disconnected {
-		conn.mu.Unlock()
-		log.Error().
-			Str("serverID", serverID.String()).
-			Str("command", command).
-			Msg("Server disconnected")
-		return "", errors.New("server disconnected")
-	}
 	conn.LastUsed = time.Now()
 	conn.mu.Unlock()
 
-	// Remove unnecessary debug log for every command
 	responseChan := make(chan CommandResponse, 1)
 
 	// Send command to command processor
@@ -405,12 +288,13 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 			Str("command", command).
 			Msg("Command queue full, try again later")
 		return "", errors.New("command queue full, try again later")
+	case <-m.ctx.Done():
+		return "", errors.New("rcon manager shutting down")
 	}
 
 	// Wait for response
 	select {
 	case response := <-responseChan:
-		// Only log debug on errors, not on every command success
 		if response.Error != nil {
 			log.Debug().
 				Str("serverID", serverID.String()).
@@ -425,12 +309,13 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 			Str("command", command).
 			Msg("Command timed out")
 		return "", errors.New("command timed out")
+	case <-m.ctx.Done():
+		return "", errors.New("rcon manager shutting down")
 	}
 }
 
 // processCommands processes commands for a server
 func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection) {
-	// Log startup once, not for every command processor
 	log.Debug().
 		Str("serverID", serverID.String()).
 		Msg("Starting command processor")
@@ -441,20 +326,8 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 			// Acquire the semaphore
 			conn.cmdSemaphore <- struct{}{}
 
-			// Check connection status
+			// Update last used time
 			conn.mu.Lock()
-			if conn.Disconnected {
-				conn.mu.Unlock()
-				// This is already logged at the outer level
-				cmd.Response <- CommandResponse{
-					Response: "",
-					Error:    errors.New("server disconnected"),
-				}
-				// Release the semaphore
-				<-conn.cmdSemaphore
-				continue
-			}
-
 			conn.LastUsed = time.Now()
 			conn.mu.Unlock()
 
@@ -473,7 +346,7 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 						Str("command", cmd.Command).
 						Err(errors.New("empty response")).
 						Dur("execTime", execTime).
-						Msg("Command execution returned error")
+						Msg("Command execution returned empty response")
 				}
 				select {
 				case responseChan <- CommandResponse{
@@ -503,16 +376,23 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 					Str("serverID", serverID.String()).
 					Str("command", cmd.Command).
 					Msg("Command execution timed out internally")
+			case <-m.ctx.Done():
+				cmdResponse = CommandResponse{
+					Response: "",
+					Error:    errors.New("rcon manager shutting down"),
+				}
 			}
 
 			// Send response back to caller
-			cmd.Response <- cmdResponse
+			select {
+			case cmd.Response <- cmdResponse:
+				// Response sent
+			case <-m.ctx.Done():
+				// Manager is shutting down
+			}
 
 			// Release the semaphore
 			<-conn.cmdSemaphore
-
-			// Remove duplicate logging - already logged in execute command
-			// Avoid logging every successful command
 
 		case <-m.ctx.Done():
 			log.Debug().
@@ -579,43 +459,19 @@ func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
 
 	// Listen for connection events
 	sr.Emitter.On("close", func(data interface{}) {
-		log.Warn(). // Use Warn level for unexpected closures
-				Str("serverID", serverID.String()).
-				Interface("data", data).
-				Msg("RCON event connection closed")
-
-		// Mark connection as disconnected and reset reconnect attempts
-		m.mu.RLock()
-		conn, exists := m.connections[serverID]
-		m.mu.RUnlock()
-
-		if exists {
-			conn.mu.Lock()
-			conn.Disconnected = true
-			// Don't reset reconnect attempts here - let them accumulate for backoff
-			conn.mu.Unlock()
-		}
+		log.Warn().
+			Str("serverID", serverID.String()).
+			Interface("data", data).
+			Msg("RCON event connection closed")
 
 		updateAndBroadcast("CONNECTION_CLOSED", data)
 	})
 
 	sr.Emitter.On("error", func(data interface{}) {
-		log.Error(). // Use Error level for connection errors
-				Str("serverID", serverID.String()).
-				Interface("data", data). // Often the error itself
-				Msg("RCON event connection error")
-
-		// Mark connection as disconnected on error
-		m.mu.RLock()
-		conn, exists := m.connections[serverID]
-		m.mu.RUnlock()
-
-		if exists {
-			conn.mu.Lock()
-			conn.Disconnected = true
-			// Don't reset reconnect attempts here - let them accumulate for backoff
-			conn.mu.Unlock()
-		}
+		log.Error().
+			Str("serverID", serverID.String()).
+			Interface("data", data).
+			Msg("RCON event connection error")
 
 		updateAndBroadcast("CONNECTION_ERROR", data)
 	})
@@ -637,11 +493,7 @@ func (m *RconManager) cleanupAllConnections() {
 
 	for _, conn := range m.connections {
 		conn.mu.Lock()
-		if !conn.Disconnected {
-			// A single log for shutdown is better than per-connection logs
-			conn.Rcon.Close()
-			conn.Disconnected = true
-		}
+		conn.Rcon.Close()
 		conn.mu.Unlock()
 	}
 

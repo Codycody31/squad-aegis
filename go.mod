@@ -7,16 +7,17 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.40.1
 	github.com/Masterminds/squirrel v1.5.4
 	github.com/MuhammadSaim/goavatar v0.1.0
-	github.com/SquadGO/squad-rcon-go/v2 v2.0.4
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/cristalhq/aconfig v0.19.0
 	github.com/cristalhq/aconfig/aconfigyaml v0.17.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
 	github.com/golang-migrate/migrate/v4 v4.18.2
+	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/guregu/null/v5 v5.0.0
 	github.com/hpcloud/tail v1.0.0
+	github.com/iamalone98/eventEmitter v1.0.1
 	github.com/jlaffaye/ftp v0.2.0
 	github.com/joho/godotenv v1.5.1
 	github.com/leighmacdonald/steamid/v3 v3.0.4
@@ -25,7 +26,6 @@ require (
 	github.com/rs/zerolog v1.33.0
 	github.com/samber/oops v1.19.0
 	github.com/uptrace/go-clickhouse v0.3.1
-	github.com/urfave/cli/v3 v3.0.0-beta1
 	golang.org/x/crypto v0.40.0
 	golang.org/x/sync v0.16.0
 	google.golang.org/grpc v1.64.1
@@ -52,7 +52,6 @@ require (
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/iamalone98/eventEmitter v1.0.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect

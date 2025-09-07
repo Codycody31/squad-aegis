@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	rcon "github.com/SquadGO/squad-rcon-go/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -16,6 +15,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
+	rcon "go.codycody31.dev/squad-aegis/internal/squad-rcon-go"
 )
 
 // TODO: Support passing the name of the player when banning via the API
