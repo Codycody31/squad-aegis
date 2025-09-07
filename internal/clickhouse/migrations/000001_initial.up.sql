@@ -29,21 +29,6 @@ PARTITION BY toYYYYMM(connected_at)
 ORDER BY (server_id, connected_at, steam_id, session_id);
 
 --migration:split
-CREATE MATERIALIZED VIEW IF NOT EXISTS squad_aegis.mv_server_player_daily_sessions
-ENGINE = SummingMergeTree
-PARTITION BY toYYYYMM(day)
-ORDER BY (server_id, steam_id, day)
-AS
-SELECT
-    server_id,
-    steam_id,
-    toDate(connected_at) AS day,
-    count() AS sessions,
-    sumIf(duration_sec, duration_sec IS NOT NULL) AS total_duration_sec
-FROM squad_aegis.server_player_sessions
-GROUP BY server_id, steam_id, day;
-
---migration:split
 CREATE TABLE IF NOT EXISTS squad_aegis.server_player_chat_messages (
     message_id  UUID DEFAULT generateUUIDv4(),
     server_id   UUID,
@@ -298,25 +283,6 @@ CREATE TABLE IF NOT EXISTS squad_aegis.server_player_team_change_events (
     player_eos   Nullable(String),
     player_steam Nullable(String),
     ingested_at  DateTime DEFAULT now()
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(event_time)
-ORDER BY (server_id, event_time);
-
---migration:split
-CREATE TABLE IF NOT EXISTS squad_aegis.server_teamkill_events (
-    event_time                 DateTime64(3, 'UTC'),
-    wound_time                 Nullable(DateTime64(3, 'UTC')),
-    server_id                  UUID,
-    chain_id                   String,
-    victim_name                String,
-    damage                     Float32,
-    attacker_player_controller String,
-    weapon                     LowCardinality(String),
-    attacker_eos               Nullable(String),
-    attacker_steam             Nullable(String),
-    teamkill                   UInt8 DEFAULT 1,
-    ingested_at                DateTime DEFAULT now()
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(event_time)

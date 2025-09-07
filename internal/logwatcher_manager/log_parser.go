@@ -48,51 +48,22 @@ func GetLogParsers() []LogParser {
 			},
 		},
 		{
-			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: PostLogin: NewPlayer: BP_PlayerController_C .+PersistentLevel\.([^\s]+) \(IP: ([\d.]+) \| Online IDs:([^)|]+)\)`),
+			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: PostLogin: NewPlayer: BP_PlayerController_C .+PersistentLevel\.([^\s]+) \(IP: ([\d.]+) \| Online IDs:(?: EOS: ([^ )]+))?(?: steam: ([^ )]+))?\)`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
-				// Parse online IDs from the log
-				idsString := args[5]
-				ids := make(map[string]string)
-
-				// Split IDs by commas and extract platform:id pairs
-				idPairs := strings.Split(idsString, ",")
-				for _, pair := range idPairs {
-					pair = strings.TrimSpace(pair)
-					parts := strings.Split(pair, ":")
-					if len(parts) == 2 {
-						platform := strings.ToLower(strings.TrimSpace(parts[0]))
-						id := strings.TrimSpace(parts[1])
-						ids[platform] = id
-					}
-				}
-
 				// Build player data
 				player := map[string]interface{}{
 					"playercontroller": args[3],
 					"ip":               args[4],
+					"steam":            args[6],
+					"eos":              args[5],
 				}
 
-				// Add all IDs to player data
-				for platform, id := range ids {
-					player[platform] = id
-				}
+				// Store player data in event store
+				eventStore.StoreJoinRequest(strings.TrimSpace(args[2]), player)
+				eventStore.StorePlayerData(args[6], player)
 
-				// Get EOS ID if available, otherwise use Steam ID as fallback
-				playerID := ""
-				if eosID, ok := ids["eos"]; ok {
-					playerID = eosID
-				} else if steamID, ok := ids["steam"]; ok {
-					playerID = steamID
-				}
-
-				if playerID != "" {
-					// Store player data in event store
-					eventStore.StoreJoinRequest(strings.TrimSpace(args[2]), player)
-					eventStore.StorePlayerData(playerID, player)
-
-					// Handle reconnecting players
-					eventStore.RemoveDisconnectedPlayer(playerID)
-				}
+				// Handle reconnecting players
+				eventStore.RemoveDisconnectedPlayer(args[6])
 
 				// Create structured event data
 				eventData := &event_manager.LogPlayerConnectedData{
@@ -100,8 +71,8 @@ func GetLogParsers() []LogParser {
 					ChainID:          strings.TrimSpace(args[2]),
 					PlayerController: args[3],
 					IPAddress:        args[4],
-					SteamID:          ids["steam"],
-					EOSID:            ids["eos"],
+					SteamID:          args[6],
+					EOSID:            args[5],
 				}
 
 				eventManager.PublishEvent(serverID, eventData, args[0])
@@ -386,51 +357,15 @@ func GetLogParsers() []LogParser {
 			},
 		},
 		{
-			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?OnPossess\(\): PC=(.+) \(Online IDs:([^)]+)\) Pawn=([A-z0-9_]+)_C`),
+			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?OnPossess\(\): PC=(.+) \(Online IDs:(?: EOS: ([^ )]+))?(?: steam: ([^ )]+))?\) Pawn=([A-Za-z0-9_]+)_C`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
-
-				// Parse online IDs from the log
-				idsString := args[4]
-				ids := make(map[string]string)
-
-				// Split IDs by commas and extract platform:id pairs
-				idPairs := strings.Split(idsString, ",")
-				for _, pair := range idPairs {
-					pair = strings.TrimSpace(pair)
-					parts := strings.Split(pair, ":")
-					if len(parts) == 2 {
-						platform := strings.ToLower(strings.TrimSpace(parts[0]))
-						id := strings.TrimSpace(parts[1])
-						ids[platform] = id
-					}
-				}
-
 				eventManagerData := &event_manager.LogPlayerPossessData{
 					Time:             args[1],
 					ChainID:          args[2],
 					PlayerSuffix:     args[3],
-					PossessClassname: args[5],
-				}
-
-				// Build event data
-				eventData := map[string]interface{}{
-					"time":             args[1],
-					"chainID":          args[2],
-					"playerSuffix":     args[3],
-					"possessClassname": args[5],
-				}
-
-				// Add all player IDs to event data with capitalized platform name
-				for platform, id := range ids {
-					// Capitalize first letter of platform for key name
-					platformKey := "player"
-					if len(platform) > 0 {
-						platformKey += strings.ToUpper(platform[:1])
-						if len(platform) > 1 {
-							platformKey += platform[1:]
-						}
-					}
-					eventData[platformKey] = id
+					PlayerEOS:        args[4],
+					PlayerSteam:      args[5],
+					PossessClassname: args[6],
 				}
 
 				// Store chainID in session data for the player suffix
@@ -439,15 +374,6 @@ func GetLogParsers() []LogParser {
 					"chainID": args[2],
 				}
 				eventStore.StoreSessionData(playerSuffix, sessionData)
-
-				if eosID, ok := ids["eos"]; ok {
-					eventManagerData.PlayerEOS = eosID
-				}
-
-				if steamID, ok := ids["steam"]; ok {
-					eventManagerData.PlayerSteam = steamID
-					eventData["pawn"] = steamID
-				}
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])
 			},

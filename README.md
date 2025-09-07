@@ -25,6 +25,7 @@ The project is currently in the early stages of development and is not ready for
 
 - [milutinke/sqcp](https://github.com/milutinke/sqcp): This project draws inspiration sqcp and we extend gratitude to the Squad gaming community for their support and feedback.
 - [SquadGO/squad-rcon-go](https://github.com/SquadGO/squad-rcon-go): For the RCON library used in this project with some modifications of our own to suit our needs.
+- [Team-Silver-Sphere/SquadJS](https://github.com/Team-Silver-Sphere/SquadJS/tree/v4.2.0): Big thanks to Team Silver Sphere for their SquadJS project which provided a solid foundation for our log parsing logic along plenty of designs for plugins! We do our best to be feature compat with SquadJS to make a easy and simple switch.
 
 ## Features
 
