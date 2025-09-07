@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
+	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
@@ -101,12 +102,8 @@ func Define() plugin_manager.PluginDefinition {
 			},
 		},
 
-		EventHandlers: []plugin_manager.EventHandler{
-			{
-				Source:      plugin_manager.EventSourceRCON,
-				EventType:   "RCON_CHAT_MESSAGE",
-				Description: "Handles admin requests from in-game chat",
-			},
+		Events: []event_manager.EventType{
+			event_manager.EventTypeRconChatMessage,
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -248,6 +245,7 @@ func (p *DiscordAdminRequestPlugin) UpdateConfig(config map[string]interface{}) 
 // handleChatMessage processes chat messages looking for admin requests
 func (p *DiscordAdminRequestPlugin) handleChatMessage(event *plugin_manager.PluginEvent) error {
 	// TODO: Array of roles that are considered admins
+	// event, ok := rawEvent.Data["event"].()
 
 	// Extract message data
 	message, ok := event.Data["message"].(string)
@@ -508,14 +506,14 @@ func (p *DiscordAdminRequestPlugin) sendWithoutPing(channelID string, serverInfo
 // sendInGameResponse sends a response to the player in-game
 func (p *DiscordAdminRequestPlugin) sendInGameResponse(playerSteamID string, onlineAdmins int) error {
 	if !p.getBoolConfig("show_in_game_admins") {
-		return p.apis.RconAPI.SendMessageToPlayer(playerSteamID, "An admin has been notified. Please wait for us to get back to you.")
+		return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, "An admin has been notified. Please wait for us to get back to you.")
 	}
 
 	if onlineAdmins == 0 {
-		return p.apis.RconAPI.SendMessageToPlayer(playerSteamID, "There are no in-game admins, however, an admin has been notified via Discord. Please wait for us to get back to you.")
+		return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, "There are no in-game admins, however, an admin has been notified via Discord. Please wait for us to get back to you.")
 	}
 
-	return p.apis.RconAPI.SendMessageToPlayer(playerSteamID, fmt.Sprintf("There are %d in-game admin(s). Please wait for us to get back to you.", onlineAdmins))
+	return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, fmt.Sprintf("There are %d in-game admin(s). Please wait for us to get back to you.", onlineAdmins))
 }
 
 // warnInGameAdmins sends a warning to in-game admins
@@ -532,8 +530,8 @@ func (p *DiscordAdminRequestPlugin) warnInGameAdmins(playerName, message string)
 	// Send to each online admin individually
 	for _, admin := range admins {
 		if admin.IsOnline {
-			if err := p.apis.RconAPI.SendMessageToPlayer(admin.SteamID, adminMessage); err != nil {
-				p.apis.LogAPI.Error("Failed to send message to admin", err, map[string]interface{}{
+			if err := p.apis.RconAPI.SendWarningToPlayer(admin.SteamID, adminMessage); err != nil {
+				p.apis.LogAPI.Error("Failed to send warning to admin", err, map[string]interface{}{
 					"adminID":   admin.SteamID,
 					"adminName": admin.Name,
 				})

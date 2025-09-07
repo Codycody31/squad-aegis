@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
 
@@ -46,7 +47,7 @@ type PluginDefinition struct {
 	AllowMultipleInstances bool                            `json:"allow_multiple_instances"`
 	RequiredConnectors     []string                        `json:"required_connectors"`
 	ConfigSchema           plug_config_schema.ConfigSchema `json:"config_schema"`
-	EventHandlers          []EventHandler                  `json:"event_handlers"`
+	Events                 []event_manager.EventType       `json:"event_handlers"`
 	LongRunning            bool                            `json:"long_running"`
 	CreateInstance         func() Plugin                   `json:"-"`
 }
@@ -97,7 +98,7 @@ type PluginInstance struct {
 	ID        uuid.UUID              `json:"id"`
 	ServerID  uuid.UUID              `json:"server_id"`
 	PluginID  string                 `json:"plugin_id"`
-	Name      string                 `json:"name"`
+	Notes     string                 `json:"notes"`
 	Config    map[string]interface{} `json:"config"`
 	Status    PluginStatus           `json:"status"`
 	Enabled   bool                   `json:"enabled"`
@@ -230,11 +231,11 @@ type RconAPI interface {
 	// SendCommand sends an RCON command (restricted list)
 	SendCommand(command string) (string, error)
 
-	// SendMessage sends a message to all players
-	SendMessage(message string) error
+	// Broadcast sends a message to all players
+	Broadcast(message string) error
 
-	// SendMessageToPlayer sends a message to a specific player
-	SendMessageToPlayer(playerID string, message string) error
+	// SendWarningToPlayer sends a warning message to a specific player
+	SendWarningToPlayer(playerID string, message string) error
 
 	// KickPlayer kicks a player (admin only)
 	KickPlayer(playerID string, reason string) error

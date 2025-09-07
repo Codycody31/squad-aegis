@@ -119,55 +119,65 @@ func (m *RconManager) broadcastEvent(event RconEvent) {
 	}
 
 	// Publish to centralized event manager
-	if m.eventManager != nil {
-		var eventType event_manager.EventType
-		var eventData map[string]interface{}
-
-		switch event.Type {
-		case "CHAT_MESSAGE":
-			eventType = event_manager.EventTypeRconChatMessage
-		case "CHAT_COMMAND":
-			eventType = event_manager.EventTypeRconChatCommand
-		case "PLAYER_WARNED":
-			eventType = event_manager.EventTypeRconPlayerWarned
-		case "PLAYER_KICKED":
-			eventType = event_manager.EventTypeRconPlayerKicked
-		case "POSSESSED_ADMIN_CAMERA":
-			eventType = event_manager.EventTypeRconPossessedAdminCamera
-		case "UNPOSSESSED_ADMIN_CAMERA":
-			eventType = event_manager.EventTypeRconUnpossessedAdminCamera
-		case "SQUAD_CREATED":
-			eventType = event_manager.EventTypeRconSquadCreated
-		case "CONNECTION_CLOSED":
-			eventType = event_manager.EventTypeRconConnectionClosed
-		case "CONNECTION_ERROR":
-			eventType = event_manager.EventTypeRconConnectionError
+	if m.eventManager != nil && event.Data != nil {
+		// Try to convert to map or use reflection
+		switch data := event.Data.(type) {
+		case rconTypes.Warn:
+			m.eventManager.PublishEvent(event.ServerID, &event_manager.RconPlayerWarnedData{
+				PlayerName: data.PlayerName,
+				Message:    data.Message,
+			}, data.Raw)
+		case rconTypes.Ban:
+			m.eventManager.PublishEvent(event.ServerID, &event_manager.RconPlayerBannedData{
+				PlayerID:   data.PlayerID,
+				SteamID:    data.SteamID,
+				PlayerName: data.PlayerName,
+				Interval:   data.Interval,
+			}, data.Raw)
+		case rconTypes.Kick:
+			m.eventManager.PublishEvent(event.ServerID, &event_manager.RconPlayerKickedData{
+				PlayerID:   data.PlayerID,
+				EosID:      data.EosID,
+				SteamID:    data.SteamID,
+				PlayerName: data.PlayerName,
+			}, data.Raw)
+		case rconTypes.Message:
+			m.eventManager.PublishEvent(event.ServerID, &event_manager.RconChatMessageData{
+				ChatType:   data.ChatType,
+				EosID:      data.EosID,
+				Message:    data.Message,
+				PlayerName: data.PlayerName,
+				SteamID:    data.SteamID,
+			}, data.Raw)
+		case rconTypes.PosAdminCam:
+			m.eventManager.PublishEvent(event.ServerID, &event_manager.RconAdminCameraData{
+				AdminName: data.AdminName,
+				EosID:     data.EosID,
+				SteamID:   data.SteamID,
+				Action:    "possessed",
+			}, data.Raw)
+		case rconTypes.UnposAdminCam:
+			m.eventManager.PublishEvent(event.ServerID, &event_manager.RconAdminCameraData{
+				AdminName: data.AdminName,
+				EosID:     data.EosID,
+				SteamID:   data.SteamID,
+				Action:    "unpossessed",
+			}, data.Raw)
+		case rconTypes.SquadCreated:
+			m.eventManager.PublishEvent(event.ServerID, &event_manager.RconSquadCreatedData{
+				PlayerName: data.PlayerName,
+				EosID:      data.EosID,
+				SteamID:    data.SteamID,
+				SquadID:    data.SquadID,
+				SquadName:  data.SquadName,
+				TeamName:   data.TeamName,
+			}, data.Raw)
 		default:
-			// Unknown event type, skip
-			return
+			log.Warn().
+				Str("serverID", event.ServerID.String()).
+				Str("eventType", event.Type).
+				Msg("Unknown event data type, cannot publish to event manager")
 		}
-
-		// Convert event data to map
-		eventData = make(map[string]interface{})
-		if event.Data != nil {
-			// Try to convert to map or use reflection
-			switch data := event.Data.(type) {
-			case map[string]interface{}:
-				eventData = data
-			case rconTypes.Message:
-				eventData = map[string]interface{}{
-					"message": data.Message,
-					"name":    data.PlayerName,
-					"steamId": data.SteamID,
-					"raw":     data.Raw,
-				}
-			default:
-				eventData["data"] = event.Data
-			}
-		}
-		eventData["time"] = event.Time
-
-		m.eventManager.PublishEvent(event.ServerID, eventType, eventData, event.Data)
 	}
 }
 

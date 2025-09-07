@@ -110,7 +110,7 @@ const loadPlugins = async () => {
         Authorization: `Bearer ${authStore.token}`,
       },
     });
-    plugins.value = response.data.plugins || [];
+    plugins.value = (response as any).data.plugins || [];
   } catch (error: any) {
     console.error("Failed to load plugins:", error);
     toast({
@@ -129,7 +129,7 @@ const loadAvailablePlugins = async () => {
         Authorization: `Bearer ${authStore.token}`,
       },
     });
-    availablePlugins.value = response.data.plugins || [];
+    availablePlugins.value = (response as any).data.plugins || [];
   } catch (error: any) {
     console.error("Failed to load available plugins:", error);
     toast({
@@ -283,8 +283,8 @@ const savePluginConfig = async () => {
 };
 
 // Handle plugin selection change
-const onPluginSelect = (pluginId: string) => {
-  selectedPlugin.value = pluginId;
+const onPluginSelect = (pluginId: any) => {
+  selectedPlugin.value = pluginId || "";
   const plugin = availablePlugins.value.find(p => p.id === pluginId);
   if (plugin?.config_schema?.fields) {
     // Initialize config with default values
@@ -323,10 +323,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="container mx-auto py-6">
-    <div class="flex items-center justify-between mb-6">
+  <div class="p-4">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
       <div>
-        <h1 class="text-3xl font-bold">Server Plugins</h1>
+        <h1 class="text-2xl font-bold">Server Plugins</h1>
         <p class="text-muted-foreground">
           Manage plugins for this server
         </p>
@@ -338,7 +338,7 @@ onMounted(async () => {
             Add Plugin
           </Button>
         </DialogTrigger>
-        <DialogContent class="max-w-2xl">
+        <DialogContent class="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add New Plugin</DialogTitle>
             <DialogDescription>
@@ -425,7 +425,7 @@ onMounted(async () => {
                   :id="`config-${field.name}`"
                   v-model="pluginConfig[field.name]"
                   placeholder="Enter values separated by commas"
-                  @input="pluginConfig[field.name] = $event.target.value.split(',').map(s => s.trim())"
+                  @input="pluginConfig[field.name] = ($event.target as HTMLTextAreaElement).value.split(',').map((s: string) => s.trim())"
                 />
               </div>
             </div>
@@ -440,7 +440,7 @@ onMounted(async () => {
     </div>
 
     <!-- Plugins List -->
-    <Card>
+    <Card class="mb-4">
       <CardHeader>
         <CardTitle>Active Plugins</CardTitle>
         <CardDescription>
@@ -456,21 +456,29 @@ onMounted(async () => {
           <p class="text-muted-foreground">No plugins configured for this server</p>
         </div>
         
-        <Table v-else>
+        <div v-else class="overflow-x-auto">
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Plugin</TableHead>
+              <TableHead class="hidden sm:table-cell">Plugin</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Enabled</TableHead>
-              <TableHead>Last Error</TableHead>
+              <TableHead class="hidden md:table-cell">Enabled</TableHead>
+              <TableHead class="hidden lg:table-cell">Last Error</TableHead>
               <TableHead class="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-for="plugin in plugins" :key="plugin.id">
-              <TableCell class="font-medium">{{ plugin.name }}</TableCell>
-              <TableCell>
+            <TableRow v-for="plugin in plugins" :key="plugin.id" class="hover:bg-muted/50">
+              <TableCell class="font-medium">
+                <div class="flex flex-col">
+                  <span>{{ plugin.name }}</span>
+                  <span class="text-sm text-muted-foreground sm:hidden">
+                    {{ plugin.plugin_id }}
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell class="hidden sm:table-cell">
                 <div class="flex flex-col">
                   <span>{{ plugin.plugin_id }}</span>
                   <span class="text-sm text-muted-foreground">
@@ -484,13 +492,13 @@ onMounted(async () => {
                   {{ plugin.status }}
                 </Badge>
               </TableCell>
-              <TableCell>
+              <TableCell class="hidden md:table-cell">
                 <Switch
                   :checked="plugin.enabled"
                   @update:checked="togglePlugin(plugin)"
                 />
               </TableCell>
-              <TableCell>
+              <TableCell class="hidden lg:table-cell">
                 <span 
                   v-if="plugin.last_error" 
                   class="text-sm text-red-600 dark:text-red-400"
@@ -501,11 +509,12 @@ onMounted(async () => {
                 <span v-else class="text-muted-foreground">None</span>
               </TableCell>
               <TableCell class="text-right">
-                <div class="flex items-center justify-end space-x-2">
+                <div class="flex items-center justify-end space-x-1 sm:space-x-2">
                   <Button
                     variant="outline"
                     size="sm"
                     @click="configurePlugin(plugin)"
+                    class="hidden sm:inline-flex"
                   >
                     <Settings class="w-4 h-4" />
                   </Button>
@@ -513,6 +522,7 @@ onMounted(async () => {
                     variant="outline"
                     size="sm"
                     @click="$router.push(`/servers/${serverId}/plugins/${plugin.id}/metrics`)"
+                    class="hidden sm:inline-flex"
                   >
                     <BarChart3 class="w-4 h-4" />
                   </Button>
@@ -520,6 +530,7 @@ onMounted(async () => {
                     variant="outline"
                     size="sm"
                     @click="$router.push(`/servers/${serverId}/plugins/${plugin.id}/logs`)"
+                    class="hidden sm:inline-flex"
                   >
                     <FileText class="w-4 h-4" />
                   </Button>
@@ -527,20 +538,28 @@ onMounted(async () => {
                     variant="destructive"
                     size="sm"
                     @click="deletePlugin(plugin)"
+                    class="hidden sm:inline-flex"
                   >
                     <Trash2 class="w-4 h-4" />
                   </Button>
+                  <!-- Mobile dropdown menu -->
+                  <div class="sm:hidden">
+                    <Button variant="outline" size="sm">
+                      <Settings class="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               </TableCell>
             </TableRow>
           </TableBody>
         </Table>
+        </div>
       </CardContent>
     </Card>
 
     <!-- Configuration Dialog -->
     <Dialog v-model:open="showConfigDialog">
-      <DialogContent class="max-w-2xl">
+      <DialogContent class="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Configure {{ currentPlugin?.name }}</DialogTitle>
           <DialogDescription>
@@ -594,7 +613,7 @@ onMounted(async () => {
               :id="`edit-config-${field.name}`"
               :model-value="Array.isArray(pluginConfig[field.name]) ? pluginConfig[field.name].join(', ') : pluginConfig[field.name]"
               placeholder="Enter values separated by commas"
-              @input="pluginConfig[field.name] = $event.target.value.split(',').map(s => s.trim())"
+              @input="pluginConfig[field.name] = ($event.target as HTMLTextAreaElement).value.split(',').map((s: string) => s.trim())"
             />
           </div>
         </div>

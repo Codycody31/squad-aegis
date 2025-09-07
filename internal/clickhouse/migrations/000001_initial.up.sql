@@ -2,8 +2,7 @@ CREATE DATABASE IF NOT EXISTS squad_aegis;
 
 --migration:split
 CREATE TABLE IF NOT EXISTS squad_aegis.players (
-    player_id    UUID,                      -- matches public.players.id
-    steam_id     UInt64,                    -- matches public.players.steam_id (bigint)
+    steam_id     UInt64,                    -- Primary identifier using Steam ID
     display_name String,
     first_seen   DateTime64(3, 'UTC'),
     last_seen    DateTime64(3, 'UTC'),
@@ -11,13 +10,13 @@ CREATE TABLE IF NOT EXISTS squad_aegis.players (
     INDEX idx_player_name_tbf display_name TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 64
 )
 ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY (player_id);
+ORDER BY (steam_id);
 
 --migration:split
 CREATE TABLE IF NOT EXISTS squad_aegis.server_player_sessions (
     session_id       UInt64,                         -- mirrors public.play_sessions.id (bigint)
     server_id        UUID,                           -- mirrors public.play_sessions.server_id
-    player_id        UUID,                           -- mirrors public.play_sessions.player_id
+    steam_id         UInt64,                         -- use steam_id instead of player_id
     connected_at     DateTime64(3, 'UTC'),
     disconnected_at  Nullable(DateTime64(3, 'UTC')),
     duration_sec     Nullable(UInt32),
@@ -27,37 +26,39 @@ CREATE TABLE IF NOT EXISTS squad_aegis.server_player_sessions (
 )
 ENGINE = ReplacingMergeTree(updated_at)
 PARTITION BY toYYYYMM(connected_at)
-ORDER BY (server_id, connected_at, player_id, session_id);
+ORDER BY (server_id, connected_at, steam_id, session_id);
 
 --migration:split
 CREATE MATERIALIZED VIEW IF NOT EXISTS squad_aegis.mv_server_player_daily_sessions
 ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(day)
-ORDER BY (server_id, player_id, day)
+ORDER BY (server_id, steam_id, day)
 AS
 SELECT
     server_id,
-    player_id,
+    steam_id,
     toDate(connected_at) AS day,
     count() AS sessions,
     sumIf(duration_sec, duration_sec IS NOT NULL) AS total_duration_sec
 FROM squad_aegis.server_player_sessions
-GROUP BY server_id, player_id, day;
+GROUP BY server_id, steam_id, day;
 
 --migration:split
 CREATE TABLE IF NOT EXISTS squad_aegis.server_player_chat_messages (
     message_id  UUID DEFAULT generateUUIDv4(),
     server_id   UUID,
-    player_id   UUID,
+    player_name String,
+    steam_id    UInt64,                     -- use steam_id instead of player_id
+    eos_id      String,
     sent_at     DateTime64(3, 'UTC'),
-    type        UInt8,
+    chat_type        String,                   -- e.g. "all", "team", "squad", "admin"
     message     String CODEC(ZSTD(5)),
     ingest_ts   DateTime DEFAULT now(),
     INDEX idx_msg_tokenbf message TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 64
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(sent_at)
-ORDER BY (server_id, sent_at, player_id, message_id);
+ORDER BY (server_id, sent_at, steam_id, message_id);
 
 --migration:split
 CREATE TABLE IF NOT EXISTS squad_aegis.server_admin_broadcast_events (

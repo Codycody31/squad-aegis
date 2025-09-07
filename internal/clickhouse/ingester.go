@@ -3,7 +3,6 @@ package clickhouse
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,8 +31,33 @@ type IngestEvent struct {
 	ServerID  uuid.UUID
 	EventType event_manager.EventType
 	EventTime time.Time
-	Data      map[string]interface{}
+	Data      event_manager.EventData
 	RawData   interface{}
+}
+
+// Helper functions for safe type assertions and conversions
+func parseFloat32(s string) float32 {
+	if f, err := strconv.ParseFloat(s, 32); err == nil {
+		return float32(f)
+	}
+	return 0
+}
+
+func parseTime(s string) time.Time {
+	// Try different time formats that might be used in logs
+	formats := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02T15:04:05.000Z",
+		"2006.01.02-15.04.05:000",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // NewEventIngester creates a new event ingester
@@ -175,6 +199,7 @@ func (i *EventIngester) ingestBatch(events []*IngestEvent) {
 
 	// Process each event type
 	for eventType, typeEvents := range eventGroups {
+		log.Debug().Interface("event", eventType).Int("count", len(typeEvents)).Msg("Ingesting events")
 		if err := i.ingestEventType(eventType, typeEvents); err != nil {
 			log.Error().
 				Err(err).
@@ -188,7 +213,7 @@ func (i *EventIngester) ingestBatch(events []*IngestEvent) {
 // ingestEventType ingests events of a specific type
 func (i *EventIngester) ingestEventType(eventType event_manager.EventType, events []*IngestEvent) error {
 	switch eventType {
-	case event_manager.EventTypeLogChatMessage:
+	case event_manager.EventTypeRconChatMessage:
 		return i.ingestChatMessages(events)
 	case event_manager.EventTypeLogPlayerConnected:
 		return i.ingestPlayerConnected(events)
@@ -228,49 +253,6 @@ func (i *EventIngester) ingestEventType(eventType event_manager.EventType, event
 	}
 }
 
-// Helper functions for extracting values from event data
-func getStringValue(data map[string]interface{}, key string) string {
-	if val, ok := data[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
-		return fmt.Sprintf("%v", val)
-	}
-	return ""
-}
-
-func getFloat32Value(data map[string]interface{}, key string) float32 {
-	if val, ok := data[key]; ok {
-		switch v := val.(type) {
-		case float64:
-			return float32(v)
-		case float32:
-			return v
-		case int:
-			return float32(v)
-		case string:
-			if f, err := strconv.ParseFloat(v, 32); err == nil {
-				return float32(f)
-			}
-		}
-	}
-	return 0
-}
-
-func getTimeValue(data map[string]interface{}, key string) time.Time {
-	if val, ok := data[key]; ok {
-		switch v := val.(type) {
-		case time.Time:
-			return v
-		case string:
-			if t, err := time.Parse(time.RFC3339, v); err == nil {
-				return t
-			}
-		}
-	}
-	return time.Time{}
-}
-
 // Specific ingestion functions for each event type
 func (i *EventIngester) ingestChatMessages(events []*IngestEvent) error {
 	if len(events) == 0 {
@@ -278,34 +260,30 @@ func (i *EventIngester) ingestChatMessages(events []*IngestEvent) error {
 	}
 
 	query := `INSERT INTO squad_aegis.server_player_chat_messages 
-		(message_id, server_id, player_id, sent_at, type, message, ingest_ts) VALUES`
+		(message_id, server_id, steam_id, eos_id, player_name, sent_at, chat_type, message, ingest_ts) VALUES`
 
 	values := make([]string, 0, len(events))
 	args := make([]interface{}, 0, len(events)*7)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Generate a UUID for the message
 		messageID := uuid.New()
-
-		// Try to extract player ID from steam ID if available
-		var playerID uuid.UUID
-		if steamIDStr := getStringValue(event.Data, "steamId"); steamIDStr != "" {
-			// For now, use a deterministic UUID based on steam ID
-			// In a real system, you'd look up the player ID from the players table
-			playerID = uuid.NewSHA1(uuid.NameSpaceDNS, []byte("steam:"+steamIDStr))
-		} else {
-			playerID = uuid.New() // Fallback
+		chatData, ok := event.Data.(*event_manager.RconChatMessageData)
+		if !ok {
+			continue
 		}
 
 		args = append(args,
 			messageID,
 			event.ServerID,
-			playerID,
+			chatData.SteamID,
+			chatData.EosID,
+			chatData.PlayerName,
 			event.EventTime,
-			1, // Chat message type
-			getStringValue(event.Data, "message"),
+			chatData.ChatType,
+			chatData.Message,
 			time.Now(),
 		)
 	}
@@ -327,14 +305,25 @@ func (i *EventIngester) ingestPlayerConnected(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, playerController, ip, steam, eos string
+		if connectedData, ok := event.Data.(*event_manager.LogPlayerConnectedData); ok {
+			chainID = connectedData.ChainID
+			playerController = connectedData.PlayerController
+			ip = connectedData.IPAddress
+			steam = connectedData.SteamID
+			eos = connectedData.EOSID
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "playerController"),
-			getStringValue(event.Data, "ip"),
-			getStringValue(event.Data, "steam"),
-			getStringValue(event.Data, "eos"),
+			chainID,
+			playerController,
+			ip,
+			steam,
+			eos,
 			time.Now(),
 		)
 	}
@@ -356,13 +345,23 @@ func (i *EventIngester) ingestPlayerDisconnected(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, ip, playerController, eosID string
+		if disconnectedData, ok := event.Data.(*event_manager.LogPlayerDisconnectedData); ok {
+			chainID = disconnectedData.ChainID
+			ip = disconnectedData.IPAddress
+			playerController = disconnectedData.PlayerController
+			eosID = disconnectedData.EOSID
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "ip"),
-			getStringValue(event.Data, "playerController"),
-			getStringValue(event.Data, "eosId"),
+			chainID,
+			ip,
+			playerController,
+			eosID,
 			time.Now(),
 		)
 	}
@@ -384,17 +383,33 @@ func (i *EventIngester) ingestPlayerDamaged(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, victimName, attackerName, attackerController, weapon, attackerEOS, attackerSteam string
+		var damage float32
+
+		if damagedData, ok := event.Data.(*event_manager.LogPlayerDamagedData); ok {
+			chainID = damagedData.ChainID
+			victimName = damagedData.VictimName
+			attackerName = damagedData.AttackerName
+			attackerController = damagedData.AttackerController
+			weapon = damagedData.Weapon
+			attackerEOS = damagedData.AttackerEOS
+			attackerSteam = damagedData.AttackerSteam
+			damage = parseFloat32(damagedData.Damage)
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "victimName"),
-			getFloat32Value(event.Data, "damage"),
-			getStringValue(event.Data, "attackerName"),
-			getStringValue(event.Data, "attackerController"),
-			getStringValue(event.Data, "weapon"),
-			getStringValue(event.Data, "attackerEos"),
-			getStringValue(event.Data, "attackerSteam"),
+			chainID,
+			victimName,
+			damage,
+			attackerName,
+			attackerController,
+			weapon,
+			attackerEOS,
+			attackerSteam,
 			time.Now(),
 		)
 	}
@@ -417,28 +432,45 @@ func (i *EventIngester) ingestPlayerDied(events []*IngestEvent) error {
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
-		woundTime := getTimeValue(event.Data, "woundTime")
+		// Extract data from structured event data
+		var chainID, victimName, attackerPlayerController, weapon, attackerEOS, attackerSteam, woundTimeStr string
+		var damage float32
+		var teamkill uint8
 		var woundTimePtr *time.Time
-		if !woundTime.IsZero() {
-			woundTimePtr = &woundTime
+
+		if diedData, ok := event.Data.(*event_manager.LogPlayerDiedData); ok {
+			chainID = diedData.ChainID
+			victimName = diedData.VictimName
+			attackerPlayerController = diedData.AttackerPlayerController
+			weapon = diedData.Weapon
+			attackerEOS = diedData.AttackerEOS
+			attackerSteam = diedData.AttackerSteam
+			woundTimeStr = diedData.WoundTime
+			damage = parseFloat32(diedData.Damage)
+			if diedData.Teamkill {
+				teamkill = 1
+			}
 		}
 
-		teamkill := uint8(0)
-		if tk, ok := event.Data["teamkill"].(bool); ok && tk {
-			teamkill = 1
+		// Parse wound time if available
+		if woundTimeStr != "" {
+			woundTime := parseTime(woundTimeStr)
+			if !woundTime.IsZero() {
+				woundTimePtr = &woundTime
+			}
 		}
 
 		args = append(args,
 			event.EventTime,
 			woundTimePtr,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "victimName"),
-			getFloat32Value(event.Data, "damage"),
-			getStringValue(event.Data, "attackerPlayerController"),
-			getStringValue(event.Data, "weapon"),
-			getStringValue(event.Data, "attackerEos"),
-			getStringValue(event.Data, "attackerSteam"),
+			chainID,
+			victimName,
+			damage,
+			attackerPlayerController,
+			weapon,
+			attackerEOS,
+			attackerSteam,
 			teamkill,
 			time.Now(),
 		)
@@ -462,21 +494,34 @@ func (i *EventIngester) ingestPlayerWounded(events []*IngestEvent) error {
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
-		teamkill := uint8(0)
-		if tk, ok := event.Data["teamkill"].(bool); ok && tk {
-			teamkill = 1
+		// Extract data from structured event data
+		var chainID, victimName, attackerPlayerController, weapon, attackerEOS, attackerSteam string
+		var damage float32
+		var teamkill uint8
+
+		if woundedData, ok := event.Data.(*event_manager.LogPlayerWoundedData); ok {
+			chainID = woundedData.ChainID
+			victimName = woundedData.VictimName
+			attackerPlayerController = woundedData.AttackerPlayerController
+			weapon = woundedData.Weapon
+			attackerEOS = woundedData.AttackerEOS
+			attackerSteam = woundedData.AttackerSteam
+			damage = parseFloat32(woundedData.Damage)
+			if woundedData.Teamkill {
+				teamkill = 1
+			}
 		}
 
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "victimName"),
-			getFloat32Value(event.Data, "damage"),
-			getStringValue(event.Data, "attackerPlayerController"),
-			getStringValue(event.Data, "weapon"),
-			getStringValue(event.Data, "attackerEos"),
-			getStringValue(event.Data, "attackerSteam"),
+			chainID,
+			victimName,
+			damage,
+			attackerPlayerController,
+			weapon,
+			attackerEOS,
+			attackerSteam,
 			teamkill,
 			time.Now(),
 		)
@@ -499,16 +544,29 @@ func (i *EventIngester) ingestPlayerRevived(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, reviverName, victimName, reviverEOS, reviverSteam, victimEOS, victimSteam string
+		if revivedData, ok := event.Data.(*event_manager.LogPlayerRevivedData); ok {
+			chainID = revivedData.ChainID
+			reviverName = revivedData.ReviverName
+			victimName = revivedData.VictimName
+			reviverEOS = revivedData.ReviverEOS
+			reviverSteam = revivedData.ReviverSteam
+			victimEOS = revivedData.VictimEOS
+			victimSteam = revivedData.VictimSteam
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "reviverName"),
-			getStringValue(event.Data, "victimName"),
-			getStringValue(event.Data, "reviverEos"),
-			getStringValue(event.Data, "reviverSteam"),
-			getStringValue(event.Data, "victimEos"),
-			getStringValue(event.Data, "victimSteam"),
+			chainID,
+			reviverName,
+			victimName,
+			reviverEOS,
+			reviverSteam,
+			victimEOS,
+			victimSteam,
 			time.Now(),
 		)
 	}
@@ -530,20 +588,37 @@ func (i *EventIngester) ingestNewGame(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, team, subfaction, faction, action, tickets, layer, level, dlc, mapClassname, layerClassname string
+		if newGameData, ok := event.Data.(*event_manager.LogNewGameData); ok {
+			chainID = newGameData.ChainID
+			team = newGameData.Team
+			subfaction = newGameData.Subfaction
+			faction = newGameData.Faction
+			action = newGameData.Action
+			tickets = newGameData.Tickets
+			layer = newGameData.Layer
+			level = newGameData.Level
+			dlc = newGameData.DLC
+			mapClassname = newGameData.MapClassname
+			layerClassname = newGameData.LayerClassname
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "team"),
-			getStringValue(event.Data, "subfaction"),
-			getStringValue(event.Data, "faction"),
-			getStringValue(event.Data, "action"),
-			getStringValue(event.Data, "tickets"),
-			getStringValue(event.Data, "layer"),
-			getStringValue(event.Data, "level"),
-			getStringValue(event.Data, "dlc"),
-			getStringValue(event.Data, "mapClassname"),
-			getStringValue(event.Data, "layerClassname"),
+			chainID,
+			team,
+			subfaction,
+			faction,
+			action,
+			tickets,
+			layer,
+			level,
+			dlc,
+			mapClassname,
+			layerClassname,
 			time.Now(),
 		)
 	}
@@ -566,25 +641,34 @@ func (i *EventIngester) ingestRoundEnded(events []*IngestEvent) error {
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?)")
 
-		// Convert winner/loser data to JSON strings if they exist
+		// Extract data from structured event data
+		var chainID, winner, layer string
 		var winnerJSON, loserJSON string
-		if winner, ok := event.Data["winner"]; ok && winner != nil {
-			if winnerBytes, err := json.Marshal(winner); err == nil {
-				winnerJSON = string(winnerBytes)
+
+		if roundEndedData, ok := event.Data.(*event_manager.LogRoundEndedData); ok {
+			chainID = roundEndedData.ChainID
+			winner = roundEndedData.Winner
+			layer = roundEndedData.Layer
+
+			// Convert winner/loser data to JSON strings if they exist
+			if roundEndedData.WinnerData != nil {
+				if winnerBytes, err := json.Marshal(roundEndedData.WinnerData); err == nil {
+					winnerJSON = string(winnerBytes)
+				}
 			}
-		}
-		if loser, ok := event.Data["loser"]; ok && loser != nil {
-			if loserBytes, err := json.Marshal(loser); err == nil {
-				loserJSON = string(loserBytes)
+			if roundEndedData.LoserData != nil {
+				if loserBytes, err := json.Marshal(roundEndedData.LoserData); err == nil {
+					loserJSON = string(loserBytes)
+				}
 			}
 		}
 
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "winner"),
-			getStringValue(event.Data, "layer"),
+			chainID,
+			winner,
+			layer,
 			winnerJSON,
 			loserJSON,
 			time.Now(),
@@ -608,17 +692,31 @@ func (i *EventIngester) ingestPlayerSquadChange(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, name, teamID, squadID, oldTeamID, oldSquadID, playerEOS, playerSteam string
+		if squadChangeData, ok := event.Data.(*event_manager.LogPlayerSquadChangeData); ok {
+			chainID = squadChangeData.ChainID
+			name = squadChangeData.Name
+			teamID = squadChangeData.TeamID
+			squadID = squadChangeData.SquadID
+			oldTeamID = squadChangeData.OldTeamID
+			oldSquadID = squadChangeData.OldSquadID
+			playerEOS = squadChangeData.PlayerEOS
+			playerSteam = squadChangeData.PlayerSteam
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "name"),
-			getStringValue(event.Data, "teamId"),
-			getStringValue(event.Data, "squadId"),
-			getStringValue(event.Data, "oldTeamId"),
-			getStringValue(event.Data, "oldSquadId"),
-			getStringValue(event.Data, "playerEos"),
-			getStringValue(event.Data, "playerSteam"),
+			chainID,
+			name,
+			teamID,
+			squadID,
+			oldTeamID,
+			oldSquadID,
+			playerEOS,
+			playerSteam,
 			time.Now(),
 		)
 	}
@@ -640,15 +738,27 @@ func (i *EventIngester) ingestPlayerTeamChange(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, name, newTeamID, oldTeamID, playerEOS, playerSteam string
+		if teamChangeData, ok := event.Data.(*event_manager.LogPlayerTeamChangeData); ok {
+			chainID = teamChangeData.ChainID
+			name = teamChangeData.Name
+			newTeamID = teamChangeData.NewTeamID
+			oldTeamID = teamChangeData.OldTeamID
+			playerEOS = teamChangeData.PlayerEOS
+			playerSteam = teamChangeData.PlayerSteam
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "name"),
-			getStringValue(event.Data, "newTeamId"),
-			getStringValue(event.Data, "oldTeamId"),
-			getStringValue(event.Data, "playerEos"),
-			getStringValue(event.Data, "playerSteam"),
+			chainID,
+			name,
+			newTeamID,
+			oldTeamID,
+			playerEOS,
+			playerSteam,
 			time.Now(),
 		)
 	}
@@ -670,14 +780,25 @@ func (i *EventIngester) ingestPlayerPossess(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, playerSuffix, possessClassname, playerEOS, playerSteam string
+		if possessData, ok := event.Data.(*event_manager.LogPlayerPossessData); ok {
+			chainID = possessData.ChainID
+			playerSuffix = possessData.PlayerSuffix
+			possessClassname = possessData.PossessClassname
+			playerEOS = possessData.PlayerEOS
+			playerSteam = possessData.PlayerSteam
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "playerSuffix"),
-			getStringValue(event.Data, "possessClassname"),
-			getStringValue(event.Data, "playerEos"),
-			getStringValue(event.Data, "playerSteam"),
+			chainID,
+			playerSuffix,
+			possessClassname,
+			playerEOS,
+			playerSteam,
 			time.Now(),
 		)
 	}
@@ -699,14 +820,25 @@ func (i *EventIngester) ingestJoinSucceeded(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, playerSuffix, ip, steam, eos string
+		if joinData, ok := event.Data.(*event_manager.LogJoinSucceededData); ok {
+			chainID = joinData.ChainID
+			playerSuffix = joinData.PlayerSuffix
+			ip = joinData.IPAddress
+			steam = joinData.SteamID
+			eos = joinData.EOSID
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "playerSuffix"),
-			getStringValue(event.Data, "ip"),
-			getStringValue(event.Data, "steam"),
-			getStringValue(event.Data, "eos"),
+			chainID,
+			playerSuffix,
+			ip,
+			steam,
+			eos,
 			time.Now(),
 		)
 	}
@@ -728,12 +860,21 @@ func (i *EventIngester) ingestAdminBroadcast(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, message, fromUser string
+		if broadcastData, ok := event.Data.(*event_manager.LogAdminBroadcastData); ok {
+			chainID = broadcastData.ChainID
+			message = broadcastData.Message
+			fromUser = broadcastData.From
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "message"),
-			getStringValue(event.Data, "fromUser"),
+			chainID,
+			message,
+			fromUser,
 			time.Now(),
 		)
 	}
@@ -755,16 +896,31 @@ func (i *EventIngester) ingestDeployableDamaged(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, deployable, weapon, playerSuffix, damageType string
+		var damage, healthRemaining float32
+
+		if deployableDamagedData, ok := event.Data.(*event_manager.LogDeployableDamagedData); ok {
+			chainID = deployableDamagedData.ChainID
+			deployable = deployableDamagedData.Deployable
+			weapon = deployableDamagedData.Weapon
+			playerSuffix = deployableDamagedData.PlayerSuffix
+			damageType = deployableDamagedData.DamageType
+			damage = parseFloat32(deployableDamagedData.Damage)
+			healthRemaining = parseFloat32(deployableDamagedData.HealthRemaining)
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getStringValue(event.Data, "deployable"),
-			getFloat32Value(event.Data, "damage"),
-			getStringValue(event.Data, "weapon"),
-			getStringValue(event.Data, "playerSuffix"),
-			getStringValue(event.Data, "damageType"),
-			getFloat32Value(event.Data, "healthRemaining"),
+			chainID,
+			deployable,
+			damage,
+			weapon,
+			playerSuffix,
+			damageType,
+			healthRemaining,
 			time.Now(),
 		)
 	}
@@ -786,11 +942,21 @@ func (i *EventIngester) ingestTickRate(events []*IngestEvent) error {
 
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID string
+		var tickRate float32
+
+		if tickRateData, ok := event.Data.(*event_manager.LogTickRateData); ok {
+			chainID = tickRateData.ChainID
+			tickRate = parseFloat32(tickRateData.TickRate)
+		}
+
 		args = append(args,
 			event.EventTime,
 			event.ServerID,
-			getStringValue(event.Data, "chainID"),
-			getFloat32Value(event.Data, "tickRate"),
+			chainID,
+			tickRate,
 			time.Now(),
 		)
 	}

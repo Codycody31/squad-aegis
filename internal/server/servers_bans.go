@@ -18,6 +18,8 @@ import (
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
+// TODO: Support passing the name of the player when banning via the API
+
 // ServerBansList handles listing all bans for a server
 func (s *Server) ServerBansList(c *gin.Context) {
 	user := s.getUserFromSession(c)
@@ -38,10 +40,9 @@ func (s *Server) ServerBansList(c *gin.Context) {
 
 	// Query the database for bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.player_id, p.steam_id, p.display_name, sb.reason, sb.duration, sb.rule_id, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
-		JOIN players p ON sb.player_id = p.id
 		WHERE sb.server_id = $1
 		ORDER BY sb.created_at DESC
 	`, serverId)
@@ -55,16 +56,13 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	for rows.Next() {
 		var ban models.ServerBan
 		var steamIDInt int64
-		var playerName sql.NullString
 		var ruleID sql.NullString
 		err := rows.Scan(
 			&ban.ID,
 			&ban.ServerID,
 			&ban.AdminID,
 			&ban.AdminName,
-			&ban.PlayerID,
 			&steamIDInt,
-			&playerName,
 			&ban.Reason,
 			&ban.Duration,
 			&ruleID,
@@ -79,12 +77,8 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		// Convert steamID from int64 to string
 		ban.SteamID = strconv.FormatInt(steamIDInt, 10)
 
-		// Set player name
-		if playerName.Valid {
-			ban.Name = playerName.String
-		} else {
-			ban.Name = "Unknown Player"
-		}
+		// Set player name to steam ID for now (could be enhanced later with ClickHouse lookup)
+		ban.Name = ban.SteamID
 
 		// Set rule ID if present
 		if ruleID.Valid {
@@ -152,39 +146,16 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		return
 	}
 
-	// First, find or create the player
-	var playerID uuid.UUID
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT id FROM players WHERE steam_id = $1
-	`, steamID).Scan(&playerID)
-
-	if err == sql.ErrNoRows {
-		// Player doesn't exist, create them
-		playerID = uuid.New()
-		now := time.Now()
-		_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
-			INSERT INTO players (id, steam_id, first_seen, last_seen)
-			VALUES ($1, $2, $3, $4)
-		`, playerID, steamID, now, now)
-		if err != nil {
-			responses.BadRequest(c, "Failed to create player", &gin.H{"error": err.Error()})
-			return
-		}
-	} else if err != nil {
-		responses.BadRequest(c, "Failed to lookup player", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Insert the ban into the database
+	// Insert the ban into the database (using steam_id directly)
 	var banID string
 	now := time.Now()
 
 	query := `
-		INSERT INTO server_bans (id, server_id, admin_id, player_id, reason, duration, created_at, updated_at)
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id
 	`
-	args := []interface{}{uuid.New(), serverId, user.Id, playerID, request.Reason, request.Duration, now, now}
+	args := []interface{}{uuid.New(), serverId, user.Id, steamID, request.Reason, request.Duration, now, now}
 
 	// Add rule_id if provided
 	if request.RuleID != nil && *request.RuleID != "" {
@@ -194,7 +165,7 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 			return
 		}
 		query = `
-			INSERT INTO server_bans (id, server_id, admin_id, player_id, reason, duration, rule_id, created_at, updated_at)
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING id
 		`
@@ -274,9 +245,8 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	var adminId uuid.UUID
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT p.steam_id, sb.reason, sb.duration, sb.admin_id 
+		SELECT sb.steam_id, sb.reason, sb.duration, sb.admin_id 
 		FROM server_bans sb
-		JOIN players p ON sb.player_id = p.id
 		WHERE sb.id = $1 AND sb.server_id = $2
 	`, banId, serverId).Scan(&steamIDInt, &reason, &duration, &adminId)
 	if err != nil {
@@ -351,9 +321,8 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 
 	// Query the database for active bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT p.steam_id, sb.reason, sb.duration, sb.created_at
+		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at
 		FROM server_bans sb
-		JOIN players p ON sb.player_id = p.id
 		WHERE sb.server_id = $1
 	`, serverId)
 	if err != nil {

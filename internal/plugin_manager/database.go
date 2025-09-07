@@ -14,7 +14,7 @@ import (
 
 func (pm *PluginManager) loadPluginsFromDatabase() error {
 	query := `
-		SELECT id, server_id, plugin_id, name, config, enabled, created_at, updated_at
+		SELECT id, server_id, plugin_id, notes, config, enabled, created_at, updated_at
 		FROM plugin_instances
 		WHERE enabled = true
 		ORDER BY created_at
@@ -34,7 +34,7 @@ func (pm *PluginManager) loadPluginsFromDatabase() error {
 			&instance.ID,
 			&instance.ServerID,
 			&instance.PluginID,
-			&instance.Name,
+			&instance.Notes,
 			&configJSON,
 			&instance.Enabled,
 			&instance.CreatedAt,
@@ -97,7 +97,7 @@ func (pm *PluginManager) loadPluginsFromDatabase() error {
 			Str("serverID", instance.ServerID.String()).
 			Str("instanceID", instance.ID.String()).
 			Str("pluginID", instance.PluginID).
-			Str("name", instance.Name).
+			Str("notes", instance.Notes).
 			Msg("Loaded plugin instance from database")
 	}
 
@@ -111,7 +111,7 @@ func (pm *PluginManager) savePluginInstanceToDatabase(instance *PluginInstance) 
 	}
 
 	query := `
-		INSERT INTO plugin_instances (id, server_id, plugin_id, name, config, enabled, created_at, updated_at)
+		INSERT INTO plugin_instances (id, server_id, plugin_id, notes, config, enabled, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 
@@ -119,7 +119,7 @@ func (pm *PluginManager) savePluginInstanceToDatabase(instance *PluginInstance) 
 		instance.ID,
 		instance.ServerID,
 		instance.PluginID,
-		instance.Name,
+		instance.Notes,
 		string(configJSON),
 		instance.Enabled,
 		instance.CreatedAt,
@@ -141,13 +141,13 @@ func (pm *PluginManager) updatePluginInstanceInDatabase(instance *PluginInstance
 
 	query := `
 		UPDATE plugin_instances
-		SET name = $2, config = $3, enabled = $4, updated_at = $5
+		SET notes = $2, config = $3, enabled = $4, updated_at = $5
 		WHERE id = $1
 	`
 
 	_, err = pm.db.Exec(query,
 		instance.ID,
-		instance.Name,
+		instance.Notes,
 		string(configJSON),
 		instance.Enabled,
 		instance.UpdatedAt,

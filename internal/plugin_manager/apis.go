@@ -1,17 +1,42 @@
 package plugin_manager
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
+
+// eventDataToMap converts EventData to map[string]interface{} for plugins
+func eventDataToMap(data event_manager.EventData) map[string]interface{} {
+	if data == nil {
+		return make(map[string]interface{})
+	}
+
+	// Marshal to JSON and back to get a map representation
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal event data to JSON")
+		return make(map[string]interface{})
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		log.Error().Err(err).Msg("Failed to unmarshal JSON to map")
+		return make(map[string]interface{})
+	}
+
+	return result
+}
 
 // serverAPI implements ServerAPI interface
 type serverAPI struct {
@@ -332,7 +357,7 @@ func (api *rconAPI) SendCommand(command string) (string, error) {
 	return response, nil
 }
 
-func (api *rconAPI) SendMessage(message string) error {
+func (api *rconAPI) Broadcast(message string) error {
 	command := fmt.Sprintf("AdminBroadcast %s", message)
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
@@ -341,11 +366,11 @@ func (api *rconAPI) SendMessage(message string) error {
 	return nil
 }
 
-func (api *rconAPI) SendMessageToPlayer(playerID string, message string) error {
+func (api *rconAPI) SendWarningToPlayer(playerID string, message string) error {
 	command := fmt.Sprintf("AdminWarn \"%s\" %s", playerID, message)
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
-		return fmt.Errorf("failed to send message to player: %w", err)
+		return fmt.Errorf("failed to send warning to player: %w", err)
 	}
 	return nil
 }
@@ -371,6 +396,9 @@ func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Dura
 	if err != nil {
 		return fmt.Errorf("failed to ban player: %w", err)
 	}
+
+	// FIXME: Need to extend logic here to support updating the DB with ban info
+
 	return nil
 }
 
@@ -389,9 +417,10 @@ func NewEventAPI(serverID uuid.UUID, eventManager *event_manager.EventManager) E
 
 func (api *eventAPI) PublishEvent(eventType string, data map[string]interface{}, raw string) error {
 	// Create custom event type for plugin events
-	pluginEventType := event_manager.EventType(fmt.Sprintf("PLUGIN_%s", strings.ToUpper(eventType)))
+	// FIXME: Implement publishing custom events from plugins
+	// pluginEventType := event_manager.EventType(fmt.Sprintf("PLUGIN_%s", strings.ToUpper(eventType)))
 
-	api.eventManager.PublishEvent(api.serverID, pluginEventType, data, raw)
+	// api.eventManager.PublishEventLegacy(api.serverID, pluginEventType, data, raw)
 	return nil
 }
 
@@ -425,7 +454,7 @@ func (api *eventAPI) SubscribeToEvents(eventTypes []string, handler func(*Plugin
 				ServerID:  event.ServerID,
 				Source:    EventSourceSystem,
 				Type:      string(event.Type),
-				Data:      event.Data,
+				Data:      eventDataToMap(event.Data),
 				Raw:       rawString,
 				Timestamp: event.Timestamp,
 			}
@@ -457,14 +486,52 @@ func (api *connectorAPI) ListConnectors() []string {
 
 // logAPI implements LogAPI interface
 type logAPI struct {
-	serverID   uuid.UUID
-	instanceID uuid.UUID
+	serverID         uuid.UUID
+	instanceID       uuid.UUID
+	clickhouseClient *clickhouse.Client
+	db               *sql.DB
 }
 
-func NewLogAPI(serverID, instanceID uuid.UUID) LogAPI {
+func NewLogAPI(serverID, instanceID uuid.UUID, clickhouseClient *clickhouse.Client, db *sql.DB) LogAPI {
 	return &logAPI{
-		serverID:   serverID,
-		instanceID: instanceID,
+		serverID:         serverID,
+		instanceID:       instanceID,
+		clickhouseClient: clickhouseClient,
+		db:               db,
+	}
+}
+
+// Helper function to write log to ClickHouse
+func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fields map[string]interface{}) {
+	// Marshal fields to JSON
+	fieldsJSON := "{}"
+	if len(fields) > 0 {
+		if jsonBytes, err := json.Marshal(fields); err == nil {
+			fieldsJSON = string(jsonBytes)
+		}
+	}
+
+	// Insert into ClickHouse
+	insertQuery := `
+		INSERT INTO squad_aegis.plugin_logs (
+			timestamp, server_id, plugin_instance_id, 
+			level, message, error_message, fields
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := api.clickhouseClient.Exec(ctx, insertQuery,
+		time.Now().UTC(),
+		api.serverID,
+		api.instanceID,
+		level,
+		message,
+		errorMsg,
+		fieldsJSON,
+	); err != nil {
+		log.Error().Err(err).Msg("Failed to write plugin log to ClickHouse")
 	}
 }
 
@@ -478,6 +545,9 @@ func (api *logAPI) Info(message string, fields map[string]interface{}) {
 	}
 
 	logger.Msg(message)
+
+	// Also write to ClickHouse
+	api.writeToClickHouse("info", message, nil, fields)
 }
 
 func (api *logAPI) Warn(message string, fields map[string]interface{}) {
@@ -490,6 +560,9 @@ func (api *logAPI) Warn(message string, fields map[string]interface{}) {
 	}
 
 	logger.Msg(message)
+
+	// Also write to ClickHouse
+	api.writeToClickHouse("warn", message, nil, fields)
 }
 
 func (api *logAPI) Error(message string, err error, fields map[string]interface{}) {
@@ -506,6 +579,14 @@ func (api *logAPI) Error(message string, err error, fields map[string]interface{
 	}
 
 	logger.Msg(message)
+
+	// Also write to ClickHouse
+	var errorMsg *string
+	if err != nil {
+		errStr := err.Error()
+		errorMsg = &errStr
+	}
+	api.writeToClickHouse("error", message, errorMsg, fields)
 }
 
 func (api *logAPI) Debug(message string, fields map[string]interface{}) {
@@ -518,4 +599,7 @@ func (api *logAPI) Debug(message string, fields map[string]interface{}) {
 	}
 
 	logger.Msg(message)
+
+	// Also write to ClickHouse
+	api.writeToClickHouse("debug", message, nil, fields)
 }

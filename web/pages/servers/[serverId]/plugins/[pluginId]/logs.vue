@@ -54,7 +54,7 @@ const loadPlugin = async () => {
         Authorization: `Bearer ${authStore.token}`,
       },
     });
-    plugin.value = response.data.plugin;
+    plugin.value = (response as any).data.plugin;
   } catch (error: any) {
     console.error("Failed to load plugin:", error);
     toast({
@@ -75,7 +75,7 @@ const loadLogs = async () => {
     });
     
     // Mock some logs for demonstration since the endpoint returns empty
-    logs.value = response.data.logs || [
+    logs.value = (response as any).data.logs || [
       {
         id: 1,
         timestamp: new Date().toISOString(),
@@ -163,22 +163,22 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="container mx-auto py-6">
-    <div class="flex items-center justify-between mb-6">
-      <div class="flex items-center space-x-4">
+  <div class="p-4">
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
+      <div class="flex flex-col sm:flex-row sm:items-center gap-4">
         <Button variant="outline" @click="goBack">
           <ArrowLeft class="w-4 h-4 mr-2" />
           Back to Plugins
         </Button>
         <div>
-          <h1 class="text-3xl font-bold">Plugin Logs</h1>
+          <h1 class="text-2xl font-bold">Plugin Logs</h1>
           <p class="text-muted-foreground">
             Recent log entries for {{ plugin?.name || 'Plugin' }}
           </p>
         </div>
       </div>
       
-      <div class="flex items-center space-x-2">
+      <div class="flex items-center gap-2">
         <Button variant="outline" @click="refreshLogs" :disabled="refreshing">
           <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': refreshing }" />
           Refresh
@@ -196,7 +196,7 @@ onMounted(async () => {
 
     <div v-else class="space-y-6">
       <!-- Plugin Info Card -->
-      <Card v-if="plugin">
+      <Card v-if="plugin" class="mb-4">
         <CardHeader>
           <CardTitle class="flex items-center space-x-2">
             <FileText class="w-5 h-5" />
@@ -212,7 +212,7 @@ onMounted(async () => {
       </Card>
 
       <!-- Logs Card -->
-      <Card>
+      <Card class="mb-4">
         <CardHeader>
           <CardTitle>Recent Log Entries</CardTitle>
           <CardDescription>
@@ -231,7 +231,7 @@ onMounted(async () => {
               :key="log.id"
               class="border rounded-lg p-4 space-y-2"
             >
-              <div class="flex items-center justify-between">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div class="flex items-center space-x-2">
                   <Badge :class="getLogLevelColor(log.level)">
                     {{ log.level?.toUpperCase() }}
@@ -249,7 +249,7 @@ onMounted(async () => {
               <div v-if="log.context" class="text-xs text-muted-foreground">
                 <details>
                   <summary class="cursor-pointer hover:text-foreground">Context</summary>
-                  <pre class="mt-2 p-2 bg-muted rounded text-xs overflow-auto">{{ JSON.stringify(log.context, null, 2) }}</pre>
+                  <pre class="mt-2 p-2 bg-muted rounded text-xs overflow-auto break-all">{{ JSON.stringify(log.context, null, 2) }}</pre>
                 </details>
               </div>
             </div>

@@ -4,6 +4,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
+	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_cam_logs"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
 )
 
@@ -14,6 +15,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Discord Admin Request plugin
 	if err := pm.RegisterPlugin(discord_admin_request.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Discord Admin Request plugin")
+		return err
+	}
+
+	// Register Discord Admin Cam Logs
+	if err := pm.RegisterPlugin(discord_admin_cam_logs.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Discord Admin Cam Logs plugin")
 		return err
 	}
 

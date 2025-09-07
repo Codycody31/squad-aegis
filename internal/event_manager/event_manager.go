@@ -14,19 +14,18 @@ import (
 type EventType string
 
 const (
+	EventTypeAll EventType = "*"
+
 	// RCON Events
 	EventTypeRconChatMessage            EventType = "RCON_CHAT_MESSAGE"
-	EventTypeRconChatCommand            EventType = "RCON_CHAT_COMMAND"
 	EventTypeRconPlayerWarned           EventType = "RCON_PLAYER_WARNED"
 	EventTypeRconPlayerKicked           EventType = "RCON_PLAYER_KICKED"
+	EventTypeRconPlayerBanned           EventType = "RCON_PLAYER_BANNED"
 	EventTypeRconPossessedAdminCamera   EventType = "RCON_POSSESSED_ADMIN_CAMERA"
 	EventTypeRconUnpossessedAdminCamera EventType = "RCON_UNPOSSESSED_ADMIN_CAMERA"
 	EventTypeRconSquadCreated           EventType = "RCON_SQUAD_CREATED"
-	EventTypeRconConnectionClosed       EventType = "RCON_CONNECTION_CLOSED"
-	EventTypeRconConnectionError        EventType = "RCON_CONNECTION_ERROR"
 
 	// Log Events
-	EventTypeLogChatMessage        EventType = "LOG_CHAT_MESSAGE"
 	EventTypeLogAdminBroadcast     EventType = "LOG_ADMIN_BROADCAST"
 	EventTypeLogDeployableDamaged  EventType = "LOG_DEPLOYABLE_DAMAGED"
 	EventTypeLogPlayerConnected    EventType = "LOG_PLAYER_CONNECTED"
@@ -47,12 +46,12 @@ const (
 
 // Event represents a unified event from any source
 type Event struct {
-	ID        uuid.UUID              `json:"id"`
-	ServerID  uuid.UUID              `json:"server_id"`
-	Type      EventType              `json:"type"`
-	Data      map[string]interface{} `json:"data"`
-	RawData   interface{}            `json:"raw_data,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
+	ID        uuid.UUID   `json:"id"`
+	ServerID  uuid.UUID   `json:"server_id"`
+	Type      EventType   `json:"type"`
+	Data      EventData   `json:"data"`               // Structured event data
+	RawData   interface{} `json:"raw_data,omitempty"` // Original raw data for debugging
+	Timestamp time.Time   `json:"timestamp"`
 }
 
 // EventSubscriber represents a subscriber to events
@@ -142,12 +141,12 @@ func (em *EventManager) Unsubscribe(subscriberID uuid.UUID) {
 	}
 }
 
-// PublishEvent publishes an event to the event queue
-func (em *EventManager) PublishEvent(serverID uuid.UUID, eventType EventType, data map[string]interface{}, rawData interface{}) {
+// PublishEvent publishes an event to the event queue with structured data
+func (em *EventManager) PublishEvent(serverID uuid.UUID, data EventData, rawData interface{}) {
 	event := Event{
 		ID:        uuid.New(),
 		ServerID:  serverID,
-		Type:      eventType,
+		Type:      data.GetEventType(),
 		Data:      data,
 		RawData:   rawData,
 		Timestamp: time.Now(),
@@ -161,7 +160,7 @@ func (em *EventManager) PublishEvent(serverID uuid.UUID, eventType EventType, da
 		log.Warn().
 			Str("eventID", event.ID.String()).
 			Str("serverID", serverID.String()).
-			Str("eventType", string(eventType)).
+			Str("eventType", string(event.Type)).
 			Msg("Event queue full, dropping event")
 	}
 }
@@ -288,9 +287,9 @@ func GetEventTypeFromString(s string) EventType {
 // IsRconEvent checks if the event type is an RCON event
 func (et EventType) IsRconEvent() bool {
 	switch et {
-	case EventTypeRconChatMessage, EventTypeRconChatCommand, EventTypeRconPlayerWarned,
-		EventTypeRconPlayerKicked, EventTypeRconPossessedAdminCamera, EventTypeRconUnpossessedAdminCamera,
-		EventTypeRconSquadCreated, EventTypeRconConnectionClosed, EventTypeRconConnectionError:
+	case EventTypeRconChatMessage, EventTypeRconPlayerWarned,
+		EventTypeRconPlayerKicked, EventTypeRconPlayerBanned, EventTypeRconPossessedAdminCamera, EventTypeRconUnpossessedAdminCamera,
+		EventTypeRconSquadCreated:
 		return true
 	default:
 		return false

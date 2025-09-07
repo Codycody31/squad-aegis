@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 )
@@ -23,9 +24,10 @@ type PluginManager struct {
 	cancel   context.CancelFunc
 
 	// Dependencies
-	db           *sql.DB
-	eventManager *event_manager.EventManager
-	rconManager  *rcon_manager.RconManager
+	db               *sql.DB
+	eventManager     *event_manager.EventManager
+	rconManager      *rcon_manager.RconManager
+	clickhouseClient *clickhouse.Client
 
 	// Connector management
 	connectors        map[string]*ConnectorInstance
@@ -37,7 +39,7 @@ type PluginManager struct {
 }
 
 // NewPluginManager creates a new plugin manager
-func NewPluginManager(ctx context.Context, db *sql.DB, eventManager *event_manager.EventManager, rconManager *rcon_manager.RconManager) *PluginManager {
+func NewPluginManager(ctx context.Context, db *sql.DB, eventManager *event_manager.EventManager, rconManager *rcon_manager.RconManager, clickhouseClient *clickhouse.Client) *PluginManager {
 	ctx, cancel := context.WithCancel(ctx)
 
 	pm := &PluginManager{
@@ -48,6 +50,7 @@ func NewPluginManager(ctx context.Context, db *sql.DB, eventManager *event_manag
 		db:                db,
 		eventManager:      eventManager,
 		rconManager:       rconManager,
+		clickhouseClient:  clickhouseClient,
 		ctx:               ctx,
 		cancel:            cancel,
 	}
@@ -133,7 +136,7 @@ func (pm *PluginManager) RegisterConnector(definition ConnectorDefinition) error
 }
 
 // CreatePluginInstance creates and starts a new plugin instance
-func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID string, name string, config map[string]interface{}) (*PluginInstance, error) {
+func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID string, notes string, config map[string]interface{}) (*PluginInstance, error) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -178,7 +181,7 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 		ID:        instanceID,
 		ServerID:  serverID,
 		PluginID:  pluginID,
-		Name:      name,
+		Notes:     notes,
 		Config:    config,
 		Status:    PluginStatusStopped,
 		Enabled:   true,
@@ -215,7 +218,7 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 		Str("serverID", serverID.String()).
 		Str("instanceID", instanceID.String()).
 		Str("pluginID", pluginID).
-		Str("name", name).
+		Str("notes", notes).
 		Msg("Created plugin instance")
 
 	return instance, nil
@@ -524,7 +527,7 @@ func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID) *Plugi
 		RconAPI:      NewRconAPI(serverID, pm.rconManager),
 		EventAPI:     NewEventAPI(serverID, pm.eventManager),
 		ConnectorAPI: NewConnectorAPI(pm),
-		LogAPI:       NewLogAPI(serverID, instanceID),
+		LogAPI:       NewLogAPI(serverID, instanceID, pm.clickhouseClient, pm.db),
 	}
 }
 
@@ -557,7 +560,7 @@ func (pm *PluginManager) distributeEventToPlugins(event *event_manager.Event) {
 		ServerID:  event.ServerID,
 		Source:    pm.convertEventSource(event.Type),
 		Type:      string(event.Type),
-		Data:      event.Data,
+		Data:      eventDataToMap(event.Data),
 		Raw:       rawString,
 		Timestamp: event.Timestamp,
 	}
@@ -572,8 +575,8 @@ func (pm *PluginManager) distributeEventToPlugins(event *event_manager.Event) {
 			// Check if plugin handles this event type
 			definition := instance.Plugin.GetDefinition()
 			handles := false
-			for _, handler := range definition.EventHandlers {
-				if handler.EventType == string(event.Type) || handler.EventType == "*" {
+			for _, e := range definition.Events {
+				if e == event.Type || e == event_manager.EventTypeAll {
 					handles = true
 					break
 				}

@@ -2,12 +2,11 @@ CREATE TABLE IF NOT EXISTS plugin_instances (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     plugin_id TEXT NOT NULL,
-    name TEXT NOT NULL,
+    notes TEXT DEFAULT '',
     config JSONB NOT NULL DEFAULT '{}',
     enabled BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    UNIQUE(server_id, plugin_id, name)
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS plugin_data (

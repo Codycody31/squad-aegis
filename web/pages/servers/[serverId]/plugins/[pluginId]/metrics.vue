@@ -36,7 +36,7 @@ const loadPlugin = async () => {
         Authorization: `Bearer ${authStore.token}`,
       },
     });
-    plugin.value = response.data.plugin;
+    plugin.value = (response as any).data.plugin;
   } catch (error: any) {
     console.error("Failed to load plugin:", error);
     toast({
@@ -55,7 +55,7 @@ const loadMetrics = async () => {
         Authorization: `Bearer ${authStore.token}`,
       },
     });
-    metrics.value = response.data.metrics || {};
+    metrics.value = (response as any).data.metrics || {};
   } catch (error: any) {
     console.error("Failed to load metrics:", error);
     toast({
@@ -82,14 +82,14 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="container mx-auto py-6">
-    <div class="flex items-center space-x-4 mb-6">
+  <div class="p-4">
+    <div class="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
       <Button variant="outline" @click="goBack">
         <ArrowLeft class="w-4 h-4 mr-2" />
         Back to Plugins
       </Button>
       <div>
-        <h1 class="text-3xl font-bold">Plugin Metrics</h1>
+        <h1 class="text-2xl font-bold">Plugin Metrics</h1>
         <p class="text-muted-foreground">
           Performance and usage metrics for {{ plugin?.name || 'Plugin' }}
         </p>
@@ -102,7 +102,7 @@ onMounted(async () => {
 
     <div v-else class="space-y-6">
       <!-- Plugin Info Card -->
-      <Card v-if="plugin">
+      <Card v-if="plugin" class="mb-4">
         <CardHeader>
           <CardTitle class="flex items-center space-x-2">
             <BarChart3 class="w-5 h-5" />
@@ -118,7 +118,7 @@ onMounted(async () => {
       </Card>
 
       <!-- Metrics Overview -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-4">
         <Card>
           <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle class="text-sm font-medium">Events Processed</CardTitle>
@@ -173,7 +173,7 @@ onMounted(async () => {
       </div>
 
       <!-- Plugin-Specific Metrics -->
-      <Card v-if="plugin?.plugin_id === 'discord_admin_request'">
+      <Card v-if="plugin?.plugin_id === 'discord_admin_request'" class="mb-4">
         <CardHeader>
           <CardTitle>Discord Admin Request Metrics</CardTitle>
           <CardDescription>
@@ -181,7 +181,7 @@ onMounted(async () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div class="text-center">
               <div class="text-3xl font-bold text-blue-600">{{ metrics.admin_requests_sent || 0 }}</div>
               <p class="text-sm text-muted-foreground">Admin Requests Sent</p>
