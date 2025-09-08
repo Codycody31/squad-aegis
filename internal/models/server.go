@@ -51,7 +51,18 @@ type ServerAdmin struct {
 	UserId       *uuid.UUID `json:"user_id,omitempty"`
 	SteamId      *int64     `json:"steam_id,string,omitempty"`
 	ServerRoleId uuid.UUID  `json:"server_role_id"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
+}
+
+// IsActive returns true if the admin role is active (not expired)
+func (sa *ServerAdmin) IsActive() bool {
+	return sa.ExpiresAt == nil || sa.ExpiresAt.After(time.Now())
+}
+
+// IsExpired returns true if the admin role has expired
+func (sa *ServerAdmin) IsExpired() bool {
+	return sa.ExpiresAt != nil && sa.ExpiresAt.Before(time.Now())
 }
 
 type ServerRole struct {
@@ -74,9 +85,10 @@ type ServerBanCreateRequest struct {
 }
 
 type ServerAdminCreateRequest struct {
-	UserID       *string `json:"user_id,omitempty"`  // Optional: existing user ID
-	SteamID      *string `json:"steam_id,omitempty"` // Optional: Steam ID for new admin
-	ServerRoleID string  `json:"server_role_id"`     // Required: role to assign
+	UserID       *string    `json:"user_id,omitempty"`    // Optional: existing user ID
+	SteamID      *string    `json:"steam_id,omitempty"`   // Optional: Steam ID for new admin
+	ServerRoleID string     `json:"server_role_id"`       // Required: role to assign
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"` // Optional: expiration date for temporary access
 }
 
 type ServerCreateRequest struct {

@@ -60,6 +60,7 @@ const showAddRoleDialog = ref(false);
 const showAddAdminDialog = ref(false);
 const addRoleLoading = ref(false);
 const addAdminLoading = ref(false);
+const cleanupLoading = ref(false);
 const selectedAdminType = ref("user");
 
 // Squad permission categories
@@ -120,6 +121,9 @@ interface ServerAdmin {
   steam_id?: string;
   username: string;
   server_role_id: string;
+  expires_at?: string;
+  is_active?: boolean;
+  is_expired?: boolean;
   created_at: string;
 }
 
@@ -180,6 +184,7 @@ const adminFormSchema = toTypedSchema(
           message: "Steam ID must be exactly 17 digits",
         }),
       server_role_id: z.string().min(1, "Role is required"),
+      expires_at: z.string().optional(),
     })
     .refine(
       (data) => {
@@ -213,6 +218,7 @@ const adminForm = useForm({
     user_id: "",
     steam_id: "",
     server_role_id: "",
+    expires_at: "",
   },
 });
 
@@ -471,7 +477,7 @@ async function removeRole(roleId: string) {
 
 // Function to add an admin
 async function addAdmin(values: any) {
-  const { adminType, user_id, steam_id, server_role_id } = values;
+  const { adminType, user_id, steam_id, server_role_id, expires_at } = values;
 
   addAdminLoading.value = true;
   error.value = null;
@@ -498,6 +504,11 @@ async function addAdmin(values: any) {
       requestBody.user_id = user_id;
     } else if (adminType === "steam_id") {
       requestBody.steam_id = steam_id;
+    }
+
+    // Add expires_at if provided
+    if (expires_at && expires_at.trim() !== "") {
+      requestBody.expires_at = new Date(expires_at).toISOString();
     }
 
     const { data, error: fetchError } = await useFetch(
@@ -579,6 +590,54 @@ async function removeAdmin(adminId: string) {
   }
 }
 
+// Function to cleanup expired admins
+async function cleanupExpiredAdmins() {
+  if (!confirm("Are you sure you want to remove all expired admin roles? This action cannot be undone.")) {
+    return;
+  }
+
+  cleanupLoading.value = true;
+  error.value = null;
+
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
+  const token = cookieToken.value;
+
+  if (!token) {
+    error.value = "Authentication required";
+    cleanupLoading.value = false;
+    return;
+  }
+
+  try {
+    const { data, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/admin/cleanup-expired-admins`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (fetchError.value) {
+      throw new Error(
+        fetchError.value.data.message || fetchError.value.message
+      );
+    }
+
+    // Refresh the admins list
+    fetchAdmins();
+  } catch (err: any) {
+    error.value = err.message || "An error occurred while cleaning up expired admins";
+    console.error(err);
+  } finally {
+    cleanupLoading.value = false;
+  }
+}
+
 function copyAdminCfgUrl() {
   const runtimeConfig = useRuntimeConfig();
   navigator.clipboard.writeText(
@@ -589,6 +648,29 @@ function copyAdminCfgUrl() {
 // Format date
 function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleString();
+}
+
+// Format expiration status
+function formatExpirationStatus(admin: ServerAdmin): { text: string; variant: "default" | "destructive" | "secondary" | "outline"; class: string } {
+  if (!admin.expires_at) {
+    return { text: "Permanent", variant: "default", class: "" };
+  }
+  
+  const expiresAt = new Date(admin.expires_at);
+  const now = new Date();
+  
+  if (expiresAt < now) {
+    return { text: "Expired", variant: "destructive", class: "" };
+  }
+  
+  const timeUntilExpiry = expiresAt.getTime() - now.getTime();
+  const daysUntilExpiry = Math.floor(timeUntilExpiry / (1000 * 60 * 60 * 24));
+  
+  if (daysUntilExpiry <= 7) {
+    return { text: `Expires in ${daysUntilExpiry} day(s)`, variant: "secondary", class: "text-orange-600" };
+  }
+  
+  return { text: `Expires ${formatDate(admin.expires_at)}`, variant: "outline", class: "text-blue-600" };
 }
 
 // Get available users (not already admins)
@@ -818,22 +900,32 @@ onMounted(() => {
         <Card>
           <CardHeader class="flex flex-row items-center justify-between pb-2">
             <CardTitle>Admin Management</CardTitle>
-            <Form
-              v-slot="{ handleSubmit }"
-              as=""
-              keep-values
-              :validation-schema="adminFormSchema"
-              :initial-values="{
-                adminType: 'user',
-                user_id: '',
-                steam_id: '',
-                server_role_id: '',
-              }"
-            >
-              <Dialog v-model:open="showAddAdminDialog">
-                <DialogTrigger asChild>
-                  <Button>Add Admin</Button>
-                </DialogTrigger>
+            <div class="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                @click="cleanupExpiredAdmins"
+                :disabled="cleanupLoading"
+              >
+                {{ cleanupLoading ? "Cleaning..." : "Cleanup Expired" }}
+              </Button>
+              <Form
+                v-slot="{ handleSubmit }"
+                as=""
+                keep-values
+                :validation-schema="adminFormSchema"
+                :initial-values="{
+                  adminType: 'user',
+                  user_id: '',
+                  steam_id: '',
+                  server_role_id: '',
+                  expires_at: '',
+                }"
+              >
+                <Dialog v-model:open="showAddAdminDialog">
+                  <DialogTrigger asChild>
+                    <Button>Add Admin</Button>
+                  </DialogTrigger>
                 <DialogContent
                   class="sm:max-w-[425px] max-h-[80vh] overflow-y-auto"
                 >
@@ -853,7 +945,7 @@ onMounted(() => {
                           <FormLabel>Admin Type</FormLabel>
                           <Select 
                             v-bind="componentField"
-                            @update:model-value="(value) => selectedAdminType = value"
+                            @update:model-value="(value: any) => selectedAdminType = value || 'user'"
                           >
                             <FormControl>
                               <SelectTrigger>
@@ -948,6 +1040,22 @@ onMounted(() => {
                           <FormMessage />
                         </FormItem>
                       </FormField>
+
+                      <FormField name="expires_at" v-slot="{ componentField }">
+                        <FormItem>
+                          <FormLabel>Expiration Date (Optional)</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="datetime-local"
+                              v-bind="componentField"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Leave empty for permanent admin access. Set a date and time for temporary access (e.g., 1-month trial).
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
                     </div>
                     <DialogFooter>
                       <Button
@@ -965,6 +1073,7 @@ onMounted(() => {
                 </DialogContent>
               </Dialog>
             </Form>
+            </div>
           </CardHeader>
           <CardContent>
             <div v-if="loading.admins" class="text-center py-8">
@@ -984,6 +1093,7 @@ onMounted(() => {
                   <TableRow>
                     <TableHead>User</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Created At</TableHead>
                     <TableHead class="text-right">Actions</TableHead>
                   </TableRow>
@@ -993,6 +1103,7 @@ onMounted(() => {
                     v-for="admin in admins"
                     :key="admin.id"
                     class="hover:bg-muted/50"
+                    :class="{ 'opacity-60': admin.is_expired }"
                   >
                     <TableCell>
                       <div>
@@ -1011,6 +1122,20 @@ onMounted(() => {
                       <Badge variant="outline">                        
                         {{ roles.find((r) => r.id === admin.server_role_id)?.name }}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div class="flex flex-col gap-1">
+                        <Badge 
+                          :variant="formatExpirationStatus(admin).variant" 
+                          :class="formatExpirationStatus(admin).class"
+                          class="w-fit"
+                        >
+                          {{ formatExpirationStatus(admin).text }}
+                        </Badge>
+                        <div v-if="admin.expires_at && !admin.is_expired" class="text-xs text-muted-foreground">
+                          Expires: {{ formatDate(admin.expires_at) }}
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell>{{ formatDate(admin.created_at) }}</TableCell>
                     <TableCell class="text-right">
@@ -1048,11 +1173,14 @@ onMounted(() => {
         </p>
         <p class="text-sm text-muted-foreground mt-2">
           <strong>Admins</strong> - Assign users to roles, giving them admin
-          privileges on your server.
+          privileges on your server. You can set an expiration date for temporary access (e.g., trial periods, temporary whitelist).
+        </p>
+        <p class="text-sm text-muted-foreground mt-2">
+          <strong>Admin Expiration</strong> - Expired admin roles are automatically cleaned up hourly. You can also manually trigger cleanup using the "Cleanup Expired" button.
         </p>
         <p class="text-sm text-muted-foreground mt-2">
           <strong>Admin Config</strong> - Download the admin configuration file
-          to use with your Squad server.
+          to use with your Squad server. Only active (non-expired) admins are included in the config.
         </p>
         <div class="mt-4">
           <h3 class="font-medium mb-2">Permission Categories</h3>

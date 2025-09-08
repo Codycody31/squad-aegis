@@ -121,6 +121,14 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			usersGroup.DELETE("/:userId", server.UserDelete)
 		}
 
+		adminGroup := apiGroup.Group("/admin")
+		{
+			adminGroup.Use(server.AuthSession)
+			adminGroup.Use(server.AuthIsSuperAdmin())
+
+			adminGroup.POST("/cleanup-expired-admins", server.ServerAdminsCleanupExpired)
+		}
+
 		serversGroup := apiGroup.Group("/servers")
 		{
 			serversGroup.Use(server.AuthSession)

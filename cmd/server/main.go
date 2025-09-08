@@ -189,6 +189,34 @@ func run(ctx context.Context) error {
 	go rconManager.StartConnectionManager()
 	go logwatcherManager.StartConnectionManager()
 
+	// Start admin cleanup task (runs every hour)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		// Run cleanup immediately on startup
+		go func() {
+			if deleted, err := core.CleanupExpiredAdmins(ctx, database); err != nil {
+				log.Error().Err(err).Msg("failed to cleanup expired admins")
+			} else if deleted > 0 {
+				log.Info().Int64("deleted", deleted).Msg("cleaned up expired admin roles")
+			}
+		}()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if deleted, err := core.CleanupExpiredAdmins(ctx, database); err != nil {
+					log.Error().Err(err).Msg("failed to cleanup expired admins")
+				} else if deleted > 0 {
+					log.Info().Int64("deleted", deleted).Msg("cleaned up expired admin roles")
+				}
+			}
+		}
+	}()
+
 	// Connect to all servers
 	rconManager.ConnectToAllServers(ctx, database)
 	logwatcherManager.ConnectToAllServers(ctx, database)

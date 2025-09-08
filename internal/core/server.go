@@ -185,7 +185,7 @@ func GetServerRoles(ctx context.Context, database db.Executor, serverId uuid.UUI
 
 func GetServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]*models.ServerAdmin, error) {
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-	sql, args, err := psql.Select("*").From("server_admins").Where(squirrel.Eq{"server_id": serverId}).ToSql()
+	sql, args, err := psql.Select("id", "server_id", "user_id", "steam_id", "server_role_id", "expires_at", "created_at").From("server_admins").Where(squirrel.Eq{"server_id": serverId}).ToSql()
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func GetServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UU
 
 	for rows.Next() {
 		var admin models.ServerAdmin
-		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.CreatedAt)
+		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -303,4 +303,56 @@ func UpdateServer(ctx context.Context, db *sql.DB, server *models.Server) error 
 	}
 
 	return nil
+}
+
+// CleanupExpiredAdmins removes expired admin roles from the database
+func CleanupExpiredAdmins(ctx context.Context, database db.Executor) (int64, error) {
+	result, err := database.ExecContext(ctx, `
+		DELETE FROM server_admins 
+		WHERE expires_at IS NOT NULL AND expires_at < NOW()
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to cleanup expired admins: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected, nil
+}
+
+// GetActiveServerAdmins retrieves all active (non-expired) admins for a server
+func GetActiveServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]*models.ServerAdmin, error) {
+	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+	sql, args, err := psql.Select("id", "server_id", "user_id", "steam_id", "server_role_id", "expires_at", "created_at").
+		From("server_admins").
+		Where(squirrel.Eq{"server_id": serverId}).
+		Where(squirrel.Or{
+			squirrel.Eq{"expires_at": nil},
+			squirrel.Gt{"expires_at": time.Now()},
+		}).ToSql()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := database.QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	admins := []*models.ServerAdmin{}
+
+	for rows.Next() {
+		var admin models.ServerAdmin
+		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		admins = append(admins, &admin)
+	}
+
+	return admins, nil
 }

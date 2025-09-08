@@ -41,6 +41,7 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 			sa.user_id, 
 			sa.steam_id,
 			sa.server_role_id, 
+			sa.expires_at,
 			sa.created_at
 		FROM server_admins sa
 		WHERE sa.server_id = $1
@@ -56,7 +57,7 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 	for rows.Next() {
 		var admin models.ServerAdmin
 
-		err := rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.CreatedAt)
+		err := rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.CreatedAt)
 		if err != nil {
 			responses.BadRequest(c, "Failed to scan admin", &gin.H{"error": err.Error()})
 			return
@@ -65,8 +66,25 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 		admins = append(admins, admin)
 	}
 
+	// Prepare response with additional status information
+	adminResponses := []gin.H{}
+	for _, admin := range admins {
+		adminResponse := gin.H{
+			"id":             admin.Id,
+			"server_id":      admin.ServerId,
+			"user_id":        admin.UserId,
+			"steam_id":       admin.SteamId,
+			"server_role_id": admin.ServerRoleId,
+			"expires_at":     admin.ExpiresAt,
+			"created_at":     admin.CreatedAt,
+			"is_active":      admin.IsActive(),
+			"is_expired":     admin.IsExpired(),
+		}
+		adminResponses = append(adminResponses, adminResponse)
+	}
+
 	responses.Success(c, "Admins fetched successfully", &gin.H{
-		"admins": admins,
+		"admins": adminResponses,
 	})
 }
 
@@ -212,19 +230,19 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 	if targetUserID != uuid.Nil {
 		// User exists, use user_id
 		query = `
-			INSERT INTO server_admins (id, server_id, user_id, server_role_id, created_at)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO server_admins (id, server_id, user_id, server_role_id, expires_at, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING id
 		`
-		args = []interface{}{uuid.New(), serverId, targetUserID, request.ServerRoleID, time.Now()}
+		args = []interface{}{uuid.New(), serverId, targetUserID, request.ServerRoleID, request.ExpiresAt, time.Now()}
 	} else {
 		// User doesn't exist, use steam_id
 		query = `
-			INSERT INTO server_admins (id, server_id, steam_id, server_role_id, created_at)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO server_admins (id, server_id, steam_id, server_role_id, expires_at, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING id
 		`
-		args = []interface{}{uuid.New(), serverId, *steamID, request.ServerRoleID, time.Now()}
+		args = []interface{}{uuid.New(), serverId, *steamID, request.ServerRoleID, request.ExpiresAt, time.Now()}
 	}
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&adminID)
@@ -262,13 +280,18 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 		"roleName": roleName,
 	}
 
+	// Add expiration information to audit log
+	if request.ExpiresAt != nil {
+		auditData["expiresAt"] = request.ExpiresAt.Format(time.RFC3339)
+	}
+
 	// Add user information to audit log
 	if targetUser != nil {
 		auditData["userId"] = targetUser.Id.String()
 		auditData["username"] = targetUser.Username
 	} else if steamID != nil {
 		auditData["steamId"] = *steamID
-		auditData["username"] = fmt.Sprintf("Steam ID: %d", *steamID)
+		auditData["username"] = fmt.Sprintf("Steam ID: %s", *steamID)
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:admin:create", auditData)
@@ -369,8 +392,8 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 		return
 	}
 
-	// Get admins
-	admins, err := core.GetServerAdmins(c.Request.Context(), s.Dependencies.DB, serverId)
+	// Get admins (only active ones for config generation)
+	admins, err := core.GetActiveServerAdmins(c.Request.Context(), s.Dependencies.DB, serverId)
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server admins", &gin.H{"error": err.Error()})
 		return
@@ -413,4 +436,28 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 	// Set the content type and send the response
 	c.Header("Content-Type", "text/plain")
 	c.String(http.StatusOK, configBuilder.String())
+}
+
+// ServerAdminsCleanupExpired handles manual cleanup of expired admin roles
+func (s *Server) ServerAdminsCleanupExpired(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	// Clean up expired admins
+	deleted, err := core.CleanupExpiredAdmins(c.Request.Context(), s.Dependencies.DB)
+	if err != nil {
+		responses.BadRequest(c, "Failed to cleanup expired admins", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create audit log for the cleanup action
+	auditData := map[string]interface{}{
+		"deletedCount": deleted,
+		"action":       "manual_cleanup",
+	}
+
+	s.CreateAuditLog(c.Request.Context(), nil, &user.Id, "admin:cleanup:expired", auditData)
+
+	responses.Success(c, "Expired admins cleaned up successfully", &gin.H{
+		"deletedCount": deleted,
+	})
 }
