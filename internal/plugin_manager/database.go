@@ -339,6 +339,20 @@ func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[
 		return nil, fmt.Errorf("connector %s already exists", connectorID)
 	}
 
+	// Get connector definition to validate config
+	definition, err := pm.connectorRegistry.GetConnector(connectorID)
+	if err != nil {
+		return nil, fmt.Errorf("connector definition not found: %w", err)
+	}
+
+	// Validate config for creation (ensures sensitive required fields are provided)
+	if err := definition.ConfigSchema.ValidateForCreation(config); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	// Fill defaults
+	config = definition.ConfigSchema.FillDefaults(config)
+
 	// Create connector instance
 	connector, err := pm.connectorRegistry.CreateConnectorInstance(connectorID)
 	if err != nil {
@@ -394,18 +408,48 @@ func (pm *PluginManager) UpdateConnectorConfig(connectorID string, config map[st
 		return fmt.Errorf("connector %s not found", connectorID)
 	}
 
+	// Get connector definition to validate config
+	definition, err := pm.connectorRegistry.GetConnector(connectorID)
+	if err != nil {
+		return fmt.Errorf("connector definition not found: %w", err)
+	}
+
+	// Merge new config with existing, handling sensitive fields properly
+	mergedConfig := definition.ConfigSchema.MergeConfigUpdates(instance.Config, config)
+
+	// Validate the merged config
+	if err := definition.ConfigSchema.Validate(mergedConfig); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
 	// Update connector config
-	if err := instance.Connector.UpdateConfig(config); err != nil {
+	if err := instance.Connector.UpdateConfig(mergedConfig); err != nil {
 		return fmt.Errorf("failed to update connector config: %w", err)
 	}
 
+	// Restart the connector if needed (some connectors stop themselves during UpdateConfig)
+	if instance.Connector.GetStatus() != ConnectorStatusRunning {
+		if err := instance.Connector.Start(instance.Context); err != nil {
+			return fmt.Errorf("failed to restart connector after config update: %w", err)
+		}
+	}
+
 	// Update instance record
-	instance.Config = config
+	instance.Config = mergedConfig
 	instance.UpdatedAt = time.Now()
 
 	// Save to database
 	if err := pm.saveConnectorToDatabase(instance); err != nil {
 		return fmt.Errorf("failed to update connector in database: %w", err)
+	}
+
+	// Restart dependent plugins after connector update
+	if err := pm.restartDependentPlugins(connectorID); err != nil {
+		log.Error().
+			Str("connectorID", connectorID).
+			Err(err).
+			Msg("Failed to restart dependent plugins after connector update")
+		// Don't return error as the connector update was successful
 	}
 
 	return nil

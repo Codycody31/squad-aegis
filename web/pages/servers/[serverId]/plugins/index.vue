@@ -265,6 +265,9 @@ const configurePlugin = (plugin: any) => {
           // Set default false for boolean fields without values
           config[field.name] = field.default !== undefined ? Boolean(field.default) : false;
         }
+      } else if (field.sensitive && config[field.name] === '***MASKED***') {
+        // Clear masked sensitive fields for editing
+        config[field.name] = '';
       } else if (field.type === 'arraystring' || field.type === 'array_string') {
         // Ensure string arrays are properly formatted
         if (config[field.name] && !Array.isArray(config[field.name])) {
@@ -414,7 +417,7 @@ const onPluginSelect = (pluginId: any) => {
 const renderConfigField = (field: any) => {
   switch (field.type) {
     case "string":
-      return "text";
+      return field.sensitive || field.name.toLowerCase().includes('password') ? "password" : "text";
     case "int":
     case "number":
       return "number";
@@ -562,6 +565,7 @@ onMounted(async () => {
                   :id="`config-${field.name}`"
                   v-model="pluginConfig[field.name]"
                   :type="renderConfigField(field)"
+                  :placeholder="field.sensitive && pluginConfig[field.name] === '' ? 'Leave empty to keep current value' : field.sensitive ? 'Enter new sensitive value...' : ''"
                 />
                 
                 <!-- Number input -->
@@ -670,7 +674,8 @@ onMounted(async () => {
                       v-if="nestedField.type === 'string'"
                       :id="`config-${field.name}-${nestedField.name}`"
                       v-model="(pluginConfig[field.name] = pluginConfig[field.name] || {})[nestedField.name]"
-                      type="text"
+                      :type="nestedField.sensitive || nestedField.name.toLowerCase().includes('password') ? 'password' : 'text'"
+                      :placeholder="nestedField.sensitive ? 'Enter sensitive value...' : ''"
                     />
                     <Input
                       v-else-if="nestedField.type === 'int'"

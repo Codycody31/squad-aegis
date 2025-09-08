@@ -114,6 +114,7 @@ func Define() plugin_manager.ConnectorDefinition {
 					Description: "Discord bot token",
 					Required:    true,
 					Type:        plug_config_schema.FieldTypeString,
+					Sensitive:   true,
 				},
 				{
 					Name:        "guild_id",

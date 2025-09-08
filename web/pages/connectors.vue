@@ -213,7 +213,19 @@ const deleteConnector = async (connector: any) => {
 // Configure connector
 const configureConnector = (connector: any) => {
   currentConnector.value = connector;
-  connectorConfig.value = { ...connector.config };
+  // Copy config and clear masked sensitive fields for editing
+  const config = { ...connector.config };
+  const connectorDef = availableConnectors.value.find(c => c.id === connector.id);
+  
+  if (connectorDef?.config_schema?.fields) {
+    connectorDef.config_schema.fields.forEach((field: any) => {
+      if (field.sensitive && config[field.name] === '***MASKED***') {
+        config[field.name] = ''; // Clear masked values for editing
+      }
+    });
+  }
+  
+  connectorConfig.value = config;
   showConfigDialog.value = true;
 };
 
@@ -251,8 +263,8 @@ const saveConnectorConfig = async () => {
 };
 
 // Handle connector selection change
-const onConnectorSelect = (connectorId: string) => {
-  selectedConnector.value = connectorId;
+const onConnectorSelect = (connectorId: any) => {
+  selectedConnector.value = connectorId || "";
   const connector = availableConnectors.value.find(c => c.id === connectorId);
   if (connector?.config_schema?.fields) {
     // Initialize config with default values
@@ -342,7 +354,8 @@ onMounted(async () => {
                   v-if="field.type === 'string'"
                   :id="`config-${field.name}`"
                   v-model="connectorConfig[field.name]"
-                  :type="field.name.toLowerCase().includes('password') ? 'password' : 'text'"
+                  :type="field.sensitive || field.name.toLowerCase().includes('password') ? 'password' : 'text'"
+                  :placeholder="field.sensitive ? 'Enter sensitive value...' : ''"
                 />
                 
                 <!-- Number input -->
@@ -500,7 +513,8 @@ onMounted(async () => {
               v-if="field.type === 'string'"
               :id="`edit-config-${field.name}`"
               v-model="connectorConfig[field.name]"
-              :type="field.name.toLowerCase().includes('password') ? 'password' : 'text'"
+              :type="field.sensitive || field.name.toLowerCase().includes('password') ? 'password' : 'text'"
+              :placeholder="field.sensitive && connectorConfig[field.name] === '***MASKED***' ? 'Leave empty to keep current value' : field.sensitive ? 'Enter new sensitive value...' : ''"
             />
             
             <!-- Number input -->

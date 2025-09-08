@@ -147,6 +147,14 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 		return nil, fmt.Errorf("plugin not found: %w", err)
 	}
 
+	// Validate config for creation (ensures sensitive required fields are provided)
+	if err := definition.ConfigSchema.ValidateForCreation(config); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	// Fill defaults
+	config = definition.ConfigSchema.FillDefaults(config)
+
 	// Check if multiple instances are allowed
 	if !definition.AllowMultipleInstances {
 		if serverPlugins, exists := pm.plugins[serverID]; exists {
@@ -237,7 +245,12 @@ func (pm *PluginManager) GetPluginInstances(serverID uuid.UUID) []*PluginInstanc
 
 	instances := make([]*PluginInstance, 0, len(serverPlugins))
 	for _, instance := range serverPlugins {
-		instances = append(instances, instance)
+		// Create a copy with masked sensitive fields
+		maskedInstance := *instance
+		if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
+			maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
+		}
+		instances = append(instances, &maskedInstance)
 	}
 
 	return instances
@@ -258,7 +271,13 @@ func (pm *PluginManager) GetPluginInstance(serverID, instanceID uuid.UUID) (*Plu
 		return nil, fmt.Errorf("plugin instance %s not found", instanceID.String())
 	}
 
-	return instance, nil
+	// Create a copy with masked sensitive fields
+	maskedInstance := *instance
+	if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
+		maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
+	}
+
+	return &maskedInstance, nil
 }
 
 // DeletePluginInstance removes and stops a plugin instance
@@ -318,13 +337,27 @@ func (pm *PluginManager) UpdatePluginConfig(serverID, instanceID uuid.UUID, conf
 		return err
 	}
 
+	// Get plugin definition to validate config
+	definition, err := pm.registry.GetPlugin(instance.PluginID)
+	if err != nil {
+		return fmt.Errorf("plugin definition not found: %w", err)
+	}
+
+	// Merge new config with existing, handling sensitive fields properly
+	mergedConfig := definition.ConfigSchema.MergeConfigUpdates(instance.Config, config)
+
+	// Validate the merged config
+	if err := definition.ConfigSchema.Validate(mergedConfig); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
 	// Update plugin config
-	if err := instance.Plugin.UpdateConfig(config); err != nil {
+	if err := instance.Plugin.UpdateConfig(mergedConfig); err != nil {
 		return fmt.Errorf("failed to update plugin config: %w", err)
 	}
 
 	// Update instance record
-	instance.Config = config
+	instance.Config = mergedConfig
 	instance.UpdatedAt = time.Now()
 
 	// Save to database
@@ -452,10 +485,105 @@ func (pm *PluginManager) GetConnectors() []*ConnectorInstance {
 
 	connectors := make([]*ConnectorInstance, 0, len(pm.connectors))
 	for _, instance := range pm.connectors {
-		connectors = append(connectors, instance)
+		// Create a copy with masked sensitive fields
+		maskedInstance := *instance
+		if definition, err := pm.connectorRegistry.GetConnector(instance.ID); err == nil {
+			maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
+		}
+		connectors = append(connectors, &maskedInstance)
 	}
 
 	return connectors
+}
+
+// restartDependentPlugins restarts all plugins that depend on a specific connector
+func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	var restartErrors []error
+
+	// Iterate through all servers and their plugins
+	for serverID, serverPlugins := range pm.plugins {
+		for instanceID, instance := range serverPlugins {
+			// Get plugin definition to check required connectors
+			definition, err := pm.registry.GetPlugin(instance.PluginID)
+			if err != nil {
+				log.Error().
+					Str("serverID", serverID.String()).
+					Str("instanceID", instanceID.String()).
+					Str("pluginID", instance.PluginID).
+					Err(err).
+					Msg("Failed to get plugin definition while checking connector dependencies")
+				continue
+			}
+
+			// Check if this plugin depends on the updated connector
+			dependsOnConnector := false
+			for _, requiredConnector := range definition.RequiredConnectors {
+				if requiredConnector == connectorID {
+					dependsOnConnector = true
+					break
+				}
+			}
+
+			if !dependsOnConnector {
+				continue // Skip plugins that don't depend on this connector
+			}
+
+			// Only restart if the plugin is currently enabled and running
+			if !instance.Enabled || instance.Status != PluginStatusRunning {
+				continue
+			}
+
+			log.Info().
+				Str("serverID", serverID.String()).
+				Str("instanceID", instanceID.String()).
+				Str("pluginID", instance.PluginID).
+				Str("connectorID", connectorID).
+				Msg("Restarting plugin due to connector update")
+
+			// Stop the plugin
+			if err := pm.stopPluginInstance(instance); err != nil {
+				log.Error().
+					Str("serverID", serverID.String()).
+					Str("instanceID", instanceID.String()).
+					Str("pluginID", instance.PluginID).
+					Str("connectorID", connectorID).
+					Err(err).
+					Msg("Failed to stop plugin instance during connector update restart")
+				restartErrors = append(restartErrors, fmt.Errorf("failed to stop plugin %s: %w", instanceID.String(), err))
+				continue
+			}
+
+			// Restart the plugin (reinitialize and start)
+			if err := pm.initializePluginInstance(instance); err != nil {
+				log.Error().
+					Str("serverID", serverID.String()).
+					Str("instanceID", instanceID.String()).
+					Str("pluginID", instance.PluginID).
+					Str("connectorID", connectorID).
+					Err(err).
+					Msg("Failed to restart plugin instance after connector update")
+				restartErrors = append(restartErrors, fmt.Errorf("failed to restart plugin %s: %w", instanceID.String(), err))
+				continue
+			}
+
+			log.Info().
+				Str("serverID", serverID.String()).
+				Str("instanceID", instanceID.String()).
+				Str("pluginID", instance.PluginID).
+				Str("connectorID", connectorID).
+				Msg("Successfully restarted plugin after connector update")
+		}
+	}
+
+	// Return combined errors if any occurred
+	if len(restartErrors) > 0 {
+		return fmt.Errorf("encountered %d errors while restarting dependent plugins: %v", len(restartErrors), restartErrors)
+	}
+
+	return nil
 }
 
 // Private methods
