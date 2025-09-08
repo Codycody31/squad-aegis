@@ -880,27 +880,26 @@ refresh();
                 <div v-else class="space-y-4">
                   <div>
                     <h3 class="text-sm font-medium mb-2">Team Balance</h3>
-                    <div class="flex h-4 mb-2">
-                      <div
-                        v-for="(team, index) in teamsData"
-                        :key="team.id"
-                        class="h-full"
-                        :class="
-                          index === 0
-                            ? 'bg-blue-500 rounded-l-full'
-                            : 'bg-red-500 rounded-r-full'
-                        "
-                        :style="`width: ${
-                          (serverInfo.metrics?.players?.teams?.[team.id] /
-                            serverInfo.metrics?.players?.max) *
-                          100
-                        }%`"
-                      ></div>
+                    <div class="flex h-4 mb-2 bg-gray-200 rounded-full overflow-hidden">
+                      <template v-if="teamsData.length >= 2">
+                        <div
+                          class="h-full bg-blue-500 transition-all duration-300"
+                          :style="`width: ${Math.max(5, ((serverInfo.metrics?.players?.teams?.[teamsData[0]?.id] || 0) / Math.max(1, serverInfo.metrics?.players?.max || 64)) * 100)}%`"
+                        ></div>
+                        <div
+                          class="h-full bg-red-500 transition-all duration-300"
+                          :style="`width: ${Math.max(5, ((serverInfo.metrics?.players?.teams?.[teamsData[1]?.id] || 0) / Math.max(1, serverInfo.metrics?.players?.max || 64)) * 100)}%`"
+                        ></div>
+                      </template>
+                      <template v-else>
+                        <div class="h-full bg-blue-500 w-1/2"></div>
+                        <div class="h-full bg-red-500 w-1/2"></div>
+                      </template>
                     </div>
                     <div class="flex justify-between text-xs">
                       <span v-for="team in teamsData" :key="team.id">
                         {{ team.name }}:
-                        {{ serverInfo.metrics?.players?.teams?.[team.id] }}
+                        {{ serverInfo.metrics?.players?.teams?.[team.id] || 0 }}
                       </span>
                     </div>
                   </div>

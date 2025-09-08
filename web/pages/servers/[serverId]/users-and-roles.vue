@@ -117,7 +117,7 @@ interface ServerAdmin {
   id: string;
   server_id: string;
   user_id?: string;
-  steam_id?: number;
+  steam_id?: string;
   username: string;
   server_role_id: string;
   created_at: string;
@@ -497,7 +497,7 @@ async function addAdmin(values: any) {
     if (adminType === "user") {
       requestBody.user_id = user_id;
     } else if (adminType === "steam_id") {
-      requestBody.steam_id = parseInt(steam_id, 10);
+      requestBody.steam_id = steam_id;
     }
 
     const { data, error: fetchError } = await useFetch(

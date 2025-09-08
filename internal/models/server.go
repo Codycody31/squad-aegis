@@ -34,7 +34,7 @@ type ServerBan struct {
 	ServerID  uuid.UUID `json:"server_id"`
 	AdminID   uuid.UUID `json:"admin_id"`
 	AdminName string    `json:"admin_name"`
-	SteamID   string    `json:"steam_id"`
+	SteamID   string    `json:"steam_id,string"`
 	Name      string    `json:"name"`
 	Reason    string    `json:"reason"`
 	Duration  int       `json:"duration"`
@@ -49,7 +49,7 @@ type ServerAdmin struct {
 	Id           uuid.UUID  `json:"id"`
 	ServerId     uuid.UUID  `json:"server_id"`
 	UserId       *uuid.UUID `json:"user_id,omitempty"`
-	SteamId      *int64     `json:"steam_id,omitempty"`
+	SteamId      *int64     `json:"steam_id,string,omitempty"`
 	ServerRoleId uuid.UUID  `json:"server_role_id"`
 	CreatedAt    time.Time  `json:"created_at"`
 }
@@ -75,7 +75,7 @@ type ServerBanCreateRequest struct {
 
 type ServerAdminCreateRequest struct {
 	UserID       *string `json:"user_id,omitempty"`  // Optional: existing user ID
-	SteamID      *int64  `json:"steam_id,omitempty"` // Optional: Steam ID for new admin
+	SteamID      *string `json:"steam_id,omitempty"` // Optional: Steam ID for new admin
 	ServerRoleID string  `json:"server_role_id"`     // Required: role to assign
 }
 

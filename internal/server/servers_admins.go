@@ -27,12 +27,11 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 	}
 
 	// Check if user has access to this server
-	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
 		return
 	}
-	_ = server // Ensure server is used
 
 	// Query the database for admins (handle both user_id and steam_id cases)
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
@@ -97,12 +96,12 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 	}
 
 	// Validate that either UserID or SteamID is provided, but not both
-	if (request.UserID == nil || *request.UserID == "") && (request.SteamID == nil || *request.SteamID == 0) {
+	if (request.UserID == nil || *request.UserID == "") && (request.SteamID == nil || *request.SteamID == "") {
 		responses.BadRequest(c, "Either User ID or Steam ID is required", &gin.H{"error": "Either User ID or Steam ID is required"})
 		return
 	}
 
-	if (request.UserID != nil && *request.UserID != "") && (request.SteamID != nil && *request.SteamID != 0) {
+	if (request.UserID != nil && *request.UserID != "") && (request.SteamID != nil && *request.SteamID != "") {
 		responses.BadRequest(c, "Cannot specify both User ID and Steam ID", &gin.H{"error": "Cannot specify both User ID and Steam ID"})
 		return
 	}
@@ -114,7 +113,7 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 
 	var targetUserID uuid.UUID
 	var targetUser *models.User
-	var steamID *int64
+	var steamID *string
 
 	// Handle existing user case
 	if request.UserID != nil && *request.UserID != "" {
