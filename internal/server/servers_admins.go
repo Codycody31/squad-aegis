@@ -150,20 +150,20 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 		}
 		targetUserID = userUUID
 
-		// Check if user already exists as admin for this server
+		// Check if user already has this specific role for this server (prevent duplicate role assignments)
 		var count int
 		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
 			SELECT COUNT(*) FROM server_admins
-			WHERE server_id = $1 AND user_id = $2
-		`, serverId, targetUserID).Scan(&count)
+			WHERE server_id = $1 AND user_id = $2 AND server_role_id = $3
+		`, serverId, targetUserID, request.ServerRoleID).Scan(&count)
 
 		if err != nil {
-			responses.BadRequest(c, "Failed to check if user is already an admin", &gin.H{"error": err.Error()})
+			responses.BadRequest(c, "Failed to check if user already has this role", &gin.H{"error": err.Error()})
 			return
 		}
 
 		if count > 0 {
-			responses.BadRequest(c, "User is already an admin for this server", &gin.H{"error": "User is already an admin for this server"})
+			responses.BadRequest(c, "User already has this role for this server", &gin.H{"error": "User already has this role for this server"})
 			return
 		}
 	} else {
@@ -188,38 +188,38 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 				return
 			}
 
-			// Check if user already exists as admin for this server
+			// Check if user already has this specific role for this server (prevent duplicate role assignments)
 			var count int
 			err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
 				SELECT COUNT(*) FROM server_admins
-				WHERE server_id = $1 AND user_id = $2
-			`, serverId, targetUserID).Scan(&count)
+				WHERE server_id = $1 AND user_id = $2 AND server_role_id = $3
+			`, serverId, targetUserID, request.ServerRoleID).Scan(&count)
 
 			if err != nil {
-				responses.BadRequest(c, "Failed to check if user is already an admin", &gin.H{"error": err.Error()})
+				responses.BadRequest(c, "Failed to check if user already has this role", &gin.H{"error": err.Error()})
 				return
 			}
 
 			if count > 0 {
-				responses.BadRequest(c, "User is already an admin for this server", &gin.H{"error": "User is already an admin for this server"})
+				responses.BadRequest(c, "User already has this role for this server", &gin.H{"error": "User already has this role for this server"})
 				return
 			}
 		}
 
-		// Also check if Steam ID is already used as admin for this server
+		// Also check if Steam ID already has this specific role for this server (prevent duplicate role assignments)
 		var count int
 		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
 			SELECT COUNT(*) FROM server_admins
-			WHERE server_id = $1 AND steam_id = $2
-		`, serverId, *steamID).Scan(&count)
+			WHERE server_id = $1 AND steam_id = $2 AND server_role_id = $3
+		`, serverId, *steamID, request.ServerRoleID).Scan(&count)
 
 		if err != nil {
-			responses.BadRequest(c, "Failed to check if Steam ID is already an admin", &gin.H{"error": err.Error()})
+			responses.BadRequest(c, "Failed to check if Steam ID already has this role", &gin.H{"error": err.Error()})
 			return
 		}
 
 		if count > 0 {
-			responses.BadRequest(c, "Steam ID is already an admin for this server", &gin.H{"error": "Steam ID is already an admin for this server"})
+			responses.BadRequest(c, "Steam ID already has this role for this server", &gin.H{"error": "Steam ID already has this role for this server"})
 			return
 		}
 	}

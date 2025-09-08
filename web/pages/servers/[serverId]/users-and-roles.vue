@@ -762,13 +762,65 @@ function formatExpirationStatus(admin: ServerAdmin): { text: string; variant: "d
   return { text: `Expires ${formatDate(admin.expires_at)}`, variant: "outline", class: "text-blue-600" };
 }
 
-// Get available users (not already admins)
+// Get available users (all users are available since they can have multiple roles)
 const availableUsers = computed(() => {
-  const adminuser_ids = admins.value
-    .filter((admin) => admin.user_id) // Only include admins that have a user_id
-    .map((admin) => admin.user_id);
-  return users.value.filter((user) => !adminuser_ids.includes(user.id));
+  return users.value;
 });
+
+// Get users that already have the selected role (to prevent duplicates)
+const getUsersWithRole = (roleId: string) => {
+  return admins.value
+    .filter((admin) => admin.user_id && admin.server_role_id === roleId)
+    .map((admin) => admin.user_id);
+};
+
+// Get filtered users based on selected role (exclude users who already have this specific role)
+const getFilteredUsersForRole = (roleId: string) => {
+  if (!roleId) return users.value;
+  const usersWithRole = getUsersWithRole(roleId);
+  return users.value.filter((user) => !usersWithRole.includes(user.id));
+};
+
+// Get filtered users for user selection based on selected role
+const filteredUsersForSelection = computed(() => {
+  const selectedRole = adminForm.values.server_role_id;
+  if (!selectedRole) return users.value;
+  return getFilteredUsersForRole(selectedRole);
+});
+
+// Group admins by user for better display
+const groupedAdmins = computed(() => {
+  const grouped: { [key: string]: ServerAdmin[] } = {};
+  
+  admins.value.forEach(admin => {
+    let key: string;
+    if (admin.user_id) {
+      key = `user_${admin.user_id}`;
+    } else if (admin.steam_id) {
+      key = `steam_${admin.steam_id}`;
+    } else {
+      key = `unknown_${admin.id}`;
+    }
+    
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(admin);
+  });
+  
+  return grouped;
+});
+
+// Get display name for an admin
+const getAdminDisplayName = (admin: ServerAdmin): string => {
+  if (admin.steam_id) {
+    return `Steam ID: ${admin.steam_id}`;
+  } else if (admin.user_id) {
+    const user = users.value.find((u) => u.id === admin.user_id);
+    return user ? `${user.name} (${user.username})` : 'Unknown User';
+  }
+  return 'Unknown';
+};
 
 // Setup initial data load
 onMounted(() => {
@@ -1073,7 +1125,7 @@ onMounted(() => {
                             <SelectContent>
                               <SelectGroup>
                                 <SelectItem
-                                  v-for="user in availableUsers"
+                                  v-for="user in filteredUsersForSelection"
                                   :key="user.id"
                                   :value="user.id"
                                 >
@@ -1260,72 +1312,70 @@ onMounted(() => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <TableRow
-                    v-for="admin in admins"
-                    :key="admin.id"
-                    class="hover:bg-muted/50"
-                    :class="{ 'opacity-60': admin.is_expired }"
-                  >
-                    <TableCell>
-                      <div>
-                        <div
-                          v-if="admin.steam_id"
-                          class="text-xs text-muted-foreground"
-                        >
-                          Steam ID: {{ admin.steam_id }}
+                  <template v-for="(adminGroup, key) in groupedAdmins" :key="key">
+                    <TableRow
+                      v-for="(admin, index) in adminGroup"
+                      :key="admin.id"
+                      class="hover:bg-muted/50"
+                      :class="{ 'opacity-60': admin.is_expired }"
+                    >
+                      <TableCell>
+                        <!-- Only show user info for the first row of each group -->
+                        <div v-if="index === 0">
+                          {{ getAdminDisplayName(admin) }}
+                          <div v-if="adminGroup.length > 1" class="text-xs text-blue-600 font-medium">
+                            {{ adminGroup.length }} roles
+                          </div>
                         </div>
-                        <div v-else>
-                          {{ users.find((u) => u.id === admin.user_id)?.name}} ({{ users.find((u) => u.id === admin.user_id)?.username }})
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">                        
-                        {{ roles.find((r) => r.id === admin.server_role_id)?.name }}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div class="flex flex-col gap-1">
-                        <Badge 
-                          :variant="formatExpirationStatus(admin).variant" 
-                          :class="formatExpirationStatus(admin).class"
-                          class="w-fit"
-                        >
-                          {{ formatExpirationStatus(admin).text }}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">                        
+                          {{ roles.find((r) => r.id === admin.server_role_id)?.name }}
                         </Badge>
-                        <div v-if="admin.expires_at && !admin.is_expired" class="text-xs text-muted-foreground">
-                          Expires: {{ formatDate(admin.expires_at) }}
+                      </TableCell>
+                      <TableCell>
+                        <div class="flex flex-col gap-1">
+                          <Badge 
+                            :variant="formatExpirationStatus(admin).variant" 
+                            :class="formatExpirationStatus(admin).class"
+                            class="w-fit"
+                          >
+                            {{ formatExpirationStatus(admin).text }}
+                          </Badge>
+                          <div v-if="admin.expires_at && !admin.is_expired" class="text-xs text-muted-foreground">
+                            Expires: {{ formatDate(admin.expires_at) }}
+                          </div>
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div class="max-w-32 truncate" :title="admin.notes">
-                        <span v-if="admin.notes" class="text-sm">{{ admin.notes }}</span>
-                        <span v-else class="text-sm text-muted-foreground italic">No notes</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{{ formatDate(admin.created_at) }}</TableCell>
-                    <TableCell class="text-right">
-                      <div class="flex gap-2 justify-end">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          @click="openEditAdminDialog(admin)"
-                          :disabled="loading.admins"
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          @click="removeAdmin(admin.id)"
-                          :disabled="loading.admins"
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                      </TableCell>
+                      <TableCell>
+                        <div class="max-w-32 truncate" :title="admin.notes">
+                          <span v-if="admin.notes" class="text-sm">{{ admin.notes }}</span>
+                          <span v-else class="text-sm text-muted-foreground italic">No notes</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>{{ formatDate(admin.created_at) }}</TableCell>
+                      <TableCell class="text-right">
+                        <div class="flex gap-2 justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            @click="openEditAdminDialog(admin)"
+                            :disabled="loading.admins"
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            @click="removeAdmin(admin.id)"
+                            :disabled="loading.admins"
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  </template>
                 </TableBody>
               </Table>
             </div>
@@ -1342,7 +1392,7 @@ onMounted(() => {
         <p class="text-sm text-muted-foreground">
           This page allows you to manage roles and admins for your Squad server.
           Roles define what permissions an admin has, and admins are users
-          assigned to those roles.
+          assigned to those roles. Users can have multiple roles simultaneously.
         </p>
         <p class="text-sm text-muted-foreground mt-2">
           <strong>Roles</strong> - Create roles with specific permissions that
@@ -1351,6 +1401,7 @@ onMounted(() => {
         <p class="text-sm text-muted-foreground mt-2">
           <strong>Admins</strong> - Assign users to roles, giving them admin
           privileges on your server. You can set an expiration date for temporary access (e.g., trial periods, temporary whitelist).
+          Users can be assigned multiple different roles, but cannot have duplicate role assignments.
         </p>
         <p class="text-sm text-muted-foreground mt-2">
           <strong>Admin Expiration</strong> - Expired admin roles are automatically cleaned up hourly. You can also manually trigger cleanup using the "Cleanup Expired" button.
