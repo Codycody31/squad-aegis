@@ -199,7 +199,6 @@ func (i *EventIngester) ingestBatch(events []*IngestEvent) {
 
 	// Process each event type
 	for eventType, typeEvents := range eventGroups {
-		log.Debug().Interface("event", eventType).Int("count", len(typeEvents)).Msg("Ingesting events")
 		if err := i.ingestEventType(eventType, typeEvents); err != nil {
 			log.Error().
 				Err(err).
@@ -215,10 +214,10 @@ func (i *EventIngester) ingestEventType(eventType event_manager.EventType, event
 	switch eventType {
 	case event_manager.EventTypeRconChatMessage:
 		return i.ingestChatMessages(events)
+	// TODO: support ingesting rcon player warned event
+	// TODO: support ingesting possessed and unpossessed admin camera
 	case event_manager.EventTypeLogPlayerConnected:
 		return i.ingestPlayerConnected(events)
-	case event_manager.EventTypeLogPlayerDisconnected:
-		return i.ingestPlayerDisconnected(events)
 	case event_manager.EventTypeLogPlayerDamaged:
 		return i.ingestPlayerDamaged(events)
 	case event_manager.EventTypeLogPlayerDied:
@@ -231,10 +230,6 @@ func (i *EventIngester) ingestEventType(eventType event_manager.EventType, event
 		return i.ingestNewGame(events)
 	case event_manager.EventTypeLogRoundEnded:
 		return i.ingestRoundEnded(events)
-	case event_manager.EventTypeLogPlayerSquadChange:
-		return i.ingestPlayerSquadChange(events)
-	case event_manager.EventTypeLogPlayerTeamChange:
-		return i.ingestPlayerTeamChange(events)
 	case event_manager.EventTypeLogPlayerPossess:
 		return i.ingestPlayerPossess(events)
 	case event_manager.EventTypeLogJoinSucceeded:
@@ -324,44 +319,6 @@ func (i *EventIngester) ingestPlayerConnected(events []*IngestEvent) error {
 			ip,
 			steam,
 			eos,
-			time.Now(),
-		)
-	}
-
-	query += strings.Join(values, ",")
-	return i.client.Exec(i.ctx, query, args...)
-}
-
-func (i *EventIngester) ingestPlayerDisconnected(events []*IngestEvent) error {
-	if len(events) == 0 {
-		return nil
-	}
-
-	query := `INSERT INTO squad_aegis.server_player_disconnected_events 
-		(event_time, server_id, chain_id, ip, player_controller, eos_id, ingested_at) VALUES`
-
-	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*7)
-
-	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?)")
-
-		// Extract data from structured event data
-		var chainID, ip, playerController, eosID string
-		if disconnectedData, ok := event.Data.(*event_manager.LogPlayerDisconnectedData); ok {
-			chainID = disconnectedData.ChainID
-			ip = disconnectedData.IPAddress
-			playerController = disconnectedData.PlayerController
-			eosID = disconnectedData.EOSID
-		}
-
-		args = append(args,
-			event.EventTime,
-			event.ServerID,
-			chainID,
-			ip,
-			playerController,
-			eosID,
 			time.Now(),
 		)
 	}
@@ -671,94 +628,6 @@ func (i *EventIngester) ingestRoundEnded(events []*IngestEvent) error {
 			layer,
 			winnerJSON,
 			loserJSON,
-			time.Now(),
-		)
-	}
-
-	query += strings.Join(values, ",")
-	return i.client.Exec(i.ctx, query, args...)
-}
-
-func (i *EventIngester) ingestPlayerSquadChange(events []*IngestEvent) error {
-	if len(events) == 0 {
-		return nil
-	}
-
-	query := `INSERT INTO squad_aegis.server_player_squad_change_events 
-		(event_time, server_id, chain_id, name, team_id, squad_id, old_team_id, old_squad_id, player_eos, player_steam, ingested_at) VALUES`
-
-	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*11)
-
-	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-
-		// Extract data from structured event data
-		var chainID, name, teamID, squadID, oldTeamID, oldSquadID, playerEOS, playerSteam string
-		if squadChangeData, ok := event.Data.(*event_manager.LogPlayerSquadChangeData); ok {
-			chainID = squadChangeData.ChainID
-			name = squadChangeData.Name
-			teamID = squadChangeData.TeamID
-			squadID = squadChangeData.SquadID
-			oldTeamID = squadChangeData.OldTeamID
-			oldSquadID = squadChangeData.OldSquadID
-			playerEOS = squadChangeData.PlayerEOS
-			playerSteam = squadChangeData.PlayerSteam
-		}
-
-		args = append(args,
-			event.EventTime,
-			event.ServerID,
-			chainID,
-			name,
-			teamID,
-			squadID,
-			oldTeamID,
-			oldSquadID,
-			playerEOS,
-			playerSteam,
-			time.Now(),
-		)
-	}
-
-	query += strings.Join(values, ",")
-	return i.client.Exec(i.ctx, query, args...)
-}
-
-func (i *EventIngester) ingestPlayerTeamChange(events []*IngestEvent) error {
-	if len(events) == 0 {
-		return nil
-	}
-
-	query := `INSERT INTO squad_aegis.server_player_team_change_events 
-		(event_time, server_id, chain_id, name, new_team_id, old_team_id, player_eos, player_steam, ingested_at) VALUES`
-
-	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*9)
-
-	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
-
-		// Extract data from structured event data
-		var chainID, name, newTeamID, oldTeamID, playerEOS, playerSteam string
-		if teamChangeData, ok := event.Data.(*event_manager.LogPlayerTeamChangeData); ok {
-			chainID = teamChangeData.ChainID
-			name = teamChangeData.Name
-			newTeamID = teamChangeData.NewTeamID
-			oldTeamID = teamChangeData.OldTeamID
-			playerEOS = teamChangeData.PlayerEOS
-			playerSteam = teamChangeData.PlayerSteam
-		}
-
-		args = append(args,
-			event.EventTime,
-			event.ServerID,
-			chainID,
-			name,
-			newTeamID,
-			oldTeamID,
-			playerEOS,
-			playerSteam,
 			time.Now(),
 		)
 	}

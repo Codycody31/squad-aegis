@@ -1,34 +1,6 @@
 CREATE DATABASE IF NOT EXISTS squad_aegis;
 
 --migration:split
-CREATE TABLE IF NOT EXISTS squad_aegis.players (
-    steam_id     UInt64,                    -- Primary identifier using Steam ID
-    display_name String,
-    first_seen   DateTime64(3, 'UTC'),
-    last_seen    DateTime64(3, 'UTC'),
-    updated_at   DateTime DEFAULT now(),
-    INDEX idx_player_name_tbf display_name TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 64
-)
-ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY (steam_id);
-
---migration:split
-CREATE TABLE IF NOT EXISTS squad_aegis.server_player_sessions (
-    session_id       UInt64,                         -- mirrors public.play_sessions.id (bigint)
-    server_id        UUID,                           -- mirrors public.play_sessions.server_id
-    steam_id         UInt64,                         -- use steam_id instead of player_id
-    connected_at     DateTime64(3, 'UTC'),
-    disconnected_at  Nullable(DateTime64(3, 'UTC')),
-    duration_sec     Nullable(UInt32),
-    updated_at       DateTime DEFAULT now(),         -- ReplacingMergeTree version
-    -- handy deriveds for common filters without parsing the timestamp
-    connected_date   Date MATERIALIZED toDate(connected_at)
-)
-ENGINE = ReplacingMergeTree(updated_at)
-PARTITION BY toYYYYMM(connected_at)
-ORDER BY (server_id, connected_at, steam_id, session_id);
-
---migration:split
 CREATE TABLE IF NOT EXISTS squad_aegis.server_player_chat_messages (
     message_id  UUID DEFAULT generateUUIDv4(),
     server_id   UUID,
@@ -118,20 +90,6 @@ CREATE TABLE IF NOT EXISTS squad_aegis.server_new_game_events (
     map_classname   Nullable(String),
     layer_classname Nullable(String),
     ingested_at     DateTime DEFAULT now()
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(event_time)
-ORDER BY (server_id, event_time);
-
---migration:split
-CREATE TABLE IF NOT EXISTS squad_aegis.server_player_disconnected_events (
-    event_time         DateTime64(3, 'UTC'),
-    server_id          UUID,
-    chain_id           String,
-    ip                 String,
-    player_controller  String,
-    eos_id             String,
-    ingested_at        DateTime DEFAULT now()
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(event_time)
@@ -249,40 +207,6 @@ CREATE TABLE IF NOT EXISTS squad_aegis.server_round_ended_events (
     winner_json Nullable(String),
     loser_json  Nullable(String),
     ingested_at DateTime DEFAULT now()
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(event_time)
-ORDER BY (server_id, event_time);
-
---migration:split
-CREATE TABLE IF NOT EXISTS squad_aegis.server_player_squad_change_events (
-    event_time   DateTime64(3, 'UTC'),
-    server_id    UUID,
-    chain_id     String,
-    name         String,
-    team_id      String,
-    squad_id     String,
-    old_team_id  Nullable(String),
-    old_squad_id Nullable(String),
-    player_eos   Nullable(String),
-    player_steam Nullable(String),
-    ingested_at  DateTime DEFAULT now()
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(event_time)
-ORDER BY (server_id, event_time);
-
---migration:split
-CREATE TABLE IF NOT EXISTS squad_aegis.server_player_team_change_events (
-    event_time   DateTime64(3, 'UTC'),
-    server_id    UUID,
-    chain_id     String,
-    name         String,
-    new_team_id  String,
-    old_team_id  Nullable(String),
-    player_eos   Nullable(String),
-    player_steam Nullable(String),
-    ingested_at  DateTime DEFAULT now()
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(event_time)

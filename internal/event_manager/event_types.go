@@ -111,17 +111,6 @@ type LogPlayerConnectedData struct {
 
 func (d LogPlayerConnectedData) GetEventType() EventType { return EventTypeLogPlayerConnected }
 
-// LogPlayerDisconnectedData represents log player disconnected event data
-type LogPlayerDisconnectedData struct {
-	Time             string `json:"time"`
-	ChainID          string `json:"chain_id"`
-	IPAddress        string `json:"ip_address"`
-	PlayerController string `json:"player_controller"`
-	EOSID            string `json:"eos_id"`
-}
-
-func (d LogPlayerDisconnectedData) GetEventType() EventType { return EventTypeLogPlayerDisconnected }
-
 // LogPlayerDamagedData represents log player damaged event data
 type LogPlayerDamagedData struct {
 	Time               string `json:"time"`
@@ -235,34 +224,6 @@ type LogRoundEndedData struct {
 }
 
 func (d LogRoundEndedData) GetEventType() EventType { return EventTypeLogRoundEnded }
-
-// LogPlayerSquadChangeData represents log player squad change event data
-type LogPlayerSquadChangeData struct {
-	Time        string `json:"time"`
-	ChainID     string `json:"chain_id"`
-	Name        string `json:"name"`
-	TeamID      string `json:"team_id"`
-	SquadID     string `json:"squad_id"`
-	OldTeamID   string `json:"old_team_id,omitempty"`
-	OldSquadID  string `json:"old_squad_id,omitempty"`
-	PlayerEOS   string `json:"player_eos,omitempty"`
-	PlayerSteam string `json:"player_steam,omitempty"`
-}
-
-func (d LogPlayerSquadChangeData) GetEventType() EventType { return EventTypeLogPlayerSquadChange }
-
-// LogPlayerTeamChangeData represents log player team change event data
-type LogPlayerTeamChangeData struct {
-	Time        string `json:"time"`
-	ChainID     string `json:"chain_id"`
-	Name        string `json:"name"`
-	NewTeamID   string `json:"new_team_id"`
-	OldTeamID   string `json:"old_team_id,omitempty"`
-	PlayerEOS   string `json:"player_eos,omitempty"`
-	PlayerSteam string `json:"player_steam,omitempty"`
-}
-
-func (d LogPlayerTeamChangeData) GetEventType() EventType { return EventTypeLogPlayerTeamChange }
 
 // LogTickRateData represents log tick rate event data
 type LogTickRateData struct {

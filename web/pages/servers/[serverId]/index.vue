@@ -579,6 +579,24 @@ refresh();
                       serverInfo?.server?.rcon_port || "Unknown"
                     }}</span>
                   </div>
+                  <div class="flex justify-between">
+                    <span class="text-sm font-medium">Server Version:</span>
+                    <span class="text-sm">{{
+                      rconServerInfo?.version || rconServerInfo?.game_version || "Unknown"
+                    }}</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-sm font-medium">License Status:</span>
+                    <span class="text-sm">
+                      <Badge 
+                        :variant="rconServerInfo?.licensed_server ? 'default' : 'destructive'"
+                        v-if="rconServerInfo?.licensed_server !== undefined"
+                      >
+                        {{ rconServerInfo?.licensed_server ? 'Licensed' : 'Unlicensed' }}
+                      </Badge>
+                      <span v-else>Unknown</span>
+                    </span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
