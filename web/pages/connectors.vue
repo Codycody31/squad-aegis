@@ -276,8 +276,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="container mx-auto py-6">
-    <div class="flex items-center justify-between mb-6">
+  <div class="p-4">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
       <div>
         <h1 class="text-3xl font-bold">Global Connectors</h1>
         <p class="text-muted-foreground">
@@ -357,8 +357,8 @@ onMounted(async () => {
                 <div v-else-if="field.type === 'bool'" class="flex items-center space-x-2">
                   <Switch
                     :id="`config-${field.name}`"
-                    :checked="connectorConfig[field.name]"
-                    @update:checked="connectorConfig[field.name] = $event"
+                    :model-value="connectorConfig[field.name]"
+                    @update:model-value="connectorConfig[field.name] = $event"
                   />
                   <Label :for="`config-${field.name}`">{{ field.name }}</Label>
                 </div>
@@ -435,7 +435,7 @@ onMounted(async () => {
                 </Badge>
               </TableCell>
               <TableCell>
-                <Switch :checked="connector.enabled" disabled />
+                <Switch :model-value="connector.enabled" disabled />
               </TableCell>
               <TableCell>
                 <span 
@@ -515,8 +515,8 @@ onMounted(async () => {
             <div v-else-if="field.type === 'bool'" class="flex items-center space-x-2">
               <Switch
                 :id="`edit-config-${field.name}`"
-                :checked="connectorConfig[field.name]"
-                @update:checked="connectorConfig[field.name] = $event"
+                :model-value="connectorConfig[field.name]"
+                @update:model-value="connectorConfig[field.name] = $event"
               />
               <Label :for="`edit-config-${field.name}`">{{ field.name }}</Label>
             </div>

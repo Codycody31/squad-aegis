@@ -3,6 +3,7 @@ package plugin_manager
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -627,4 +628,93 @@ func (pm *PluginManager) convertEventSource(eventType event_manager.EventType) E
 	default:
 		return EventSourceSystem
 	}
+}
+
+// PluginLog represents a log entry from ClickHouse
+type PluginLog struct {
+	ID           string                 `json:"id"`
+	Timestamp    time.Time              `json:"timestamp"`
+	Level        string                 `json:"level"`
+	Message      string                 `json:"message"`
+	ErrorMessage *string                `json:"error_message,omitempty"`
+	Fields       map[string]interface{} `json:"fields,omitempty"`
+	IngestedAt   time.Time              `json:"ingested_at"`
+}
+
+// GetPluginLogs retrieves logs for a specific plugin instance from ClickHouse
+func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int, offset int) ([]PluginLog, error) {
+	if pm.clickhouseClient == nil {
+		return nil, fmt.Errorf("ClickHouse client not available")
+	}
+
+	// Default limit if not specified
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// Prevent excessively large queries
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	query := `
+		SELECT 
+			log_id,
+			timestamp,
+			level,
+			message,
+			error_message,
+			fields,
+			ingested_at
+		FROM squad_aegis.plugin_logs 
+		WHERE server_id = ? AND plugin_instance_id = ?
+		ORDER BY timestamp ASC, log_id ASC
+		LIMIT ? OFFSET ?
+	`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rows, err := pm.clickhouseClient.Query(ctx, query, serverID, instanceID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query plugin logs: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []PluginLog
+	for rows.Next() {
+		var log PluginLog
+		var fieldsJSON string
+
+		err := rows.Scan(
+			&log.ID,
+			&log.Timestamp,
+			&log.Level,
+			&log.Message,
+			&log.ErrorMessage,
+			&fieldsJSON,
+			&log.IngestedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan log row: %w", err)
+		}
+
+		// Parse fields JSON
+		if fieldsJSON != "" {
+			var fields map[string]interface{}
+			if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
+				log.Fields = map[string]interface{}{"raw": fieldsJSON}
+			} else {
+				log.Fields = fields
+			}
+		}
+
+		logs = append(logs, log)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over log rows: %w", err)
+	}
+
+	return logs, nil
 }

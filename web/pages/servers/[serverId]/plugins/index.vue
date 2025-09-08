@@ -185,8 +185,8 @@ const createPlugin = async () => {
 };
 
 // Toggle plugin enabled/disabled
-const togglePlugin = async (plugin: any) => {
-  const action = plugin.enabled ? "disable" : "enable";
+const togglePlugin = async (plugin: any, newState: boolean) => {
+  const action = newState ? "enable" : "disable";
   
   try {
     await $fetch(`/api/servers/${serverId}/plugins/${plugin.id}/${action}`, {
@@ -209,6 +209,8 @@ const togglePlugin = async (plugin: any) => {
       description: error.data?.message || `Failed to ${action} plugin`,
       variant: "destructive",
     });
+    // Reload plugins to revert UI state on error
+    await loadPlugins();
   }
 };
 
@@ -245,7 +247,72 @@ const deletePlugin = async (plugin: any) => {
 // Configure plugin
 const configurePlugin = (plugin: any) => {
   currentPlugin.value = plugin;
-  pluginConfig.value = { ...plugin.config };
+  
+  // Deep copy and convert values to proper types
+  const config = JSON.parse(JSON.stringify(plugin.config || {}));
+  const pluginDef = availablePlugins.value.find(p => p.id === plugin.plugin_id);
+  
+  if (pluginDef?.config_schema?.fields) {
+    pluginDef.config_schema.fields.forEach((field: any) => {
+      if (field.type === 'bool') {
+        if (config[field.name] !== undefined) {
+          if (typeof config[field.name] === 'string') {
+            config[field.name] = config[field.name] === 'true' || config[field.name] === '1';
+          } else {
+            config[field.name] = Boolean(config[field.name]);
+          }
+        } else {
+          // Set default false for boolean fields without values
+          config[field.name] = field.default !== undefined ? Boolean(field.default) : false;
+        }
+      } else if (field.type === 'arraystring' || field.type === 'array_string') {
+        // Ensure string arrays are properly formatted
+        if (config[field.name] && !Array.isArray(config[field.name])) {
+          if (typeof config[field.name] === 'string') {
+            config[field.name] = config[field.name].split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+          }
+        } else if (!config[field.name]) {
+          config[field.name] = [];
+        }
+      } else if (field.type === 'arrayint') {
+        // Ensure integer arrays are properly formatted
+        if (config[field.name] && !Array.isArray(config[field.name])) {
+          if (typeof config[field.name] === 'string') {
+            config[field.name] = config[field.name].split(',').map((s: string) => parseInt(s.trim())).filter((n: number) => !isNaN(n));
+          }
+        } else if (!config[field.name]) {
+          config[field.name] = [];
+        }
+      } else if (field.type === 'arraybool' || field.type === 'arrayobject') {
+        // Ensure arrays exist
+        if (!config[field.name]) {
+          config[field.name] = [];
+        }
+      } else if (field.type === 'object') {
+        // Ensure object exists and initialize nested fields
+        if (!config[field.name]) {
+          config[field.name] = {};
+        }
+        if (field.nested && field.nested.length > 0) {
+          field.nested.forEach((nestedField: any) => {
+            if (config[field.name][nestedField.name] === undefined) {
+              if (nestedField.default !== undefined) {
+                config[field.name][nestedField.name] = nestedField.default;
+              } else if (nestedField.type === 'bool') {
+                config[field.name][nestedField.name] = false;
+              } else if (nestedField.type === 'int') {
+                config[field.name][nestedField.name] = 0;
+              } else {
+                config[field.name][nestedField.name] = '';
+              }
+            }
+          });
+        }
+      }
+    });
+  }
+  
+  pluginConfig.value = config;
   showConfigDialog.value = true;
 };
 
@@ -291,7 +358,53 @@ const onPluginSelect = (pluginId: any) => {
     pluginConfig.value = {};
     plugin.config_schema.fields.forEach((field: any) => {
       if (field.default !== undefined) {
-        pluginConfig.value[field.name] = field.default;
+        let defaultValue = field.default;
+        // Convert string boolean defaults to actual booleans
+        if (field.type === 'bool') {
+          if (typeof defaultValue === 'string') {
+            defaultValue = defaultValue === 'true' || defaultValue === '1';
+          } else {
+            defaultValue = Boolean(defaultValue);
+          }
+        }
+        pluginConfig.value[field.name] = defaultValue;
+      } else {
+        // Set appropriate defaults based on field type
+        switch (field.type) {
+          case 'bool':
+            pluginConfig.value[field.name] = false;
+            break;
+          case 'int':
+          case 'number':
+            pluginConfig.value[field.name] = 0;
+            break;
+          case 'arraystring':
+          case 'array_string':
+          case 'arrayint':
+          case 'arraybool':
+          case 'arrayobject':
+            pluginConfig.value[field.name] = [];
+            break;
+          case 'object':
+            pluginConfig.value[field.name] = {};
+            // Initialize nested fields if defined
+            if (field.nested && field.nested.length > 0) {
+              field.nested.forEach((nestedField: any) => {
+                if (nestedField.default !== undefined) {
+                  pluginConfig.value[field.name][nestedField.name] = nestedField.default;
+                } else if (nestedField.type === 'bool') {
+                  pluginConfig.value[field.name][nestedField.name] = false;
+                } else if (nestedField.type === 'int') {
+                  pluginConfig.value[field.name][nestedField.name] = 0;
+                } else {
+                  pluginConfig.value[field.name][nestedField.name] = '';
+                }
+              });
+            }
+            break;
+          default:
+            pluginConfig.value[field.name] = '';
+        }
       }
     });
   }
@@ -309,6 +422,55 @@ const renderConfigField = (field: any) => {
       return "checkbox";
     default:
       return "text";
+  }
+};
+
+// Array bool helper functions
+const updateArrayBool = (fieldName: string, index: number, checked: boolean) => {
+  if (!pluginConfig.value[fieldName]) {
+    pluginConfig.value[fieldName] = [];
+  }
+  pluginConfig.value[fieldName][index] = checked;
+};
+
+const addArrayBoolItem = (fieldName: string) => {
+  if (!pluginConfig.value[fieldName]) {
+    pluginConfig.value[fieldName] = [];
+  }
+  pluginConfig.value[fieldName].push(false);
+};
+
+const removeArrayBoolItem = (fieldName: string, index: number) => {
+  if (pluginConfig.value[fieldName] && Array.isArray(pluginConfig.value[fieldName])) {
+    pluginConfig.value[fieldName].splice(index, 1);
+  }
+};
+
+// Array object helper functions
+const addArrayObjectItem = (fieldName: string, nestedFields: any[]) => {
+  if (!pluginConfig.value[fieldName]) {
+    pluginConfig.value[fieldName] = [];
+  }
+  
+  const newItem: Record<string, any> = {};
+  nestedFields.forEach(field => {
+    if (field.default !== undefined) {
+      newItem[field.name] = field.default;
+    } else if (field.type === 'bool') {
+      newItem[field.name] = false;
+    } else if (field.type === 'int') {
+      newItem[field.name] = 0;
+    } else {
+      newItem[field.name] = '';
+    }
+  });
+  
+  pluginConfig.value[fieldName].push(newItem);
+};
+
+const removeArrayObjectItem = (fieldName: string, index: number) => {
+  if (pluginConfig.value[fieldName] && Array.isArray(pluginConfig.value[fieldName])) {
+    pluginConfig.value[fieldName].splice(index, 1);
   }
 };
 
@@ -338,7 +500,7 @@ onMounted(async () => {
             Add Plugin
           </Button>
         </DialogTrigger>
-        <DialogContent class="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent class="sm:max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Add New Plugin</DialogTitle>
             <DialogDescription>
@@ -346,7 +508,7 @@ onMounted(async () => {
             </DialogDescription>
           </DialogHeader>
           
-          <div class="space-y-4">
+          <div class="space-y-4 overflow-y-auto flex-1 pr-2">
             <div>
               <Label for="plugin-select">Plugin</Label>
               <Select :model-value="selectedPlugin" @update:model-value="onPluginSelect">
@@ -394,6 +556,7 @@ onMounted(async () => {
                 </p>
                 
                 <!-- String/Text input -->
+                                <!-- String/Text input -->
                 <Input
                   v-if="field.type === 'string'"
                   :id="`config-${field.name}`"
@@ -413,25 +576,185 @@ onMounted(async () => {
                 <div v-else-if="field.type === 'bool'" class="flex items-center space-x-2">
                   <Switch
                     :id="`config-${field.name}`"
-                    :checked="pluginConfig[field.name]"
-                    @update:checked="pluginConfig[field.name] = $event"
+                    :model-value="!!pluginConfig[field.name]"
+                    @update:model-value="(checked: boolean) => pluginConfig[field.name] = checked"
                   />
                   <Label :for="`config-${field.name}`">{{ field.name }}</Label>
                 </div>
                 
+                <!-- Select dropdown for options -->
+                <Select
+                  v-else-if="field.options && field.options.length > 0"
+                  :model-value="pluginConfig[field.name]"
+                  @update:model-value="(value) => pluginConfig[field.name] = value"
+                >
+                  <SelectTrigger :id="`config-${field.name}`">
+                    <SelectValue placeholder="Select an option" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem 
+                      v-for="option in field.options" 
+                      :key="option" 
+                      :value="option"
+                    >
+                      {{ option }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                
                 <!-- Array of strings -->
                 <Textarea
-                  v-else-if="field.type === 'array_string'"
+                  v-else-if="field.type === 'arraystring' || field.type === 'array_string'"
                   :id="`config-${field.name}`"
-                  v-model="pluginConfig[field.name]"
+                  :model-value="Array.isArray(pluginConfig[field.name]) ? pluginConfig[field.name].join(', ') : (pluginConfig[field.name] || '')"
                   placeholder="Enter values separated by commas"
-                  @input="pluginConfig[field.name] = ($event.target as HTMLTextAreaElement).value.split(',').map((s: string) => s.trim())"
+                  @input="pluginConfig[field.name] = ($event.target as HTMLTextAreaElement).value.split(',').map((s: string) => s.trim()).filter(s => s.length > 0)"
                 />
+                
+                <!-- Array of integers -->
+                <Textarea
+                  v-else-if="field.type === 'arrayint'"
+                  :id="`config-${field.name}`"
+                  :model-value="Array.isArray(pluginConfig[field.name]) ? pluginConfig[field.name].join(', ') : (pluginConfig[field.name] || '')"
+                  placeholder="Enter integer values separated by commas"
+                  @input="pluginConfig[field.name] = ($event.target as HTMLTextAreaElement).value.split(',').map((s: string) => parseInt(s.trim())).filter(n => !isNaN(n))"
+                />
+                
+                <!-- Array of booleans -->
+                <div v-else-if="field.type === 'arraybool'" class="space-y-2">
+                  <div 
+                    v-for="(item, index) in (pluginConfig[field.name] || [])" 
+                    :key="index"
+                    class="flex items-center space-x-2"
+                  >
+                    <Switch
+                      :checked="!!item"
+                      @update:checked="(checked: boolean) => updateArrayBool(field.name, index, checked)"
+                    />
+                    <Label>Item {{ index + 1 }}</Label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      @click="removeArrayBoolItem(field.name, index)"
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    @click="addArrayBoolItem(field.name)"
+                  >
+                    Add Item
+                  </Button>
+                </div>
+                
+                <!-- Object configuration -->
+                <div v-else-if="field.type === 'object'" class="space-y-4 p-4 border rounded-lg">
+                  <h5 class="font-medium">{{ field.name }} Configuration</h5>
+                  <div
+                    v-for="nestedField in field.nested || []"
+                    :key="nestedField.name"
+                    class="space-y-2"
+                  >
+                    <Label :for="`config-${field.name}-${nestedField.name}`">
+                      {{ nestedField.name }}
+                      <span v-if="nestedField.required" class="text-red-500">*</span>
+                    </Label>
+                    <p v-if="nestedField.description" class="text-sm text-muted-foreground">
+                      {{ nestedField.description }}
+                    </p>
+                    
+                    <!-- Nested field inputs based on type -->
+                    <Input
+                      v-if="nestedField.type === 'string'"
+                      :id="`config-${field.name}-${nestedField.name}`"
+                      v-model="(pluginConfig[field.name] = pluginConfig[field.name] || {})[nestedField.name]"
+                      type="text"
+                    />
+                    <Input
+                      v-else-if="nestedField.type === 'int'"
+                      :id="`config-${field.name}-${nestedField.name}`"
+                      v-model.number="(pluginConfig[field.name] = pluginConfig[field.name] || {})[nestedField.name]"
+                      type="number"
+                    />
+                    <div v-else-if="nestedField.type === 'bool'" class="flex items-center space-x-2">
+                      <Switch
+                        :id="`config-${field.name}-${nestedField.name}`"
+                        :checked="!!((pluginConfig[field.name] || {})[nestedField.name])"
+                        @update:checked="(checked: boolean) => {
+                          pluginConfig[field.name] = pluginConfig[field.name] || {};
+                          pluginConfig[field.name][nestedField.name] = checked;
+                        }"
+                      />
+                      <Label :for="`config-${field.name}-${nestedField.name}`">{{ nestedField.name }}</Label>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Array of objects -->
+                <div v-else-if="field.type === 'arrayobject'" class="space-y-4">
+                  <div 
+                    v-for="(item, index) in (pluginConfig[field.name] || [])" 
+                    :key="index"
+                    class="p-4 border rounded-lg space-y-2"
+                  >
+                    <div class="flex justify-between items-center">
+                      <h6 class="font-medium">{{ field.name }} Item {{ index + 1 }}</h6>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        @click="removeArrayObjectItem(field.name, index)"
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                    
+                    <div
+                      v-for="nestedField in field.nested || []"
+                      :key="nestedField.name"
+                      class="space-y-2"
+                    >
+                      <Label :for="`config-${field.name}-${index}-${nestedField.name}`">
+                        {{ nestedField.name }}
+                        <span v-if="nestedField.required" class="text-red-500">*</span>
+                      </Label>
+                      
+                      <Input
+                        v-if="nestedField.type === 'string'"
+                        :id="`config-${field.name}-${index}-${nestedField.name}`"
+                        v-model="item[nestedField.name]"
+                        type="text"
+                      />
+                      <Input
+                        v-else-if="nestedField.type === 'int'"
+                        :id="`config-${field.name}-${index}-${nestedField.name}`"
+                        v-model.number="item[nestedField.name]"
+                        type="number"
+                      />
+                      <div v-else-if="nestedField.type === 'bool'" class="flex items-center space-x-2">
+                        <Switch
+                          :id="`config-${field.name}-${index}-${nestedField.name}`"
+                          :checked="!!item[nestedField.name]"
+                          @update:checked="(checked: boolean) => item[nestedField.name] = checked"
+                        />
+                        <Label :for="`config-${field.name}-${index}-${nestedField.name}`">{{ nestedField.name }}</Label>
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    @click="addArrayObjectItem(field.name, field.nested || [])"
+                  >
+                    Add {{ field.name }} Item
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter class="flex-shrink-0 pt-4">
             <Button variant="outline" @click="showAddDialog = false">Cancel</Button>
             <Button @click="createPlugin">Create Plugin</Button>
           </DialogFooter>
@@ -495,7 +818,8 @@ onMounted(async () => {
               <TableCell class="hidden md:table-cell">
                 <Switch
                   :checked="plugin.enabled"
-                  @update:checked="togglePlugin(plugin)"
+                  :model-value="plugin.enabled"
+                  @update:model-value="(newState: boolean) => togglePlugin(plugin, newState)"
                 />
               </TableCell>
               <TableCell class="hidden lg:table-cell">
@@ -517,14 +841,6 @@ onMounted(async () => {
                     class="hidden sm:inline-flex"
                   >
                     <Settings class="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    @click="$router.push(`/servers/${serverId}/plugins/${plugin.id}/metrics`)"
-                    class="hidden sm:inline-flex"
-                  >
-                    <BarChart3 class="w-4 h-4" />
                   </Button>
                   <Button
                     variant="outline"
@@ -559,7 +875,7 @@ onMounted(async () => {
 
     <!-- Configuration Dialog -->
     <Dialog v-model:open="showConfigDialog">
-      <DialogContent class="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent class="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Configure {{ currentPlugin?.name }}</DialogTitle>
           <DialogDescription>
@@ -567,7 +883,7 @@ onMounted(async () => {
           </DialogDescription>
         </DialogHeader>
         
-        <div v-if="currentPlugin" class="space-y-4">
+        <div v-if="currentPlugin" class="space-y-4 overflow-y-auto flex-1 pr-2">
           <div 
             v-for="field in availablePlugins.find(p => p.id === currentPlugin.plugin_id)?.config_schema?.fields || []"
             :key="field.name"
@@ -601,24 +917,184 @@ onMounted(async () => {
             <div v-else-if="field.type === 'bool'" class="flex items-center space-x-2">
               <Switch
                 :id="`edit-config-${field.name}`"
-                :checked="pluginConfig[field.name]"
-                @update:checked="pluginConfig[field.name] = $event"
+                :model-value="!!pluginConfig[field.name]"
+                @update:model-value="(checked: boolean) => pluginConfig[field.name] = checked"
               />
               <Label :for="`edit-config-${field.name}`">{{ field.name }}</Label>
             </div>
             
+            <!-- Select dropdown for options -->
+            <Select
+              v-else-if="field.options && field.options.length > 0"
+              :model-value="pluginConfig[field.name]"
+              @update:model-value="(value) => pluginConfig[field.name] = value"
+            >
+              <SelectTrigger :id="`edit-config-${field.name}`">
+                <SelectValue placeholder="Select an option" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem 
+                  v-for="option in field.options" 
+                  :key="option" 
+                  :value="option"
+                >
+                  {{ option }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            
             <!-- Array of strings -->
             <Textarea
-              v-else-if="field.type === 'array_string'"
+              v-else-if="field.type === 'arraystring' || field.type === 'array_string'"
               :id="`edit-config-${field.name}`"
-              :model-value="Array.isArray(pluginConfig[field.name]) ? pluginConfig[field.name].join(', ') : pluginConfig[field.name]"
+              :model-value="Array.isArray(pluginConfig[field.name]) ? pluginConfig[field.name].join(', ') : (pluginConfig[field.name] || '')"
               placeholder="Enter values separated by commas"
-              @input="pluginConfig[field.name] = ($event.target as HTMLTextAreaElement).value.split(',').map((s: string) => s.trim())"
+              @input="pluginConfig[field.name] = ($event.target as HTMLTextAreaElement).value.split(',').map((s: string) => s.trim()).filter(s => s.length > 0)"
             />
+            
+            <!-- Array of integers -->
+            <Textarea
+              v-else-if="field.type === 'arrayint'"
+              :id="`edit-config-${field.name}`"
+              :model-value="Array.isArray(pluginConfig[field.name]) ? pluginConfig[field.name].join(', ') : (pluginConfig[field.name] || '')"
+              placeholder="Enter integer values separated by commas"
+              @input="pluginConfig[field.name] = ($event.target as HTMLTextAreaElement).value.split(',').map((s: string) => parseInt(s.trim())).filter(n => !isNaN(n))"
+            />
+            
+            <!-- Array of booleans -->
+            <div v-else-if="field.type === 'arraybool'" class="space-y-2">
+              <div 
+                v-for="(item, index) in (pluginConfig[field.name] || [])" 
+                :key="index"
+                class="flex items-center space-x-2"
+              >
+                <Switch
+                  :checked="!!item"
+                  @update:checked="(checked: boolean) => updateArrayBool(field.name, index, checked)"
+                />
+                <Label>Item {{ index + 1 }}</Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  @click="removeArrayBoolItem(field.name, index)"
+                >
+                  Remove
+                </Button>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                @click="addArrayBoolItem(field.name)"
+              >
+                Add Item
+              </Button>
+            </div>
+            
+            <!-- Object configuration -->
+            <div v-else-if="field.type === 'object'" class="space-y-4 p-4 border rounded-lg">
+              <h5 class="font-medium">{{ field.name }} Configuration</h5>
+              <div
+                v-for="nestedField in field.nested || []"
+                :key="nestedField.name"
+                class="space-y-2"
+              >
+                <Label :for="`edit-config-${field.name}-${nestedField.name}`">
+                  {{ nestedField.name }}
+                  <span v-if="nestedField.required" class="text-red-500">*</span>
+                </Label>
+                <p v-if="nestedField.description" class="text-sm text-muted-foreground">
+                  {{ nestedField.description }}
+                </p>
+                
+                <!-- Nested field inputs based on type -->
+                <Input
+                  v-if="nestedField.type === 'string'"
+                  :id="`edit-config-${field.name}-${nestedField.name}`"
+                  v-model="(pluginConfig[field.name] = pluginConfig[field.name] || {})[nestedField.name]"
+                  type="text"
+                />
+                <Input
+                  v-else-if="nestedField.type === 'int'"
+                  :id="`edit-config-${field.name}-${nestedField.name}`"
+                  v-model.number="(pluginConfig[field.name] = pluginConfig[field.name] || {})[nestedField.name]"
+                  type="number"
+                />
+                <div v-else-if="nestedField.type === 'bool'" class="flex items-center space-x-2">
+                  <Switch
+                    :id="`edit-config-${field.name}-${nestedField.name}`"
+                    :checked="!!((pluginConfig[field.name] || {})[nestedField.name])"
+                    @update:checked="(checked: boolean) => {
+                      pluginConfig[field.name] = pluginConfig[field.name] || {};
+                      pluginConfig[field.name][nestedField.name] = checked;
+                    }"
+                  />
+                  <Label :for="`edit-config-${field.name}-${nestedField.name}`">{{ nestedField.name }}</Label>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Array of objects -->
+            <div v-else-if="field.type === 'arrayobject'" class="space-y-4">
+              <div 
+                v-for="(item, index) in (pluginConfig[field.name] || [])" 
+                :key="index"
+                class="p-4 border rounded-lg space-y-2"
+              >
+                <div class="flex justify-between items-center">
+                  <h6 class="font-medium">{{ field.name }} Item {{ index + 1 }}</h6>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    @click="removeArrayObjectItem(field.name, index)"
+                  >
+                    Remove
+                  </Button>
+                </div>
+                
+                <div
+                  v-for="nestedField in field.nested || []"
+                  :key="nestedField.name"
+                  class="space-y-2"
+                >
+                  <Label :for="`edit-config-${field.name}-${index}-${nestedField.name}`">
+                    {{ nestedField.name }}
+                    <span v-if="nestedField.required" class="text-red-500">*</span>
+                  </Label>
+                  
+                  <Input
+                    v-if="nestedField.type === 'string'"
+                    :id="`edit-config-${field.name}-${index}-${nestedField.name}`"
+                    v-model="item[nestedField.name]"
+                    type="text"
+                  />
+                  <Input
+                    v-else-if="nestedField.type === 'int'"
+                    :id="`edit-config-${field.name}-${index}-${nestedField.name}`"
+                    v-model.number="item[nestedField.name]"
+                    type="number"
+                  />
+                  <div v-else-if="nestedField.type === 'bool'" class="flex items-center space-x-2">
+                    <Switch
+                      :id="`edit-config-${field.name}-${index}-${nestedField.name}`"
+                      :checked="!!item[nestedField.name]"
+                      @update:checked="(checked: boolean) => item[nestedField.name] = checked"
+                    />
+                    <Label :for="`edit-config-${field.name}-${index}-${nestedField.name}`">{{ nestedField.name }}</Label>
+                  </div>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                @click="addArrayObjectItem(field.name, field.nested || [])"
+              >
+                Add {{ field.name }} Item
+              </Button>
+            </div>
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter class="flex-shrink-0 pt-4">
           <Button variant="outline" @click="showConfigDialog = false">Cancel</Button>
           <Button @click="savePluginConfig">Save Configuration</Button>
         </DialogFooter>

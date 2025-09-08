@@ -2,6 +2,8 @@ package server
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -319,8 +321,46 @@ func (s *Server) ServerPluginDelete(c *gin.Context) {
 
 // ServerPluginLogs returns recent logs for a plugin instance
 func (s *Server) ServerPluginLogs(c *gin.Context) {
-	// TODO: Implement plugin-specific logging retrieval
-	responses.Success(c, "Plugin logs fetched successfully", &gin.H{"logs": []string{}})
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	instanceID, err := uuid.Parse(c.Param("pluginId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Parse query parameters
+	limit := 100 // default
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	offset := 0 // default
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if parsed, err := strconv.Atoi(offsetStr); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	// Get logs from ClickHouse via PluginManager
+	logs, err := s.Dependencies.PluginManager.GetPluginLogs(serverID, instanceID, limit, offset)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to retrieve plugin logs: %w", err), nil)
+		return
+	}
+
+	responses.Success(c, "Plugin logs fetched successfully", &gin.H{"logs": logs})
 }
 
 // ServerPluginMetrics returns metrics for a plugin instance
