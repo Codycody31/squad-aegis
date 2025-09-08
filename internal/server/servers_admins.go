@@ -42,6 +42,7 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 			sa.steam_id,
 			sa.server_role_id, 
 			sa.expires_at,
+			sa.notes,
 			sa.created_at
 		FROM server_admins sa
 		WHERE sa.server_id = $1
@@ -57,7 +58,7 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 	for rows.Next() {
 		var admin models.ServerAdmin
 
-		err := rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.CreatedAt)
+		err := rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.Notes, &admin.CreatedAt)
 		if err != nil {
 			responses.BadRequest(c, "Failed to scan admin", &gin.H{"error": err.Error()})
 			return
@@ -76,6 +77,7 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 			"steam_id":       admin.SteamId,
 			"server_role_id": admin.ServerRoleId,
 			"expires_at":     admin.ExpiresAt,
+			"notes":          admin.Notes,
 			"created_at":     admin.CreatedAt,
 			"is_active":      admin.IsActive(),
 			"is_expired":     admin.IsExpired(),
@@ -230,19 +232,19 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 	if targetUserID != uuid.Nil {
 		// User exists, use user_id
 		query = `
-			INSERT INTO server_admins (id, server_id, user_id, server_role_id, expires_at, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO server_admins (id, server_id, user_id, server_role_id, expires_at, notes, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING id
 		`
-		args = []interface{}{uuid.New(), serverId, targetUserID, request.ServerRoleID, request.ExpiresAt, time.Now()}
+		args = []interface{}{uuid.New(), serverId, targetUserID, request.ServerRoleID, request.ExpiresAt, request.Notes, time.Now()}
 	} else {
 		// User doesn't exist, use steam_id
 		query = `
-			INSERT INTO server_admins (id, server_id, steam_id, server_role_id, expires_at, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO server_admins (id, server_id, steam_id, server_role_id, expires_at, notes, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING id
 		`
-		args = []interface{}{uuid.New(), serverId, *steamID, request.ServerRoleID, request.ExpiresAt, time.Now()}
+		args = []interface{}{uuid.New(), serverId, *steamID, request.ServerRoleID, request.ExpiresAt, request.Notes, time.Now()}
 	}
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&adminID)
@@ -285,6 +287,11 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 		auditData["expiresAt"] = request.ExpiresAt.Format(time.RFC3339)
 	}
 
+	// Add notes to audit log
+	if request.Notes != nil && *request.Notes != "" {
+		auditData["notes"] = *request.Notes
+	}
+
 	// Add user information to audit log
 	if targetUser != nil {
 		auditData["userId"] = targetUser.Id.String()
@@ -299,6 +306,108 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 	responses.Success(c, "Admin created successfully", &gin.H{
 		"adminId": adminID,
 	})
+}
+
+// ServerAdminsUpdate handles updating an admin's notes
+func (s *Server) ServerAdminsUpdate(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	adminIdString := c.Param("adminId")
+	adminId, err := uuid.Parse(adminIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid admin ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if user has access to this server
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Parse request body
+	var updateData struct {
+		Notes string `json:"notes"`
+	}
+
+	if err := c.ShouldBindJSON(&updateData); err != nil {
+		responses.BadRequest(c, "Invalid request data", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get existing admin details for audit log
+	var existingUserId sql.NullString
+	var existingSteamId sql.NullString
+	var existingRoleId uuid.UUID
+	var existingNotes sql.NullString
+
+	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+		SELECT user_id, steam_id, server_role_id, notes
+		FROM server_admins
+		WHERE id = $1 AND server_id = $2
+	`, adminId, serverId).Scan(&existingUserId, &existingSteamId, &existingRoleId, &existingNotes)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			responses.NotFound(c, "Admin not found", nil)
+		} else {
+			responses.BadRequest(c, "Failed to get admin", &gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	// Update the admin's notes
+	var notes *string
+	if updateData.Notes != "" {
+		notes = &updateData.Notes
+	}
+
+	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+		UPDATE server_admins 
+		SET notes = $1
+		WHERE id = $2 AND server_id = $3
+	`, notes, adminId, serverId)
+
+	if err != nil {
+		responses.BadRequest(c, "Failed to update admin", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Create audit log
+	auditData := map[string]interface{}{
+		"adminId": adminId.String(),
+		"roleId":  existingRoleId.String(),
+	}
+
+	// Get username for audit log
+	if existingUserId.Valid {
+		auditData["userId"] = existingUserId.String
+		// TODO: Get actual username from users table if needed
+		auditData["username"] = "User ID: " + existingUserId.String
+	} else if existingSteamId.Valid {
+		auditData["steamId"] = existingSteamId.String
+		auditData["username"] = "Steam ID: " + existingSteamId.String
+	}
+
+	// Add notes change information
+	oldNotes := ""
+	if existingNotes.Valid {
+		oldNotes = existingNotes.String
+	}
+	auditData["oldNotes"] = oldNotes
+	auditData["newNotes"] = updateData.Notes
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:admin:update", auditData)
+
+	responses.Success(c, "Admin updated successfully", nil)
 }
 
 // ServerAdminsRemove handles removing an admin

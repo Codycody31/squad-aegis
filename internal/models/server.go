@@ -52,6 +52,7 @@ type ServerAdmin struct {
 	SteamId      *int64     `json:"steam_id,string,omitempty"`
 	ServerRoleId uuid.UUID  `json:"server_role_id"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	Notes        *string    `json:"notes,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
@@ -89,6 +90,7 @@ type ServerAdminCreateRequest struct {
 	SteamID      *string    `json:"steam_id,omitempty"`   // Optional: Steam ID for new admin
 	ServerRoleID string     `json:"server_role_id"`       // Required: role to assign
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"` // Optional: expiration date for temporary access
+	Notes        *string    `json:"notes,omitempty"`      // Optional: notes about this admin assignment
 }
 
 type ServerCreateRequest struct {

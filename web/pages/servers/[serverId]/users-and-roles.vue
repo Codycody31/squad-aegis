@@ -39,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
+import { Textarea } from "~/components/ui/textarea";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
@@ -58,10 +59,13 @@ const admins = ref<ServerAdmin[]>([]);
 const users = ref<User[]>([]);
 const showAddRoleDialog = ref(false);
 const showAddAdminDialog = ref(false);
+const showEditAdminDialog = ref(false);
 const addRoleLoading = ref(false);
 const addAdminLoading = ref(false);
+const editAdminLoading = ref(false);
 const cleanupLoading = ref(false);
 const selectedAdminType = ref("user");
+const editingAdmin = ref<ServerAdmin | null>(null);
 
 // Squad permission categories
 const permissionCategories = [
@@ -122,6 +126,7 @@ interface ServerAdmin {
   username: string;
   server_role_id: string;
   expires_at?: string;
+  notes?: string;
   is_active?: boolean;
   is_expired?: boolean;
   created_at: string;
@@ -185,6 +190,7 @@ const adminFormSchema = toTypedSchema(
         }),
       server_role_id: z.string().min(1, "Role is required"),
       expires_at: z.string().optional(),
+      notes: z.string().optional(),
     })
     .refine(
       (data) => {
@@ -200,6 +206,13 @@ const adminFormSchema = toTypedSchema(
         path: ["user_id"], // This will show the error on the user_id field
       }
     )
+);
+
+// Edit admin form schema (only for notes)
+const editAdminFormSchema = toTypedSchema(
+  z.object({
+    notes: z.string().optional(),
+  })
 );
 
 // Setup forms
@@ -219,6 +232,14 @@ const adminForm = useForm({
     steam_id: "",
     server_role_id: "",
     expires_at: "",
+    notes: "",
+  },
+});
+
+const editAdminForm = useForm({
+  validationSchema: editAdminFormSchema,
+  initialValues: {
+    notes: "",
   },
 });
 
@@ -477,7 +498,7 @@ async function removeRole(roleId: string) {
 
 // Function to add an admin
 async function addAdmin(values: any) {
-  const { adminType, user_id, steam_id, server_role_id, expires_at } = values;
+  const { adminType, user_id, steam_id, server_role_id, expires_at, notes } = values;
 
   addAdminLoading.value = true;
   error.value = null;
@@ -509,6 +530,11 @@ async function addAdmin(values: any) {
     // Add expires_at if provided
     if (expires_at && expires_at.trim() !== "") {
       requestBody.expires_at = new Date(expires_at).toISOString();
+    }
+
+    // Add notes if provided
+    if (notes && notes.trim() !== "") {
+      requestBody.notes = notes;
     }
 
     const { data, error: fetchError } = await useFetch(
@@ -587,6 +613,69 @@ async function removeAdmin(adminId: string) {
     console.error(err);
   } finally {
     loading.value.admins = false;
+  }
+}
+
+// Function to open edit admin dialog
+function openEditAdminDialog(admin: ServerAdmin) {
+  editingAdmin.value = admin;
+  showEditAdminDialog.value = true;
+}
+
+// Function to close edit admin dialog
+function closeEditAdminDialog() {
+  showEditAdminDialog.value = false;
+  editingAdmin.value = null;
+}
+
+// Function to update admin notes
+async function updateAdminNotes(values: any) {
+  if (!editingAdmin.value) return;
+  
+  editAdminLoading.value = true;
+  error.value = null;
+
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
+  const token = cookieToken.value;
+
+  if (!token) {
+    error.value = "Authentication required";
+    editAdminLoading.value = false;
+    return;
+  }
+
+  try {
+    const { data, error: fetchError } = await useFetch(
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/admins/${editingAdmin.value.id}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          notes: values.notes,
+        }),
+      }
+    );
+
+    if (fetchError.value) {
+      throw new Error(
+        fetchError.value.data.message || fetchError.value.message
+      );
+    }
+
+    // Close dialog and refresh admins
+    closeEditAdminDialog();
+    fetchAdmins();
+  } catch (err: any) {
+    error.value = err.message || "An error occurred while updating the admin";
+    console.error(err);
+  } finally {
+    editAdminLoading.value = false;
   }
 }
 
@@ -920,6 +1009,7 @@ onMounted(() => {
                   steam_id: '',
                   server_role_id: '',
                   expires_at: '',
+                  notes: '',
                 }"
               >
                 <Dialog v-model:open="showAddAdminDialog">
@@ -1056,6 +1146,22 @@ onMounted(() => {
                           <FormMessage />
                         </FormItem>
                       </FormField>
+
+                      <FormField name="notes" v-slot="{ componentField }">
+                        <FormItem>
+                          <FormLabel>Notes (Optional)</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="e.g., Trial period, Temporary whitelist, etc."
+                              v-bind="componentField"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Add notes about this admin assignment for future reference.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
                     </div>
                     <DialogFooter>
                       <Button
@@ -1073,6 +1179,60 @@ onMounted(() => {
                 </DialogContent>
               </Dialog>
             </Form>
+
+            <!-- Edit Admin Dialog -->
+            <Form
+              :key="editingAdmin?.id"
+              :validation-schema="editAdminFormSchema"
+              :initial-values="{ notes: editingAdmin?.notes || '' }"
+              v-slot="{ handleSubmit }"
+            >
+              <Dialog v-model:open="showEditAdminDialog">
+                <DialogContent class="sm:max-w-[500px]">
+                  <DialogHeader>
+                    <DialogTitle>Edit Admin Notes</DialogTitle>
+                    <DialogDescription>
+                      Update the notes for this admin assignment.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form
+                    @submit="handleSubmit($event, updateAdminNotes)"
+                  >
+                    <div class="grid gap-4 py-4">
+                      <FormField v-slot="{ componentField }" name="notes">
+                        <FormItem>
+                          <FormLabel>Notes</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              v-bind="componentField"
+                              placeholder="Add notes about this admin assignment..."
+                              rows="4"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Add any notes or context about this admin assignment.
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </FormField>
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        @click="closeEditAdminDialog"
+                      >
+                        Cancel
+                      </Button>
+                      <Button type="submit" :disabled="editAdminLoading">
+                        {{ editAdminLoading ? "Updating..." : "Update Notes" }}
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </Form>
+
             </div>
           </CardHeader>
           <CardContent>
@@ -1094,6 +1254,7 @@ onMounted(() => {
                     <TableHead>User</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Notes</TableHead>
                     <TableHead>Created At</TableHead>
                     <TableHead class="text-right">Actions</TableHead>
                   </TableRow>
@@ -1137,16 +1298,32 @@ onMounted(() => {
                         </div>
                       </div>
                     </TableCell>
+                    <TableCell>
+                      <div class="max-w-32 truncate" :title="admin.notes">
+                        <span v-if="admin.notes" class="text-sm">{{ admin.notes }}</span>
+                        <span v-else class="text-sm text-muted-foreground italic">No notes</span>
+                      </div>
+                    </TableCell>
                     <TableCell>{{ formatDate(admin.created_at) }}</TableCell>
                     <TableCell class="text-right">
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        @click="removeAdmin(admin.id)"
-                        :disabled="loading.admins"
-                      >
-                        Remove
-                      </Button>
+                      <div class="flex gap-2 justify-end">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          @click="openEditAdminDialog(admin)"
+                          :disabled="loading.admins"
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          @click="removeAdmin(admin.id)"
+                          :disabled="loading.admins"
+                        >
+                          Remove
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 </TableBody>

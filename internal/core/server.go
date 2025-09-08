@@ -185,7 +185,7 @@ func GetServerRoles(ctx context.Context, database db.Executor, serverId uuid.UUI
 
 func GetServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]*models.ServerAdmin, error) {
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-	sql, args, err := psql.Select("id", "server_id", "user_id", "steam_id", "server_role_id", "expires_at", "created_at").From("server_admins").Where(squirrel.Eq{"server_id": serverId}).ToSql()
+	sql, args, err := psql.Select("id", "server_id", "user_id", "steam_id", "server_role_id", "expires_at", "notes", "created_at").From("server_admins").Where(squirrel.Eq{"server_id": serverId}).ToSql()
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func GetServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UU
 
 	for rows.Next() {
 		var admin models.ServerAdmin
-		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.CreatedAt)
+		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.Notes, &admin.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -326,7 +326,7 @@ func CleanupExpiredAdmins(ctx context.Context, database db.Executor) (int64, err
 // GetActiveServerAdmins retrieves all active (non-expired) admins for a server
 func GetActiveServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]*models.ServerAdmin, error) {
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-	sql, args, err := psql.Select("id", "server_id", "user_id", "steam_id", "server_role_id", "expires_at", "created_at").
+	sql, args, err := psql.Select("id", "server_id", "user_id", "steam_id", "server_role_id", "expires_at", "notes", "created_at").
 		From("server_admins").
 		Where(squirrel.Eq{"server_id": serverId}).
 		Where(squirrel.Or{
@@ -347,7 +347,7 @@ func GetActiveServerAdmins(ctx context.Context, database db.Executor, serverId u
 
 	for rows.Next() {
 		var admin models.ServerAdmin
-		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.CreatedAt)
+		err = rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.Notes, &admin.CreatedAt)
 		if err != nil {
 			return nil, err
 		}

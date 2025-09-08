@@ -920,10 +920,7 @@ refresh();
                             <span>{{ squad.name }}</span>
                             <span>{{ squad.players.length }} / 9</span>
                           </div>
-                          <Progress
-                            :value="(squad.players.length / 9) * 100"
-                            class="h-2"
-                          />
+                          <Progress :modelValue="Math.min(100, Math.round((squad.players.length / 9) * 100))" class="h-2" />
                         </div>
                       </div>
                     </div>
