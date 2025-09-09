@@ -5,6 +5,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
 	"go.codycody31.dev/squad-aegis/internal/plugins/team_randomizer"
 )
@@ -28,6 +29,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Seeding Mode plugin
 	if err := pm.RegisterPlugin(seeding_mode.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Seeding Mode plugin")
+		return err
+	}
+
+	// Register Intervalled Broadcasts plugin
+	if err := pm.RegisterPlugin(intervalled_broadcasts.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Intervalled Broadcasts plugin")
 		return err
 	}
 
