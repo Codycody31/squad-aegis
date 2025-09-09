@@ -13,6 +13,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_chat"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_fob_hab_explosion_damage"
+	"go.codycody31.dev/squad-aegis/internal/plugins/discord_kill_feed"
 	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
@@ -74,6 +75,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Discord FOB/HAB Explosion Damage plugin
 	if err := pm.RegisterPlugin(discord_fob_hab_explosion_damage.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Discord FOB/HAB Explosion Damage plugin")
+		return err
+	}
+
+	// Register Discord Kill Feed plugin
+	if err := pm.RegisterPlugin(discord_kill_feed.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Discord Kill Feed plugin")
 		return err
 	}
 
