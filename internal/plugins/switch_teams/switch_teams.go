@@ -207,7 +207,7 @@ func (p *SwitchTeamsPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEve
 			return err
 		}
 		if !isAdmin {
-			return p.apis.RconAPI.SendWarningToPlayer(event.EosID, "You must be an admin to use the switch command.")
+			return p.apis.RconAPI.SendWarningToPlayer(event.SteamID, "You must be an admin to use the switch command.")
 		}
 	}
 
@@ -228,7 +228,7 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 		if timeSinceLastSwitch < cooldown {
 			remainingTime := cooldown - timeSinceLastSwitch
-			return p.apis.RconAPI.SendWarningToPlayer(event.EosID,
+			return p.apis.RconAPI.SendWarningToPlayer(event.SteamID,
 				fmt.Sprintf("You must wait %s before using !%s again.",
 					p.formatDuration(remainingTime), p.getStringConfig("command")))
 		}
@@ -254,7 +254,7 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 	// Try to switch the player immediately
 	if err := p.tryImmediateSwitch(event.SteamID, event.PlayerName, event.EosID, currentPlayer.TeamID, players); err != nil {
-		return p.apis.RconAPI.SendWarningToPlayer(event.EosID, err.Error())
+		return p.apis.RconAPI.SendWarningToPlayer(event.SteamID, err.Error())
 	}
 
 	// Record successful switch time for cooldown

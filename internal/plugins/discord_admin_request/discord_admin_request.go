@@ -276,7 +276,7 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 	}
 
 	// Send Discord notification
-	if err := p.sendAdminRequestNotification(serverInfo, event.PlayerName, event.PlayerName, event.SteamID, event.Message, onlineAdmins); err != nil {
+	if err := p.sendAdminRequestNotification(serverInfo, event.PlayerName, event.SteamID, event.Message, onlineAdmins); err != nil {
 		p.apis.LogAPI.Error("Failed to send Discord notification", err, map[string]interface{}{
 			"player":  event.PlayerName,
 			"message": event.Message,
@@ -327,15 +327,10 @@ func (p *DiscordAdminRequestPlugin) shouldIgnoreChat(chatType string) bool {
 }
 
 // sendAdminRequestNotification sends the Discord notification
-func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plugin_manager.ServerInfo, playerName, playerID, steamID, message string, onlineAdmins int) error {
+func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plugin_manager.ServerInfo, playerName, steamID, message string, onlineAdmins int) error {
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
 		return fmt.Errorf("channel_id not configured")
-	}
-
-	// Check ping cooldown
-	if !p.canPing() {
-		return p.sendWithoutPing(channelID, serverInfo, playerName, playerID, steamID, message, onlineAdmins)
 	}
 
 	// Build ping string
@@ -397,17 +392,25 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 		Timestamp: func() *time.Time { t := time.Now(); return &t }(),
 	}
 
-	// Send with ping
-	content := pingString
-	if content != "" {
-		if err := p.discordAPI.SendMessage(channelID, content); err != nil {
-			return fmt.Errorf("failed to send ping message: %w", err)
+	// Check ping cooldown
+	if !p.canPing() {
+		// Send embed
+		if err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
+			return fmt.Errorf("failed to send embed: %w", err)
 		}
-	}
+	} else {
+		// Send with ping
+		content := pingString
+		if content != "" {
+			if err := p.discordAPI.SendMessage(channelID, content); err != nil {
+				return fmt.Errorf("failed to send ping message: %w", err)
+			}
+		}
 
-	// Send embed
-	if err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
-		return fmt.Errorf("failed to send embed: %w", err)
+		// Send embed
+		if err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
+			return fmt.Errorf("failed to send embed: %w", err)
+		}
 	}
 
 	// Update last ping time
@@ -416,50 +419,6 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 	p.mu.Unlock()
 
 	return nil
-}
-
-// sendWithoutPing sends notification without ping due to cooldown
-func (p *DiscordAdminRequestPlugin) sendWithoutPing(channelID string, serverInfo *plugin_manager.ServerInfo, playerName, playerID, steamID, message string, onlineAdmins int) error {
-	embed := &discord.DiscordEmbed{
-		Title:       "🔕 Admin Request (Ping on Cooldown)",
-		Description: fmt.Sprintf("**Player:** %s\n**Message:** %s", playerName, message),
-		Color:       p.getIntConfig("color"),
-		Fields: []*discord.DiscordEmbedField{
-			{
-				Name:   "Server",
-				Value:  serverInfo.Name,
-				Inline: true,
-			},
-			{
-				Name:   "Online Admins",
-				Value:  fmt.Sprintf("%d", onlineAdmins),
-				Inline: true,
-			},
-		},
-		Footer: &discord.DiscordEmbedFooter{
-			Text: "Squad Aegis Admin Request System (Ping Cooldown Active)",
-		},
-		Timestamp: func() *time.Time { t := time.Now(); return &t }(),
-	}
-
-	// Add player details if available
-	if playerID != "" {
-		embed.Fields = append(embed.Fields, &discord.DiscordEmbedField{
-			Name:   "Player ID",
-			Value:  playerID,
-			Inline: true,
-		})
-	}
-
-	if steamID != "" {
-		embed.Fields = append(embed.Fields, &discord.DiscordEmbedField{
-			Name:   "Steam ID",
-			Value:  steamID,
-			Inline: true,
-		})
-	}
-
-	return p.discordAPI.SendEmbed(channelID, embed)
 }
 
 // sendInGameResponse sends a response to the player in-game
