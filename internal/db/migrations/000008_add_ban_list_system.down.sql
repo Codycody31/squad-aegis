@@ -1,0 +1,10 @@
+ALTER TABLE public.server_bans DROP CONSTRAINT IF EXISTS fk_server_bans_ban_list_id_ban_lists_id;
+ALTER TABLE public.server_bans DROP COLUMN IF EXISTS ban_list_id;
+DROP INDEX IF EXISTS idx_ban_lists_name;
+DROP INDEX IF EXISTS idx_server_bans_ban_list_id;
+DROP INDEX IF EXISTS idx_server_ban_list_subscriptions_server_id;
+DROP INDEX IF EXISTS idx_server_ban_list_subscriptions_ban_list_id;
+DROP INDEX IF EXISTS idx_remote_ban_sources_sync_enabled;
+DROP TABLE IF EXISTS public.server_ban_list_subscriptions;
+DROP TABLE IF EXISTS public.remote_ban_sources;
+DROP TABLE IF EXISTS public.ban_lists;

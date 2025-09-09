@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "~/components/ui/card";
 import {
     Table,
     TableBody,
@@ -38,22 +38,32 @@ import {
     SelectTrigger,
     SelectValue,
 } from "~/components/ui/select";
+import { Plus, Trash2 } from "lucide-vue-next";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
+import { toast } from "~/components/ui/toast";
 
 const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
 const route = useRoute();
-const serverId = route.params.serverId;
+const serverId = Array.isArray(route.params.serverId) 
+  ? route.params.serverId[0] 
+  : route.params.serverId;
 
 const loading = ref(true);
 const error = ref<string | null>(null);
 const bannedPlayers = ref<BannedPlayer[]>([]);
-const refreshInterval = ref<NodeJS.Timeout | null>(null);
+const banLists = ref<any[]>([]);
+const subscribedBanLists = ref<any[]>([]);
+const availableBanLists = ref<any[]>([]);
 const searchQuery = ref("");
 const showAddBanDialog = ref(false);
+const showBanListDialog = ref(false);
 const addBanLoading = ref(false);
+const selectedBanListId = ref("");
+const subscribing = ref(false);
+const unsubscribing = ref<string>("");
 
 interface BannedPlayer {
     id: string;
@@ -68,6 +78,8 @@ interface BannedPlayer {
     expires_at: string;
     created_at: string;
     updated_at: string;
+    ban_list_id?: string;
+    ban_list_name?: string;
 }
 
 interface BannedPlayersResponse {
@@ -84,8 +96,10 @@ const formSchema = toTypedSchema(
             .min(17, "Steam ID must be at least 17 characters")
             .max(17, "Steam ID must be exactly 17 characters")
             .regex(/^\d+$/, "Steam ID must contain only numbers"),
+        player_name: z.string().optional(),
         reason: z.string().min(1, "Reason is required"),
         duration: z.number().min(0, "Duration must be at least 0"),
+        ban_list_id: z.string().optional(),
     }),
 );
 
@@ -94,8 +108,10 @@ const form = useForm({
     validationSchema: formSchema,
     initialValues: {
         steam_id: "",
+        player_name: "",
         reason: "",
         duration: 24,
+        ban_list_id: "",
     },
 });
 
@@ -156,8 +172,8 @@ async function fetchBannedPlayers() {
             // Sort by ban date (most recent first)
             bannedPlayers.value.sort((a, b) => {
                 return (
-                    new Date(b.bannedAt).getTime() -
-                    new Date(a.bannedAt).getTime()
+                    new Date(b.created_at).getTime() -
+                    new Date(a.created_at).getTime()
                 );
             });
         }
@@ -173,7 +189,7 @@ async function fetchBannedPlayers() {
 
 // Function to add a ban
 async function addBan(values: any) {
-    const { steam_id, reason, duration } = values;
+    const { steam_id, player_name, reason, duration, ban_list_id } = values;
 
     addBanLoading.value = true;
     error.value = null;
@@ -191,15 +207,28 @@ async function addBan(values: any) {
     }
 
     try {
+        // Enhance the reason with player name if provided
+        let enhancedReason = reason;
+        if (player_name && player_name.trim()) {
+            enhancedReason = `${player_name}: ${reason}`;
+        }
+
+        const requestBody: any = {
+            steam_id,
+            reason: enhancedReason,
+            duration,
+        };
+
+        // Add ban_list_id if selected
+        if (ban_list_id && ban_list_id.trim()) {
+            requestBody.ban_list_id = ban_list_id;
+        }
+
         const { data, error: fetchError } = await useFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`,
             {
                 method: "POST",
-                body: {
-                    steam_id,
-                    reason,
-                    duration,
-                },
+                body: requestBody,
                 headers: {
                     Authorization: `Bearer ${token}`,
                 },
@@ -213,6 +242,11 @@ async function addBan(values: any) {
         // Reset form and close dialog
         form.resetForm();
         showAddBanDialog.value = false;
+
+        toast({
+            title: "Success",
+            description: "Ban added successfully",
+        });
 
         // Refresh the banned players list
         fetchBannedPlayers();
@@ -270,37 +304,169 @@ async function removeBan(banId: string) {
     }
 }
 
+// Function to fetch ban lists
+async function fetchBanLists() {
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+    const token = cookieToken.value;
+
+    if (!token) return;
+
+    try {
+        const response = await $fetch(`${runtimeConfig.public.backendApi}/ban-lists`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        }) as any;
+
+        if (response?.data?.ban_lists) {
+            banLists.value = response.data.ban_lists;
+        }
+    } catch (err) {
+        console.error("Failed to fetch ban lists:", err);
+    }
+}
+
+// Function to fetch server's ban list subscriptions
+async function fetchServerBanListSubscriptions() {
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+    const token = cookieToken.value;
+
+    if (!token) return;
+
+    try {
+        const response = await $fetch(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-list-subscriptions`,
+            {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            }
+        ) as any;
+
+        if (response?.data?.subscriptions) {
+            subscribedBanLists.value = response.data.subscriptions;
+            // Calculate available ban lists (not subscribed)
+            availableBanLists.value = banLists.value.filter(
+                banList => !subscribedBanLists.value.some(sub => sub.ban_list_id === banList.id)
+            );
+        } else {
+            subscribedBanLists.value = [];
+            availableBanLists.value = banLists.value;
+        }
+    } catch (err) {
+        console.error("Failed to fetch ban list subscriptions:", err);
+    }
+}
+
+// Function to subscribe to a ban list
+async function subscribeToBanList() {
+    if (!selectedBanListId.value) return;
+
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+    const token = cookieToken.value;
+
+    if (!token) return;
+
+    subscribing.value = true;
+    
+    try {
+        await $fetch(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-list-subscriptions`,
+            {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+                body: {
+                    ban_list_id: selectedBanListId.value,
+                },
+            }
+        );
+
+        selectedBanListId.value = "";
+        await fetchServerBanListSubscriptions();
+        await fetchBannedPlayers();
+        
+        toast({
+            title: "Success",
+            description: "Successfully subscribed to ban list. The server's ban configuration has been updated.",
+        });
+    } catch (err: any) {
+        error.value = err.data?.message || "Failed to subscribe to ban list";
+        console.error(err);
+    } finally {
+        subscribing.value = false;
+    }
+}
+
+// Function to unsubscribe from a ban list
+async function unsubscribeFromBanList(banListId: string) {
+    if (!confirm("Are you sure you want to unsubscribe from this ban list?")) return;
+
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+    const token = cookieToken.value;
+
+    if (!token) return;
+
+    unsubscribing.value = banListId;
+    
+    try {
+        await $fetch(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-list-subscriptions/${banListId}`,
+            {
+                method: "DELETE",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            }
+        );
+
+        await fetchServerBanListSubscriptions();
+        await fetchBannedPlayers();
+        
+        toast({
+            title: "Success",
+            description: "Ban list subscription removed. The server's ban configuration has been updated and will take effect on the next ban list refresh.",
+        });
+    } catch (err: any) {
+        error.value = err.data?.message || "Failed to unsubscribe from ban list";
+        console.error(err);
+    } finally {
+        unsubscribing.value = "";
+    }
+}
+
 // Format date
 function formatDate(dateString: string): string {
     return new Date(dateString).toLocaleString();
 }
 
 // Setup auto-refresh
-onMounted(() => {
-    fetchBannedPlayers();
-
-    // Refresh data every 60 seconds
-    refreshInterval.value = setInterval(() => {
-        fetchBannedPlayers();
-    }, 60000);
-});
-
-// Clear interval on component unmount
-onUnmounted(() => {
-    if (refreshInterval.value) {
-        clearInterval(refreshInterval.value);
-    }
+onMounted(async () => {
+    await fetchBanLists();
+    await fetchServerBanListSubscriptions();
+    await fetchBannedPlayers();
 });
 
 // Manual refresh function
-function refreshData() {
-    fetchBannedPlayers();
+async function refreshData() {
+    await fetchBanLists();
+    await fetchServerBanListSubscriptions();
+    await fetchBannedPlayers();
 }
 
 function copyBanCfgUrl() {
-    navigator.clipboard.writeText(
-        `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/cfg`,
-    );
+    const url = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/cfg`;
+    navigator.clipboard.writeText(url);
+    
+    toast({
+        title: "Success",
+        description: "Ban configuration URL copied to clipboard",
+    });
 }
 </script>
 
@@ -316,20 +482,22 @@ function copyBanCfgUrl() {
                     :validation-schema="formSchema"
                     :initial-values="{
                         steam_id: '',
+                        player_name: '',
                         reason: '',
                         duration: 1,
+                        ban_list_id: '',
                     }"
                 >
                     <Dialog v-model:open="showAddBanDialog">
                         <DialogTrigger asChild>
-                            <Button v-if="authStore.getServerPermissions(serverId as string).includes('ban')">Add Ban Manually</Button>
+                            <Button v-if="authStore.getServerPermission(serverId as string, 'ban')">Add Ban Manually</Button>
                         </DialogTrigger>
-                        <DialogContent class="sm:max-w-[425px]">
+                        <DialogContent class="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
                             <DialogHeader>
                                 <DialogTitle>Add New Ban</DialogTitle>
                                 <DialogDescription>
-                                    Enter the details of the player you want to
-                                    ban.
+                                    Enter the details of the player you want to ban. 
+                                    You can optionally assign the ban to a shared ban list.
                                 </DialogDescription>
                             </DialogHeader>
                             <form
@@ -349,6 +517,24 @@ function copyBanCfgUrl() {
                                                     v-bind="componentField"
                                                 />
                                             </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+                                    <FormField
+                                        name="player_name"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Player Name (Optional)</FormLabel>
+                                            <FormControl>
+                                                <Input
+                                                    placeholder="Player display name"
+                                                    v-bind="componentField"
+                                                />
+                                            </FormControl>
+                                            <FormDescription>
+                                                If provided, will be included in the ban reason
+                                            </FormDescription>
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
@@ -384,6 +570,34 @@ function copyBanCfgUrl() {
                                                 >Duration in days. 0 is
                                                 permanent</FormDescription
                                             >
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+                                    <FormField
+                                        name="ban_list_id"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Ban List (Optional)</FormLabel>
+                                            <FormControl>
+                                                <Select v-bind="componentField">
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Select a ban list (optional)" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem
+                                                            v-for="banList in banLists.filter(bl => !bl.is_remote)"
+                                                            :key="banList.id"
+                                                            :value="banList.id.toString()"
+                                                        >
+                                                            {{ banList.name }}
+                                                        </SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </FormControl>
+                                            <FormDescription>
+                                                Select a ban list to add this ban to for sharing across servers
+                                            </FormDescription>
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
@@ -480,6 +694,7 @@ function copyBanCfgUrl() {
                                 <TableHead>Reason</TableHead>
                                 <TableHead>Banned At</TableHead>
                                 <TableHead>Duration</TableHead>
+                                <TableHead>Source</TableHead>
                                 <TableHead class="text-right"
                                     >Actions</TableHead
                                 >
@@ -515,6 +730,11 @@ function copyBanCfgUrl() {
                                         }}
                                     </Badge>
                                 </TableCell>
+                                <TableCell>
+                                    <Badge variant="secondary">
+                                        {{ player.ban_list_name || "Manual" }}
+                                    </Badge>
+                                </TableCell>
                                 <TableCell class="text-right">
                                     <Button
                                         variant="destructive"
@@ -533,6 +753,76 @@ function copyBanCfgUrl() {
             </CardContent>
         </Card>
 
+        <!-- Ban List Subscriptions -->
+        <Card class="mb-4">
+            <CardHeader>
+                <CardTitle>Ban List Subscriptions</CardTitle>
+                <CardDescription>
+                    Manage which ban lists this server subscribes to for automatic ban synchronization.
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div class="space-y-4">
+                    <!-- Add Ban List Subscription -->
+                    <div class="flex gap-2 items-center">
+                        <Select v-model="selectedBanListId">
+                            <SelectTrigger class="w-64">
+                                <SelectValue placeholder="Select a ban list to subscribe to" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem
+                                    v-for="banList in availableBanLists"
+                                    :key="banList.id"
+                                    :value="banList.id.toString()"
+                                >
+                                    {{ banList.name }}
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Button
+                            @click="subscribeToBanList"
+                            :disabled="!selectedBanListId || subscribing"
+                        >
+                            <Plus class="h-4 w-4 mr-2" />
+                            {{ subscribing ? "Subscribing..." : "Subscribe" }}
+                        </Button>
+                    </div>
+
+                    <!-- Current Subscriptions -->
+                    <div v-if="subscribedBanLists.length > 0">
+                        <h4 class="text-sm font-medium mb-2">Current Subscriptions</h4>
+                        <div class="space-y-2">
+                            <div
+                                v-for="subscription in subscribedBanLists"
+                                :key="subscription.ban_list_id"
+                                class="flex items-center justify-between p-3 border rounded-lg"
+                            >
+                                <div>
+                                    <div class="font-medium">{{ subscription.ban_list_name || 'Unknown Ban List' }}</div>
+                                    <div class="text-sm text-gray-500">
+                                        Subscribed on {{ new Date(subscription.created_at).toLocaleDateString() }}
+                                    </div>
+                                </div>
+                                <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    @click="unsubscribeFromBanList(subscription.ban_list_id.toString())"
+                                    :disabled="unsubscribing === subscription.ban_list_id.toString()"
+                                >
+                                    <Trash2 class="h-4 w-4 mr-2" />
+                                    {{ unsubscribing === subscription.ban_list_id.toString() ? "Unsubscribing..." : "Unsubscribe" }}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-else class="text-center text-gray-500 py-4">
+                        No ban list subscriptions configured
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+
         <Card>
             <CardHeader>
                 <CardTitle>About Bans</CardTitle>
@@ -546,6 +836,15 @@ function copyBanCfgUrl() {
                 <p class="text-sm text-muted-foreground mt-2">
                     Permanent bans will remain in effect until manually removed.
                     Temporary bans will expire after the specified duration.
+                </p>
+                <p class="text-sm text-muted-foreground mt-2">
+                    Ban list subscriptions allow this server to automatically include bans from other shared ban lists.
+                    Players banned on subscribed lists will be automatically banned on this server as well.
+                </p>
+                <p class="text-sm text-muted-foreground mt-2">
+                    <strong>Note:</strong> Squad servers typically cache ban configurations and refresh them periodically. 
+                    Changes to ban list subscriptions will be reflected in the ban configuration immediately, but may take 
+                    some time to take effect in-game depending on your server's ban list refresh interval.
                 </p>
             </CardContent>
         </Card>

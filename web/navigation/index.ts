@@ -27,6 +27,13 @@ const navigationItems: NavigationItem[] = [
     icon: "mdi:server",
   },
   {
+    title: "Ban Lists",
+    to: {
+      name: "ban-lists",
+    },
+    icon: "mdi:ban",
+  },
+  {
     title: "Connectors",
     to: {
       name: "connectors",
