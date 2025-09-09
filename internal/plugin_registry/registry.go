@@ -7,6 +7,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/auto_kick_unassigned"
 	"go.codycody31.dev/squad-aegis/internal/plugins/auto_tk_warn"
 	"go.codycody31.dev/squad-aegis/internal/plugins/cbl_info"
+	"go.codycody31.dev/squad-aegis/internal/plugins/chat_commands"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
 	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
@@ -39,6 +40,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register CBL Info plugin
 	if err := pm.RegisterPlugin(cbl_info.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register CBL Info plugin")
+		return err
+	}
+
+	// Register Chat Commands plugin
+	if err := pm.RegisterPlugin(chat_commands.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Chat Commands plugin")
 		return err
 	}
 
