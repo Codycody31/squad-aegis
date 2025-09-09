@@ -5,6 +5,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
 	"go.codycody31.dev/squad-aegis/internal/plugins/team_randomizer"
@@ -35,6 +36,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Intervalled Broadcasts plugin
 	if err := pm.RegisterPlugin(intervalled_broadcasts.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Intervalled Broadcasts plugin")
+		return err
+	}
+
+	// Register Fog of War plugin
+	if err := pm.RegisterPlugin(fog_of_war.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Fog of War plugin")
 		return err
 	}
 
