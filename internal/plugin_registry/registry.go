@@ -5,6 +5,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
 	"go.codycody31.dev/squad-aegis/internal/plugins/team_randomizer"
 )
 
@@ -21,6 +22,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Team Randomizer plugin
 	if err := pm.RegisterPlugin(team_randomizer.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Team Randomizer plugin")
+		return err
+	}
+
+	// Register Seeding Mode plugin
+	if err := pm.RegisterPlugin(seeding_mode.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Seeding Mode plugin")
 		return err
 	}
 
