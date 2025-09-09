@@ -2,6 +2,7 @@ package discord_round_ended
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
@@ -68,7 +69,8 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogRoundEnded,
+			event_manager.EventTypeLogRoundEnded,       // Keep for backwards compatibility
+			event_manager.EventTypeLogGameEventUnified, // New unified events
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -226,16 +228,46 @@ func (p *DiscordRoundEndedPlugin) handleRoundEnded(rawEvent *plugin_manager.Plug
 		return nil // Plugin is disabled
 	}
 
-	event, ok := rawEvent.Data.(*event_manager.LogRoundEndedData)
-	if !ok {
+	// Handle both old and new event types for backwards compatibility
+	var eventData *roundEndedEventData
+
+	if unifiedEvent, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData); ok {
+		if unifiedEvent.EventType == "ROUND_ENDED" {
+			eventData = &roundEndedEventData{
+				Winner:     unifiedEvent.Winner,
+				Layer:      unifiedEvent.Layer,
+				WinnerData: unifiedEvent.WinnerData,
+				LoserData:  unifiedEvent.LoserData,
+			}
+		} else {
+			return nil // Not a round ended event
+		}
+	} else if oldEvent, ok := rawEvent.Data.(*event_manager.LogRoundEndedData); ok {
+		// Legacy event format
+		eventData = &roundEndedEventData{
+			Winner: oldEvent.Winner,
+			Layer:  oldEvent.Layer,
+		}
+		// Convert legacy winner/loser data if present
+		if oldEvent.WinnerData != nil {
+			if winnerJSON, err := json.Marshal(oldEvent.WinnerData); err == nil {
+				eventData.WinnerData = string(winnerJSON)
+			}
+		}
+		if oldEvent.LoserData != nil {
+			if loserJSON, err := json.Marshal(oldEvent.LoserData); err == nil {
+				eventData.LoserData = string(loserJSON)
+			}
+		}
+	} else {
 		return fmt.Errorf("invalid event data type")
 	}
 
 	// Send Discord embed in a goroutine to avoid blocking
 	go func() {
-		if err := p.sendRoundEndedEmbed(event); err != nil {
+		if err := p.sendRoundEndedEmbed(eventData); err != nil {
 			p.apis.LogAPI.Error("Failed to send Discord embed for round ended", err, map[string]interface{}{
-				"winner": event.Winner,
+				"winner": eventData.Winner,
 			})
 		}
 	}()
@@ -243,8 +275,16 @@ func (p *DiscordRoundEndedPlugin) handleRoundEnded(rawEvent *plugin_manager.Plug
 	return nil
 }
 
+// roundEndedEventData represents normalized round ended event data
+type roundEndedEventData struct {
+	Winner     string
+	Layer      string
+	WinnerData string
+	LoserData  string
+}
+
 // sendRoundEndedEmbed sends the round ended as a Discord embed
-func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *event_manager.LogRoundEndedData) error {
+func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData) error {
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
 		return fmt.Errorf("channel_id not configured")
@@ -283,32 +323,38 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *event_manager.LogRo
 		},
 	}
 
-	// Extract winner information from WinnerData map
-	if event.WinnerData != nil {
-		if team, ok := event.WinnerData["team"].(string); ok && team != "" {
-			if subfaction, ok := event.WinnerData["subfaction"].(string); ok && subfaction != "" {
-				if faction, ok := event.WinnerData["faction"].(string); ok && faction != "" {
-					if tickets, ok := event.WinnerData["tickets"].(string); ok && tickets != "" {
-						fields = append(fields, &discord.DiscordEmbedField{
-							Name:  fmt.Sprintf("Team %s Won", team),
-							Value: fmt.Sprintf("%s\n%s\nwon with %s tickets.", subfaction, faction, tickets),
-						})
+	// Extract winner information from WinnerData JSON
+	if event.WinnerData != "" {
+		var winnerData map[string]interface{}
+		if err := json.Unmarshal([]byte(event.WinnerData), &winnerData); err == nil {
+			if team, ok := winnerData["team"].(string); ok && team != "" {
+				if subfaction, ok := winnerData["subfaction"].(string); ok && subfaction != "" {
+					if faction, ok := winnerData["faction"].(string); ok && faction != "" {
+						if tickets, ok := winnerData["tickets"].(string); ok && tickets != "" {
+							fields = append(fields, &discord.DiscordEmbedField{
+								Name:  fmt.Sprintf("Team %s Won", team),
+								Value: fmt.Sprintf("%s\n%s\nwon with %s tickets.", subfaction, faction, tickets),
+							})
+						}
 					}
 				}
 			}
 		}
 	}
 
-	// Extract loser information from LoserData map
-	if event.LoserData != nil {
-		if team, ok := event.LoserData["team"].(string); ok && team != "" {
-			if subfaction, ok := event.LoserData["subfaction"].(string); ok && subfaction != "" {
-				if faction, ok := event.LoserData["faction"].(string); ok && faction != "" {
-					if tickets, ok := event.LoserData["tickets"].(string); ok && tickets != "" {
-						fields = append(fields, &discord.DiscordEmbedField{
-							Name:  fmt.Sprintf("Team %s Lost", team),
-							Value: fmt.Sprintf("%s\n%s\nlost with %s tickets.", subfaction, faction, tickets),
-						})
+	// Extract loser information from LoserData JSON
+	if event.LoserData != "" {
+		var loserData map[string]interface{}
+		if err := json.Unmarshal([]byte(event.LoserData), &loserData); err == nil {
+			if team, ok := loserData["team"].(string); ok && team != "" {
+				if subfaction, ok := loserData["subfaction"].(string); ok && subfaction != "" {
+					if faction, ok := loserData["faction"].(string); ok && faction != "" {
+						if tickets, ok := loserData["tickets"].(string); ok && tickets != "" {
+							fields = append(fields, &discord.DiscordEmbedField{
+								Name:  fmt.Sprintf("Team %s Lost", team),
+								Value: fmt.Sprintf("%s\n%s\nlost with %s tickets.", subfaction, faction, tickets),
+							})
+						}
 					}
 				}
 			}
@@ -316,16 +362,21 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *event_manager.LogRo
 	}
 
 	// Calculate ticket difference if both are available
-	if event.WinnerData != nil && event.LoserData != nil {
-		if winnerTicketsStr, ok := event.WinnerData["tickets"].(string); ok {
-			if loserTicketsStr, ok := event.LoserData["tickets"].(string); ok {
-				if winnerTickets, err1 := strconv.Atoi(winnerTicketsStr); err1 == nil {
-					if loserTickets, err2 := strconv.Atoi(loserTicketsStr); err2 == nil {
-						ticketDiff := winnerTickets - loserTickets
-						fields = append(fields, &discord.DiscordEmbedField{
-							Name:  "Ticket Difference",
-							Value: fmt.Sprintf("%d", ticketDiff),
-						})
+	if event.WinnerData != "" && event.LoserData != "" {
+		var winnerData, loserData map[string]interface{}
+		if err1 := json.Unmarshal([]byte(event.WinnerData), &winnerData); err1 == nil {
+			if err2 := json.Unmarshal([]byte(event.LoserData), &loserData); err2 == nil {
+				if winnerTicketsStr, ok := winnerData["tickets"].(string); ok {
+					if loserTicketsStr, ok := loserData["tickets"].(string); ok {
+						if winnerTickets, err1 := strconv.Atoi(winnerTicketsStr); err1 == nil {
+							if loserTickets, err2 := strconv.Atoi(loserTicketsStr); err2 == nil {
+								ticketDiff := winnerTickets - loserTickets
+								fields = append(fields, &discord.DiscordEmbedField{
+									Name:  "Ticket Difference",
+									Value: fmt.Sprintf("%d", ticketDiff),
+								})
+							}
+						}
 					}
 				}
 			}
@@ -350,21 +401,27 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *event_manager.LogRo
 	loserTeam := ""
 	loserTickets := ""
 
-	if event.WinnerData != nil {
-		if team, ok := event.WinnerData["team"].(string); ok {
-			winnerTeam = team
-		}
-		if tickets, ok := event.WinnerData["tickets"].(string); ok {
-			winnerTickets = tickets
+	if event.WinnerData != "" {
+		var winnerData map[string]interface{}
+		if err := json.Unmarshal([]byte(event.WinnerData), &winnerData); err == nil {
+			if team, ok := winnerData["team"].(string); ok {
+				winnerTeam = team
+			}
+			if tickets, ok := winnerData["tickets"].(string); ok {
+				winnerTickets = tickets
+			}
 		}
 	}
 
-	if event.LoserData != nil {
-		if team, ok := event.LoserData["team"].(string); ok {
-			loserTeam = team
-		}
-		if tickets, ok := event.LoserData["tickets"].(string); ok {
-			loserTickets = tickets
+	if event.LoserData != "" {
+		var loserData map[string]interface{}
+		if err := json.Unmarshal([]byte(event.LoserData), &loserData); err == nil {
+			if team, ok := loserData["team"].(string); ok {
+				loserTeam = team
+			}
+			if tickets, ok := loserData["tickets"].(string); ok {
+				loserTickets = tickets
+			}
 		}
 	}
 

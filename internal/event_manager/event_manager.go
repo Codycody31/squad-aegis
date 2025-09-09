@@ -39,6 +39,7 @@ const (
 	EventTypeLogRoundEnded        EventType = "LOG_ROUND_ENDED"
 	EventTypeLogTickRate          EventType = "LOG_TICK_RATE"
 	EventTypeLogTeamkill          EventType = "LOG_TEAMKILL"
+	EventTypeLogGameEventUnified  EventType = "LOG_GAME_EVENT_UNIFIED"
 )
 
 // Event represents a unified event from any source

@@ -16,7 +16,6 @@ func (pm *PluginManager) loadPluginsFromDatabase() error {
 	query := `
 		SELECT id, server_id, plugin_id, notes, config, enabled, created_at, updated_at
 		FROM plugin_instances
-		WHERE enabled = true
 		ORDER BY created_at
 	`
 
@@ -80,17 +79,23 @@ func (pm *PluginManager) loadPluginsFromDatabase() error {
 		// Store instance
 		pm.plugins[instance.ServerID][instance.ID] = &instance
 
-		// Initialize plugin
-		if err := pm.initializePluginInstance(&instance); err != nil {
-			log.Error().
-				Str("instanceID", instance.ID.String()).
-				Str("pluginID", instance.PluginID).
-				Err(err).
-				Msg("Failed to initialize plugin instance")
+		// Only initialize plugin if enabled
+		if instance.Enabled {
+			// Initialize plugin
+			if err := pm.initializePluginInstance(&instance); err != nil {
+				log.Error().
+					Str("instanceID", instance.ID.String()).
+					Str("pluginID", instance.PluginID).
+					Err(err).
+					Msg("Failed to initialize plugin instance")
 
-			instance.Status = PluginStatusError
-			instance.LastError = err.Error()
-			continue
+				instance.Status = PluginStatusError
+				instance.LastError = err.Error()
+				continue
+			}
+		} else {
+			// Set status for disabled plugins
+			instance.Status = PluginStatusDisabled
 		}
 
 		log.Info().

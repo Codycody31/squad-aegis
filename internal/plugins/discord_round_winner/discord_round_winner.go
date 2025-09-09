@@ -2,6 +2,7 @@ package discord_round_winner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -67,7 +68,8 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogNewGame,
+			event_manager.EventTypeLogNewGame,          // Keep for backwards compatibility
+			event_manager.EventTypeLogGameEventUnified, // New unified events
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -225,16 +227,78 @@ func (p *DiscordRoundWinnerPlugin) handleNewGame(rawEvent *plugin_manager.Plugin
 		return nil // Plugin is disabled
 	}
 
-	event, ok := rawEvent.Data.(*event_manager.LogNewGameData)
-	if !ok {
+	// Handle both old and new event types for backwards compatibility
+	var eventData *newGameEventData
+
+	if unifiedEvent, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData); ok {
+		if unifiedEvent.EventType == "NEW_GAME" {
+			eventData = &newGameEventData{
+				Team:           unifiedEvent.Team,
+				Subfaction:     unifiedEvent.Subfaction,
+				Faction:        unifiedEvent.Faction,
+				Action:         unifiedEvent.Action,
+				Tickets:        unifiedEvent.Tickets,
+				Layer:          unifiedEvent.Layer,
+				Level:          unifiedEvent.Level,
+				DLC:            unifiedEvent.DLC,
+				MapClassname:   unifiedEvent.MapClassname,
+				LayerClassname: unifiedEvent.LayerClassname,
+			}
+
+			// Parse metadata if available
+			if unifiedEvent.Metadata != "" {
+				var metadata map[string]interface{}
+				if err := json.Unmarshal([]byte(unifiedEvent.Metadata), &metadata); err == nil {
+					// Override with metadata values if they exist
+					if team, ok := metadata["team"].(string); ok {
+						eventData.Team = team
+					}
+					if subfaction, ok := metadata["subfaction"].(string); ok {
+						eventData.Subfaction = subfaction
+					}
+					if faction, ok := metadata["faction"].(string); ok {
+						eventData.Faction = faction
+					}
+					if action, ok := metadata["action"].(string); ok {
+						eventData.Action = action
+					}
+					if tickets, ok := metadata["tickets"].(string); ok {
+						eventData.Tickets = tickets
+					}
+					if layer, ok := metadata["layer"].(string); ok {
+						eventData.Layer = layer
+					}
+					if level, ok := metadata["level"].(string); ok {
+						eventData.Level = level
+					}
+				}
+			}
+		} else {
+			return nil // Not a new game event
+		}
+	} else if oldEvent, ok := rawEvent.Data.(*event_manager.LogNewGameData); ok {
+		// Legacy event format
+		eventData = &newGameEventData{
+			Team:           oldEvent.Team,
+			Subfaction:     oldEvent.Subfaction,
+			Faction:        oldEvent.Faction,
+			Action:         oldEvent.Action,
+			Tickets:        oldEvent.Tickets,
+			Layer:          oldEvent.Layer,
+			Level:          oldEvent.Level,
+			DLC:            oldEvent.DLC,
+			MapClassname:   oldEvent.MapClassname,
+			LayerClassname: oldEvent.LayerClassname,
+		}
+	} else {
 		return fmt.Errorf("invalid event data type")
 	}
 
 	// Send Discord embed in a goroutine to avoid blocking
 	go func() {
-		if err := p.sendRoundWinnerEmbed(event); err != nil {
+		if err := p.sendRoundWinnerEmbed(eventData); err != nil {
 			p.apis.LogAPI.Error("Failed to send Discord embed for round winner", err, map[string]interface{}{
-				"layer": event.Layer,
+				"layer": eventData.Layer,
 			})
 		}
 	}()
@@ -242,8 +306,22 @@ func (p *DiscordRoundWinnerPlugin) handleNewGame(rawEvent *plugin_manager.Plugin
 	return nil
 }
 
+// newGameEventData represents normalized new game event data
+type newGameEventData struct {
+	Team           string
+	Subfaction     string
+	Faction        string
+	Action         string
+	Tickets        string
+	Layer          string
+	Level          string
+	DLC            string
+	MapClassname   string
+	LayerClassname string
+}
+
 // sendRoundWinnerEmbed sends the round winner as a Discord embed
-func (p *DiscordRoundWinnerPlugin) sendRoundWinnerEmbed(event *event_manager.LogNewGameData) error {
+func (p *DiscordRoundWinnerPlugin) sendRoundWinnerEmbed(event *newGameEventData) error {
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
 		return fmt.Errorf("channel_id not configured")

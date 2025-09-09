@@ -9,7 +9,7 @@ type EventData interface {
 
 // RconChatMessageData represents RCON chat message event data
 type RconChatMessageData struct {
-	ChatType   string `json"chat_type"`
+	ChatType   string `json:"chat_type"`
 	EosID      string `json:"eos_id"`
 	SteamID    string `json:"steam_id"`
 	PlayerName string `json:"player_name"`
@@ -249,3 +249,39 @@ type LogTeamkillData struct {
 }
 
 func (d LogTeamkillData) GetEventType() EventType { return EventTypeLogTeamkill }
+
+// LogGameEventUnifiedData represents a unified game event that can handle multiple event types
+type LogGameEventUnifiedData struct {
+	Time      string `json:"time"`
+	ChainID   string `json:"chain_id,omitempty"`
+	EventType string `json:"event_type"` // "ROUND_ENDED", "NEW_GAME", "MATCH_WINNER", "GAME_STATE_CHANGE"
+
+	// Round/Match data
+	Winner     string `json:"winner,omitempty"`
+	Layer      string `json:"layer,omitempty"`
+	Team       string `json:"team,omitempty"`
+	Subfaction string `json:"subfaction,omitempty"`
+	Faction    string `json:"faction,omitempty"`
+	Action     string `json:"action,omitempty"` // "won" or "lost"
+	Tickets    string `json:"tickets,omitempty"`
+	Level      string `json:"level,omitempty"`
+
+	// New Game data
+	DLC            string `json:"dlc,omitempty"`
+	MapClassname   string `json:"map_classname,omitempty"`
+	LayerClassname string `json:"layer_classname,omitempty"`
+
+	// Game state data
+	FromState string `json:"from_state,omitempty"`
+	ToState   string `json:"to_state,omitempty"`
+
+	// Complex data as JSON strings
+	WinnerData string `json:"winner_data,omitempty"`
+	LoserData  string `json:"loser_data,omitempty"`
+	Metadata   string `json:"metadata,omitempty"`
+
+	// Raw log line
+	RawLog string `json:"raw_log"`
+}
+
+func (d LogGameEventUnifiedData) GetEventType() EventType { return EventTypeLogGameEventUnified }

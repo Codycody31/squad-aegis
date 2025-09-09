@@ -2,7 +2,6 @@ package clickhouse
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"strings"
 	"sync"
@@ -226,10 +225,6 @@ func (i *EventIngester) ingestEventType(eventType event_manager.EventType, event
 		return i.ingestPlayerWounded(events)
 	case event_manager.EventTypeLogPlayerRevived:
 		return i.ingestPlayerRevived(events)
-	case event_manager.EventTypeLogNewGame:
-		return i.ingestNewGame(events)
-	case event_manager.EventTypeLogRoundEnded:
-		return i.ingestRoundEnded(events)
 	case event_manager.EventTypeLogPlayerPossess:
 		return i.ingestPlayerPossess(events)
 	case event_manager.EventTypeLogJoinSucceeded:
@@ -240,6 +235,8 @@ func (i *EventIngester) ingestEventType(eventType event_manager.EventType, event
 		return i.ingestDeployableDamaged(events)
 	case event_manager.EventTypeLogTickRate:
 		return i.ingestTickRate(events)
+	case event_manager.EventTypeLogGameEventUnified:
+		return i.ingestGameEventUnified(events)
 	default:
 		log.Debug().
 			Str("eventType", string(eventType)).
@@ -532,110 +529,6 @@ func (i *EventIngester) ingestPlayerRevived(events []*IngestEvent) error {
 	return i.client.Exec(i.ctx, query, args...)
 }
 
-func (i *EventIngester) ingestNewGame(events []*IngestEvent) error {
-	if len(events) == 0 {
-		return nil
-	}
-
-	query := `INSERT INTO squad_aegis.server_new_game_events 
-		(event_time, server_id, chain_id, team, subfaction, faction, action, tickets, layer, level, dlc, map_classname, layer_classname, ingested_at) VALUES`
-
-	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*14)
-
-	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-
-		// Extract data from structured event data
-		var chainID, team, subfaction, faction, action, tickets, layer, level, dlc, mapClassname, layerClassname string
-		if newGameData, ok := event.Data.(*event_manager.LogNewGameData); ok {
-			chainID = newGameData.ChainID
-			team = newGameData.Team
-			subfaction = newGameData.Subfaction
-			faction = newGameData.Faction
-			action = newGameData.Action
-			tickets = newGameData.Tickets
-			layer = newGameData.Layer
-			level = newGameData.Level
-			dlc = newGameData.DLC
-			mapClassname = newGameData.MapClassname
-			layerClassname = newGameData.LayerClassname
-		}
-
-		args = append(args,
-			event.EventTime,
-			event.ServerID,
-			chainID,
-			team,
-			subfaction,
-			faction,
-			action,
-			tickets,
-			layer,
-			level,
-			dlc,
-			mapClassname,
-			layerClassname,
-			time.Now(),
-		)
-	}
-
-	query += strings.Join(values, ",")
-	return i.client.Exec(i.ctx, query, args...)
-}
-
-func (i *EventIngester) ingestRoundEnded(events []*IngestEvent) error {
-	if len(events) == 0 {
-		return nil
-	}
-
-	query := `INSERT INTO squad_aegis.server_round_ended_events 
-		(event_time, server_id, chain_id, winner, layer, winner_json, loser_json, ingested_at) VALUES`
-
-	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*8)
-
-	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?)")
-
-		// Extract data from structured event data
-		var chainID, winner, layer string
-		var winnerJSON, loserJSON string
-
-		if roundEndedData, ok := event.Data.(*event_manager.LogRoundEndedData); ok {
-			chainID = roundEndedData.ChainID
-			winner = roundEndedData.Winner
-			layer = roundEndedData.Layer
-
-			// Convert winner/loser data to JSON strings if they exist
-			if roundEndedData.WinnerData != nil {
-				if winnerBytes, err := json.Marshal(roundEndedData.WinnerData); err == nil {
-					winnerJSON = string(winnerBytes)
-				}
-			}
-			if roundEndedData.LoserData != nil {
-				if loserBytes, err := json.Marshal(roundEndedData.LoserData); err == nil {
-					loserJSON = string(loserBytes)
-				}
-			}
-		}
-
-		args = append(args,
-			event.EventTime,
-			event.ServerID,
-			chainID,
-			winner,
-			layer,
-			winnerJSON,
-			loserJSON,
-			time.Now(),
-		)
-	}
-
-	query += strings.Join(values, ",")
-	return i.client.Exec(i.ctx, query, args...)
-}
-
 func (i *EventIngester) ingestPlayerPossess(events []*IngestEvent) error {
 	if len(events) == 0 {
 		return nil
@@ -826,6 +719,94 @@ func (i *EventIngester) ingestTickRate(events []*IngestEvent) error {
 			event.ServerID,
 			chainID,
 			tickRate,
+			time.Now(),
+		)
+	}
+
+	query += strings.Join(values, ",")
+	return i.client.Exec(i.ctx, query, args...)
+}
+
+// ingestGameEventUnified ingests unified game events into ClickHouse
+func (i *EventIngester) ingestGameEventUnified(events []*IngestEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	query := `INSERT INTO squad_aegis.server_game_events_unified 
+		(event_time, server_id, chain_id, event_type, winner, layer, team, subfaction, faction, action, tickets, level, dlc, map_classname, layer_classname, from_state, to_state, winner_data, loser_data, metadata, raw_log, ingested_at) VALUES`
+
+	values := make([]string, 0, len(events))
+	args := make([]interface{}, 0, len(events)*22)
+
+	for _, event := range events {
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, eventType, winner, layer, team, subfaction, faction, action, tickets, level, dlc, mapClassname, layerClassname, fromState, toState, winnerData, loserData, metadata, rawLog string
+
+		if unifiedData, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok {
+			chainID = unifiedData.ChainID
+			eventType = unifiedData.EventType
+			winner = unifiedData.Winner
+			layer = unifiedData.Layer
+			team = unifiedData.Team
+			subfaction = unifiedData.Subfaction
+			faction = unifiedData.Faction
+			action = unifiedData.Action
+			tickets = unifiedData.Tickets
+			level = unifiedData.Level
+			dlc = unifiedData.DLC
+			mapClassname = unifiedData.MapClassname
+			layerClassname = unifiedData.LayerClassname
+			fromState = unifiedData.FromState
+			toState = unifiedData.ToState
+			winnerData = unifiedData.WinnerData
+			loserData = unifiedData.LoserData
+			metadata = unifiedData.Metadata
+			rawLog = unifiedData.RawLog
+		}
+
+		// Convert team to uint8 if present
+		var teamNum *uint8
+		if team != "" {
+			if teamVal, err := strconv.ParseUint(team, 10, 8); err == nil {
+				teamUint8 := uint8(teamVal)
+				teamNum = &teamUint8
+			}
+		}
+
+		// Convert tickets to uint32 if present
+		var ticketsNum *uint32
+		if tickets != "" {
+			if ticketsVal, err := strconv.ParseUint(tickets, 10, 32); err == nil {
+				ticketsUint32 := uint32(ticketsVal)
+				ticketsNum = &ticketsUint32
+			}
+		}
+
+		args = append(args,
+			event.EventTime,
+			event.ServerID,
+			chainID,
+			eventType,
+			winner,
+			layer,
+			teamNum,
+			subfaction,
+			faction,
+			action,
+			ticketsNum,
+			level,
+			dlc,
+			mapClassname,
+			layerClassname,
+			fromState,
+			toState,
+			winnerData,
+			loserData,
+			metadata,
+			rawLog,
 			time.Now(),
 		)
 	}

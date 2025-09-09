@@ -308,7 +308,7 @@ func GetLogParsers() []LogParser {
 					Time:         args[1],
 					ChainID:      args[2],
 					ReviverName:  args[3],
-					VictimName:   args[5],
+					VictimName:   args[6],
 					ReviverEOS:   args[4],
 					ReviverSteam: args[5],
 					VictimEOS:    args[7],

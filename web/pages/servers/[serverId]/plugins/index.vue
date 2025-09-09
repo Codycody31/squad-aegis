@@ -788,7 +788,6 @@ onMounted(async () => {
             <TableRow>
               <TableHead>Type</TableHead>
               <TableHead>Description</TableHead>
-              <TableHead>Status</TableHead>
               <TableHead class="hidden md:table-cell">Enabled</TableHead>
               <TableHead class="hidden lg:table-cell">Last Error</TableHead>
               <TableHead class="text-right">Actions</TableHead>
@@ -805,12 +804,6 @@ onMounted(async () => {
                   <span class="text-sm text-muted-foreground">
                     {{ availablePlugins.find(p => p.id === plugin.plugin_id)?.description }}
                   </span>
-              </TableCell>
-              <TableCell>
-                <Badge :class="getStatusColor(plugin.status)">
-                  <component :is="getStatusIcon(plugin.status)" class="w-3 h-3 mr-1" />
-                  {{ plugin.status }}
-                </Badge>
               </TableCell>
               <TableCell class="hidden md:table-cell">
                 <Switch

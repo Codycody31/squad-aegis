@@ -44,7 +44,7 @@ func NewLogwatcherManager(ctx context.Context, eventManager *event_manager.Event
 	return &LogwatcherManager{
 		connections:  make(map[uuid.UUID]*ServerLogConnection),
 		eventManager: eventManager,
-		parsers:      GetLogParsers(),
+		parsers:      GetOptimizedLogParsers(), // Use the unified parsers
 		ctx:          ctx,
 		cancel:       cancel,
 	}
