@@ -31,7 +31,7 @@ func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
 		ID:                     "discord_squad_created",
 		Name:                   "Discord Squad Created",
-		Description:            "The <code>SquadCreated</code> plugin will log Squad Creation events to a Discord channel.",
+		Description:            "The SquadCreated plugin will log Squad Creation events to a Discord channel.",
 		Version:                "1.0.0",
 		Author:                 "Squad Aegis",
 		AllowMultipleInstances: false,
