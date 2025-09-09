@@ -25,13 +25,14 @@ const (
 
 // ConfigField represents a single configuration field
 type ConfigField struct {
-	Name        string        `json:"name"`              // Field name
-	Description string        `json:"description"`       // Field description
-	Required    bool          `json:"required"`          // Is this field mandatory?
-	Type        FieldType     `json:"type"`              // Data type (string, int, etc.)
-	Default     interface{}   `json:"default"`           // Default value
-	Nested      []ConfigField `json:"nested,omitempty"`  // Nested fields for objects
-	Options     []interface{} `json:"options,omitempty"` // Allowed values (for enums)
+	Name        string        `json:"name"`                // Field name
+	Description string        `json:"description"`         // Field description
+	Required    bool          `json:"required"`            // Is this field mandatory?
+	Type        FieldType     `json:"type"`                // Data type (string, int, etc.)
+	Default     interface{}   `json:"default"`             // Default value
+	Nested      []ConfigField `json:"nested,omitempty"`    // Nested fields for objects
+	Options     []interface{} `json:"options,omitempty"`   // Allowed values (for enums)
+	Sensitive   bool          `json:"sensitive,omitempty"` // Is this field sensitive (e.g., passwords)?
 }
 
 // ConfigSchema defines a configuration schema
@@ -322,4 +323,116 @@ func (c *ConfigSchema) FillDefaults(config map[string]interface{}) map[string]in
 	}
 
 	return config
+}
+
+// MaskSensitiveFields masks sensitive field values for safe display/return
+func (c *ConfigSchema) MaskSensitiveFields(config map[string]interface{}) map[string]interface{} {
+	masked := make(map[string]interface{})
+
+	// Copy all non-sensitive fields
+	for key, value := range config {
+		masked[key] = value
+	}
+
+	// Mask sensitive fields
+	for _, field := range c.Fields {
+		if field.Sensitive && config[field.Name] != nil {
+			// Replace sensitive value with placeholder
+			masked[field.Name] = "***MASKED***"
+		}
+	}
+
+	return masked
+}
+
+// MergeConfigUpdates merges new config values with existing ones, handling sensitive fields properly
+func (c *ConfigSchema) MergeConfigUpdates(existingConfig, newConfig map[string]interface{}) map[string]interface{} {
+	merged := make(map[string]interface{})
+
+	// Start with existing config
+	for key, value := range existingConfig {
+		merged[key] = value
+	}
+
+	// Apply updates, handling sensitive fields specially
+	for _, field := range c.Fields {
+		if newValue, exists := newConfig[field.Name]; exists {
+			if field.Sensitive {
+				// For sensitive fields, only update if the new value is not empty/masked
+				if newValue != nil && newValue != "" && newValue != "***MASKED***" {
+					merged[field.Name] = newValue
+				}
+				// If empty or masked, keep the existing value
+			} else {
+				// For non-sensitive fields, always update
+				merged[field.Name] = newValue
+			}
+		}
+	}
+
+	return merged
+}
+
+// ValidateForCreation validates config for creation, ensuring sensitive required fields are provided
+func (c *ConfigSchema) ValidateForCreation(config map[string]interface{}) error {
+	for _, field := range c.Fields {
+		if field.Required {
+			value := config[field.Name]
+			if value == nil {
+				return fmt.Errorf("required field %s is missing", field.Name)
+			}
+
+			// For sensitive fields, ensure they're not empty when required
+			if field.Sensitive {
+				if str, ok := value.(string); ok && str == "" {
+					return fmt.Errorf("required sensitive field %s cannot be empty", field.Name)
+				}
+			}
+		}
+
+		// Validate field types and arrays as before
+		if IsArrayType(field.Type) && config[field.Name] != nil {
+			arr, ok := config[field.Name].([]interface{})
+			if !ok {
+				return fmt.Errorf("field %s should be an array", field.Name)
+			}
+
+			// Validate array element types
+			itemType := GetArrayItemType(field.Type)
+			for i, item := range arr {
+				switch itemType {
+				case FieldTypeString:
+					if _, ok := item.(string); !ok {
+						return fmt.Errorf("array item %d in field %s should be a string", i, field.Name)
+					}
+				case FieldTypeInt:
+					if _, ok := item.(int); !ok {
+						// Check for float64 since JSON numbers are sometimes parsed as float64
+						if _, ok := item.(float64); !ok {
+							return fmt.Errorf("array item %d in field %s should be an integer", i, field.Name)
+						}
+					}
+				case FieldTypeBool:
+					if _, ok := item.(bool); !ok {
+						return fmt.Errorf("array item %d in field %s should be a boolean", i, field.Name)
+					}
+				case FieldTypeObject:
+					if _, ok := item.(map[string]interface{}); !ok {
+						return fmt.Errorf("array item %d in field %s should be an object", i, field.Name)
+					}
+					// If the field has nested fields defined, validate them
+					if len(field.Nested) > 0 {
+						if obj, ok := item.(map[string]interface{}); ok {
+							nestedSchema := &ConfigSchema{Fields: field.Nested}
+							if err := nestedSchema.ValidateForCreation(obj); err != nil {
+								return fmt.Errorf("array item %d in field %s: %v", i, field.Name, err)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }

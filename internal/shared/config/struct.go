@@ -24,6 +24,15 @@ type Struct struct {
 			Verbose bool `default:"false"`
 		}
 	}
+	ClickHouse struct {
+		Enabled  bool   `default:"false"`
+		Host     string `default:"localhost"`
+		Port     int    `default:"9000"`
+		Database string `default:"default"`
+		Username string `default:"squad_aegis"`
+		Password string `default:"squad_aegis"`
+		Debug    bool   `default:"false"`
+	}
 	Log struct {
 		Level   string `default:"info"`
 		ShowGin bool   `default:"false"`

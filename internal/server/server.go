@@ -7,6 +7,9 @@ import (
 	"net/url"
 	"strings"
 
+	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
+	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 
@@ -18,8 +21,11 @@ type Server struct {
 }
 
 type Dependencies struct {
-	DB          *sql.DB
-	RconManager *rcon_manager.RconManager
+	DB                *sql.DB
+	RconManager       *rcon_manager.RconManager
+	EventManager      *event_manager.EventManager
+	LogwatcherManager *logwatcher_manager.LogwatcherManager
+	PluginManager     *plugin_manager.PluginManager
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {
@@ -115,6 +121,14 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			usersGroup.DELETE("/:userId", server.UserDelete)
 		}
 
+		adminGroup := apiGroup.Group("/admin")
+		{
+			adminGroup.Use(server.AuthSession)
+			adminGroup.Use(server.AuthIsSuperAdmin())
+
+			adminGroup.POST("/cleanup-expired-admins", server.ServerAdminsCleanupExpired)
+		}
+
 		serversGroup := apiGroup.Group("/servers")
 		{
 			serversGroup.Use(server.AuthSession)
@@ -147,6 +161,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				serverGroup.GET("/admins", server.ServerAdminsList)
 				serverGroup.POST("/admins", server.AuthIsSuperAdmin(), server.ServerAdminsAdd)
+				serverGroup.PUT("/admins/:adminId", server.AuthIsSuperAdmin(), server.ServerAdminsUpdate)
 				serverGroup.DELETE("/admins/:adminId", server.AuthIsSuperAdmin(), server.ServerAdminsRemove)
 
 				serverGroup.GET("/bans", server.ServerBansList)
@@ -160,7 +175,43 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				// Server info endpoints
 				serverGroup.GET("/rcon/server-info", server.ServerRconServerInfo)
+
+				// Plugin management routes for specific servers
+				pluginGroup := serverGroup.Group("/plugins")
+				{
+					pluginGroup.GET("", server.ServerPluginList)
+					pluginGroup.GET("/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogsAll)
+					pluginGroup.POST("", server.AuthHasServerPermission("manageserver"), server.ServerPluginCreate)
+					pluginGroup.GET("/:pluginId", server.ServerPluginGet)
+					pluginGroup.PUT("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginUpdate)
+					pluginGroup.POST("/:pluginId/enable", server.AuthHasServerPermission("manageserver"), server.ServerPluginEnable)
+					pluginGroup.POST("/:pluginId/disable", server.AuthHasServerPermission("manageserver"), server.ServerPluginDisable)
+					pluginGroup.DELETE("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginDelete)
+					pluginGroup.GET("/:pluginId/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogs)
+					pluginGroup.GET("/:pluginId/metrics", server.ServerPluginMetrics)
+				}
 			}
+		}
+
+		// Global plugin and connector management routes
+		pluginsGroup := apiGroup.Group("/plugins")
+		{
+			pluginsGroup.Use(server.AuthSession)
+			pluginsGroup.Use(server.AuthIsSuperAdmin())
+
+			pluginsGroup.GET("/available", server.PluginListAvailable)
+		}
+
+		connectorsGroup := apiGroup.Group("/connectors")
+		{
+			connectorsGroup.Use(server.AuthSession)
+			connectorsGroup.Use(server.AuthIsSuperAdmin())
+
+			connectorsGroup.GET("/available", server.ConnectorListAvailable)
+			connectorsGroup.GET("", server.ConnectorList)
+			connectorsGroup.POST("", server.ConnectorCreate)
+			connectorsGroup.PUT("/:connectorId", server.ConnectorUpdate)
+			connectorsGroup.DELETE("/:connectorId", server.ConnectorDelete)
 		}
 
 		// Public Routes for the server
