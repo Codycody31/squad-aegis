@@ -60,7 +60,6 @@ interface BannedPlayer {
     server_id: string;
     admin_id: string;
     admin_name: string;
-    player_id: string;
     steam_id: string;
     name: string;
     reason: string;

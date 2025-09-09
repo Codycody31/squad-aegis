@@ -20,8 +20,8 @@ type AuthLoginRequest struct {
 }
 
 type UpdateProfileRequest struct {
-	Name    string         `json:"name" binding:"required"`
-	SteamId *steamid.SID64 `json:"steam_id"`
+	Name    string `json:"name" binding:"required"`
+	SteamId string `json:"steam_id"`
 }
 
 type UpdatePasswordRequest struct {

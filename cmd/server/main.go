@@ -12,13 +12,19 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"github.com/samber/oops"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/db"
+	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
+	"go.codycody31.dev/squad-aegis/internal/plugin_registry"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
@@ -113,13 +119,107 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to commit transaction: %v", err)
 	}
 
+	// Create event manager for centralized event handling
+	eventManager := event_manager.NewEventManager(ctx, 10000)
+	defer eventManager.Shutdown()
+
+	// Initialize ClickHouse
+	var clickhouseClient *clickhouse.Client
+	var eventIngester *clickhouse.EventIngester
+	clickhouseConfig := clickhouse.Config{
+		Host:     config.Config.ClickHouse.Host,
+		Port:     config.Config.ClickHouse.Port,
+		Database: config.Config.ClickHouse.Database,
+		Username: config.Config.ClickHouse.Username,
+		Password: config.Config.ClickHouse.Password,
+		Debug:    config.Config.ClickHouse.Debug,
+	}
+
+	clickhouseClient, err = clickhouse.NewClient(clickhouseConfig)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to ClickHouse")
+	}
+	defer clickhouseClient.Close()
+
+	// Ping clickhouse
+	err = clickhouseClient.Ping(ctx)
+	if err != nil {
+		return oops.Wrapf(err, "failed to ping clickhouse")
+	}
+
+	// Migrate clickhouse
+	log.Info().Msg("Migrating clickhouse...")
+	err = clickhouse.Migrate(clickhouseClient.GetConnection(), config.Config.ClickHouse.Debug)
+	if err != nil {
+		return oops.Wrapf(err, "failed to migrate clickhouse")
+	}
+
+	// Create and start event ingester
+	eventIngester = clickhouse.NewEventIngester(ctx, clickhouseClient, eventManager)
+	eventIngester.Start()
+	defer eventIngester.Stop()
+
 	// Create RCON manager
-	rconManager := rcon_manager.NewRconManager(ctx)
+	rconManager := rcon_manager.NewRconManager(ctx, eventManager)
 	defer rconManager.Shutdown()
 
-	// Start RCON connection manager
+	// Create logwatcher manager
+	logwatcherManager := logwatcher_manager.NewLogwatcherManager(ctx, eventManager)
+	defer logwatcherManager.Shutdown()
+
+	// Create plugin manager
+	pluginManager := plugin_manager.NewPluginManager(ctx, database, eventManager, rconManager, clickhouseClient)
+	defer pluginManager.Stop()
+
+	// Register all available plugins and connectors
+	if err := plugin_registry.RegisterAllConnectors(pluginManager); err != nil {
+		return fmt.Errorf("failed to register connectors: %w", err)
+	}
+
+	if err := plugin_registry.RegisterAllPlugins(pluginManager); err != nil {
+		return fmt.Errorf("failed to register plugins: %w", err)
+	}
+
+	// Start plugin manager
+	if err := pluginManager.Start(); err != nil {
+		return fmt.Errorf("failed to start plugin manager: %w", err)
+	}
+
+	// Start connection managers
 	go rconManager.StartConnectionManager()
+	go logwatcherManager.StartConnectionManager()
+
+	// Start admin cleanup task (runs every hour)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		// Run cleanup immediately on startup
+		go func() {
+			if deleted, err := core.CleanupExpiredAdmins(ctx, database); err != nil {
+				log.Error().Err(err).Msg("failed to cleanup expired admins")
+			} else if deleted > 0 {
+				log.Info().Int64("deleted", deleted).Msg("cleaned up expired admin roles")
+			}
+		}()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if deleted, err := core.CleanupExpiredAdmins(ctx, database); err != nil {
+					log.Error().Err(err).Msg("failed to cleanup expired admins")
+				} else if deleted > 0 {
+					log.Info().Int64("deleted", deleted).Msg("cleaned up expired admin roles")
+				}
+			}
+		}
+	}()
+
+	// Connect to all servers
 	rconManager.ConnectToAllServers(ctx, database)
+	logwatcherManager.ConnectToAllServers(ctx, database)
 
 	// Initialize services
 	waitingGroup := errgroup.Group{}
@@ -134,8 +234,11 @@ func run(ctx context.Context) error {
 		}
 
 		deps := &server.Dependencies{
-			DB:          database,
-			RconManager: rconManager,
+			DB:                database,
+			RconManager:       rconManager,
+			EventManager:      eventManager,
+			LogwatcherManager: logwatcherManager,
+			PluginManager:     pluginManager,
 		}
 
 		// Initialize router

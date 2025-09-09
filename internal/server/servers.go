@@ -9,6 +9,7 @@ import (
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/core"
+	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
@@ -55,8 +56,19 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		RconIpAddress: request.RconIpAddress,
 		RconPort:      request.RconPort,
 		RconPassword:  request.RconPassword,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+
+		// Log configuration fields
+		LogSourceType:    request.LogSourceType,
+		LogFilePath:      request.LogFilePath,
+		LogHost:          request.LogHost,
+		LogPort:          request.LogPort,
+		LogUsername:      request.LogUsername,
+		LogPassword:      request.LogPassword,
+		LogPollFrequency: request.LogPollFrequency,
+		LogReadFromStart: request.LogReadFromStart,
+
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	}
 
 	server, err := core.CreateServer(c.Request.Context(), s.Dependencies.DB, &serverToCreate)
@@ -71,8 +83,37 @@ func (s *Server) ServersCreate(c *gin.Context) {
 	}
 
 	// Connect to RCON
-
 	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
+
+	// Connect to logwatcher if log configuration is provided
+	if server.LogSourceType != nil && server.LogFilePath != nil {
+		config := logwatcher_manager.LogSourceConfig{
+			Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
+			FilePath:      *server.LogFilePath,
+			ReadFromStart: false, // Default value
+		}
+
+		if server.LogHost != nil {
+			config.Host = *server.LogHost
+		}
+		if server.LogPort != nil {
+			config.Port = *server.LogPort
+		}
+		if server.LogUsername != nil {
+			config.Username = *server.LogUsername
+		}
+		if server.LogPassword != nil {
+			config.Password = *server.LogPassword
+		}
+		if server.LogPollFrequency != nil {
+			config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
+		}
+		if server.LogReadFromStart != nil {
+			config.ReadFromStart = *server.LogReadFromStart
+		}
+
+		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, config)
+	}
 
 	responses.Success(c, "Server created successfully", &gin.H{"server": server})
 }
@@ -410,6 +451,18 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		server.RconPassword = request.RconPassword
 	}
 
+	// Update log configuration fields
+	server.LogSourceType = request.LogSourceType
+	server.LogFilePath = request.LogFilePath
+	server.LogHost = request.LogHost
+	server.LogPort = request.LogPort
+	server.LogUsername = request.LogUsername
+	if request.LogPassword != nil && *request.LogPassword != "" {
+		server.LogPassword = request.LogPassword
+	}
+	server.LogPollFrequency = request.LogPollFrequency
+	server.LogReadFromStart = request.LogReadFromStart
+
 	// Update server in database
 	if err := core.UpdateServer(c.Request.Context(), s.Dependencies.DB, server); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to update server"})
@@ -423,6 +476,39 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 
 	// Reconnect RCON with new credentials
 	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
+
+	// Reconnect logwatcher if log configuration is provided
+	if server.LogSourceType != nil && server.LogFilePath != nil {
+		config := logwatcher_manager.LogSourceConfig{
+			Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
+			FilePath:      *server.LogFilePath,
+			ReadFromStart: false, // Default value
+		}
+
+		if server.LogHost != nil {
+			config.Host = *server.LogHost
+		}
+		if server.LogPort != nil {
+			config.Port = *server.LogPort
+		}
+		if server.LogUsername != nil {
+			config.Username = *server.LogUsername
+		}
+		if server.LogPassword != nil {
+			config.Password = *server.LogPassword
+		}
+		if server.LogPollFrequency != nil {
+			config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
+		}
+		if server.LogReadFromStart != nil {
+			config.ReadFromStart = *server.LogReadFromStart
+		}
+
+		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, config)
+	} else {
+		// Disconnect from logwatcher if log configuration is removed
+		_ = s.Dependencies.LogwatcherManager.DisconnectFromServer(server.Id)
+	}
 
 	// Create audit log entry
 	auditData := map[string]interface{}{

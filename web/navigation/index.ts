@@ -25,6 +25,14 @@ const navigationItems: NavigationItem[] = [
       name: "servers",
     },
     icon: "mdi:server",
+  },
+  {
+    title: "Connectors",
+    to: {
+      name: "connectors",
+    },
+    icon: "lucide:plug",
+    permissions: ["super_admin"],
   }
 ];
 

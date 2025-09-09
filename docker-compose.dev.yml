@@ -12,8 +12,33 @@ services:
     networks:
       - default
 
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:25.3
+    ports:
+      - 8123:8123
+      - 9000:9000
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_USER: "squad_aegis"
+      CLICKHOUSE_PASSWORD: "squad_aegis"
+    networks:
+      - default
+
+  clickhouse-ui:
+    image: ghcr.io/caioricciuti/ch-ui:latest
+    ports:
+      - "5521:5521"
+    environment:
+      VITE_CLICKHOUSE_URL: "http://127.0.0.1:8123"
+      VITE_CLICKHOUSE_USER: "squad_aegis"
+      VITE_CLICKHOUSE_PASS: "squad_aegis"
+    networks:
+      - default
+
 volumes:
   squad-aegis-database:
+  clickhouse-data:
 
 networks:
   default:
