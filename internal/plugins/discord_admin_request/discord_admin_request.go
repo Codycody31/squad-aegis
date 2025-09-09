@@ -165,8 +165,6 @@ func (p *DiscordAdminRequestPlugin) Start(ctx context.Context) error {
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
 
-	p.apis.LogAPI.Info("Discord Admin Request plugin started", nil)
-
 	return nil
 }
 
@@ -186,8 +184,6 @@ func (p *DiscordAdminRequestPlugin) Stop() error {
 	}
 
 	p.status = plugin_manager.PluginStatusStopped
-
-	p.apis.LogAPI.Info("Discord Admin Request plugin stopped", nil)
 
 	return nil
 }

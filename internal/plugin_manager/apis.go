@@ -311,41 +311,11 @@ func NewRconAPI(serverID uuid.UUID, rconManager *rcon_manager.RconManager) RconA
 	}
 }
 
-// List of allowed RCON commands for plugins
-var allowedCommands = map[string]bool{
-	"AdminBroadcast":         true,
-	"AdminDemotePlayer":      true,
-	"AdminPromotePlayer":     true,
-	"AdminKick":              true,
-	"AdminKickById":          true,
-	"AdminBan":               true,
-	"AdminBanById":           true,
-	"AdminListPlayers":       true,
-	"AdminListAdmins":        true,
-	"ShowCurrentMap":         true,
-	"ShowNextMap":            true,
-	"AdminCurrentMap":        true,
-	"AdminNextMap":           true,
-	"AdminSetNextMap":        true,
-	"AdminChangeMap":         true,
-	"AdminSetMaxNumPlayers":  true,
-	"AdminSetServerPassword": true,
-	"AdminPause":             true,
-	"AdminUnpause":           true,
-	"AdminRestartMatch":      true,
-	"AdminEndMatch":          true,
-}
-
 func (api *rconAPI) SendCommand(command string) (string, error) {
 	// Extract command name (first word)
 	parts := strings.Fields(command)
 	if len(parts) == 0 {
 		return "", fmt.Errorf("empty command")
-	}
-
-	commandName := parts[0]
-	if !allowedCommands[commandName] {
-		return "", fmt.Errorf("command %s is not allowed for plugins", commandName)
 	}
 
 	// Execute command via RCON manager

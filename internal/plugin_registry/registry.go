@@ -5,6 +5,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
+	"go.codycody31.dev/squad-aegis/internal/plugins/team_randomizer"
 )
 
 // RegisterAllPlugins registers all available plugins with the plugin manager
@@ -14,6 +15,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Discord Admin Request plugin
 	if err := pm.RegisterPlugin(discord_admin_request.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Discord Admin Request plugin")
+		return err
+	}
+
+	// Register Team Randomizer plugin
+	if err := pm.RegisterPlugin(team_randomizer.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Team Randomizer plugin")
 		return err
 	}
 
