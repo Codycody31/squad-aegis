@@ -264,10 +264,10 @@ func (p *DiscordRoundWinnerPlugin) sendRoundWinnerEmbed(event *event_manager.Log
 			faction = "faction"
 		}
 		message = fmt.Sprintf("%s %s won on %s.", event.Team, faction, currentLayer)
-		
+
 		// Add ticket information if available
 		if event.Tickets != "" {
-			message = fmt.Sprintf("%s %s won on %s with %s tickets remaining.", 
+			message = fmt.Sprintf("%s %s won on %s with %s tickets remaining.",
 				event.Team, faction, currentLayer, event.Tickets)
 		}
 	} else {

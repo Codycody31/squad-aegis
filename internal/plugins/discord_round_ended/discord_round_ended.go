@@ -275,7 +275,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *event_manager.LogRo
 	if event.Layer == "" {
 		description = "Round ended"
 	}
-	
+
 	fields := []*discord.DiscordEmbedField{
 		{
 			Name:  "Winner",
@@ -349,7 +349,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *event_manager.LogRo
 	winnerTickets := ""
 	loserTeam := ""
 	loserTickets := ""
-	
+
 	if event.WinnerData != nil {
 		if team, ok := event.WinnerData["team"].(string); ok {
 			winnerTeam = team
@@ -358,7 +358,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *event_manager.LogRo
 			winnerTickets = tickets
 		}
 	}
-	
+
 	if event.LoserData != nil {
 		if team, ok := event.LoserData["team"].(string); ok {
 			loserTeam = team

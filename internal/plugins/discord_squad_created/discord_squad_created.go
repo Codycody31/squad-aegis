@@ -146,8 +146,8 @@ func (p *DiscordSquadCreatedPlugin) Start(ctx context.Context) error {
 
 	p.apis.LogAPI.Info("Discord Squad Created plugin started", map[string]interface{}{
 		"channel_id": channelID,
-		"use_embed": p.getBoolConfig("use_embed"),
-		"color":     p.getIntConfig("color"),
+		"use_embed":  p.getBoolConfig("use_embed"),
+		"color":      p.getIntConfig("color"),
 	})
 
 	return nil
@@ -210,9 +210,9 @@ func (p *DiscordSquadCreatedPlugin) UpdateConfig(config map[string]interface{}) 
 
 	p.apis.LogAPI.Info("Discord Squad Created plugin configuration updated", map[string]interface{}{
 		"channel_id": config["channel_id"],
-		"use_embed": config["use_embed"],
-		"color":     config["color"],
-		"enabled":   config["enabled"],
+		"use_embed":  config["use_embed"],
+		"color":      config["color"],
+		"enabled":    config["enabled"],
 	})
 
 	return nil
@@ -270,11 +270,11 @@ func (p *DiscordSquadCreatedPlugin) sendEmbedMessage(channelID string, event *ev
 	}
 
 	p.apis.LogAPI.Debug("Sent squad creation embed to Discord", map[string]interface{}{
-		"channel_id":   channelID,
-		"player_name":  event.PlayerName,
-		"team_name":    event.TeamName,
-		"squad_id":     event.SquadID,
-		"squad_name":   event.SquadName,
+		"channel_id":  channelID,
+		"player_name": event.PlayerName,
+		"team_name":   event.TeamName,
+		"squad_id":    event.SquadID,
+		"squad_name":  event.SquadName,
 	})
 
 	return nil
@@ -294,11 +294,11 @@ func (p *DiscordSquadCreatedPlugin) sendTextMessage(channelID string, event *eve
 	}
 
 	p.apis.LogAPI.Debug("Sent squad creation message to Discord", map[string]interface{}{
-		"channel_id":   channelID,
-		"player_name":  event.PlayerName,
-		"team_name":    event.TeamName,
-		"squad_id":     event.SquadID,
-		"squad_name":   event.SquadName,
+		"channel_id":  channelID,
+		"player_name": event.PlayerName,
+		"team_name":   event.TeamName,
+		"squad_id":    event.SquadID,
+		"squad_name":  event.SquadName,
 	})
 
 	return nil

@@ -17,18 +17,18 @@ import (
 
 // CBLUser represents a user from the Community Ban List API
 type CBLUser struct {
-	ID                                string `json:"id"`
-	Name                              string `json:"name"`
-	AvatarFull                        string `json:"avatarFull"`
-	ReputationPoints                  int    `json:"reputationPoints"`
-	RiskRating                        int    `json:"riskRating"`
-	ReputationRank                    int    `json:"reputationRank"`
-	LastRefreshedInfo                 string `json:"lastRefreshedInfo"`
-	LastRefreshedReputationPoints     string `json:"lastRefreshedReputationPoints"`
-	LastRefreshedReputationRank       string `json:"lastRefreshedReputationRank"`
-	ReputationPointsMonthChange       int    `json:"reputationPointsMonthChange"`
-	ActiveBans                        BanList `json:"activeBans"`
-	ExpiredBans                       BanList `json:"expiredBans"`
+	ID                            string  `json:"id"`
+	Name                          string  `json:"name"`
+	AvatarFull                    string  `json:"avatarFull"`
+	ReputationPoints              int     `json:"reputationPoints"`
+	RiskRating                    int     `json:"riskRating"`
+	ReputationRank                int     `json:"reputationRank"`
+	LastRefreshedInfo             string  `json:"lastRefreshedInfo"`
+	LastRefreshedReputationPoints string  `json:"lastRefreshedReputationPoints"`
+	LastRefreshedReputationRank   string  `json:"lastRefreshedReputationRank"`
+	ReputationPointsMonthChange   int     `json:"reputationPointsMonthChange"`
+	ActiveBans                    BanList `json:"activeBans"`
+	ExpiredBans                   BanList `json:"expiredBans"`
 }
 
 // BanList represents a list of bans
@@ -451,7 +451,7 @@ func (p *CBLInfoPlugin) sendDiscordAlert(user *CBLUser, event *event_manager.Log
 	}
 
 	embed := &discord.DiscordEmbed{
-		Title:       fmt.Sprintf("%s is a potentially harmful player!", playerName),
+		Title: fmt.Sprintf("%s is a potentially harmful player!", playerName),
 		Thumbnail: &discord.DiscordEmbedThumbnail{
 			URL: user.AvatarFull,
 		},

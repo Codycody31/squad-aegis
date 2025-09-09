@@ -156,9 +156,9 @@ func (p *DiscordChatPlugin) Start(ctx context.Context) error {
 	p.status = plugin_manager.PluginStatusRunning
 
 	p.apis.LogAPI.Info("Discord Chat plugin started", map[string]interface{}{
-		"channel_id":    channelID,
-		"color":         p.getIntConfig("color"),
-		"ignore_chats":  p.getArrayConfig("ignore_chats"),
+		"channel_id":   channelID,
+		"color":        p.getIntConfig("color"),
+		"ignore_chats": p.getArrayConfig("ignore_chats"),
 	})
 
 	return nil
@@ -278,7 +278,7 @@ func (p *DiscordChatPlugin) sendChatEmbed(event *event_manager.RconChatMessageDa
 	// Get player info to populate team/squad data
 	var teamInfo string = "Unknown"
 	var squadInfo string = "Unknown"
-	
+
 	// Try to get current player list to find team/squad info
 	if players, err := p.apis.ServerAPI.GetPlayers(); err == nil {
 		for _, player := range players {
@@ -342,11 +342,11 @@ func (p *DiscordChatPlugin) sendChatEmbed(event *event_manager.RconChatMessageDa
 	}
 
 	p.apis.LogAPI.Debug("Sent chat message to Discord", map[string]interface{}{
-		"channel_id":   channelID,
-		"player_name":  event.PlayerName,
-		"chat_type":    event.ChatType,
-		"message":      event.Message,
-		"steam_id":     event.SteamID,
+		"channel_id":  channelID,
+		"player_name": event.PlayerName,
+		"chat_type":   event.ChatType,
+		"message":     event.Message,
+		"steam_id":    event.SteamID,
 	})
 
 	return nil

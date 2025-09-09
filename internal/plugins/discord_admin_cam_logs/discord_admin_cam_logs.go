@@ -345,10 +345,10 @@ func (p *DiscordAdminCamLogsPlugin) sendAdminCameraEntryEmbed(event *event_manag
 	}
 
 	p.apis.LogAPI.Info("Sent admin camera entry log to Discord", map[string]interface{}{
-		"channel_id":  channelID,
-		"admin_name":  event.AdminName,
-		"steam_id":    event.SteamID,
-		"eos_id":      event.EosID,
+		"channel_id": channelID,
+		"admin_name": event.AdminName,
+		"steam_id":   event.SteamID,
+		"eos_id":     event.EosID,
 	})
 
 	return nil

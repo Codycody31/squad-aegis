@@ -14,7 +14,7 @@ import (
 // CommandConfig represents a single chat command configuration
 type CommandConfig struct {
 	Command     string   `json:"command"`
-	Type        string   `json:"type"`        // "warn" or "broadcast"
+	Type        string   `json:"type"` // "warn" or "broadcast"
 	Response    string   `json:"response"`
 	IgnoreChats []string `json:"ignoreChats"`
 }

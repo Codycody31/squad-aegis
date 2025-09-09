@@ -149,9 +149,9 @@ func (p *DiscordKillFeedPlugin) Start(ctx context.Context) error {
 	p.status = plugin_manager.PluginStatusRunning
 
 	p.apis.LogAPI.Info("Discord Kill Feed plugin started", map[string]interface{}{
-		"channel_id":   channelID,
-		"color":        p.getIntConfig("color"),
-		"disable_cbl":  p.getBoolConfig("disable_cbl"),
+		"channel_id":  channelID,
+		"color":       p.getIntConfig("color"),
+		"disable_cbl": p.getBoolConfig("disable_cbl"),
 	})
 
 	return nil
@@ -248,9 +248,9 @@ func (p *DiscordKillFeedPlugin) handlePlayerWounded(rawEvent *plugin_manager.Plu
 	go func() {
 		if err := p.sendKillFeedEmbed(event); err != nil {
 			p.apis.LogAPI.Error("Failed to send Discord embed for kill feed", err, map[string]interface{}{
-				"victim_name":               event.VictimName,
+				"victim_name":                event.VictimName,
 				"attacker_player_controller": event.AttackerPlayerController,
-				"weapon":                    event.Weapon,
+				"weapon":                     event.Weapon,
 			})
 		}
 	}()

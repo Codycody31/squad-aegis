@@ -29,7 +29,7 @@ type DiscordFOBHABExplosionDamagePlugin struct {
 	cancel context.CancelFunc
 
 	// Compiled regex patterns for performance
-	fobHabRegex    *regexp.Regexp
+	fobHabRegex     *regexp.Regexp
 	deployableRegex *regexp.Regexp
 }
 
