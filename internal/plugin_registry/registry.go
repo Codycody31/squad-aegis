@@ -14,6 +14,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_chat"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_fob_hab_explosion_damage"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_kill_feed"
+	"go.codycody31.dev/squad-aegis/internal/plugins/discord_round_ended"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_round_winner"
 	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
@@ -88,6 +89,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Discord Round Winner plugin
 	if err := pm.RegisterPlugin(discord_round_winner.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Discord Round Winner plugin")
+		return err
+	}
+
+	// Register Discord Round Ended plugin
+	if err := pm.RegisterPlugin(discord_round_ended.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Discord Round Ended plugin")
 		return err
 	}
 
