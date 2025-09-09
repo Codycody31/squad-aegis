@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-09-04
+## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-09-09
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feat: integrate ClickHouse for event logging and analytics, add log c… [[#69](https://github.com/Codycody31/squad-aegis/pull/69)]
 - Refactor: cut down project into the working components [[#67](https://github.com/Codycody31/squad-aegis/pull/67)]
 - feat(logwatcher): refactor log processing and client broadcasting [[#45](https://github.com/Codycody31/squad-aegis/pull/45)]
 
