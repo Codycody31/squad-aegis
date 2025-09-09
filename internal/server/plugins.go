@@ -362,6 +362,43 @@ func (s *Server) ServerPluginLogs(c *gin.Context) {
 	responses.Success(c, "Plugin logs fetched successfully", &gin.H{"logs": logs})
 }
 
+// ServerPluginLogsAll returns aggregated logs for all plugin instances for a server
+func (s *Server) ServerPluginLogsAll(c *gin.Context) {
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Parse query parameters
+	limit := 100 // default
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	before := c.Query("before")
+	after := c.Query("after")
+	order := c.Query("order")
+	level := c.Query("level")
+	search := c.Query("search")
+
+	// Get aggregated logs from ClickHouse via PluginManager
+	logs, err := s.Dependencies.PluginManager.GetServerPluginLogs(serverID, limit, before, after, order, level, search)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to retrieve server plugin logs: %w", err), nil)
+		return
+	}
+
+	responses.Success(c, "Server plugin logs fetched successfully", &gin.H{"logs": logs})
+}
+
 // ServerPluginMetrics returns metrics for a plugin instance
 func (s *Server) ServerPluginMetrics(c *gin.Context) {
 	// TODO: Implement plugin-specific metrics retrieval from ClickHouse

@@ -493,14 +493,23 @@ onMounted(async () => {
           Manage plugins for this server
         </p>
       </div>
-      <Dialog v-model:open="showAddDialog">
-        <DialogTrigger as-child>
-          <Button>
-            <Plus class="w-4 h-4 mr-2" />
-            Add Plugin
-          </Button>
-        </DialogTrigger>
-        <DialogContent class="sm:max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="flex items-center gap-2">
+        <Button
+          variant="outline"
+          @click="$router.push(`/servers/${serverId}/plugins/logs`)"
+          class="flex items-center"
+        >
+          <FileText class="w-4 h-4 mr-2" />
+          View All Logs
+        </Button>
+        <Dialog v-model:open="showAddDialog">
+          <DialogTrigger as-child>
+            <Button>
+              <Plus class="w-4 h-4 mr-2" />
+              Add Plugin
+            </Button>
+          </DialogTrigger>
+          <DialogContent class="sm:max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Add New Plugin</DialogTitle>
             <DialogDescription>
@@ -752,7 +761,8 @@ onMounted(async () => {
             <Button @click="createPlugin">Create Plugin</Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      </div>
     </div>
 
     <!-- Plugins List -->

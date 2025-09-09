@@ -4,9 +4,10 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Checkbox } from "~/components/ui/checkbox";
+import { Badge } from "~/components/ui/badge";
 import { toast } from "~/components/ui/toast";
 import { useAuthStore } from "~/stores/auth";
-import { ArrowLeft, FileText, Download, RefreshCw, ChevronLeft, ChevronRight, X, ChevronDown, ChevronRight as ChevronRightIcon, Clock, Hash, Database, AlertCircle, Info, AlertTriangle, Bug, ArrowDown } from "lucide-vue-next";
+import { ArrowLeft, FileText, Download, RefreshCw, ChevronLeft, ChevronRight, X, ChevronDown, ChevronRight as ChevronRightIcon, Clock, Hash, Database, AlertCircle, Info, AlertTriangle, Bug, ArrowDown, Filter } from "lucide-vue-next";
 
 definePageMeta({
   middleware: ["auth"],
@@ -15,18 +16,18 @@ definePageMeta({
 const route = useRoute();
 const router = useRouter();
 const serverId = route.params.serverId;
-const pluginId = route.params.pluginId;
 const authStore = useAuthStore();
 
 // State variables
 const loading = ref(true);
-const plugin = ref<any>(null);
+const server = ref<any>(null);
 const logs = ref<any[]>([]);
 const refreshing = ref(false);
 const loadingOlder = ref(false);
 const logsPerPage = ref(50);
 const logLevelFilter = ref('');
 const searchFilter = ref('');
+const pluginFilter = ref('');
 const expandedLogs = ref<Set<string>>(new Set());
 const showMetadata = ref(true);
 const showFields = ref(true);
@@ -37,6 +38,17 @@ const isAtBottom = ref(true);
 
 // Available log levels for filtering
 const logLevels = ['debug', 'info', 'warn', 'error'];
+
+// Get unique plugins from logs
+const availablePlugins = computed(() => {
+  const plugins = new Set<string>();
+  logs.value.forEach(log => {
+    if (log.plugin_name) {
+      plugins.add(log.plugin_name);
+    }
+  });
+  return Array.from(plugins).sort();
+});
 
 // Console-style log level colors and styling
 const getLogLevelStyle = (level: string) => {
@@ -70,6 +82,13 @@ const getLogLevelIcon = (level: string) => {
     default:
       return Info;
   }
+};
+
+// Get plugin badge color
+const getPluginBadgeColor = (pluginName: string) => {
+  const colors = ['bg-blue-600', 'bg-green-600', 'bg-purple-600', 'bg-orange-600', 'bg-pink-600', 'bg-indigo-600'];
+  const hash = pluginName.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
+  return colors[hash % colors.length];
 };
 
 // Toggle log expansion
@@ -156,20 +175,20 @@ const formatConsoleTimestamp = (timestamp: string) => {
   });
 };
 
-// Load plugin details
-const loadPlugin = async () => {
+// Load server details
+const loadServer = async () => {
   try {
-    const response = await $fetch(`/api/servers/${serverId}/plugins/${pluginId}`, {
+    const response = await $fetch(`/api/servers/${serverId}`, {
       headers: {
         Authorization: `Bearer ${authStore.token}`,
       },
     });
-    plugin.value = (response as any).data.plugin;
+    server.value = (response as any).data.server;
   } catch (error: any) {
-    console.error("Failed to load plugin:", error);
+    console.error("Failed to load server:", error);
     toast({
       title: "Error",
-      description: "Failed to load plugin details",
+      description: "Failed to load server details",
       variant: "destructive",
     });
   }
@@ -194,7 +213,7 @@ const handleScroll = async (event: Event) => {
 // Load initial logs (latest first)
 const loadInitialLogs = async () => {
   try {
-    let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc`;
+    let url = `/api/servers/${serverId}/plugins/logs?limit=${logsPerPage.value}&order=desc`;
     
     // Add filters if set
     const params = new URLSearchParams();
@@ -246,7 +265,7 @@ const loadOlderLogs = async () => {
   const previousScrollHeight = container?.scrollHeight || 0;
   
   try {
-    let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc&before=${oldestLogId.value}`;
+    let url = `/api/servers/${serverId}/plugins/logs?limit=${logsPerPage.value}&order=desc&before=${oldestLogId.value}`;
     
     // Add filters if set
     const params = new URLSearchParams();
@@ -297,7 +316,7 @@ const loadNewerLogs = async () => {
   if (!newestLogId.value) return;
   
   try {
-    let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc&after=${newestLogId.value}`;
+    let url = `/api/servers/${serverId}/plugins/logs?limit=${logsPerPage.value}&order=desc&after=${newestLogId.value}`;
     
     // Add filters if set
     const params = new URLSearchParams();
@@ -400,6 +419,7 @@ const applyFilters = async () => {
 const clearFilters = async () => {
   logLevelFilter.value = '';
   searchFilter.value = '';
+  pluginFilter.value = '';
   logs.value = [];
   oldestLogId.value = null;
   newestLogId.value = null;
@@ -416,14 +436,17 @@ const exportLogs = () => {
     message: log.message,
     error_message: log.error_message,
     fields: log.fields,
-    ingested_at: log.ingested_at
+    ingested_at: log.ingested_at,
+    plugin_name: log.plugin_name,
+    plugin_id: log.plugin_id,
+    plugin_instance_id: log.plugin_instance_id
   }));
   
   const blob = new Blob([JSON.stringify(logData, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `plugin-${plugin.value?.name || pluginId}-logs-${new Date().toISOString().split('T')[0]}.json`;
+  a.download = `server-${serverId}-plugin-logs-${new Date().toISOString().split('T')[0]}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -435,10 +458,18 @@ const goBack = () => {
   router.push(`/servers/${serverId}/plugins`);
 };
 
+// Filter logs by plugin (client-side filtering for now)
+const filteredLogs = computed(() => {
+  if (!pluginFilter.value) {
+    return logs.value;
+  }
+  return logs.value.filter(log => log.plugin_name === pluginFilter.value);
+});
+
 onMounted(async () => {
   loading.value = true;
   try {
-    await Promise.all([loadPlugin(), loadInitialLogs()]);
+    await Promise.all([loadServer(), loadInitialLogs()]);
     
     // Add keyboard event listeners
     document.addEventListener('keydown', handleKeydown);
@@ -476,9 +507,10 @@ onUnmounted(() => {
               Back
             </Button>
             <div>
-              <h1 class="text-xl font-bold">{{ plugin?.plugin_id || 'Plugin' }} Plugin Logs</h1>
+              <h1 class="text-xl font-bold">All Plugin Logs</h1>
               <p class="text-sm text-muted-foreground">
-                Live log stream • {{ logs.length }} entries
+                Aggregated log stream • {{ filteredLogs.length }} entries
+                <span v-if="pluginFilter">(filtered by {{ pluginFilter }})</span>
               </p>
             </div>
           </div>
@@ -508,7 +540,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Compact Filters -->
-        <div class="flex flex-col sm:flex-row gap-2 mt-4">
+        <div class="flex flex-col lg:flex-row gap-2 mt-4">
           <div class="flex-1">
             <Input 
               v-model="searchFilter" 
@@ -520,16 +552,26 @@ onUnmounted(() => {
           </div>
           <Select v-model="logLevelFilter">
             <SelectTrigger class="w-32">
-              <SelectValue placeholder="All" />
+              <SelectValue placeholder="All Levels" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All</SelectItem>
               <SelectItem v-for="level in logLevels" :key="level" :value="level">
                 {{ level.toUpperCase() }}
               </SelectItem>
             </SelectContent>
           </Select>
+          <Select v-model="pluginFilter">
+            <SelectTrigger class="w-48">
+              <SelectValue placeholder="All Plugins" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="plugin in availablePlugins" :key="plugin" :value="plugin">
+                {{ plugin }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
           <Button @click="applyFilters" size="sm" variant="outline">
+            <Filter class="w-4 h-4 mr-2" />
             Apply
           </Button>
           <Button @click="clearFilters" size="sm" variant="outline">
@@ -577,15 +619,16 @@ onUnmounted(() => {
         id="console-container"
         @scroll="handleScroll"
       >
-        <div v-if="logs.length === 0" class="text-center py-8 text-gray-500">
+        <div v-if="filteredLogs.length === 0" class="text-center py-8 text-gray-500">
           <FileText class="w-16 h-16 mx-auto mb-4" />
           <p>No log entries found</p>
+          <p v-if="pluginFilter" class="text-sm mt-2">No logs found for plugin: {{ pluginFilter }}</p>
         </div>
         
         <!-- Log entries -->
         <div v-else class="space-y-1">
           <div 
-            v-for="log in logs" 
+            v-for="log in filteredLogs" 
             :key="log.id"
             class="border border-gray-800 rounded-lg hover:border-gray-700 transition-colors"
             :class="{ 'bg-gray-900/30': expandedLogs.has(log.id) }"
@@ -622,6 +665,17 @@ onUnmounted(() => {
                   {{ log.level?.toUpperCase().substring(0, 4) }}
                 </span>
               </div>
+
+              <!-- Plugin Badge -->
+              <div class="flex-shrink-0 mr-3">
+                <Badge 
+                  variant="secondary"
+                  :class="getPluginBadgeColor(log.plugin_name || 'unknown')"
+                  class="text-white text-xs px-2 py-1"
+                >
+                  {{ log.plugin_name || 'Unknown' }}
+                </Badge>
+              </div>
               
               <!-- Message -->
               <span class="flex-1 break-words">
@@ -650,6 +704,14 @@ onUnmounted(() => {
                   <div class="flex">
                     <span class="text-gray-500 w-20 flex-shrink-0">ID:</span>
                     <span class="font-mono text-yellow-400">{{ log.id }}</span>
+                  </div>
+                  <div class="flex">
+                    <span class="text-gray-500 w-20 flex-shrink-0">Plugin:</span>
+                    <span class="font-mono text-purple-400">{{ log.plugin_name }}</span>
+                  </div>
+                  <div class="flex">
+                    <span class="text-gray-500 w-20 flex-shrink-0">Instance:</span>
+                    <span class="font-mono text-cyan-400">{{ log.plugin_instance_id }}</span>
                   </div>
                   <div class="flex">
                     <span class="text-gray-500 w-20 flex-shrink-0">Ingested:</span>
@@ -702,7 +764,8 @@ onUnmounted(() => {
       <div class="p-3">
         <div class="flex items-center justify-between text-sm">
           <div class="text-muted-foreground flex items-center gap-4">
-            <span>{{ logs.length }} entries loaded</span>
+            <span>{{ filteredLogs.length }} entries displayed</span>
+            <span v-if="filteredLogs.length !== logs.length">({{ logs.length }} total loaded)</span>
             <span class="flex items-center gap-1">
               <Clock class="w-3 h-3" />
               {{ expandedLogs.size }} expanded

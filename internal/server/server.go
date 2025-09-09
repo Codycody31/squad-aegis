@@ -180,6 +180,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				pluginGroup := serverGroup.Group("/plugins")
 				{
 					pluginGroup.GET("", server.ServerPluginList)
+					pluginGroup.GET("/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogsAll)
 					pluginGroup.POST("", server.AuthHasServerPermission("manageserver"), server.ServerPluginCreate)
 					pluginGroup.GET("/:pluginId", server.ServerPluginGet)
 					pluginGroup.PUT("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginUpdate)

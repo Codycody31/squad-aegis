@@ -890,3 +890,166 @@ func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int
 
 	return logs, nil
 }
+
+// AggregatedPluginLog extends PluginLog with plugin information
+type AggregatedPluginLog struct {
+	PluginLog
+	PluginInstanceID uuid.UUID `json:"plugin_instance_id"`
+	PluginName       string    `json:"plugin_name"`
+	PluginID         string    `json:"plugin_id"`
+}
+
+// GetServerPluginLogs retrieves logs for all plugin instances for a specific server from ClickHouse
+func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, before, after, order, level, search string) ([]AggregatedPluginLog, error) {
+	if pm.clickhouseClient == nil {
+		return nil, fmt.Errorf("ClickHouse client not available")
+	}
+
+	// Default limit if not specified
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// Prevent excessively large queries
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	// Build the query - aggregate logs from all plugins for this server
+	query := `SELECT 
+		log_id, 
+		timestamp, 
+		level, 
+		message, 
+		error_message, 
+		fields, 
+		ingested_at,
+		plugin_instance_id
+	FROM squad_aegis.plugin_logs 
+	WHERE server_id = ?`
+	args := []interface{}{serverID}
+
+	if level != "" && level != "all" {
+		query += " AND level = ?"
+		args = append(args, level)
+	}
+
+	if search != "" {
+		query += " AND (message LIKE ? OR error_message LIKE ?)"
+		searchPattern := "%" + search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Handle cursor-based pagination
+	if before != "" {
+		var beforeTimestamp time.Time
+		tsQuery := "SELECT timestamp FROM squad_aegis.plugin_logs WHERE log_id = ? AND server_id = ?"
+		err := pm.clickhouseClient.QueryRow(ctx, tsQuery, before, serverID).Scan(&beforeTimestamp)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return []AggregatedPluginLog{}, nil // If cursor not found, return no older logs
+			}
+			return nil, fmt.Errorf("failed to get timestamp for 'before' cursor: %w", err)
+		}
+		query += " AND (timestamp, log_id) < (?, ?)"
+		args = append(args, beforeTimestamp, before)
+	}
+
+	if after != "" {
+		var afterTimestamp time.Time
+		tsQuery := "SELECT timestamp FROM squad_aegis.plugin_logs WHERE log_id = ? AND server_id = ?"
+		err := pm.clickhouseClient.QueryRow(ctx, tsQuery, after, serverID).Scan(&afterTimestamp)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return []AggregatedPluginLog{}, nil // If cursor not found, return no newer logs
+			}
+			return nil, fmt.Errorf("failed to get timestamp for 'after' cursor: %w", err)
+		}
+		query += " AND (timestamp, log_id) > (?, ?)"
+		args = append(args, afterTimestamp, after)
+	}
+
+	// Handle order
+	if order == "desc" {
+		query += " ORDER BY timestamp DESC, log_id DESC"
+	} else {
+		query += " ORDER BY timestamp ASC, log_id ASC"
+	}
+
+	query += " LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := pm.clickhouseClient.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query server plugin logs: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []AggregatedPluginLog
+	for rows.Next() {
+		var logItem AggregatedPluginLog
+		var fieldsJSON string
+		var errorMessage sql.NullString
+
+		err := rows.Scan(
+			&logItem.ID,
+			&logItem.Timestamp,
+			&logItem.Level,
+			&logItem.Message,
+			&errorMessage,
+			&fieldsJSON,
+			&logItem.IngestedAt,
+			&logItem.PluginInstanceID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan log row: %w", err)
+		}
+
+		if errorMessage.Valid {
+			logItem.ErrorMessage = &errorMessage.String
+		}
+
+		// Parse fields JSON
+		if fieldsJSON != "" {
+			var fields map[string]interface{}
+			if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
+				logItem.Fields = map[string]interface{}{"raw": fieldsJSON, "error": "failed to parse json"}
+			} else {
+				logItem.Fields = fields
+			}
+		}
+
+		// Get plugin information
+		pm.mu.RLock()
+		if serverPlugins, exists := pm.plugins[serverID]; exists {
+			if instance, exists := serverPlugins[logItem.PluginInstanceID]; exists {
+				if instance.Plugin != nil {
+					logItem.PluginName = instance.Plugin.GetDefinition().Name
+					logItem.PluginID = instance.Plugin.GetDefinition().ID
+				} else {
+					logItem.PluginName = instance.PluginID
+					logItem.PluginID = instance.PluginID
+				}
+			} else {
+				// Fallback: try to get plugin info from database or use instance ID
+				logItem.PluginName = "Unknown Plugin"
+				logItem.PluginID = logItem.PluginInstanceID.String()
+			}
+		} else {
+			logItem.PluginName = "Unknown Plugin"
+			logItem.PluginID = logItem.PluginInstanceID.String()
+		}
+		pm.mu.RUnlock()
+
+		logs = append(logs, logItem)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over log rows: %w", err)
+	}
+
+	return logs, nil
+}
