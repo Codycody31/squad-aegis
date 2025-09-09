@@ -150,10 +150,6 @@ func (p *DiscordAdminRequestPlugin) Initialize(config map[string]interface{}, ap
 
 	p.status = plugin_manager.PluginStatusStopped
 
-	p.apis.LogAPI.Info("Discord Admin Request plugin initialized", map[string]interface{}{
-		"channelID": config["channel_id"],
-	})
-
 	return nil
 }
 
@@ -403,23 +399,6 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 			Text: "Powered by Squad Aegis",
 		},
 		Timestamp: func() *time.Time { t := time.Now(); return &t }(),
-	}
-
-	// Add player details if available
-	if playerID != "" {
-		embed.Fields = append(embed.Fields, &discord.DiscordEmbedField{
-			Name:   "Player ID",
-			Value:  playerID,
-			Inline: true,
-		})
-	}
-
-	if steamID != "" {
-		embed.Fields = append(embed.Fields, &discord.DiscordEmbedField{
-			Name:   "Steam ID",
-			Value:  steamID,
-			Inline: true,
-		})
 	}
 
 	// Send with ping

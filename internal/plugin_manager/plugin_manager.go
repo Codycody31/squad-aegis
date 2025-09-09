@@ -770,7 +770,7 @@ type PluginLog struct {
 }
 
 // GetPluginLogs retrieves logs for a specific plugin instance from ClickHouse
-func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int, offset int) ([]PluginLog, error) {
+func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int, before, after, order, level, search string) ([]PluginLog, error) {
 	if pm.clickhouseClient == nil {
 		return nil, fmt.Errorf("ClickHouse client not available")
 	}
@@ -785,25 +785,64 @@ func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int
 		limit = 1000
 	}
 
-	query := `
-		SELECT 
-			log_id,
-			timestamp,
-			level,
-			message,
-			error_message,
-			fields,
-			ingested_at
-		FROM squad_aegis.plugin_logs 
-		WHERE server_id = ? AND plugin_instance_id = ?
-		ORDER BY timestamp ASC, log_id ASC
-		LIMIT ? OFFSET ?
-	`
+	// Build the query
+	query := "SELECT log_id, timestamp, level, message, error_message, fields, ingested_at FROM squad_aegis.plugin_logs WHERE server_id = ? AND plugin_instance_id = ?"
+	args := []interface{}{serverID, instanceID}
+
+	if level != "" && level != "all" {
+		query += " AND level = ?"
+		args = append(args, level)
+	}
+
+	if search != "" {
+		query += " AND (message LIKE ? OR error_message LIKE ?)"
+		searchPattern := "%" + search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	rows, err := pm.clickhouseClient.Query(ctx, query, serverID, instanceID, limit, offset)
+	// Handle cursor-based pagination
+	if before != "" {
+		var beforeTimestamp time.Time
+		tsQuery := "SELECT timestamp FROM squad_aegis.plugin_logs WHERE log_id = ? AND server_id = ? AND plugin_instance_id = ?"
+		err := pm.clickhouseClient.QueryRow(ctx, tsQuery, before, serverID, instanceID).Scan(&beforeTimestamp)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return []PluginLog{}, nil // If cursor not found, return no older logs
+			}
+			return nil, fmt.Errorf("failed to get timestamp for 'before' cursor: %w", err)
+		}
+		query += " AND (timestamp, log_id) < (?, ?)"
+		args = append(args, beforeTimestamp, before)
+	}
+
+	if after != "" {
+		var afterTimestamp time.Time
+		tsQuery := "SELECT timestamp FROM squad_aegis.plugin_logs WHERE log_id = ? AND server_id = ? AND plugin_instance_id = ?"
+		err := pm.clickhouseClient.QueryRow(ctx, tsQuery, after, serverID, instanceID).Scan(&afterTimestamp)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return []PluginLog{}, nil // If cursor not found, return no newer logs
+			}
+			return nil, fmt.Errorf("failed to get timestamp for 'after' cursor: %w", err)
+		}
+		query += " AND (timestamp, log_id) > (?, ?)"
+		args = append(args, afterTimestamp, after)
+	}
+
+	// Handle order
+	if order == "desc" {
+		query += " ORDER BY timestamp DESC, log_id DESC"
+	} else {
+		query += " ORDER BY timestamp ASC, log_id ASC"
+	}
+
+	query += " LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := pm.clickhouseClient.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query plugin logs: %w", err)
 	}
@@ -811,33 +850,38 @@ func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int
 
 	var logs []PluginLog
 	for rows.Next() {
-		var log PluginLog
+		var logItem PluginLog
 		var fieldsJSON string
+		var errorMessage sql.NullString
 
 		err := rows.Scan(
-			&log.ID,
-			&log.Timestamp,
-			&log.Level,
-			&log.Message,
-			&log.ErrorMessage,
+			&logItem.ID,
+			&logItem.Timestamp,
+			&logItem.Level,
+			&logItem.Message,
+			&errorMessage,
 			&fieldsJSON,
-			&log.IngestedAt,
+			&logItem.IngestedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan log row: %w", err)
+		}
+
+		if errorMessage.Valid {
+			logItem.ErrorMessage = &errorMessage.String
 		}
 
 		// Parse fields JSON
 		if fieldsJSON != "" {
 			var fields map[string]interface{}
 			if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
-				log.Fields = map[string]interface{}{"raw": fieldsJSON}
+				logItem.Fields = map[string]interface{}{"raw": fieldsJSON, "error": "failed to parse json"}
 			} else {
-				log.Fields = fields
+				logItem.Fields = fields
 			}
 		}
 
-		logs = append(logs, log)
+		logs = append(logs, logItem)
 	}
 
 	if err := rows.Err(); err != nil {

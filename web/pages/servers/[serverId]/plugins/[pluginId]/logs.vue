@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
+import { Checkbox } from "~/components/ui/checkbox";
 import { toast } from "~/components/ui/toast";
 import { useAuthStore } from "~/stores/auth";
-import { ArrowLeft, FileText, Download, RefreshCw, ChevronLeft, ChevronRight, X, ChevronDown, ChevronRight as ChevronRightIcon, Clock, Hash, Database, AlertCircle, Info, AlertTriangle, Bug } from "lucide-vue-next";
+import { ArrowLeft, FileText, Download, RefreshCw, ChevronLeft, ChevronRight, X, ChevronDown, ChevronRight as ChevronRightIcon, Clock, Hash, Database, AlertCircle, Info, AlertTriangle, Bug, ArrowDown } from "lucide-vue-next";
 
 definePageMeta({
   middleware: ["auth"],
@@ -22,16 +23,17 @@ const loading = ref(true);
 const plugin = ref<any>(null);
 const logs = ref<any[]>([]);
 const refreshing = ref(false);
-const currentPage = ref(1);
+const loadingOlder = ref(false);
 const logsPerPage = ref(50);
-const totalLogs = ref(0);
 const logLevelFilter = ref('');
 const searchFilter = ref('');
 const expandedLogs = ref<Set<string>>(new Set());
 const showMetadata = ref(true);
 const showFields = ref(true);
-const autoRefresh = ref(false);
-const autoRefreshInterval = ref<NodeJS.Timeout | null>(null);
+const hasMoreLogs = ref(true);
+const oldestLogId = ref<string | null>(null);
+const newestLogId = ref<string | null>(null);
+const isAtBottom = ref(true);
 
 // Available log levels for filtering
 const logLevels = ['debug', 'info', 'warn', 'error'];
@@ -121,34 +123,6 @@ const getRelativeTime = (timestamp: string) => {
   return `${seconds}s ago`;
 };
 
-// Toggle auto-refresh
-const toggleAutoRefresh = () => {
-  autoRefresh.value = !autoRefresh.value;
-  
-  if (autoRefresh.value) {
-    autoRefreshInterval.value = setInterval(() => {
-      if (!refreshing.value) {
-        refreshLogs();
-      }
-    }, 5000); // Refresh every 5 seconds
-    
-    toast({
-      title: "Auto-refresh enabled",
-      description: "Logs will refresh every 5 seconds",
-    });
-  } else {
-    if (autoRefreshInterval.value) {
-      clearInterval(autoRefreshInterval.value);
-      autoRefreshInterval.value = null;
-    }
-    
-    toast({
-      title: "Auto-refresh disabled",
-      description: "Manual refresh required",
-    });
-  }
-};
-
 // Keyboard shortcuts
 const handleKeydown = (event: KeyboardEvent) => {
   // Ctrl/Cmd + R to refresh
@@ -167,12 +141,6 @@ const handleKeydown = (event: KeyboardEvent) => {
   if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'E') {
     event.preventDefault();
     collapseAllLogs();
-  }
-  
-  // Ctrl/Cmd + A to toggle auto-refresh
-  if ((event.ctrlKey || event.metaKey) && event.key === 'a') {
-    event.preventDefault();
-    toggleAutoRefresh();
   }
 };
 
@@ -207,11 +175,26 @@ const loadPlugin = async () => {
   }
 };
 
-// Load plugin logs
-const loadLogs = async (page = 1) => {
+// Scroll detection and infinite scroll
+const handleScroll = async (event: Event) => {
+  const container = event.target as HTMLElement;
+  const scrollTop = container.scrollTop;
+  const scrollHeight = container.scrollHeight;
+  const clientHeight = container.clientHeight;
+  
+  // Check if user is at the bottom (within 100px threshold)
+  isAtBottom.value = scrollHeight - scrollTop - clientHeight < 100;
+  
+  // Load older logs when scrolling near the top (within 200px)
+  if (scrollTop < 200 && !loadingOlder.value && hasMoreLogs.value) {
+    await loadOlderLogs();
+  }
+};
+
+// Load initial logs (latest first)
+const loadInitialLogs = async () => {
   try {
-    const offset = (page - 1) * logsPerPage.value;
-    let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&offset=${offset}`;
+    let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc`;
     
     // Add filters if set
     const params = new URLSearchParams();
@@ -228,13 +211,22 @@ const loadLogs = async (page = 1) => {
       },
     });
     
-    logs.value = (response as any).data.logs || [];
-    // Note: We don't have total count from the API yet, so we'll estimate
-    totalLogs.value = logs.value.length === logsPerPage.value ? (page * logsPerPage.value) + 1 : (page - 1) * logsPerPage.value + logs.value.length;
+    const newLogs = (response as any).data.logs || [];
+    const reversedLogs = newLogs.slice().reverse();
+    logs.value = reversedLogs;
     
-    // Auto-scroll to bottom for console view
+    if (reversedLogs.length > 0) {
+      newestLogId.value = reversedLogs[reversedLogs.length - 1].id;
+      oldestLogId.value = reversedLogs[0].id;
+    }
+    
+    hasMoreLogs.value = newLogs.length === logsPerPage.value;
+    
+    // Always scroll to bottom after initial load with a slight delay
     await nextTick();
-    scrollToBottom();
+    setTimeout(() => {
+      scrollToBottom();
+    }, 100);
   } catch (error: any) {
     console.error("Failed to load logs:", error);
     toast({
@@ -245,11 +237,118 @@ const loadLogs = async (page = 1) => {
   }
 };
 
+// Load older logs (for infinite scroll)
+const loadOlderLogs = async () => {
+  if (!hasMoreLogs.value || loadingOlder.value || !oldestLogId.value) return;
+  
+  loadingOlder.value = true;
+  const container = document.getElementById('console-container');
+  const previousScrollHeight = container?.scrollHeight || 0;
+  
+  try {
+    let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc&before=${oldestLogId.value}`;
+    
+    // Add filters if set
+    const params = new URLSearchParams();
+    if (logLevelFilter.value) params.append('level', logLevelFilter.value);
+    if (searchFilter.value) params.append('search', searchFilter.value);
+    
+    if (params.toString()) {
+      url += '&' + params.toString();
+    }
+    
+    const response = await $fetch(url, {
+      headers: {
+        Authorization: `Bearer ${authStore.token}`,
+      },
+    });
+    
+    const olderLogs = (response as any).data.logs || [];
+    const reversedOlderLogs = olderLogs.slice().reverse();
+    
+    if (reversedOlderLogs.length > 0) {
+      // Prepend older logs to the beginning of the array
+      logs.value = [...reversedOlderLogs, ...logs.value];
+      oldestLogId.value = reversedOlderLogs[0].id;
+      
+      // Maintain scroll position
+      await nextTick();
+      if (container) {
+        const newScrollHeight = container.scrollHeight;
+        container.scrollTop = newScrollHeight - previousScrollHeight;
+      }
+    }
+    
+    hasMoreLogs.value = olderLogs.length === logsPerPage.value;
+  } catch (error: any) {
+    console.error("Failed to load older logs:", error);
+    toast({
+      title: "Error",
+      description: "Failed to load older logs",
+      variant: "destructive",
+    });
+  } finally {
+    loadingOlder.value = false;
+  }
+};
+
+// Load newer logs (for auto-refresh)
+const loadNewerLogs = async () => {
+  if (!newestLogId.value) return;
+  
+  try {
+    let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc&after=${newestLogId.value}`;
+    
+    // Add filters if set
+    const params = new URLSearchParams();
+    if (logLevelFilter.value) params.append('level', logLevelFilter.value);
+    if (searchFilter.value) params.append('search', searchFilter.value);
+    
+    if (params.toString()) {
+      url += '&' + params.toString();
+    }
+    
+    const response = await $fetch(url, {
+      headers: {
+        Authorization: `Bearer ${authStore.token}`,
+      },
+    });
+    
+    const newerLogs = (response as any).data.logs || [];
+    const reversedNewerLogs = newerLogs.slice().reverse();
+    
+    if (reversedNewerLogs.length > 0) {
+      // Append newer logs to the end of the array
+      logs.value = [...logs.value, ...reversedNewerLogs];
+      newestLogId.value = reversedNewerLogs[reversedNewerLogs.length - 1].id;
+      
+      // Auto-scroll to bottom if user was already at bottom
+      if (isAtBottom.value) {
+        await nextTick();
+        scrollToBottom();
+      } else {
+        toast({
+          title: "New logs available",
+          description: `${reversedNewerLogs.length} new log entries`,
+          action: {
+            label: "Scroll to bottom",
+            onClick: scrollToBottom
+          }
+        });
+      }
+    }
+  } catch (error: any) {
+    console.error("Failed to load newer logs:", error);
+  }
+};
+
 // Scroll to bottom of console
 const scrollToBottom = () => {
   const container = document.getElementById('console-container');
   if (container) {
     container.scrollTop = container.scrollHeight;
+    // Ensure we're marked as at bottom
+    isAtBottom.value = true;
   }
 };
 
@@ -257,7 +356,9 @@ const scrollToBottom = () => {
 const refreshLogs = async () => {
   refreshing.value = true;
   try {
-    await loadLogs(currentPage.value);
+    // Always reload from scratch for manual refresh
+    await loadInitialLogs();
+    
     toast({
       title: "Success",
       description: "Logs refreshed successfully",
@@ -267,32 +368,43 @@ const refreshLogs = async () => {
   }
 };
 
-// Handle pagination
+// Scroll to bottom and load newer logs
+const scrollToBottomAndRefresh = async () => {
+  await loadNewerLogs();
+  scrollToBottom();
+};
+
+// Handle pagination (simplified for infinite scroll)
 const nextPage = () => {
-  if (logs.value.length === logsPerPage.value) {
-    currentPage.value++;
-    loadLogs(currentPage.value);
-  }
+  // In infinite scroll, "next page" means scroll to bottom
+  scrollToBottom();
 };
 
 const prevPage = () => {
-  if (currentPage.value > 1) {
-    currentPage.value--;
-    loadLogs(currentPage.value);
+  // In infinite scroll, "prev page" means scroll to top to load older logs
+  const container = document.getElementById('console-container');
+  if (container) {
+    container.scrollTop = 0;
   }
 };
 
 // Handle filtering
-const applyFilters = () => {
-  currentPage.value = 1;
-  loadLogs(1);
+const applyFilters = async () => {
+  logs.value = [];
+  oldestLogId.value = null;
+  newestLogId.value = null;
+  hasMoreLogs.value = true;
+  await loadInitialLogs();
 };
 
-const clearFilters = () => {
+const clearFilters = async () => {
   logLevelFilter.value = '';
   searchFilter.value = '';
-  currentPage.value = 1;
-  loadLogs(1);
+  logs.value = [];
+  oldestLogId.value = null;
+  newestLogId.value = null;
+  hasMoreLogs.value = true;
+  await loadInitialLogs();
 };
 
 // Export logs
@@ -326,10 +438,16 @@ const goBack = () => {
 onMounted(async () => {
   loading.value = true;
   try {
-    await Promise.all([loadPlugin(), loadLogs()]);
+    await Promise.all([loadPlugin(), loadInitialLogs()]);
     
     // Add keyboard event listeners
     document.addEventListener('keydown', handleKeydown);
+    
+    // Add scroll listener to console container
+    const container = document.getElementById('console-container');
+    if (container) {
+      container.addEventListener('scroll', handleScroll);
+    }
   } finally {
     loading.value = false;
   }
@@ -338,8 +456,10 @@ onMounted(async () => {
 // Cleanup on unmount
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown);
-  if (autoRefreshInterval.value) {
-    clearInterval(autoRefreshInterval.value);
+  
+  const container = document.getElementById('console-container');
+  if (container) {
+    container.removeEventListener('scroll', handleScroll);
   }
 });
 </script>
@@ -364,15 +484,6 @@ onUnmounted(() => {
           </div>
           
           <div class="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              @click="toggleAutoRefresh"
-              :class="{ 'bg-green-600 text-white': autoRefresh }"
-            >
-              <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': autoRefresh }" />
-              Auto {{ autoRefresh ? 'ON' : 'OFF' }}
-            </Button>
             <Button variant="outline" size="sm" @click="expandAllLogs" :disabled="logs.length === 0" title="Ctrl+E">
               <ChevronDown class="w-4 h-4 mr-2" />
               Expand All
@@ -384,6 +495,10 @@ onUnmounted(() => {
             <Button variant="outline" size="sm" @click="refreshLogs" :disabled="refreshing" title="Ctrl+R">
               <RefreshCw class="w-4 h-4 mr-2" :class="{ 'animate-spin': refreshing }" />
               Refresh
+            </Button>
+            <Button variant="outline" size="sm" @click="scrollToBottomAndRefresh">
+              <ArrowDown class="w-4 h-4 mr-2" />
+              Latest
             </Button>
             <Button variant="outline" size="sm" @click="exportLogs" :disabled="logs.length === 0">
               <Download class="w-4 h-4 mr-2" />
@@ -426,19 +541,15 @@ onUnmounted(() => {
         <div class="flex flex-wrap gap-2 mt-3 pt-3 border-t border-border/50">
           <div class="flex items-center space-x-2">
             <Checkbox 
-              type="checkbox" 
               id="show-metadata" 
               v-model="showMetadata" 
-              class="rounded border-gray-300 text-primary focus:ring-primary"
             />
             <label for="show-metadata" class="text-sm text-muted-foreground">Show Metadata</label>
           </div>
           <div class="flex items-center space-x-2">
             <Checkbox 
-              type="checkbox" 
               id="show-fields" 
               v-model="showFields" 
-              class="rounded border-gray-300 text-primary focus:ring-primary"
             />
             <label for="show-fields" class="text-sm text-muted-foreground">Show Fields</label>
           </div>
@@ -452,8 +563,20 @@ onUnmounted(() => {
 
     <!-- Console View - Scrollable content area -->
     <div v-else class="flex-1 overflow-hidden">
+      <!-- Loading indicator for older logs -->
+      <div v-if="loadingOlder" class="bg-gray-900 text-center py-2 text-sm text-gray-400 border-b border-gray-800">
+        <div class="flex items-center justify-center gap-2">
+          <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400"></div>
+          Loading older logs...
+        </div>
+      </div>
+      
       <!-- Console Container -->
-      <div class="h-full bg-black text-green-400 font-mono text-sm overflow-auto p-4" id="console-container">
+      <div 
+        class="h-full bg-black text-green-400 font-mono text-sm overflow-auto p-4" 
+        id="console-container"
+        @scroll="handleScroll"
+      >
         <div v-if="logs.length === 0" class="text-center py-8 text-gray-500">
           <FileText class="w-16 h-16 mx-auto mb-4" />
           <p>No log entries found</p>
@@ -574,12 +697,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Footer with pagination - Fixed at bottom -->
+    <!-- Footer with status - Fixed at bottom -->
     <div v-if="logs.length > 0" class="flex-shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div class="p-3">
         <div class="flex items-center justify-between text-sm">
           <div class="text-muted-foreground flex items-center gap-4">
-            <span>Page {{ currentPage }} • {{ logs.length }} entries</span>
+            <span>{{ logs.length }} entries loaded</span>
             <span class="flex items-center gap-1">
               <Clock class="w-3 h-3" />
               {{ expandedLogs.size }} expanded
@@ -587,32 +710,63 @@ onUnmounted(() => {
             <span v-if="logs.length > 0" class="text-xs">
               Latest: {{ formatConsoleTimestamp(logs[logs.length - 1]?.timestamp) }}
             </span>
+            <span v-if="loadingOlder" class="text-blue-400 text-xs">
+              Loading older logs...
+            </span>
+            <span v-if="!hasMoreLogs" class="text-gray-500 text-xs">
+              No more logs to load
+            </span>
           </div>
           <div class="flex items-center space-x-2">
             <Button 
               variant="outline" 
               size="sm"
               @click="prevPage"
-              :disabled="currentPage <= 1"
+              :disabled="!hasMoreLogs || loadingOlder"
+              title="Scroll to top to load older logs"
             >
               <ChevronLeft class="w-4 h-4" />
+              Older
             </Button>
             <Button 
               variant="outline" 
               size="sm"
-              @click="nextPage"
-              :disabled="logs.length < logsPerPage"
+              @click="scrollToBottomAndRefresh"
+              :disabled="refreshing"
+              title="Jump to latest logs"
             >
-              <ChevronRight class="w-4 h-4" />
+              <ArrowDown class="w-4 h-4" />
+              Latest
             </Button>
             
-            <!-- Keyboard shortcuts info -->
-            <div class="ml-4 text-xs text-muted-foreground hidden lg:block">
-              Shortcuts: Ctrl+R (refresh) • Ctrl+E (expand) • Ctrl+A (auto-refresh)
+            <!-- Status indicators -->
+            <div class="ml-4 flex items-center gap-2">
+              <div v-if="!isAtBottom" class="flex items-center gap-1 text-orange-400 text-xs">
+                <ArrowDown class="w-3 h-3" />
+                New logs available
+              </div>
+              <div class="text-xs text-muted-foreground hidden lg:block">
+                Scroll up for older logs • Shortcuts: Ctrl+R (refresh) • Ctrl+E (expand)
+              </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
+    
+    <!-- Floating "new logs" indicator -->
+    <div 
+      v-if="!isAtBottom && logs.length > 0" 
+      class="fixed bottom-20 right-6 z-10"
+    >
+      <Button 
+        @click="scrollToBottom" 
+        class="shadow-lg bg-blue-600 hover:bg-blue-700 text-white"
+        size="sm"
+      >
+        <ArrowDown class="w-4 h-4 mr-2" />
+        New logs available
+      </Button>
     </div>
   </div>
 </template>

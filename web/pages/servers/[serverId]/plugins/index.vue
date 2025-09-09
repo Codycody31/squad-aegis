@@ -69,7 +69,6 @@ const showAddDialog = ref(false);
 const showConfigDialog = ref(false);
 const currentPlugin = ref<any>(null);
 const pluginConfig = ref<Record<string, any>>({});
-const pluginName = ref("");
 
 // Status color mapping
 const getStatusColor = (status: string) => {
@@ -142,10 +141,10 @@ const loadAvailablePlugins = async () => {
 
 // Create new plugin instance
 const createPlugin = async () => {
-  if (!selectedPlugin.value || !pluginName.value) {
+  if (!selectedPlugin.value) {
     toast({
       title: "Error",
-      description: "Please select a plugin and enter a name",
+      description: "Please select a plugin",
       variant: "destructive",
     });
     return;
@@ -159,7 +158,6 @@ const createPlugin = async () => {
       },
       body: {
         plugin_id: selectedPlugin.value,
-        name: pluginName.value,
         config: pluginConfig.value,
       },
     });
@@ -171,7 +169,6 @@ const createPlugin = async () => {
 
     showAddDialog.value = false;
     selectedPlugin.value = "";
-    pluginName.value = "";
     pluginConfig.value = {};
     await loadPlugins();
   } catch (error: any) {
@@ -533,15 +530,6 @@ onMounted(async () => {
               </Select>
             </div>
 
-            <div>
-              <Label for="plugin-name">Instance Name</Label>
-              <Input 
-                id="plugin-name"
-                v-model="pluginName" 
-                placeholder="Enter a name for this plugin instance"
-              />
-            </div>
-
             <!-- Dynamic configuration fields -->
             <div v-if="selectedPlugin" class="space-y-4">
               <h4 class="font-medium">Configuration</h4>
@@ -788,8 +776,8 @@ onMounted(async () => {
           <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead class="hidden sm:table-cell">Plugin</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Description</TableHead>
               <TableHead>Status</TableHead>
               <TableHead class="hidden md:table-cell">Enabled</TableHead>
               <TableHead class="hidden lg:table-cell">Last Error</TableHead>
@@ -798,21 +786,15 @@ onMounted(async () => {
           </TableHeader>
           <TableBody>
             <TableRow v-for="plugin in plugins" :key="plugin.id" class="hover:bg-muted/50">
-              <TableCell class="font-medium">
+              <TableCell>
                 <div class="flex flex-col">
-                  <span>{{ plugin.name }}</span>
-                  <span class="text-sm text-muted-foreground sm:hidden">
-                    {{ plugin.plugin_id }}
-                  </span>
+                  <span class="font-medium">{{ plugin.plugin_id }}</span>
                 </div>
               </TableCell>
-              <TableCell class="hidden sm:table-cell">
-                <div class="flex flex-col">
-                  <span>{{ plugin.plugin_id }}</span>
+              <TableCell class="font-medium">
                   <span class="text-sm text-muted-foreground">
                     {{ availablePlugins.find(p => p.id === plugin.plugin_id)?.description }}
                   </span>
-                </div>
               </TableCell>
               <TableCell>
                 <Badge :class="getStatusColor(plugin.status)">

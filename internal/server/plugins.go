@@ -152,7 +152,7 @@ func (s *Server) ServerPluginCreate(c *gin.Context) {
 
 	var request struct {
 		PluginID string                 `json:"plugin_id" binding:"required"`
-		Name     string                 `json:"name" binding:"required"`
+		Notes    string                 `json:"notes"`
 		Config   map[string]interface{} `json:"config"`
 	}
 
@@ -165,7 +165,7 @@ func (s *Server) ServerPluginCreate(c *gin.Context) {
 		request.Config = make(map[string]interface{})
 	}
 
-	instance, err := s.Dependencies.PluginManager.CreatePluginInstance(serverID, request.PluginID, request.Name, request.Config)
+	instance, err := s.Dependencies.PluginManager.CreatePluginInstance(serverID, request.PluginID, request.Notes, request.Config)
 	if err != nil {
 		responses.BadRequest(c, "Failed to create plugin instance", &gin.H{"error": err.Error()})
 		return
@@ -346,15 +346,14 @@ func (s *Server) ServerPluginLogs(c *gin.Context) {
 		}
 	}
 
-	offset := 0 // default
-	if offsetStr := c.Query("offset"); offsetStr != "" {
-		if parsed, err := strconv.Atoi(offsetStr); err == nil && parsed >= 0 {
-			offset = parsed
-		}
-	}
+	before := c.Query("before")
+	after := c.Query("after")
+	order := c.Query("order")
+	level := c.Query("level")
+	search := c.Query("search")
 
 	// Get logs from ClickHouse via PluginManager
-	logs, err := s.Dependencies.PluginManager.GetPluginLogs(serverID, instanceID, limit, offset)
+	logs, err := s.Dependencies.PluginManager.GetPluginLogs(serverID, instanceID, limit, before, after, order, level, search)
 	if err != nil {
 		responses.InternalServerError(c, fmt.Errorf("failed to retrieve plugin logs: %w", err), nil)
 		return
