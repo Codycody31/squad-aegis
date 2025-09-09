@@ -4,6 +4,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
+	"go.codycody31.dev/squad-aegis/internal/plugins/auto_kick_unassigned"
+	"go.codycody31.dev/squad-aegis/internal/plugins/auto_tk_warn"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
 	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
@@ -18,6 +20,18 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Discord Admin Request plugin
 	if err := pm.RegisterPlugin(discord_admin_request.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Discord Admin Request plugin")
+		return err
+	}
+
+	// Register Auto Kick Unassigned plugin
+	if err := pm.RegisterPlugin(auto_kick_unassigned.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Auto Kick Unassigned plugin")
+		return err
+	}
+
+	// Register Auto TK Warn plugin
+	if err := pm.RegisterPlugin(auto_tk_warn.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Auto TK Warn plugin")
 		return err
 	}
 
