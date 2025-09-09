@@ -186,6 +186,9 @@ type PluginAPIs struct {
 	// RCON access (limited)
 	RconAPI RconAPI
 
+	// Admin management
+	AdminAPI AdminAPI
+
 	// Event system access
 	EventAPI EventAPI
 
@@ -217,13 +220,13 @@ type DatabaseAPI interface {
 	ExecuteQuery(query string, args ...interface{}) (*sql.Rows, error)
 
 	// GetPluginData retrieves plugin-specific data
-	GetPluginData(pluginInstanceID uuid.UUID, key string) (string, error)
+	GetPluginData(key string) (string, error)
 
 	// SetPluginData stores plugin-specific data
-	SetPluginData(pluginInstanceID uuid.UUID, key string, value string) error
+	SetPluginData(key string, value string) error
 
 	// DeletePluginData removes plugin-specific data
-	DeletePluginData(pluginInstanceID uuid.UUID, key string) error
+	DeletePluginData(key string) error
 }
 
 // RconAPI provides limited RCON access to plugins
@@ -242,6 +245,49 @@ type RconAPI interface {
 
 	// BanPlayer bans a player (admin only)
 	BanPlayer(playerID string, reason string, duration time.Duration) error
+}
+
+// AdminAPI provides admin management functionality to plugins
+type AdminAPI interface {
+	// AddTemporaryAdmin adds a player as a temporary admin with specified role and notes
+	AddTemporaryAdmin(steamID string, roleName string, notes string, expiresAt *time.Time) error
+
+	// RemoveTemporaryAdmin removes a player's temporary admin status
+	RemoveTemporaryAdmin(steamID string, notes string) error
+
+	// GetPlayerAdminStatus checks if a player has admin status and returns their roles
+	GetPlayerAdminStatus(steamID string) (*PlayerAdminStatus, error)
+
+	// ListTemporaryAdmins lists all temporary admins managed by plugins
+	ListTemporaryAdmins() ([]*TemporaryAdminInfo, error)
+}
+
+// PlayerAdminStatus contains admin status information for a player
+type PlayerAdminStatus struct {
+	SteamID     string             `json:"steam_id"`
+	IsAdmin     bool               `json:"is_admin"`
+	Roles       []*PlayerAdminRole `json:"roles"`
+	HasExpiring bool               `json:"has_expiring"`
+}
+
+// PlayerAdminRole contains role information for a player's admin status
+type PlayerAdminRole struct {
+	ID        string     `json:"id"`
+	RoleName  string     `json:"role_name"`
+	Notes     string     `json:"notes"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	IsExpired bool       `json:"is_expired"`
+}
+
+// TemporaryAdminInfo contains information about temporary admins
+type TemporaryAdminInfo struct {
+	ID        string     `json:"id"`
+	SteamID   string     `json:"steam_id"`
+	RoleName  string     `json:"role_name"`
+	Notes     string     `json:"notes"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	IsExpired bool       `json:"is_expired"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // EventAPI provides event system access to plugins

@@ -654,6 +654,7 @@ func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID) *Plugi
 		ServerAPI:    NewServerAPI(serverID, pm.db, pm.rconManager),
 		DatabaseAPI:  NewDatabaseAPI(instanceID, pm.db),
 		RconAPI:      NewRconAPI(serverID, pm.rconManager),
+		AdminAPI:     NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
 		EventAPI:     NewEventAPI(serverID, pm.eventManager),
 		ConnectorAPI: NewConnectorAPI(pm),
 		LogAPI:       NewLogAPI(serverID, instanceID, pm.clickhouseClient, pm.db),

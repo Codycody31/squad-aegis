@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -211,6 +212,246 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	return admins, nil
 }
 
+// adminAPI implements AdminAPI interface
+type adminAPI struct {
+	serverID         uuid.UUID
+	db               *sql.DB
+	rconManager      *rcon_manager.RconManager
+	pluginInstanceID uuid.UUID
+}
+
+func NewAdminAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager, pluginInstanceID uuid.UUID) AdminAPI {
+	return &adminAPI{
+		serverID:         serverID,
+		db:               db,
+		rconManager:      rconManager,
+		pluginInstanceID: pluginInstanceID,
+	}
+}
+
+func (api *adminAPI) AddTemporaryAdmin(steamID string, roleName string, notes string, expiresAt *time.Time) error {
+	// First, get or create the role for this server
+	var roleID uuid.UUID
+	err := api.db.QueryRow(`
+		SELECT id FROM server_roles 
+		WHERE server_id = $1 AND name = $2
+	`, api.serverID, roleName).Scan(&roleID)
+
+	if err == sql.ErrNoRows {
+		// Role doesn't exist, create it with basic permissions
+		roleID = uuid.New()
+		_, err = api.db.Exec(`
+			INSERT INTO server_roles (id, server_id, name, permissions, created_at)
+			VALUES ($1, $2, $3, $4, NOW())
+		`, roleID, api.serverID, roleName, "reserve")
+		if err != nil {
+			return fmt.Errorf("failed to create role %s: %w", roleName, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to query role %s: %w", roleName, err)
+	}
+
+	// Parse steamID to int64 for database storage
+	steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid steam ID format: %w", err)
+	}
+
+	// Check if admin record already exists
+	var existingID uuid.UUID
+	err = api.db.QueryRow(`
+		SELECT id FROM server_admins 
+		WHERE server_id = $1 AND steam_id = $2 AND server_role_id = $3
+	`, api.serverID, steamIDInt, roleID).Scan(&existingID)
+
+	if err == sql.ErrNoRows {
+		// Create new admin record
+		adminID := uuid.New()
+		_, err = api.db.Exec(`
+			INSERT INTO server_admins (id, server_id, steam_id, server_role_id, expires_at, notes, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		`, adminID, api.serverID, steamIDInt, roleID, expiresAt, notes)
+		if err != nil {
+			return fmt.Errorf("failed to create admin record: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to check existing admin record: %w", err)
+	} else {
+		// Update existing admin record
+		_, err = api.db.Exec(`
+			UPDATE server_admins 
+			SET expires_at = $1, notes = $2
+			WHERE id = $3
+		`, expiresAt, notes, existingID)
+		if err != nil {
+			return fmt.Errorf("failed to update admin record: %w", err)
+		}
+	}
+
+	// Also add via RCON for immediate effect
+	rconCommand := fmt.Sprintf("AdminAdd %s %s", steamID, roleName)
+	if _, err := api.rconManager.ExecuteCommand(api.serverID, rconCommand); err != nil {
+		// Log but don't fail - database record is created
+		log.Debug().Err(err).
+			Str("steam_id", steamID).
+			Str("role", roleName).
+			Msg("RCON AdminAdd command failed, relying on database record only")
+	}
+
+	return nil
+}
+
+func (api *adminAPI) RemoveTemporaryAdmin(steamID string, notes string) error {
+	// Parse steamID to int64 for database query
+	steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid steam ID format: %w", err)
+	}
+
+	// Find and remove admin records for this steam ID
+	rows, err := api.db.Query(`
+		SELECT id FROM server_admins 
+		WHERE server_id = $1 AND steam_id = $2
+	`, api.serverID, steamIDInt)
+	if err != nil {
+		return fmt.Errorf("failed to query admin records: %w", err)
+	}
+	defer rows.Close()
+
+	var adminIDs []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("failed to scan admin ID: %w", err)
+		}
+		adminIDs = append(adminIDs, id)
+	}
+
+	if len(adminIDs) == 0 {
+		return fmt.Errorf("no admin records found for steam ID %s", steamID)
+	}
+
+	// Remove admin records
+	for _, adminID := range adminIDs {
+		_, err = api.db.Exec(`DELETE FROM server_admins WHERE id = $1`, adminID)
+		if err != nil {
+			return fmt.Errorf("failed to remove admin record %s: %w", adminID, err)
+		}
+	}
+
+	// Also remove via RCON for immediate effect
+	rconCommand := fmt.Sprintf("AdminRemove %s", steamID)
+	if _, err := api.rconManager.ExecuteCommand(api.serverID, rconCommand); err != nil {
+		// Log but don't fail - database record is removed
+		log.Debug().Err(err).
+			Str("steam_id", steamID).
+			Msg("RCON AdminRemove command failed, relying on database record removal only")
+	}
+
+	return nil
+}
+
+func (api *adminAPI) GetPlayerAdminStatus(steamID string) (*PlayerAdminStatus, error) {
+	// Parse steamID to int64 for database query
+	steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid steam ID format: %w", err)
+	}
+
+	// Query admin roles for this player
+	rows, err := api.db.Query(`
+		SELECT sa.id, sr.name, sa.notes, sa.expires_at, sa.created_at
+		FROM server_admins sa
+		JOIN server_roles sr ON sa.server_role_id = sr.id
+		WHERE sa.server_id = $1 AND sa.steam_id = $2
+	`, api.serverID, steamIDInt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query admin status: %w", err)
+	}
+	defer rows.Close()
+
+	var roles []*PlayerAdminRole
+	hasExpiring := false
+
+	for rows.Next() {
+		var role PlayerAdminRole
+		var expiresAt sql.NullTime
+		var notes sql.NullString
+		var createdAt time.Time
+
+		err := rows.Scan(&role.ID, &role.RoleName, &notes, &expiresAt, &createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan admin role: %w", err)
+		}
+
+		if notes.Valid {
+			role.Notes = notes.String
+		}
+
+		if expiresAt.Valid {
+			role.ExpiresAt = &expiresAt.Time
+			role.IsExpired = expiresAt.Time.Before(time.Now())
+			if !role.IsExpired {
+				hasExpiring = true
+			}
+		}
+
+		roles = append(roles, &role)
+	}
+
+	status := &PlayerAdminStatus{
+		SteamID:     steamID,
+		IsAdmin:     len(roles) > 0,
+		Roles:       roles,
+		HasExpiring: hasExpiring,
+	}
+
+	return status, nil
+}
+
+func (api *adminAPI) ListTemporaryAdmins() ([]*TemporaryAdminInfo, error) {
+	// Query all temporary admins for this server with notes containing plugin information
+	rows, err := api.db.Query(`
+		SELECT sa.id, sa.steam_id, sr.name as role_name, sa.notes, sa.expires_at, sa.created_at
+		FROM server_admins sa
+		JOIN server_roles sr ON sa.server_role_id = sr.id
+		WHERE sa.server_id = $1 AND sa.notes IS NOT NULL AND sa.notes LIKE '%Plugin:%'
+		ORDER BY sa.created_at DESC
+	`, api.serverID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query temporary admins: %w", err)
+	}
+	defer rows.Close()
+
+	var admins []*TemporaryAdminInfo
+	for rows.Next() {
+		var admin TemporaryAdminInfo
+		var steamIDInt int64
+		var notes sql.NullString
+		var expiresAt sql.NullTime
+
+		err := rows.Scan(&admin.ID, &steamIDInt, &admin.RoleName, &notes, &expiresAt, &admin.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan temporary admin: %w", err)
+		}
+
+		admin.SteamID = fmt.Sprintf("%d", steamIDInt)
+
+		if notes.Valid {
+			admin.Notes = notes.String
+		}
+
+		if expiresAt.Valid {
+			admin.ExpiresAt = &expiresAt.Time
+			admin.IsExpired = expiresAt.Time.Before(time.Now())
+		}
+
+		admins = append(admins, &admin)
+	}
+
+	return admins, nil
+}
+
 // databaseAPI implements DatabaseAPI interface
 type databaseAPI struct {
 	instanceID uuid.UUID
@@ -244,15 +485,11 @@ func (api *databaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Ro
 	return api.db.Query(query, args...)
 }
 
-func (api *databaseAPI) GetPluginData(pluginInstanceID uuid.UUID, key string) (string, error) {
-	if pluginInstanceID != api.instanceID {
-		return "", fmt.Errorf("access denied: can only access own plugin data")
-	}
-
+func (api *databaseAPI) GetPluginData(key string) (string, error) {
 	query := `SELECT value FROM plugin_data WHERE plugin_instance_id = $1 AND key = $2`
 
 	var value string
-	err := api.db.QueryRow(query, pluginInstanceID, key).Scan(&value)
+	err := api.db.QueryRow(query, api.instanceID, key).Scan(&value)
 	if err == sql.ErrNoRows {
 		return "", fmt.Errorf("key not found")
 	}
@@ -263,11 +500,7 @@ func (api *databaseAPI) GetPluginData(pluginInstanceID uuid.UUID, key string) (s
 	return value, nil
 }
 
-func (api *databaseAPI) SetPluginData(pluginInstanceID uuid.UUID, key string, value string) error {
-	if pluginInstanceID != api.instanceID {
-		return fmt.Errorf("access denied: can only modify own plugin data")
-	}
-
+func (api *databaseAPI) SetPluginData(key string, value string) error {
 	query := `
 		INSERT INTO plugin_data (plugin_instance_id, key, value, created_at, updated_at)
 		VALUES ($1, $2, $3, NOW(), NOW())
@@ -275,7 +508,7 @@ func (api *databaseAPI) SetPluginData(pluginInstanceID uuid.UUID, key string, va
 		DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
 	`
 
-	_, err := api.db.Exec(query, pluginInstanceID, key, value)
+	_, err := api.db.Exec(query, api.instanceID, key, value)
 	if err != nil {
 		return fmt.Errorf("failed to set plugin data: %w", err)
 	}
@@ -283,14 +516,10 @@ func (api *databaseAPI) SetPluginData(pluginInstanceID uuid.UUID, key string, va
 	return nil
 }
 
-func (api *databaseAPI) DeletePluginData(pluginInstanceID uuid.UUID, key string) error {
-	if pluginInstanceID != api.instanceID {
-		return fmt.Errorf("access denied: can only delete own plugin data")
-	}
-
+func (api *databaseAPI) DeletePluginData(key string) error {
 	query := `DELETE FROM plugin_data WHERE plugin_instance_id = $1 AND key = $2`
 
-	_, err := api.db.Exec(query, pluginInstanceID, key)
+	_, err := api.db.Exec(query, api.instanceID, key)
 	if err != nil {
 		return fmt.Errorf("failed to delete plugin data: %w", err)
 	}
