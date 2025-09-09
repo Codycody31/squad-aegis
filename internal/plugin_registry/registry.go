@@ -20,6 +20,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
+	"go.codycody31.dev/squad-aegis/internal/plugins/switch_teams"
 	"go.codycody31.dev/squad-aegis/internal/plugins/team_randomizer"
 )
 
@@ -126,6 +127,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Fog of War plugin
 	if err := pm.RegisterPlugin(fog_of_war.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Fog of War plugin")
+		return err
+	}
+
+	// Register Switch Teams plugin
+	if err := pm.RegisterPlugin(switch_teams.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Switch Teams plugin")
 		return err
 	}
 
