@@ -42,41 +42,42 @@ func Define() plugin_manager.PluginDefinition {
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
-				{
-					Name:        "channel_id",
-					Description: "The ID of the channel to log chat messages to.",
-					Required:    true,
-					Type:        plug_config_schema.FieldTypeString,
-					Default:     "",
-				},
-				{
-					Name:        "chat_colors",
-					Description: "The color of the embed for each chat type. Map of chat type to color (e.g., {'ChatAll': 16761867}).",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeObject,
-					Default:     map[string]interface{}{},
-				},
-				{
-					Name:        "color",
-					Description: "The default color of the embed if no specific chat color is set.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeInt,
-					Default:     16761867, // Orange color
-				},
+				plug_config_schema.NewStringField(
+					"channel_id",
+					"The ID of the channel to log chat messages to",
+					true,
+					"",
+				),
+				plug_config_schema.NewObjectField(
+					"chat_colors",
+					"The color of the embed for each chat type (map of chat type to color hex value)",
+					false,
+					[]plug_config_schema.ConfigField{
+						plug_config_schema.NewIntField("ChatAll", "Color for all chat messages", false, 16761867),
+						plug_config_schema.NewIntField("ChatTeam", "Color for team chat messages", false, 65280),
+						plug_config_schema.NewIntField("ChatAdmin", "Color for admin chat messages", false, 16711680),
+					},
+					map[string]interface{}{},
+				),
+				plug_config_schema.NewIntField(
+					"color",
+					"The default color of the embed if no specific chat color is set",
+					false,
+					16761867,
+				),
 				{
 					Name:        "ignore_chats",
-					Description: "A list of chat types to ignore (e.g., ['ChatSquad']).",
+					Description: "A list of chat types to ignore (e.g., ChatSquad, ChatAll)",
 					Required:    false,
-					Type:        plug_config_schema.FieldTypeArray,
+					Type:        plug_config_schema.FieldTypeArrayString,
 					Default:     []interface{}{"ChatSquad"},
 				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
+				plug_config_schema.NewBoolField(
+					"enabled",
+					"Whether the plugin is enabled",
+					false,
+					true,
+				),
 			},
 		},
 
@@ -249,7 +250,7 @@ func (p *DiscordChatPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEve
 	// Check if this chat type should be ignored
 	ignoreChats := p.getArrayConfig("ignore_chats")
 	for _, ignoredChat := range ignoreChats {
-		if chatStr, ok := ignoredChat.(string); ok && chatStr == event.ChatType {
+		if ignoredChat == event.ChatType {
 			return nil // This chat type is ignored
 		}
 	}
@@ -355,34 +356,19 @@ func (p *DiscordChatPlugin) sendChatEmbed(event *event_manager.RconChatMessageDa
 // Helper methods for config access
 
 func (p *DiscordChatPlugin) getStringConfig(key string) string {
-	if value, ok := p.config[key].(string); ok {
-		return value
-	}
-	return ""
+	return plug_config_schema.GetStringValue(p.config, key)
 }
 
 func (p *DiscordChatPlugin) getIntConfig(key string) int {
-	if value, ok := p.config[key].(int); ok {
-		return value
-	}
-	if value, ok := p.config[key].(float64); ok {
-		return int(value)
-	}
-	return 0
+	return plug_config_schema.GetIntValue(p.config, key)
 }
 
 func (p *DiscordChatPlugin) getBoolConfig(key string) bool {
-	if value, ok := p.config[key].(bool); ok {
-		return value
-	}
-	return false
+	return plug_config_schema.GetBoolValue(p.config, key)
 }
 
-func (p *DiscordChatPlugin) getArrayConfig(key string) []interface{} {
-	if value, ok := p.config[key].([]interface{}); ok {
-		return value
-	}
-	return []interface{}{}
+func (p *DiscordChatPlugin) getArrayConfig(key string) []string {
+	return plug_config_schema.GetArrayStringValue(p.config, key)
 }
 
 func (p *DiscordChatPlugin) getMapConfig(key string) map[string]interface{} {

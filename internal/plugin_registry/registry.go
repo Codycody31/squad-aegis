@@ -8,6 +8,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/auto_tk_warn"
 	"go.codycody31.dev/squad-aegis/internal/plugins/cbl_info"
 	"go.codycody31.dev/squad-aegis/internal/plugins/chat_commands"
+	"go.codycody31.dev/squad-aegis/internal/plugins/command_scheduler"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_broadcast"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_cam_logs"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_request"
@@ -37,6 +38,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Auto Kick Unassigned plugin
 	if err := pm.RegisterPlugin(auto_kick_unassigned.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Auto Kick Unassigned plugin")
+		return err
+	}
+
+	// Register Command Scheduler plugin
+	if err := pm.RegisterPlugin(command_scheduler.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Command Scheduler plugin")
 		return err
 	}
 

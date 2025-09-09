@@ -49,27 +49,43 @@ func Define() plugin_manager.PluginDefinition {
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
-				{
-					Name:        "commands",
-					Description: "An array of command configurations. Each command should have: command (string), type ('warn' or 'broadcast'), response (string), and ignoreChats (array of chat types to ignore).",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeArray,
-					Default: []interface{}{
-						map[string]interface{}{
-							"command":     "squadaegis",
-							"type":        "warn",
-							"response":    "This server is powered by Squad Aegis.",
-							"ignoreChats": []interface{}{},
+				plug_config_schema.NewArrayObjectField(
+					"commands",
+					"An array of command configurations for chat commands",
+					false,
+					[]plug_config_schema.ConfigField{
+						plug_config_schema.NewStringField("command", "The chat command trigger (without !)", true, ""),
+						plug_config_schema.NewStringField("type", "Response type: 'warn' (private) or 'broadcast' (public)", true, "warn"),
+						plug_config_schema.NewStringField("response", "The message to send when command is triggered", true, ""),
+						{
+							Name:        "ignoreChats",
+							Description: "Chat types to ignore for this command",
+							Required:    false,
+							Type:        plug_config_schema.FieldTypeArrayString,
+							Default:     []interface{}{},
 						},
 					},
-				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
+					[]interface{}{
+						plug_config_schema.CreateDefaultObject([]plug_config_schema.ConfigField{
+							plug_config_schema.NewStringField("command", "", true, "squadaegis"),
+							plug_config_schema.NewStringField("type", "", true, "warn"),
+							plug_config_schema.NewStringField("response", "", true, "This server is powered by Squad Aegis."),
+							{
+								Name:        "ignoreChats",
+								Description: "",
+								Required:    false,
+								Type:        plug_config_schema.FieldTypeArrayString,
+								Default:     []interface{}{},
+							},
+						}),
+					},
+				),
+				plug_config_schema.NewBoolField(
+					"enabled",
+					"Whether the plugin is enabled",
+					false,
+					true,
+				),
 			},
 		},
 
@@ -127,7 +143,7 @@ func (p *ChatCommandsPlugin) Start(ctx context.Context) error {
 	}
 
 	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
+	if !plug_config_schema.GetBoolValue(p.config, "enabled") {
 		p.apis.LogAPI.Info("Chat Commands plugin is disabled", nil)
 		return nil
 	}
@@ -219,54 +235,36 @@ func (p *ChatCommandsPlugin) UpdateConfig(config map[string]interface{}) error {
 func (p *ChatCommandsPlugin) parseCommands() error {
 	p.commands = make(map[string]*CommandConfig)
 
-	commandsConfig, ok := p.config["commands"].([]interface{})
-	if !ok {
-		return fmt.Errorf("commands config is not an array")
-	}
+	// Use schema helper to get array of objects
+	commandsObjects := plug_config_schema.GetArrayObjectValue(p.config, "commands")
 
-	for i, cmdInterface := range commandsConfig {
-		cmdMap, ok := cmdInterface.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("command %d is not an object", i)
-		}
-
+	for i, cmdObj := range commandsObjects {
 		command := &CommandConfig{}
 
 		// Parse command name
-		if cmdName, ok := cmdMap["command"].(string); ok {
-			command.Command = strings.ToLower(strings.TrimSpace(cmdName))
-		} else {
+		command.Command = strings.ToLower(strings.TrimSpace(plug_config_schema.GetStringValue(cmdObj, "command")))
+		if command.Command == "" {
 			return fmt.Errorf("command %d missing 'command' field", i)
 		}
 
 		// Parse type
-		if cmdType, ok := cmdMap["type"].(string); ok {
-			cmdType = strings.ToLower(strings.TrimSpace(cmdType))
-			if cmdType != "warn" && cmdType != "broadcast" {
-				return fmt.Errorf("command %d has invalid type '%s', must be 'warn' or 'broadcast'", i, cmdType)
-			}
-			command.Type = cmdType
-		} else {
-			return fmt.Errorf("command %d missing 'type' field", i)
+		cmdType := strings.ToLower(strings.TrimSpace(plug_config_schema.GetStringValue(cmdObj, "type")))
+		if cmdType != "warn" && cmdType != "broadcast" {
+			return fmt.Errorf("command %d has invalid type '%s', must be 'warn' or 'broadcast'", i, cmdType)
 		}
+		command.Type = cmdType
 
 		// Parse response
-		if response, ok := cmdMap["response"].(string); ok {
-			command.Response = response
-		} else {
+		command.Response = plug_config_schema.GetStringValue(cmdObj, "response")
+		if command.Response == "" {
 			return fmt.Errorf("command %d missing 'response' field", i)
 		}
 
-		// Parse ignoreChats
-		if ignoreChatsInterface, ok := cmdMap["ignoreChats"].([]interface{}); ok {
-			command.IgnoreChats = make([]string, len(ignoreChatsInterface))
-			for j, chatInterface := range ignoreChatsInterface {
-				if chat, ok := chatInterface.(string); ok {
-					command.IgnoreChats[j] = strings.ToUpper(strings.TrimSpace(chat))
-				} else {
-					return fmt.Errorf("command %d ignoreChats[%d] is not a string", i, j)
-				}
-			}
+		// Parse ignoreChats using schema helper
+		ignoreChatsArray := plug_config_schema.GetArrayStringValue(cmdObj, "ignoreChats")
+		command.IgnoreChats = make([]string, len(ignoreChatsArray))
+		for j, chat := range ignoreChatsArray {
+			command.IgnoreChats[j] = strings.ToUpper(strings.TrimSpace(chat))
 		}
 
 		// Check for duplicate commands
@@ -282,7 +280,7 @@ func (p *ChatCommandsPlugin) parseCommands() error {
 
 // handleChatMessage processes chat message events to detect commands
 func (p *ChatCommandsPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
+	if !plug_config_schema.GetBoolValue(p.config, "enabled") {
 		return nil // Plugin is disabled
 	}
 
@@ -365,13 +363,4 @@ func (p *ChatCommandsPlugin) executeCommand(command *CommandConfig, event *event
 	}
 
 	return nil
-}
-
-// Helper methods for config access
-
-func (p *ChatCommandsPlugin) getBoolConfig(key string) bool {
-	if value, ok := p.config[key].(bool); ok {
-		return value
-	}
-	return false
 }
