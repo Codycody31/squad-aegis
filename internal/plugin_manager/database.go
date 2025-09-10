@@ -293,15 +293,33 @@ func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) erro
 		instance.Cancel()
 	}
 
-	// Stop connector
-	if err := instance.Connector.Stop(); err != nil {
-		instance.Status = ConnectorStatusError
-		instance.LastError = err.Error()
-		return fmt.Errorf("failed to stop connector: %w", err)
-	}
+	// Stop connector with 30-second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	instance.Status = ConnectorStatusStopped
-	return nil
+	stopChan := make(chan error, 1)
+
+	go func() {
+		stopChan <- instance.Connector.Stop()
+	}()
+
+	select {
+	case err := <-stopChan:
+		if err != nil {
+			instance.Status = ConnectorStatusError
+			instance.LastError = err.Error()
+			return fmt.Errorf("failed to stop connector: %w", err)
+		}
+		instance.Status = ConnectorStatusStopped
+		return nil
+	case <-ctx.Done():
+		log.Warn().
+			Str("connectorID", instance.ID).
+			Msg("Connector shutdown timed out after 30 seconds, forcefully killing it")
+		instance.Status = ConnectorStatusStopped
+		instance.LastError = "Connector shutdown timed out after 30 seconds"
+		return nil
+	}
 }
 
 func (pm *PluginManager) saveConnectorToDatabase(instance *ConnectorInstance) error {
