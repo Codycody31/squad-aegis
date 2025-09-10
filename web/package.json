@@ -10,6 +10,7 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
+    "@antv/g2plot": "^2.4.33",
     "@nuxt/icon": "1.10.3",
     "@pinia/nuxt": "0.10.1",
     "@vee-validate/zod": "^4.15.0",

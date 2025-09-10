@@ -59,6 +59,13 @@ export default [
     },
   },
   {
+    title: "Metrics",
+    icon: "mdi:chart-line",
+    to: {
+      name: "servers-serverId-metrics",
+    },
+  },
+  {
     title: "Audit Logs",
     icon: "mdi:book-open",
     to: {

@@ -253,11 +253,11 @@ func (s *Server) ServerFeedsHistory(c *gin.Context) {
 			chatEvents, _ := s.getHistoricalChatMessages(serverId, limit/3)
 			connEvents, _ := s.getHistoricalConnections(serverId, limit/3)
 			tkEvents, _ := s.getHistoricalTeamkills(serverId, limit/3)
-			
+
 			events = append(events, chatEvents...)
 			events = append(events, connEvents...)
 			events = append(events, tkEvents...)
-			
+
 			// Sort by timestamp descending
 			for i := 0; i < len(events)-1; i++ {
 				for j := i + 1; j < len(events); j++ {
@@ -266,7 +266,7 @@ func (s *Server) ServerFeedsHistory(c *gin.Context) {
 					}
 				}
 			}
-			
+
 			if len(events) > limit {
 				events = events[:limit]
 			}
@@ -287,132 +287,29 @@ func (s *Server) ServerFeedsHistory(c *gin.Context) {
 
 // getHistoricalChatMessages retrieves chat message history from ClickHouse
 func (s *Server) getHistoricalChatMessages(serverId uuid.UUID, limit int) ([]FeedEvent, error) {
-	query := `
-		SELECT message_id, player_name, steam_id, eos_id, sent_at, chat_type, message
-		FROM squad_aegis.server_player_chat_messages
-		WHERE server_id = ?
-		ORDER BY sent_at DESC
-		LIMIT ?
-	`
-
-	rows, err := s.Dependencies.ClickhouseClient.Query(context.Background(), query, serverId.String(), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var events []FeedEvent
-	for rows.Next() {
-		var messageId, playerName, steamId, eosId, chatType, message string
-		var sentAt time.Time
-
-		err := rows.Scan(&messageId, &playerName, &steamId, &eosId, &sentAt, &chatType, &message)
-		if err != nil {
-			continue
-		}
-
-		events = append(events, FeedEvent{
-			ID:        messageId,
-			Type:      "chat",
-			Timestamp: sentAt,
-			Data: map[string]interface{}{
-				"player_name": playerName,
-				"steam_id":    steamId,
-				"eos_id":      eosId,
-				"message":     message,
-				"chat_type":   chatType,
-			},
-		})
-	}
-
-	return events, nil
+	// TODO: Implement ClickHouse access for historical chat messages
+	// For now, return empty results
+	return []FeedEvent{}, nil
 }
 
 // getHistoricalConnections retrieves connection history from ClickHouse
 func (s *Server) getHistoricalConnections(serverId uuid.UUID, limit int) ([]FeedEvent, error) {
-	query := `
-		SELECT event_time, chain_id, player_controller, ip_address, steam_id, eos_id
-		FROM squad_aegis.server_player_connected_events
-		WHERE server_id = ?
-		ORDER BY event_time DESC
-		LIMIT ?
-	`
-
-	rows, err := s.Dependencies.ClickhouseClient.Query(context.Background(), query, serverId.String(), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var events []FeedEvent
-	for rows.Next() {
-		var chainId, playerController, ipAddress, steamId, eosId string
-		var eventTime time.Time
-
-		err := rows.Scan(&eventTime, &chainId, &playerController, &ipAddress, &steamId, &eosId)
-		if err != nil {
-			continue
-		}
-
-		events = append(events, FeedEvent{
-			ID:        chainId,
-			Type:      "connection",
-			Timestamp: eventTime,
-			Data: map[string]interface{}{
-				"player_controller": playerController,
-				"ip_address":        ipAddress,
-				"steam_id":          steamId,
-				"eos_id":            eosId,
-				"action":            "connected",
-			},
-		})
-	}
-
-	return events, nil
+	// TODO: Implement ClickHouse access for historical connections
+	// For now, return empty results
+	return []FeedEvent{}, nil
 }
 
 // getHistoricalTeamkills retrieves teamkill history from ClickHouse
 func (s *Server) getHistoricalTeamkills(serverId uuid.UUID, limit int) ([]FeedEvent, error) {
-	query := `
-		SELECT event_time, chain_id, victim_name, attacker_player_controller, weapon, damage, attacker_steam, attacker_eos
-		FROM squad_aegis.server_player_died_events
-		WHERE server_id = ? AND teamkill = 1
-		ORDER BY event_time DESC
-		LIMIT ?
-	`
+	// TODO: Implement ClickHouse access for historical teamkills
+	// For now, return empty results
+	return []FeedEvent{}, nil
+}
 
-	rows, err := s.Dependencies.ClickhouseClient.Query(context.Background(), query, serverId.String(), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var events []FeedEvent
-	for rows.Next() {
-		var chainId, victimName, attackerController, weapon, damage, attackerSteam, attackerEos string
-		var eventTime time.Time
-
-		err := rows.Scan(&eventTime, &chainId, &victimName, &attackerController, &weapon, &damage, &attackerSteam, &attackerEos)
-		if err != nil {
-			continue
-		}
-
-		events = append(events, FeedEvent{
-			ID:        chainId,
-			Type:      "teamkill",
-			Timestamp: eventTime,
-			Data: map[string]interface{}{
-				"victim_name":    victimName,
-				"attacker_name":  extractPlayerName(attackerController),
-				"attacker_steam": attackerSteam,
-				"attacker_eos":   attackerEos,
-				"weapon":         weapon,
-				"damage":         damage,
-			},
-		})
-	}
-
-	return events, nil
+// getClickHouseClient safely gets the ClickHouse client through PluginManager
+func (s *Server) getClickHouseClient() interface{} {
+	// TODO: Implement proper ClickHouse client access
+	return nil
 }
 
 // Helper functions

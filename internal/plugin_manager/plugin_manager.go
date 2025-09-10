@@ -126,6 +126,11 @@ func (pm *PluginManager) Stop() error {
 	return nil
 }
 
+// GetClickHouseClient returns the ClickHouse client instance
+func (pm *PluginManager) GetClickHouseClient() *clickhouse.Client {
+	return pm.clickhouseClient
+}
+
 // RegisterPlugin registers a new plugin definition
 func (pm *PluginManager) RegisterPlugin(definition PluginDefinition) error {
 	return pm.registry.RegisterPlugin(definition)
