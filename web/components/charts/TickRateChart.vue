@@ -65,15 +65,6 @@ const createChart = () => {
     yField: 'value',
     smooth: true,
     color: lineColor,
-    point: {
-      size: 4,
-      shape: 'circle',
-      style: {
-        fill: lineColor,
-        stroke: '#fff',
-        lineWidth: 2,
-      },
-    },
     lineStyle: {
       lineWidth: 3,
     },
@@ -223,30 +214,6 @@ const createChart = () => {
             color: color,
           },
         };
-      },
-      customContent: (title, items) => {
-        if (!items || items.length === 0) return '';
-        const item = items[0];
-        const performance = getPerformanceStatus(item.data.value);
-        const color = item.data.value >= 40 ? '#059669' : item.data.value >= 25 ? '#d97706' : '#dc2626';
-        
-        return `
-          <div class="g2-tooltip">
-            <div class="g2-tooltip-title">${title}</div>
-            <div class="g2-tooltip-list">
-              <div class="g2-tooltip-list-item">
-                <span class="g2-tooltip-marker" style="background-color: ${color}"></span>
-                <span class="g2-tooltip-name">Server TPS:</span>
-                <span class="g2-tooltip-value">${item.data.value.toFixed(2)} TPS</span>
-              </div>
-              <div class="g2-tooltip-list-item">
-                <span class="g2-tooltip-marker" style="background-color: ${color}"></span>
-                <span class="g2-tooltip-name">Status:</span>
-                <span class="g2-tooltip-value" style="color: ${color}; font-weight: bold;">${performance}</span>
-              </div>
-            </div>
-          </div>
-        `;
       },
     },
     theme: {
