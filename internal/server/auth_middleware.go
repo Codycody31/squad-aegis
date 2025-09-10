@@ -20,12 +20,25 @@ func (s *Server) OptionalAuthSession(c *gin.Context) {
 
 // authSession checks if the user is authenticated and updates the session's last seen time and IP address
 func (s *Server) authSession(c *gin.Context, required bool) {
-	sessionToken := c.GetHeader("Authorization") // TODO: Check for a cookie, query param, or header
+	sessionToken := c.GetHeader("Authorization") // Check for Authorization header first
 	session := &models.Session{}
 
 	// if text begins with "Bearer ", remove it
 	if len(sessionToken) > 7 && sessionToken[:7] == "Bearer " {
 		sessionToken = sessionToken[7:]
+	}
+
+	// If no Authorization header, check for token in query parameter (for SSE/WebSocket connections)
+	if sessionToken == "" {
+		sessionToken = c.Query("token")
+	}
+
+	// If still no token, check for cookie
+	if sessionToken == "" {
+		cookie, err := c.Cookie("session_token")
+		if err == nil {
+			sessionToken = cookie
+		}
 	}
 
 	dests := []any{&session.Id, &session.UserId, &session.Token, &session.CreatedAt, &session.ExpiresAt, &session.LastSeen, &session.LastSeenIp}

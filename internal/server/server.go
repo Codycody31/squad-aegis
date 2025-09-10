@@ -195,6 +195,10 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/rcon/events", server.AuthHasServerPermission("manageserver"), server.ServerRconEvents)
 				serverGroup.POST("/rcon/force-restart", server.AuthHasServerPermission("manageserver"), server.ServerRconForceRestart)
 
+				// Live feeds for chat, connections, and teamkills
+				serverGroup.GET("/feeds", server.AuthSession, server.ServerFeeds)
+				serverGroup.GET("/feeds/history", server.AuthSession, server.ServerFeedsHistory)
+
 				serverGroup.GET("/roles", server.ServerRolesList)
 				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)
 				serverGroup.DELETE("/roles/:roleId", server.AuthIsSuperAdmin(), server.ServerRolesRemove)
