@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
@@ -21,11 +22,12 @@ type Server struct {
 }
 
 type Dependencies struct {
-	DB                *sql.DB
-	RconManager       *rcon_manager.RconManager
-	EventManager      *event_manager.EventManager
-	LogwatcherManager *logwatcher_manager.LogwatcherManager
-	PluginManager     *plugin_manager.PluginManager
+	DB                   *sql.DB
+	RconManager          *rcon_manager.RconManager
+	EventManager         *event_manager.EventManager
+	LogwatcherManager    *logwatcher_manager.LogwatcherManager
+	PluginManager        *plugin_manager.PluginManager
+	RemoteBanSyncService *core.RemoteBanSyncService
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {
@@ -121,6 +123,44 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			usersGroup.DELETE("/:userId", server.UserDelete)
 		}
 
+		// Ban List Management Routes
+		banListsGroup := apiGroup.Group("/ban-lists")
+		{
+			banListsGroup.Use(server.AuthSession)
+			banListsGroup.Use(server.AuthIsSuperAdmin())
+
+			banListsGroup.GET("", server.BanListsList)
+			banListsGroup.POST("", server.BanListsCreate)
+			banListsGroup.GET("/:banListId", server.BanListsGet)
+			banListsGroup.PUT("/:banListId", server.BanListsUpdate)
+			banListsGroup.DELETE("/:banListId", server.BanListsDelete)
+		}
+
+		// Remote Ban Source Management Routes
+		remoteBanSourcesGroup := apiGroup.Group("/remote-ban-sources")
+		{
+			remoteBanSourcesGroup.Use(server.AuthSession)
+			remoteBanSourcesGroup.Use(server.AuthIsSuperAdmin())
+
+			remoteBanSourcesGroup.GET("", server.RemoteBanSourcesList)
+			remoteBanSourcesGroup.POST("", server.RemoteBanSourcesCreate)
+			remoteBanSourcesGroup.PUT("/:sourceId", server.RemoteBanSourcesUpdate)
+			remoteBanSourcesGroup.DELETE("/:sourceId", server.RemoteBanSourcesDelete)
+		}
+
+		// Ignored Steam ID Management Routes
+		ignoredSteamIDsGroup := apiGroup.Group("/ignored-steam-ids")
+		{
+			ignoredSteamIDsGroup.Use(server.AuthSession)
+			ignoredSteamIDsGroup.Use(server.AuthIsSuperAdmin())
+
+			ignoredSteamIDsGroup.GET("", server.IgnoredSteamIDsList)
+			ignoredSteamIDsGroup.POST("", server.IgnoredSteamIDsCreate)
+			ignoredSteamIDsGroup.PUT("/:id", server.IgnoredSteamIDsUpdate)
+			ignoredSteamIDsGroup.DELETE("/:id", server.IgnoredSteamIDsDelete)
+			ignoredSteamIDsGroup.GET("/check/:steam_id", server.IgnoredSteamIDsCheck)
+		}
+
 		adminGroup := apiGroup.Group("/admin")
 		{
 			adminGroup.Use(server.AuthSession)
@@ -144,6 +184,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.DELETE("", server.AuthIsSuperAdmin(), server.ServerDelete)
 
 				serverGroup.GET("/metrics", server.ServerMetrics)
+				serverGroup.GET("/metrics/history", server.ServerMetricsHistory)
 				serverGroup.GET("/status", server.ServerStatus)
 				serverGroup.GET("/audit-logs", server.AuthHasServerPermission("manageserver"), server.ServerAuditLogs)
 
@@ -154,6 +195,10 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/rcon/available-layers", server.ServerRconAvailableLayers)
 				serverGroup.GET("/rcon/events", server.AuthHasServerPermission("manageserver"), server.ServerRconEvents)
 				serverGroup.POST("/rcon/force-restart", server.AuthHasServerPermission("manageserver"), server.ServerRconForceRestart)
+
+				// Live feeds for chat, connections, and teamkills
+				serverGroup.GET("/feeds", server.AuthSession, server.ServerFeeds)
+				serverGroup.GET("/feeds/history", server.AuthSession, server.ServerFeedsHistory)
 
 				serverGroup.GET("/roles", server.ServerRolesList)
 				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)
@@ -167,6 +212,11 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/bans", server.ServerBansList)
 				serverGroup.POST("/bans", server.AuthHasAnyServerPermission("ban"), server.ServerBansAdd)
 				serverGroup.DELETE("/bans/:banId", server.AuthHasAnyServerPermission("ban"), server.ServerBansRemove)
+
+				// Ban list subscription management
+				serverGroup.GET("/ban-list-subscriptions", server.ServerBanListSubscriptions)
+				serverGroup.POST("/ban-list-subscriptions", server.AuthHasServerPermission("manageserver"), server.ServerBanListSubscriptionCreate)
+				serverGroup.DELETE("/ban-list-subscriptions/:banListId", server.AuthHasServerPermission("manageserver"), server.ServerBanListSubscriptionDelete)
 
 				// Player action endpoints
 				serverGroup.POST("/rcon/kick-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconKickPlayer)
@@ -216,7 +266,8 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 		// Public Routes for the server
 		apiGroup.GET("/servers/:serverId/admins/cfg", server.ServerAdminsCfg)
-		apiGroup.GET("/servers/:serverId/bans/cfg", server.ServerBansCfg)
+		apiGroup.GET("/servers/:serverId/bans/cfg", server.ServerBansCfgEnhanced)
+		apiGroup.GET("/ban-lists/:banListId/cfg", server.BanListCfg)
 	}
 
 	return router

@@ -126,6 +126,11 @@ func (pm *PluginManager) Stop() error {
 	return nil
 }
 
+// GetClickHouseClient returns the ClickHouse client instance
+func (pm *PluginManager) GetClickHouseClient() *clickhouse.Client {
+	return pm.clickhouseClient
+}
+
 // RegisterPlugin registers a new plugin definition
 func (pm *PluginManager) RegisterPlugin(definition PluginDefinition) error {
 	return pm.registry.RegisterPlugin(definition)
@@ -654,6 +659,7 @@ func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID) *Plugi
 		ServerAPI:    NewServerAPI(serverID, pm.db, pm.rconManager),
 		DatabaseAPI:  NewDatabaseAPI(instanceID, pm.db),
 		RconAPI:      NewRconAPI(serverID, pm.rconManager),
+		AdminAPI:     NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
 		EventAPI:     NewEventAPI(serverID, pm.eventManager),
 		ConnectorAPI: NewConnectorAPI(pm),
 		LogAPI:       NewLogAPI(serverID, instanceID, pm.clickhouseClient, pm.db),

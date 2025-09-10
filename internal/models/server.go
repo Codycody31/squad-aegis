@@ -30,19 +30,54 @@ type Server struct {
 }
 
 type ServerBan struct {
-	ID        string    `json:"id"`
-	ServerID  uuid.UUID `json:"server_id"`
-	AdminID   uuid.UUID `json:"admin_id"`
-	AdminName string    `json:"admin_name"`
-	SteamID   string    `json:"steam_id,string"`
-	Name      string    `json:"name"`
-	Reason    string    `json:"reason"`
-	Duration  int       `json:"duration"`
-	RuleID    *string   `json:"rule_id,omitempty"`
-	Permanent bool      `json:"permanent"`
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	ServerID    uuid.UUID `json:"server_id"`
+	AdminID     uuid.UUID `json:"admin_id"`
+	AdminName   string    `json:"admin_name"`
+	SteamID     string    `json:"steam_id,string"`
+	Name        string    `json:"name"`
+	Reason      string    `json:"reason"`
+	Duration    int       `json:"duration"`
+	RuleID      *string   `json:"rule_id,omitempty"`
+	BanListID   *string   `json:"ban_list_id,omitempty"`
+	BanListName *string   `json:"ban_list_name,omitempty"`
+	Permanent   bool      `json:"permanent"`
+	ExpiresAt   time.Time `json:"expires_at,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type BanList struct {
+	ID                uuid.UUID  `json:"id"`
+	Name              string     `json:"name"`
+	Description       *string    `json:"description,omitempty"`
+	IsRemote          bool       `json:"is_remote"`
+	RemoteURL         *string    `json:"remote_url,omitempty"`
+	RemoteSyncEnabled bool       `json:"remote_sync_enabled"`
+	LastSyncedAt      *time.Time `json:"last_synced_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+type ServerBanListSubscription struct {
+	ID          uuid.UUID `json:"id"`
+	ServerID    uuid.UUID `json:"server_id"`
+	BanListID   uuid.UUID `json:"ban_list_id"`
+	BanListName string    `json:"ban_list_name"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type RemoteBanSource struct {
+	ID                  uuid.UUID  `json:"id"`
+	Name                string     `json:"name"`
+	URL                 string     `json:"url"`
+	SyncEnabled         bool       `json:"sync_enabled"`
+	SyncIntervalMinutes int        `json:"sync_interval_minutes"`
+	LastSyncedAt        *time.Time `json:"last_synced_at,omitempty"`
+	LastSyncStatus      *string    `json:"last_sync_status,omitempty"`
+	LastSyncError       *string    `json:"last_sync_error,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 type ServerAdmin struct {
@@ -79,10 +114,39 @@ type ServerRole struct {
 // ------------------------------------------
 
 type ServerBanCreateRequest struct {
-	SteamID  string  `json:"steam_id"`
-	Reason   string  `json:"reason"`
-	Duration int     `json:"duration"`
-	RuleID   *string `json:"rule_id,omitempty"`
+	SteamID   string  `json:"steam_id"`
+	Reason    string  `json:"reason"`
+	Duration  int     `json:"duration"`
+	RuleID    *string `json:"rule_id,omitempty"`
+	BanListID *string `json:"ban_list_id,omitempty"`
+}
+
+type BanListCreateRequest struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+}
+
+type BanListUpdateRequest struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+}
+
+type ServerBanListSubscriptionRequest struct {
+	BanListID string `json:"ban_list_id"`
+}
+
+type RemoteBanSourceCreateRequest struct {
+	Name                string `json:"name"`
+	URL                 string `json:"url"`
+	SyncEnabled         bool   `json:"sync_enabled"`
+	SyncIntervalMinutes int    `json:"sync_interval_minutes"`
+}
+
+type RemoteBanSourceUpdateRequest struct {
+	Name                string `json:"name"`
+	URL                 string `json:"url"`
+	SyncEnabled         bool   `json:"sync_enabled"`
+	SyncIntervalMinutes int    `json:"sync_interval_minutes"`
 }
 
 type ServerAdminCreateRequest struct {
@@ -153,4 +217,26 @@ type ServerUpdateRequest struct {
 	LogPassword      *string `json:"log_password,omitempty"`
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
+}
+
+// IgnoredSteamID represents a Steam ID that should be ignored from remote ban sources
+type IgnoredSteamID struct {
+	ID        string    `json:"id" db:"id"`
+	SteamID   string    `json:"steam_id" db:"steam_id"`
+	Reason    *string   `json:"reason" db:"reason"`
+	CreatedBy *string   `json:"created_by" db:"created_by"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// IgnoredSteamIDCreateRequest represents a request to add a Steam ID to the ignore list
+type IgnoredSteamIDCreateRequest struct {
+	SteamID   string  `json:"steam_id" binding:"required"`
+	Reason    *string `json:"reason"`
+	CreatedBy *string `json:"created_by"`
+}
+
+// IgnoredSteamIDUpdateRequest represents a request to update an ignored Steam ID
+type IgnoredSteamIDUpdateRequest struct {
+	Reason *string `json:"reason"`
 }

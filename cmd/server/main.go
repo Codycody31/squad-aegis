@@ -234,14 +234,16 @@ func run(ctx context.Context) error {
 		}
 
 		deps := &server.Dependencies{
-			DB:                database,
-			RconManager:       rconManager,
-			EventManager:      eventManager,
-			LogwatcherManager: logwatcherManager,
-			PluginManager:     pluginManager,
+			DB:                   database,
+			RconManager:          rconManager,
+			EventManager:         eventManager,
+			LogwatcherManager:    logwatcherManager,
+			PluginManager:        pluginManager,
+			RemoteBanSyncService: core.NewRemoteBanSyncService(database, database),
 		}
 
-		// Initialize router
+		// Start remote ban sync service
+		go deps.RemoteBanSyncService.StartPeriodicSync(ctx) // Initialize router
 		router := server.NewRouter(deps)
 
 		// Create server with timeout

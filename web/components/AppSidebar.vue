@@ -32,6 +32,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import type { NavigationItem, Server } from "~/types";
 import { useAuthStore } from "@/stores/auth";
 
@@ -45,6 +53,30 @@ const sidebar = useSidebar();
 const authStore = useAuthStore();
 const activeServer = ref<Server | null>(null);
 const userServerRoles = ref<{ [serverId: string]: string[] }>({});
+
+// About Dialog
+const isAboutDialogOpen = ref(false);
+const appVersion = ref<string | null>(null);
+const developerName = "Codycody31"; // As per GitHub repo owner
+const githubRepoUrl = "https://github.com/Codycody31/squad-aegis"; // From git remote URL
+
+const fetchVersionInfo = async () => {
+  try {
+    const response = await $fetch<{ data: { version: string } }>(
+      "http://localhost:3113/api/"
+    );
+    appVersion.value = response.data.version;
+  } catch (error) {
+    console.error("Failed to fetch version info:", error);
+    appVersion.value = "N/A";
+  }
+};
+
+const openAboutDialog = async () => {
+  await fetchVersionInfo();
+  isAboutDialogOpen.value = true;
+  closeSidebarOnMobile();
+};
 
 // Function to close sidebar on mobile
 const closeSidebarOnMobile = () => {
@@ -307,6 +339,10 @@ await fetchServers();
                     Settings
                   </RouterLink>
                 </DropdownMenuItem>
+                <DropdownMenuItem @click="openAboutDialog">
+                  <Icon name="lucide:info" />
+                  About
+                </DropdownMenuItem>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -327,4 +363,36 @@ await fetchServers();
     </SidebarFooter>
     <SidebarRail />
   </Sidebar>
+
+  <Dialog v-model:open="isAboutDialogOpen">
+    <DialogContent class="sm:max-w-[425px]">
+      <DialogHeader>
+        <DialogTitle>About Squad Aegis</DialogTitle>
+        <DialogDescription>
+          Application information and details.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="grid gap-4 py-4">
+        <div class="grid grid-cols-4 items-center gap-4">
+          <span class="text-sm font-medium">Version:</span>
+          <span class="col-span-3">{{ appVersion ?? 'Loading...' }}</span>
+        </div>
+        <div class="grid grid-cols-4 items-center gap-4">
+          <span class="text-sm font-medium">Developer:</span>
+          <span class="col-span-3">{{ developerName }}</span>
+        </div>
+        <div class="grid grid-cols-4 items-center gap-4">
+          <span class="text-sm font-medium">Source:</span>
+          <a
+            :href="githubRepoUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="col-span-3 text-primary hover:underline"
+          >
+            GitHub Repository
+          </a>
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
 </template>

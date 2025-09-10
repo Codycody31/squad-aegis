@@ -40,9 +40,10 @@ func (s *Server) ServerBansList(c *gin.Context) {
 
 	// Query the database for bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
+		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
 		WHERE sb.server_id = $1
 		ORDER BY sb.created_at DESC
 	`, serverId)
@@ -57,6 +58,8 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		var ban models.ServerBan
 		var steamIDInt int64
 		var ruleID sql.NullString
+		var banListID sql.NullString
+		var banListName sql.NullString
 		err := rows.Scan(
 			&ban.ID,
 			&ban.ServerID,
@@ -66,6 +69,8 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			&ban.Reason,
 			&ban.Duration,
 			&ruleID,
+			&banListID,
+			&banListName,
 			&ban.CreatedAt,
 			&ban.UpdatedAt,
 		)
@@ -83,6 +88,14 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		// Set rule ID if present
 		if ruleID.Valid {
 			ban.RuleID = &ruleID.String
+		}
+
+		// Set ban list information if present
+		if banListID.Valid {
+			ban.BanListID = &banListID.String
+		}
+		if banListName.Valid {
+			ban.BanListName = &banListName.String
 		}
 
 		// Calculate if ban is permanent and expiry date
@@ -157,19 +170,46 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	`
 	args := []interface{}{uuid.New(), serverId, user.Id, steamID, request.Reason, request.Duration, now, now}
 
-	// Add rule_id if provided
+	// Add rule_id and ban_list_id if provided
 	if request.RuleID != nil && *request.RuleID != "" {
 		ruleUUID, err := uuid.Parse(*request.RuleID)
 		if err != nil {
 			responses.BadRequest(c, "Invalid rule ID format", &gin.H{"error": err.Error()})
 			return
 		}
+
+		if request.BanListID != nil && *request.BanListID != "" {
+			banListUUID, err := uuid.Parse(*request.BanListID)
+			if err != nil {
+				responses.BadRequest(c, "Invalid ban list ID format", &gin.H{"error": err.Error()})
+				return
+			}
+			query = `
+				INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, ban_list_id, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				RETURNING id
+			`
+			args = append(args[:6], ruleUUID, banListUUID, now, now)
+		} else {
+			query = `
+				INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				RETURNING id
+			`
+			args = append(args[:6], ruleUUID, now, now)
+		}
+	} else if request.BanListID != nil && *request.BanListID != "" {
+		banListUUID, err := uuid.Parse(*request.BanListID)
+		if err != nil {
+			responses.BadRequest(c, "Invalid ban list ID format", &gin.H{"error": err.Error()})
+			return
+		}
 		query = `
-			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at)
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, ban_list_id, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			RETURNING id
 		`
-		args = append(args[:5], ruleUUID, now, now)
+		args = append(args[:6], banListUUID, now, now)
 	}
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&banID)

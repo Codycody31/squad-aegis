@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -33,6 +33,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
+import {
+  Combobox,
+  ComboboxAnchor,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "~/components/ui/combobox";
+import ComboboxTrigger from "~/components/ui/combobox/ComboboxTrigger.vue";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
@@ -49,7 +58,9 @@ import {
   FileText,
   AlertCircle,
   CheckCircle,
-  Clock
+  Clock,
+  Check,
+  ChevronsUpDown
 } from "lucide-vue-next";
 
 definePageMeta({
@@ -69,6 +80,42 @@ const showAddDialog = ref(false);
 const showConfigDialog = ref(false);
 const currentPlugin = ref<any>(null);
 const pluginConfig = ref<Record<string, any>>({});
+
+// Combobox state
+const pluginSearchQuery = ref("");
+const showPluginDropdown = ref(false);
+
+// Computed filtered plugins
+const filteredAvailablePlugins = computed(() => {
+  // Get plugins that already exist on this server
+  const existingPluginIds = new Set(plugins.value.map(p => p.plugin_id));
+  
+  // Filter out plugins that already exist and don't allow multiple instances
+  let availableForCreation = availablePlugins.value.filter(plugin => {
+    // If plugin already exists and doesn't allow multiple instances, exclude it
+    if (existingPluginIds.has(plugin.id) && !plugin.allow_multiple_instances) {
+      return false;
+    }
+    return true;
+  });
+  
+  // Filter by search query if provided
+  if (pluginSearchQuery.value.trim()) {
+    const query = pluginSearchQuery.value.toLowerCase().trim();
+    availableForCreation = availableForCreation.filter(plugin => 
+      plugin.name.toLowerCase().includes(query) ||
+      plugin.description.toLowerCase().includes(query) ||
+      plugin.id.toLowerCase().includes(query)
+    );
+  }
+  
+  return availableForCreation;
+});
+
+// Get selected plugin object
+const selectedPluginObject = computed(() => {
+  return availablePlugins.value.find(p => p.id === selectedPlugin.value);
+});
 
 // Status color mapping
 const getStatusColor = (status: string) => {
@@ -250,70 +297,78 @@ const configurePlugin = (plugin: any) => {
   const pluginDef = availablePlugins.value.find(p => p.id === plugin.plugin_id);
   
   if (pluginDef?.config_schema?.fields) {
-    pluginDef.config_schema.fields.forEach((field: any) => {
-      if (field.type === 'bool') {
-        if (config[field.name] !== undefined) {
-          if (typeof config[field.name] === 'string') {
-            config[field.name] = config[field.name] === 'true' || config[field.name] === '1';
-          } else {
-            config[field.name] = Boolean(config[field.name]);
-          }
-        } else {
-          // Set default false for boolean fields without values
-          config[field.name] = field.default !== undefined ? Boolean(field.default) : false;
-        }
-      } else if (field.sensitive && config[field.name] === '***MASKED***') {
-        // Clear masked sensitive fields for editing
-        config[field.name] = '';
-      } else if (field.type === 'arraystring' || field.type === 'array_string') {
-        // Ensure string arrays are properly formatted
-        if (config[field.name] && !Array.isArray(config[field.name])) {
-          if (typeof config[field.name] === 'string') {
-            config[field.name] = config[field.name].split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
-          }
-        } else if (!config[field.name]) {
-          config[field.name] = [];
-        }
-      } else if (field.type === 'arrayint') {
-        // Ensure integer arrays are properly formatted
-        if (config[field.name] && !Array.isArray(config[field.name])) {
-          if (typeof config[field.name] === 'string') {
-            config[field.name] = config[field.name].split(',').map((s: string) => parseInt(s.trim())).filter((n: number) => !isNaN(n));
-          }
-        } else if (!config[field.name]) {
-          config[field.name] = [];
-        }
-      } else if (field.type === 'arraybool' || field.type === 'arrayobject') {
-        // Ensure arrays exist
-        if (!config[field.name]) {
-          config[field.name] = [];
-        }
-      } else if (field.type === 'object') {
-        // Ensure object exists and initialize nested fields
-        if (!config[field.name]) {
-          config[field.name] = {};
-        }
-        if (field.nested && field.nested.length > 0) {
-          field.nested.forEach((nestedField: any) => {
-            if (config[field.name][nestedField.name] === undefined) {
-              if (nestedField.default !== undefined) {
-                config[field.name][nestedField.name] = nestedField.default;
-              } else if (nestedField.type === 'bool') {
-                config[field.name][nestedField.name] = false;
-              } else if (nestedField.type === 'int') {
-                config[field.name][nestedField.name] = 0;
-              } else {
-                config[field.name][nestedField.name] = '';
-              }
-            }
-          });
-        }
-      }
-    });
+    // Initialize config with schema-aware defaults
+    initializeConfigFromSchema(config, pluginDef.config_schema.fields);
   }
   
   pluginConfig.value = config;
   showConfigDialog.value = true;
+};
+
+// Initialize config values based on schema
+const initializeConfigFromSchema = (config: any, fields: any[]) => {
+  fields.forEach((field: any) => {
+    if (field.type === 'bool') {
+      if (config[field.name] !== undefined) {
+        if (typeof config[field.name] === 'string') {
+          config[field.name] = config[field.name] === 'true' || config[field.name] === '1';
+        } else {
+          config[field.name] = Boolean(config[field.name]);
+        }
+      } else {
+        config[field.name] = field.default !== undefined ? Boolean(field.default) : false;
+      }
+    } else if (field.sensitive && config[field.name] === '***MASKED***') {
+      config[field.name] = '';
+    } else if (field.type === 'arraystring') {
+      if (config[field.name] && !Array.isArray(config[field.name])) {
+        if (typeof config[field.name] === 'string') {
+          config[field.name] = config[field.name].split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+        }
+      } else if (!config[field.name]) {
+        config[field.name] = field.default || [];
+      }
+    } else if (field.type === 'arrayint') {
+      if (config[field.name] && !Array.isArray(config[field.name])) {
+        if (typeof config[field.name] === 'string') {
+          config[field.name] = config[field.name].split(',').map((s: string) => parseInt(s.trim())).filter((n: number) => !isNaN(n));
+        }
+      } else if (!config[field.name]) {
+        config[field.name] = field.default || [];
+      }
+    } else if (field.type === 'arraybool') {
+      if (!config[field.name]) {
+        config[field.name] = field.default || [];
+      }
+    } else if (field.type === 'arrayobject') {
+      if (!config[field.name]) {
+        config[field.name] = field.default || [];
+      }
+      // Initialize nested objects in array
+      if (Array.isArray(config[field.name]) && field.nested && field.nested.length > 0) {
+        config[field.name].forEach((item: any) => {
+          if (typeof item === 'object' && item !== null) {
+            initializeConfigFromSchema(item, field.nested);
+          }
+        });
+      }
+    } else if (field.type === 'object') {
+      if (!config[field.name]) {
+        config[field.name] = field.default || {};
+      }
+      if (field.nested && field.nested.length > 0) {
+        initializeConfigFromSchema(config[field.name], field.nested);
+      }
+    } else if (field.type === 'int') {
+      if (config[field.name] === undefined) {
+        config[field.name] = field.default !== undefined ? field.default : 0;
+      }
+    } else if (field.type === 'string') {
+      if (config[field.name] === undefined) {
+        config[field.name] = field.default !== undefined ? field.default : '';
+      }
+    }
+  });
 };
 
 // Save plugin configuration
@@ -354,72 +409,49 @@ const onPluginSelect = (pluginId: any) => {
   selectedPlugin.value = pluginId || "";
   const plugin = availablePlugins.value.find(p => p.id === pluginId);
   if (plugin?.config_schema?.fields) {
-    // Initialize config with default values
+    // Initialize config with schema-aware defaults
     pluginConfig.value = {};
-    plugin.config_schema.fields.forEach((field: any) => {
-      if (field.default !== undefined) {
-        let defaultValue = field.default;
-        // Convert string boolean defaults to actual booleans
-        if (field.type === 'bool') {
-          if (typeof defaultValue === 'string') {
-            defaultValue = defaultValue === 'true' || defaultValue === '1';
-          } else {
-            defaultValue = Boolean(defaultValue);
-          }
-        }
-        pluginConfig.value[field.name] = defaultValue;
-      } else {
-        // Set appropriate defaults based on field type
-        switch (field.type) {
-          case 'bool':
-            pluginConfig.value[field.name] = false;
-            break;
-          case 'int':
-          case 'number':
-            pluginConfig.value[field.name] = 0;
-            break;
-          case 'arraystring':
-          case 'array_string':
-          case 'arrayint':
-          case 'arraybool':
-          case 'arrayobject':
-            pluginConfig.value[field.name] = [];
-            break;
-          case 'object':
-            pluginConfig.value[field.name] = {};
-            // Initialize nested fields if defined
-            if (field.nested && field.nested.length > 0) {
-              field.nested.forEach((nestedField: any) => {
-                if (nestedField.default !== undefined) {
-                  pluginConfig.value[field.name][nestedField.name] = nestedField.default;
-                } else if (nestedField.type === 'bool') {
-                  pluginConfig.value[field.name][nestedField.name] = false;
-                } else if (nestedField.type === 'int') {
-                  pluginConfig.value[field.name][nestedField.name] = 0;
-                } else {
-                  pluginConfig.value[field.name][nestedField.name] = '';
-                }
-              });
-            }
-            break;
-          default:
-            pluginConfig.value[field.name] = '';
-        }
-      }
-    });
+    initializeConfigFromSchema(pluginConfig.value, plugin.config_schema.fields);
   }
 };
 
-// Render config field based on type
-const renderConfigField = (field: any) => {
+// Handle combobox plugin selection
+const onComboboxPluginSelect = (plugin: any) => {
+  selectedPlugin.value = plugin.id;
+  showPluginDropdown.value = false;
+  
+  if (plugin?.config_schema?.fields) {
+    // Initialize config with schema-aware defaults
+    pluginConfig.value = {};
+    initializeConfigFromSchema(pluginConfig.value, plugin.config_schema.fields);
+  }
+};
+
+// Handle opening add dialog
+const openAddDialog = () => {
+  showAddDialog.value = true;
+  selectedPlugin.value = "";
+  pluginSearchQuery.value = "";
+  pluginConfig.value = {};
+};
+
+// Watch for dialog close to reset search
+watch(showAddDialog, (newValue) => {
+  if (!newValue) {
+    pluginSearchQuery.value = "";
+    selectedPlugin.value = "";
+    pluginConfig.value = {};
+  }
+});
+
+// Get input type for field
+const getInputType = (field: any) => {
   switch (field.type) {
     case "string":
       return field.sensitive || field.name.toLowerCase().includes('password') ? "password" : "text";
     case "int":
     case "number":
       return "number";
-    case "bool":
-      return "checkbox";
     default:
       return "text";
   }
@@ -453,17 +485,7 @@ const addArrayObjectItem = (fieldName: string, nestedFields: any[]) => {
   }
   
   const newItem: Record<string, any> = {};
-  nestedFields.forEach(field => {
-    if (field.default !== undefined) {
-      newItem[field.name] = field.default;
-    } else if (field.type === 'bool') {
-      newItem[field.name] = false;
-    } else if (field.type === 'int') {
-      newItem[field.name] = 0;
-    } else {
-      newItem[field.name] = '';
-    }
-  });
+  initializeConfigFromSchema(newItem, nestedFields);
   
   pluginConfig.value[fieldName].push(newItem);
 };
@@ -472,6 +494,48 @@ const removeArrayObjectItem = (fieldName: string, index: number) => {
   if (pluginConfig.value[fieldName] && Array.isArray(pluginConfig.value[fieldName])) {
     pluginConfig.value[fieldName].splice(index, 1);
   }
+};
+
+// Render field component for recursive rendering
+const renderConfigField = (field: any, config: any, fieldPath: string = '', isNested: boolean = false) => {
+  const fieldKey = isNested ? fieldPath : field.name;
+  
+  return {
+    field,
+    config,
+    fieldKey,
+    isNested,
+    getValue: () => {
+      if (isNested) {
+        const keys = fieldPath.split('.');
+        let value = config;
+        for (const key of keys) {
+          if (value && typeof value === 'object') {
+            value = value[key];
+          } else {
+            return undefined;
+          }
+        }
+        return value;
+      }
+      return config[field.name];
+    },
+    setValue: (value: any) => {
+      if (isNested) {
+        const keys = fieldPath.split('.');
+        let current = config;
+        for (let i = 0; i < keys.length - 1; i++) {
+          if (!current[keys[i]]) {
+            current[keys[i]] = {};
+          }
+          current = current[keys[i]];
+        }
+        current[keys[keys.length - 1]] = value;
+      } else {
+        config[field.name] = value;
+      }
+    }
+  };
 };
 
 onMounted(async () => {
@@ -504,7 +568,7 @@ onMounted(async () => {
         </Button>
         <Dialog v-model:open="showAddDialog">
           <DialogTrigger as-child>
-            <Button>
+            <Button @click="openAddDialog">
               <Plus class="w-4 h-4 mr-2" />
               Add Plugin
             </Button>
@@ -520,23 +584,49 @@ onMounted(async () => {
           <div class="space-y-4 overflow-y-auto flex-1 pr-2">
             <div>
               <Label for="plugin-select">Plugin</Label>
-              <Select :model-value="selectedPlugin" @update:model-value="onPluginSelect">
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a plugin" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem 
-                    v-for="plugin in availablePlugins" 
-                    :key="plugin.id" 
-                    :value="plugin.id"
+              <Combobox v-model:open="showPluginDropdown">
+                <ComboboxAnchor as-child>
+                  <ComboboxTrigger 
+                    class="flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm ring-offset-background focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    :class="!selectedPlugin && 'text-muted-foreground'"
                   >
-                    <div class="flex flex-col">
-                      <span class="font-medium">{{ plugin.name }}</span>
-                      <span class="text-sm text-muted-foreground">{{ plugin.description }}</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                    {{ selectedPluginObject?.name || 'Select a plugin...' }}
+                    <ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </ComboboxTrigger>
+                </ComboboxAnchor>
+                <ComboboxList class="w-[--reka-combobox-trigger-width] p-0 z-50 min-w-32 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
+                  <div class="border-b border-border">
+                    <Input 
+                      v-model="pluginSearchQuery" 
+                      placeholder="Search plugins..."
+                      class="h-9 border-0 focus:ring-0 rounded-none px-3"
+                    />
+                  </div>
+                  <ComboboxEmpty class="py-6 text-center text-sm text-muted-foreground">
+                    No plugins found.
+                  </ComboboxEmpty>
+                  <div class="max-h-60 overflow-auto">
+                    <ComboboxItem
+                      v-for="plugin in filteredAvailablePlugins"
+                      :key="plugin.id"
+                      :value="plugin.id"
+                      @select="() => onComboboxPluginSelect(plugin)"
+                      class="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
+                    >
+                      <Check
+                        :class="[
+                          'mr-2 h-4 w-4',
+                          selectedPlugin === plugin.id ? 'opacity-100' : 'opacity-0'
+                        ]"
+                      />
+                      <div class="flex flex-col flex-1">
+                        <span class="font-medium">{{ plugin.name }}</span>
+                        <span class="text-sm text-muted-foreground">{{ plugin.description }}</span>
+                      </div>
+                    </ComboboxItem>
+                  </div>
+                </ComboboxList>
+              </Combobox>
             </div>
 
             <!-- Dynamic configuration fields -->
@@ -561,7 +651,7 @@ onMounted(async () => {
                   v-if="field.type === 'string'"
                   :id="`config-${field.name}`"
                   v-model="pluginConfig[field.name]"
-                  :type="renderConfigField(field)"
+                  :type="getInputType(field)"
                   :placeholder="field.sensitive && pluginConfig[field.name] === '' ? 'Leave empty to keep current value' : field.sensitive ? 'Enter new sensitive value...' : ''"
                 />
                 

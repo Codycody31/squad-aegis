@@ -52,6 +52,20 @@ export default [
     permissions: ["super_admin", "manageserver"],
   },
   {
+    title: "Feeds",
+    icon: "mdi:rss",
+    to: {
+      name: "servers-serverId-feeds",
+    },
+  },
+  {
+    title: "Metrics",
+    icon: "mdi:chart-line",
+    to: {
+      name: "servers-serverId-metrics",
+    },
+  },
+  {
     title: "Audit Logs",
     icon: "mdi:book-open",
     to: {
