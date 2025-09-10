@@ -176,17 +176,17 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	if interval <= 0 {
 		switch period {
 		case "1h":
-			intervalMinutes = 1 // 1 minute intervals for 1 hour
+			intervalMinutes = 5 // 5 minute intervals for 1 hour
 		case "6h":
-			intervalMinutes = 5 // 5 minute intervals for 6 hours
+			intervalMinutes = 15 // 15 minute intervals for 6 hours
 		case "24h":
-			intervalMinutes = 15 // 15 minute intervals for 24 hours
+			intervalMinutes = 60 // 1 hour intervals for 24 hours
 		case "7d":
-			intervalMinutes = 120 // 2 hour intervals for 7 days
+			intervalMinutes = 360 // 6 hour intervals for 7 days
 		case "30d":
-			intervalMinutes = 720 // 12 hour intervals for 30 days
+			intervalMinutes = 1440 // 24 hour intervals for 30 days
 		default:
-			intervalMinutes = 15
+			intervalMinutes = 60
 		}
 	}
 
@@ -260,6 +260,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store chat activity data
+	chatDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, chatQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query chat activity metrics from ClickHouse")
@@ -272,12 +274,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan chat activity metric")
 				continue
 			}
-			metricsData.ChatActivity = append(metricsData.ChatActivity, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			chatDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the chat activity data with 0s for missing intervals
+	metricsData.ChatActivity = fillTimeSeriesGaps(startTime, now, intervalMinutes, chatDataMap)
 
 	// Query connection metrics
 	connectionQuery := `
@@ -326,6 +328,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store teamkill data
+	teamkillDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, teamkillQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query teamkill metrics from ClickHouse")
@@ -338,12 +342,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan teamkill metric")
 				continue
 			}
-			metricsData.TeamkillStats = append(metricsData.TeamkillStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			teamkillDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the teamkill data with 0s for missing intervals
+	metricsData.TeamkillStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, teamkillDataMap)
 
 	// Query player wounded metrics
 	playerWoundedQuery := `
@@ -358,6 +362,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store player wounded data
+	playerWoundedDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, playerWoundedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player wounded metrics from ClickHouse")
@@ -370,12 +376,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan player wounded metric")
 				continue
 			}
-			metricsData.PlayerWoundedStats = append(metricsData.PlayerWoundedStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			playerWoundedDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the player wounded data with 0s for missing intervals
+	metricsData.PlayerWoundedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerWoundedDataMap)
 
 	// Query player revived metrics
 	playerRevivedQuery := `
@@ -390,6 +396,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store player revived data
+	playerRevivedDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, playerRevivedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player revived metrics from ClickHouse")
@@ -402,12 +410,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan player revived metric")
 				continue
 			}
-			metricsData.PlayerRevivedStats = append(metricsData.PlayerRevivedStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			playerRevivedDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the player revived data with 0s for missing intervals
+	metricsData.PlayerRevivedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerRevivedDataMap)
 
 	// Query player possess metrics
 	playerPossessQuery := `
@@ -422,6 +430,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store player possess data
+	playerPossessDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, playerPossessQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player possess metrics from ClickHouse")
@@ -434,12 +444,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan player possess metric")
 				continue
 			}
-			metricsData.PlayerPossessStats = append(metricsData.PlayerPossessStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			playerPossessDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the player possess data with 0s for missing intervals
+	metricsData.PlayerPossessStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerPossessDataMap)
 
 	// Query player died metrics (non-teamkill deaths)
 	playerDiedQuery := `
@@ -454,6 +464,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store player died data
+	playerDiedDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, playerDiedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player died metrics from ClickHouse")
@@ -466,12 +478,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan player died metric")
 				continue
 			}
-			metricsData.PlayerDiedStats = append(metricsData.PlayerDiedStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			playerDiedDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the player died data with 0s for missing intervals
+	metricsData.PlayerDiedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerDiedDataMap)
 
 	// Query player damaged metrics
 	playerDamagedQuery := `
@@ -486,6 +498,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store player damaged data
+	playerDamagedDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, playerDamagedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player damaged metrics from ClickHouse")
@@ -498,12 +512,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan player damaged metric")
 				continue
 			}
-			metricsData.PlayerDamagedStats = append(metricsData.PlayerDamagedStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			playerDamagedDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the player damaged data with 0s for missing intervals
+	metricsData.PlayerDamagedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerDamagedDataMap)
 
 	// Query deployable damaged metrics
 	deployableDamagedQuery := `
@@ -518,6 +532,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store deployable damaged data
+	deployableDamagedDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, deployableDamagedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query deployable damaged metrics from ClickHouse")
@@ -530,12 +546,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan deployable damaged metric")
 				continue
 			}
-			metricsData.DeployableDamagedStats = append(metricsData.DeployableDamagedStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			deployableDamagedDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the deployable damaged data with 0s for missing intervals
+	metricsData.DeployableDamagedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, deployableDamagedDataMap)
 
 	// Query admin broadcast metrics
 	adminBroadcastQuery := `
@@ -550,6 +566,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
+	// Create a map to store admin broadcast data
+	adminBroadcastDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, adminBroadcastQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query admin broadcast metrics from ClickHouse")
@@ -562,12 +580,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan admin broadcast metric")
 				continue
 			}
-			metricsData.AdminBroadcastStats = append(metricsData.AdminBroadcastStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(value),
-			})
+			adminBroadcastDataMap[timestamp] = int(value)
 		}
 	}
+
+	// Fill in the admin broadcast data with 0s for missing intervals
+	metricsData.AdminBroadcastStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, adminBroadcastDataMap)
 
 	// Calculate summary metrics
 	if len(metricsData.PlayerCount) > 0 {
@@ -726,17 +744,17 @@ func (s *Server) generateSampleMetrics(period string, interval int) ServerMetric
 	if interval <= 0 {
 		switch period {
 		case "1h":
-			actualInterval = 1 // 1 minute intervals for 1 hour
+			actualInterval = 5 // 5 minute intervals for 1 hour
 		case "6h":
-			actualInterval = 5 // 5 minute intervals for 6 hours
+			actualInterval = 15 // 15 minute intervals for 6 hours
 		case "24h":
-			actualInterval = 15 // 15 minute intervals for 24 hours
+			actualInterval = 60 // 1 hour intervals for 24 hours
 		case "7d":
-			actualInterval = 120 // 2 hour intervals for 7 days
+			actualInterval = 360 // 6 hour intervals for 7 days
 		case "30d":
-			actualInterval = 720 // 12 hour intervals for 30 days
+			actualInterval = 1440 // 24 hour intervals for 30 days
 		default:
-			actualInterval = 15
+			actualInterval = 60
 		}
 	}
 
@@ -776,7 +794,6 @@ func (s *Server) generateSampleMetrics(period string, interval int) ServerMetric
 	playerDamagedStats := make([]MetricPoint, 0, points)
 	deployableDamagedStats := make([]MetricPoint, 0, points)
 	adminBroadcastStats := make([]MetricPoint, 0, points)
-	pluginLogRateStats := make([]MetricPoint, 0, points)
 
 	for i := 0; i < points; i++ {
 		timestamp := startTime.Add(time.Duration(i) * time.Duration(actualInterval) * time.Minute)
@@ -810,70 +827,104 @@ func (s *Server) generateSampleMetrics(period string, interval int) ServerMetric
 			})
 		}
 
-		// Chat activity (messages per interval)
+		// Chat activity (messages per interval) - more realistic
+		chatValue := 0
+		if randomInt(0, 100) < 70 { // 70% chance of having chat messages
+			chatValue = randomInt(1, 8)
+		}
 		chatActivity = append(chatActivity, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(5, 25),
+			Value:     chatValue,
 		})
 
 		// Connection stats (connections per interval)
+		connectionValue := 0
+		if randomInt(0, 100) < 40 { // 40% chance of connections in any given interval
+			connectionValue = randomInt(1, 3)
+		}
 		connectionStats = append(connectionStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(0, 8),
+			Value:     connectionValue,
 		})
 
-		// Teamkill stats (teamkills per interval)
+		// Teamkill stats (teamkills per interval) - should be rare
+		teamkillValue := 0
+		if randomInt(0, 100) < 10 { // Only 10% chance of teamkills
+			teamkillValue = 1
+		}
 		teamkillStats = append(teamkillStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(0, 3),
+			Value:     teamkillValue,
 		})
 
 		// Player wounded stats (wounded per interval)
+		woundedValue := 0
+		if randomInt(0, 100) < 60 { // 60% chance of wounded events
+			woundedValue = randomInt(1, 8)
+		}
 		playerWoundedStats = append(playerWoundedStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(2, 15),
+			Value:     woundedValue,
 		})
 
 		// Player revived stats (revived per interval)
+		revivedValue := 0
+		if randomInt(0, 100) < 50 { // 50% chance of revived events
+			revivedValue = randomInt(1, 6)
+		}
 		playerRevivedStats = append(playerRevivedStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(1, 12),
+			Value:     revivedValue,
 		})
 
 		// Player possess stats (possessions per interval)
+		possessValue := 0
+		if randomInt(0, 100) < 30 { // 30% chance of possess events
+			possessValue = randomInt(1, 4)
+		}
 		playerPossessStats = append(playerPossessStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(0, 8),
+			Value:     possessValue,
 		})
 
 		// Player died stats (deaths per interval)
+		diedValue := 0
+		if randomInt(0, 100) < 80 { // 80% chance of death events
+			diedValue = randomInt(1, 10)
+		}
 		playerDiedStats = append(playerDiedStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(3, 20),
+			Value:     diedValue,
 		})
 
 		// Player damaged stats (damage events per interval)
+		damagedValue := 0
+		if randomInt(0, 100) < 90 { // 90% chance of damage events
+			damagedValue = randomInt(1, 25)
+		}
 		playerDamagedStats = append(playerDamagedStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(10, 50),
+			Value:     damagedValue,
 		})
 
 		// Deployable damaged stats (deployable damage per interval)
+		deployableDamagedValue := 0
+		if randomInt(0, 100) < 20 { // Only 20% chance of deployable damage
+			deployableDamagedValue = randomInt(1, 2)
+		}
 		deployableDamagedStats = append(deployableDamagedStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(0, 5),
+			Value:     deployableDamagedValue,
 		})
 
-		// Admin broadcast stats (broadcasts per interval)
+		// Admin broadcast stats (broadcasts per interval) - should be rare
+		broadcastValue := 0
+		if randomInt(0, 100) < 5 { // Only 5% chance of admin broadcasts
+			broadcastValue = 1
+		}
 		adminBroadcastStats = append(adminBroadcastStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     randomInt(0, 2),
-		})
-
-		// Plugin log rate stats (logs per interval)
-		pluginLogRateStats = append(pluginLogRateStats, MetricPoint{
-			Timestamp: timestamp,
-			Value:     randomInt(5, 100),
+			Value:     broadcastValue,
 		})
 	}
 
@@ -924,14 +975,68 @@ func sin(x float64) float64 {
 }
 
 func randomInt(min, max int) int {
-	// Simple random number generation based on current time
+	// Better random number generation with more realistic distribution
+	if min >= max {
+		return min
+	}
 	now := time.Now().UnixNano()
-	return min + int(now%int64(max-min+1))
+	// Use a combination of time and index to get better distribution
+	return min + int((now/1000000)%int64(max-min+1))
 }
 
 func randomFloat(min, max float64) float64 {
-	// Simple random float generation
+	// Better random float generation
+	if min >= max {
+		return min
+	}
 	now := time.Now().UnixNano()
-	ratio := float64(now%1000) / 1000.0
+	ratio := float64((now/1000)%1000) / 1000.0
 	return min + ratio*(max-min)
+}
+
+// fillTimeSeriesGaps fills in missing time intervals with zero values
+func fillTimeSeriesGaps(startTime, endTime time.Time, intervalMinutes int, dataMap map[int64]int) []MetricPoint {
+	var points []MetricPoint
+	
+	// Calculate the time step for intervals
+	interval := time.Duration(intervalMinutes) * time.Minute
+	
+	// Round start time to the nearest interval boundary using the same logic as ClickHouse
+	// ClickHouse's toStartOfInterval truncates to the interval boundary
+	startTimestamp := startTime.Truncate(interval)
+	
+	// Ensure we don't go beyond the end time
+	endTimestamp := endTime.Truncate(interval)
+	if endTime.After(endTimestamp) {
+		endTimestamp = endTimestamp.Add(interval)
+	}
+	
+	// Iterate through all possible time intervals
+	for current := startTimestamp; current.Before(endTimestamp) || current.Equal(endTimestamp); current = current.Add(interval) {
+		// Convert to milliseconds timestamp (same as ClickHouse query)
+		timestamp := current.Unix() * 1000
+		
+		// Check if we have data for this timestamp, try a few variations due to potential rounding differences
+		value := 0
+		
+		// Try exact match first
+		if val, exists := dataMap[timestamp]; exists {
+			value = val
+		} else {
+			// Try with small tolerance (±1 second) for potential rounding differences
+			for tolerance := int64(-1000); tolerance <= 1000; tolerance += 1000 {
+				if val, exists := dataMap[timestamp+tolerance]; exists {
+					value = val
+					break
+				}
+			}
+		}
+		
+		points = append(points, MetricPoint{
+			Timestamp: current,
+			Value:     value,
+		})
+	}
+	
+	return points
 }

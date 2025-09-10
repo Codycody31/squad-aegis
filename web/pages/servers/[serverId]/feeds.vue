@@ -301,15 +301,15 @@ const chatContainer = ref<HTMLElement>();
 const connectionsContainer = ref<HTMLElement>();
 const teamkillsContainer = ref<HTMLElement>();
 
-// Event source for SSE
-let eventSource: EventSource | null = null;
+// WebSocket connection
+let websocket: WebSocket | null = null;
 
 // Computed counts
 const chatCount = computed(() => chatMessages.value.length);
 const connectionsCount = computed(() => connections.value.length);
 const teamkillsCount = computed(() => teamkills.value.length);
 
-// Connect to SSE endpoint
+// Connect to WebSocket endpoint
 const connectToFeeds = async () => {
   if (isConnected.value || connecting.value) return;
 
@@ -327,54 +327,50 @@ const connectToFeeds = async () => {
       throw new Error("Authentication required");
     }
 
-    const url = `${runtimeConfig.public.backendApi}/servers/${serverId}/feeds?types=chat&types=connections&types=teamkills&token=${token}`;
+    // Convert HTTP/HTTPS URL to WebSocket URL
+    const backendUrl = runtimeConfig.public.backendApi;
+    const wsProtocol = backendUrl.startsWith('https') ? 'wss' : 'ws';
+    const baseUrl = backendUrl.replace(/^https?:\/\//, '');
+    const url = `${wsProtocol}://${baseUrl}/servers/${serverId}/feeds?types=chat&types=connections&types=teamkills&token=${token}`;
     
-    eventSource = new EventSource(url);
+    websocket = new WebSocket(url);
 
-    eventSource.onopen = () => {
+    websocket.onopen = () => {
       isConnected.value = true;
       connecting.value = false;
       error.value = null;
     };
 
-    eventSource.onmessage = (event) => {
+    websocket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         handleFeedEvent(data);
       } catch (err) {
-        console.error("Failed to parse event data:", err);
+        console.error("Failed to parse WebSocket message:", err);
       }
     };
 
-    eventSource.addEventListener("feed", (event) => {
-      try {
-        const data = JSON.parse((event as MessageEvent).data);
-        handleFeedEvent(data);
-      } catch (err) {
-        console.error("Failed to parse feed event:", err);
-      }
-    });
-
-    eventSource.addEventListener("connected", (event) => {
-      console.log("Connected to feeds:", (event as MessageEvent).data);
-    });
-
-    eventSource.addEventListener("ping", (event) => {
-      // Handle ping to keep connection alive
-    });
-
-    eventSource.onerror = (event) => {
-      console.error("EventSource failed:", event);
-      error.value = "Connection to live feeds failed";
+    websocket.onclose = (event) => {
+      console.log("WebSocket connection closed:", event);
       isConnected.value = false;
       connecting.value = false;
       
-      // Retry connection after 5 seconds
-      setTimeout(() => {
-        if (!isConnected.value) {
-          connectToFeeds();
-        }
-      }, 5000);
+      // Retry connection after 5 seconds if not manually disconnected
+      if (event.code !== 1000) { // 1000 is normal closure
+        error.value = "Connection to live feeds was lost";
+        setTimeout(() => {
+          if (!isConnected.value) {
+            connectToFeeds();
+          }
+        }, 5000);
+      }
+    };
+
+    websocket.onerror = (event) => {
+      console.error("WebSocket error:", event);
+      error.value = "Connection to live feeds failed";
+      isConnected.value = false;
+      connecting.value = false;
     };
 
   } catch (err: any) {
@@ -383,11 +379,11 @@ const connectToFeeds = async () => {
   }
 };
 
-// Disconnect from SSE
+// Disconnect from WebSocket
 const disconnectFromFeeds = () => {
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
+  if (websocket) {
+    websocket.close(1000, "User disconnect"); // Normal closure
+    websocket = null;
   }
   isConnected.value = false;
   connecting.value = false;
@@ -405,6 +401,12 @@ const toggleConnection = () => {
 
 // Handle incoming feed events
 const handleFeedEvent = (event: any) => {
+  // Handle connection message
+  if (event.type === "connected") {
+    console.log("Connected to feeds:", event.message, event.types);
+    return;
+  }
+
   const maxEvents = 500; // Limit to prevent memory issues
 
   switch (event.type) {
