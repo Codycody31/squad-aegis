@@ -57,7 +57,6 @@ type MetricsSummary struct {
 	TotalPluginLogs        int     `json:"total_plugin_logs"`
 	MostPlayedMap          string  `json:"most_played_map"`
 	PeakPlayerCount        int     `json:"peak_player_count"`
-	UptimePercentage       float64 `json:"uptime_percentage"`
 }
 
 // ServerMetricsHistory provides detailed metrics history from ClickHouse
@@ -896,7 +895,6 @@ func (s *Server) generateSampleMetrics(period string, interval int) ServerMetric
 		TotalPluginLogs:        2340,
 		MostPlayedMap:          "Tallil Outskirts",
 		PeakPlayerCount:        78,
-		UptimePercentage:       98.5,
 	}
 
 	return ServerMetricsData{

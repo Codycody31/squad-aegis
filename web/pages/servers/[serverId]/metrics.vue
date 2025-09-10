@@ -88,9 +88,6 @@
                   {{ metrics.summary.avg_tick_rate.toFixed(2) }}
                 </p>
                 </p>
-                <p class="text-xs text-muted-foreground">
-                  {{ metrics.summary.uptime_percentage.toFixed(1) }}% uptime
-                </p>
               </div>
             </div>
           </CardContent>
@@ -174,7 +171,7 @@
       </div>
 
       <!-- Charts -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Player Count Chart -->
         <Card>
           <CardContent class="p-6">
@@ -374,12 +371,6 @@
                 <span class="text-sm text-red-600">{{
                   metrics.summary.total_teamkills
                 }}</span>
-              </div>
-              <div class="flex items-center justify-between">
-                <span class="text-sm font-medium">Server Uptime</span>
-                <span class="text-sm"
-                  >{{ metrics.summary.uptime_percentage.toFixed(1) }}%</span
-                >
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Average TPS</span>
