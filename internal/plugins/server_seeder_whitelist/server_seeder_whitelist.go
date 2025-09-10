@@ -220,8 +220,6 @@ func (p *ServerSeederWhitelistPlugin) Initialize(config map[string]interface{}, 
 		// Don't fail initialization, just start with empty progress
 	}
 
-	p.status = plugin_manager.PluginStatusStopped
-
 	return nil
 }
 
@@ -285,35 +283,21 @@ func (p *ServerSeederWhitelistPlugin) Stop() error {
 		p.adminSyncTicker.Stop()
 	}
 
-	// Give goroutines a moment to finish their current iteration
-	// Use a timeout to prevent infinite hanging
-	done := make(chan bool, 1)
-	go func() {
-		time.Sleep(500 * time.Millisecond) // Wait for goroutines to finish
-		done <- true
-	}()
-
-	select {
-	case <-done:
-		// Normal completion
-	case <-time.After(2 * time.Second):
-		// Timeout - force shutdown
-		p.apis.LogAPI.Warn("Plugin shutdown timed out, forcing stop", nil)
-	}
-
-	// Now safely acquire mutex for final cleanup
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	// Clear ticker references
+	p.mu.Lock()
 	p.progressTicker = nil
 	p.decayTicker = nil
 	p.adminSyncTicker = nil
+	p.mu.Unlock()
 
 	// Save final state to database
 	if err := p.savePlayerProgress(); err != nil {
 		p.apis.LogAPI.Error("Failed to save player progress to database on shutdown", err, nil)
 	}
+
+	// Now safely acquire mutex for final cleanup
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	p.status = plugin_manager.PluginStatusStopped
 

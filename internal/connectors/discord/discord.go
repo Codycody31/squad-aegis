@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
@@ -205,10 +204,6 @@ func (c *DiscordConnector) Start(ctx context.Context) error {
 
 	c.status = plugin_manager.ConnectorStatusRunning
 
-	log.Info().
-		Str("guildID", c.config.GuildID).
-		Msg("Discord connector started successfully")
-
 	// Handle context cancellation
 	go func() {
 		<-ctx.Done()
@@ -234,8 +229,6 @@ func (c *DiscordConnector) Stop() error {
 	}
 
 	c.status = plugin_manager.ConnectorStatusStopped
-
-	log.Info().Msg("Discord connector stopped")
 
 	return nil
 }
