@@ -299,7 +299,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData
 			Timestamp:   func() *time.Time { t := time.Now(); return &t }(),
 		}
 
-		if err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
+		if _, err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
 			return fmt.Errorf("failed to send Discord embed: %w", err)
 		}
 
@@ -391,7 +391,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData
 		Timestamp:   func() *time.Time { t := time.Now(); return &t }(),
 	}
 
-	if err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
+	if _, err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
 		return fmt.Errorf("failed to send Discord embed: %w", err)
 	}
 

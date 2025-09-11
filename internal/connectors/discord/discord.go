@@ -28,10 +28,10 @@ type DiscordConfig struct {
 // DiscordAPI provides Discord functionality to plugins
 type DiscordAPI interface {
 	// SendMessage sends a message to a Discord channel
-	SendMessage(channelID, content string) error
+	SendMessage(channelID, content string) (string, error)
 
 	// SendEmbed sends an embed message to a Discord channel
-	SendEmbed(channelID string, embed *DiscordEmbed) error
+	SendEmbed(channelID string, embed *DiscordEmbed) (string, error)
 
 	// GetGuildID returns the configured guild ID
 	GetGuildID() string
@@ -50,6 +50,21 @@ type DiscordAPI interface {
 
 	// RemoveRole removes a role from a user
 	RemoveRole(userID, roleID string) error
+
+	// SetStatus sets the bot's custom status message
+	SetStatus(status string) error
+
+	// SetActivity sets the bot's activity (e.g., playing, watching)
+	SetActivity(activity string, activityType int) error
+
+	// UpdateMessage updates the content of an existing message
+	UpdateMessage(channelID, messageID, content string) error
+
+	// DeleteMessage deletes a message from a channel
+	DeleteMessage(channelID, messageID string) error
+
+	// GetMessage retrieves a message from a channel
+	GetMessage(channelID, messageID string) (*DiscordMessage, error)
 }
 
 // DiscordEmbed represents a Discord embed message
@@ -95,6 +110,15 @@ type DiscordMember struct {
 	Roles       []string  `json:"roles"`
 	JoinedAt    time.Time `json:"joined_at"`
 	IsBot       bool      `json:"is_bot"`
+}
+
+// DiscordMessage represents a Discord message
+type DiscordMessage struct {
+	ID        string         `json:"id"`
+	ChannelID string         `json:"channel_id"`
+	Author    *DiscordMember `json:"author"`
+	Content   string         `json:"content"`
+	Timestamp time.Time      `json:"timestamp"`
 }
 
 // Define returns the connector definition
@@ -280,28 +304,28 @@ type discordAPI struct {
 	connector *DiscordConnector
 }
 
-func (api *discordAPI) SendMessage(channelID, content string) error {
+func (api *discordAPI) SendMessage(channelID, content string) (string, error) {
 	api.connector.mu.RLock()
 	defer api.connector.mu.RUnlock()
 
 	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return fmt.Errorf("Discord connector is not running")
+		return "", fmt.Errorf("Discord connector is not running")
 	}
 
-	_, err := api.connector.session.ChannelMessageSend(channelID, content)
+	msg, err := api.connector.session.ChannelMessageSend(channelID, content)
 	if err != nil {
-		return fmt.Errorf("failed to send Discord message: %w", err)
+		return "", fmt.Errorf("failed to send Discord message: %w", err)
 	}
 
-	return nil
+	return msg.ID, nil
 }
 
-func (api *discordAPI) SendEmbed(channelID string, embed *DiscordEmbed) error {
+func (api *discordAPI) SendEmbed(channelID string, embed *DiscordEmbed) (string, error) {
 	api.connector.mu.RLock()
 	defer api.connector.mu.RUnlock()
 
 	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return fmt.Errorf("Discord connector is not running")
+		return "", fmt.Errorf("Discord connector is not running")
 	}
 
 	// Convert our embed to discordgo embed
@@ -350,12 +374,12 @@ func (api *discordAPI) SendEmbed(channelID string, embed *DiscordEmbed) error {
 		discordEmbed.Timestamp = embed.Timestamp.Format(time.RFC3339)
 	}
 
-	_, err := api.connector.session.ChannelMessageSendEmbed(channelID, discordEmbed)
+	msg, err := api.connector.session.ChannelMessageSendEmbed(channelID, discordEmbed)
 	if err != nil {
-		return fmt.Errorf("failed to send Discord embed: %w", err)
+		return "", fmt.Errorf("failed to send Discord embed: %w", err)
 	}
 
-	return nil
+	return msg.ID, nil
 }
 
 func (api *discordAPI) GetGuildID() string {
@@ -471,4 +495,109 @@ func (api *discordAPI) RemoveRole(userID, roleID string) error {
 	}
 
 	return nil
+}
+
+func (api *discordAPI) SetStatus(status string) error {
+	api.connector.mu.RLock()
+	defer api.connector.mu.RUnlock()
+
+	if api.connector.status != plugin_manager.ConnectorStatusRunning {
+		return fmt.Errorf("Discord connector is not running")
+	}
+
+	err := api.connector.session.UpdateStatusComplex(discordgo.UpdateStatusData{
+		Status: "online",
+		Activities: []*discordgo.Activity{
+			{
+				Name: status,
+				Type: discordgo.ActivityTypeCustom,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set custom status: %w", err)
+	}
+
+	return nil
+}
+
+func (api *discordAPI) SetActivity(activity string, activityType int) error {
+	api.connector.mu.RLock()
+	defer api.connector.mu.RUnlock()
+
+	if api.connector.status != plugin_manager.ConnectorStatusRunning {
+		return fmt.Errorf("Discord connector is not running")
+	}
+
+	err := api.connector.session.UpdateGameStatus(activityType, activity)
+	if err != nil {
+		return fmt.Errorf("failed to set activity: %w", err)
+	}
+
+	return nil
+}
+
+func (api *discordAPI) UpdateMessage(channelID, messageID, content string) error {
+	api.connector.mu.RLock()
+	defer api.connector.mu.RUnlock()
+
+	if api.connector.status != plugin_manager.ConnectorStatusRunning {
+		return fmt.Errorf("Discord connector is not running")
+	}
+
+	_, err := api.connector.session.ChannelMessageEdit(channelID, messageID, content)
+	if err != nil {
+		return fmt.Errorf("failed to update message: %w", err)
+	}
+
+	return nil
+}
+
+func (api *discordAPI) DeleteMessage(channelID, messageID string) error {
+	api.connector.mu.RLock()
+	defer api.connector.mu.RUnlock()
+
+	if api.connector.status != plugin_manager.ConnectorStatusRunning {
+		return fmt.Errorf("Discord connector is not running")
+	}
+
+	err := api.connector.session.ChannelMessageDelete(channelID, messageID)
+	if err != nil {
+		return fmt.Errorf("failed to delete message: %w", err)
+	}
+
+	return nil
+}
+
+func (api *discordAPI) GetMessage(channelID, messageID string) (*DiscordMessage, error) {
+	api.connector.mu.RLock()
+	defer api.connector.mu.RUnlock()
+
+	if api.connector.status != plugin_manager.ConnectorStatusRunning {
+		return nil, fmt.Errorf("Discord connector is not running")
+	}
+
+	msg, err := api.connector.session.ChannelMessage(channelID, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get message: %w", err)
+	}
+
+	author := &DiscordMember{
+		UserID:      msg.Author.ID,
+		Username:    msg.Author.Username,
+		DisplayName: msg.Author.Username, // Assuming no nick for simplicity
+		Roles:       []string{},          // Not fetched here
+		JoinedAt:    time.Time{},         // Not available
+		IsBot:       msg.Author.Bot,
+	}
+
+	discordMsg := &DiscordMessage{
+		ID:        msg.ID,
+		ChannelID: msg.ChannelID,
+		Author:    author,
+		Content:   msg.Content,
+		Timestamp: msg.Timestamp,
+	}
+
+	return discordMsg, nil
 }
