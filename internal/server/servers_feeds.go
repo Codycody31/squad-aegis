@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
@@ -90,10 +91,6 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 
-	// Create audit log for connection
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:feeds:connect",
-		map[string]interface{}{"feed_types": feedTypes})
-
 	// Send initial connection message
 	connectMsg := map[string]interface{}{
 		"type":    "connected",
@@ -101,8 +98,7 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 		"types":   feedTypes,
 	}
 	if err := conn.WriteJSON(connectMsg); err != nil {
-		s.CreateAuditLog(context.Background(), &serverId, &user.Id, "server:feeds:disconnect", 
-			map[string]interface{}{"error": "failed to send connect message"})
+		log.Error().Err(err).Msg("Failed to send initial connection message")
 		return
 	}
 
@@ -133,8 +129,6 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Connection closed
-			s.CreateAuditLog(context.Background(), &serverId, &user.Id, "server:feeds:disconnect", nil)
 			return
 		case event := <-subscriber.Channel:
 			// Format event for feeds
@@ -146,8 +140,7 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 			// Send event to client
 			if err := conn.WriteJSON(feedEvent); err != nil {
 				// Connection likely closed
-				s.CreateAuditLog(context.Background(), &serverId, &user.Id, "server:feeds:disconnect", 
-					map[string]interface{}{"error": "failed to send event"})
+				log.Error().Err(err).Msg("Failed to send event to WebSocket client")
 				return
 			}
 		case <-ticker.C:
