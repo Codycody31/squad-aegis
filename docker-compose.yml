@@ -6,38 +6,48 @@ services:
     volumes:
       - database:/var/lib/postgresql/data
     environment:
-      - POSTGRES_PASSWORD=squad-aegis
       - POSTGRES_USER=squad-aegis
+      - POSTGRES_PASSWORD=squad-aegis
       - POSTGRES_DB=squad-aegis
-    networks:
-      - default
+      - POSTGRES_INITDB_ARGS=
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U squad-aegis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.3
+    ports:
+      - 8123:8123
+      - 9000:9000
+    volumes:
+      - clickhouse:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_USER: "squad_aegis"
+      CLICKHOUSE_PASSWORD: "squad_aegis"
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
 
   server:
-    image: registry.vmgware.dev/insidiousfiddler/squad-aegis:latest
+    image: insidiousfiddler/squad-aegis:latest
     depends_on:
       - database
+      - clickhouse
     ports:
-      - 3113:3113
+      - 3113:80
     volumes:
-      - squad-aegis:/etc/squad-aegis
-    environment:
-      - APP_PORT=3113
-      - APP_URL=http://localhost:3113
-      - APP_WEB_UI_PROXY=http://localhost:3000/
-      - INITIAL_ADMIN_USERNAME=admin
-      - INITIAL_ADMIN_PASSWORD"admin
-      - DB_HOST=database
-      - DB_PORT=5432
-      - DB_NAME=squad-aegis
-      - DB_USER=squad-aegis
-      - DB_PASS=squad-aegis
-    networks:
-      - default
+      - data:/etc/squad-aegis
+    env_file:
+      - .env
+    restart: unless-stopped
 
 volumes:
   database:
-  squad-aegis:
-
-networks:
-  default:
-    driver: bridge
+  clickhouse:
+  data:
