@@ -1,3 +1,5 @@
+ALTER TABLE public.server_bans DROP CONSTRAINT IF EXISTS fk_server_bans_rule_id_server_rules_id;
+
 DROP TABLE IF EXISTS public.player_rule_violations;
 DROP TABLE IF EXISTS public.server_rule_actions;
 DROP TABLE IF EXISTS public.server_rules;
