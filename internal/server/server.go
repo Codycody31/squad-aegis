@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
@@ -23,6 +24,7 @@ type Server struct {
 
 type Dependencies struct {
 	DB                   *sql.DB
+	Clickhouse           *clickhouse.Client
 	RconManager          *rcon_manager.RconManager
 	EventManager         *event_manager.EventManager
 	LogwatcherManager    *logwatcher_manager.LogwatcherManager
@@ -244,6 +246,17 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 					pluginGroup.DELETE("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginDelete)
 					pluginGroup.GET("/:pluginId/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogs)
 					pluginGroup.GET("/:pluginId/metrics", server.ServerPluginMetrics)
+				}
+
+				// Server Rules
+				rulesGroup := serverGroup.Group("/rules")
+				{
+					rulesGroup.Use(server.AuthHasServerPermission("manageserver"))
+					rulesGroup.GET("", server.listServerRules)
+					rulesGroup.POST("", server.createServerRule)
+					rulesGroup.PUT("/:ruleId", server.updateServerRule)
+					rulesGroup.DELETE("/:ruleId", server.AuthIsSuperAdmin(), server.deleteServerRule)
+					rulesGroup.PUT("/bulk", server.bulkUpdateServerRules) // Bulk update endpoint
 				}
 			}
 		}

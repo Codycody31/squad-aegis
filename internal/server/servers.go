@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -315,9 +316,6 @@ func (s *Server) ServerDelete(c *gin.Context) {
 		return
 	}
 
-	// Disconnect from RCON
-	_ = s.Dependencies.RconManager.DisconnectFromServer(serverId, true)
-
 	// Begin transaction
 	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
 	if err != nil {
@@ -326,23 +324,76 @@ func (s *Server) ServerDelete(c *gin.Context) {
 	}
 	defer tx.Rollback()
 
-	// Delete related records first (server_admins, server_roles, server_bans)
-	_, err = tx.ExecContext(c.Request.Context(), `DELETE FROM server_admins WHERE server_id = $1`, serverId)
+	chTx, err := s.Dependencies.Clickhouse.Begin(c.Request.Context())
 	if err != nil {
-		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete server admins"})
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to begin transaction"})
+		return
+	}
+	defer chTx.Rollback()
+
+	// TODO: Get and shutdown plugins
+	plugins := s.Dependencies.PluginManager.GetPluginInstances(serverId)
+	for _, plugin := range plugins {
+		err = s.Dependencies.PluginManager.DeletePluginInstance(serverId, plugin.ID)
+		if err != nil {
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete plugin"})
+			return
+		}
+
+		_, err = tx.ExecContext(c.Request.Context(), `DELETE FROM plugin_data WHERE plugin_instance_id = $1`, plugin.ID)
+		if err != nil {
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete plugin data"})
+			return
+		}
+	}
+
+	_, err = tx.ExecContext(c.Request.Context(), `DELETE FROM plugin_instances WHERE server_id = $1`, serverId)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete plugin instances"})
 		return
 	}
 
-	_, err = tx.ExecContext(c.Request.Context(), `DELETE FROM server_roles WHERE server_id = $1`, serverId)
-	if err != nil {
-		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete server roles"})
-		return
+	clickhouseTables := []string{
+		"squad_aegis.plugin_logs",
+		"squad_aegis.server_admin_broadcast_events",
+		"squad_aegis.server_deployable_damaged_events",
+		"squad_aegis.server_game_events_unified",
+		"squad_aegis.server_join_succeeded_events",
+		"squad_aegis.server_player_chat_messages",
+		"squad_aegis.server_player_connected_events",
+		"squad_aegis.server_player_damaged_events",
+		"squad_aegis.server_player_died_events",
+		"squad_aegis.server_player_possess_events",
+		"squad_aegis.server_player_revived_events",
+		"squad_aegis.server_player_wounded_events",
+		"squad_aegis.server_tick_rate_events",
 	}
 
-	_, err = tx.ExecContext(c.Request.Context(), `DELETE FROM server_bans WHERE server_id = $1`, serverId)
-	if err != nil {
-		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete server bans"})
-		return
+	for _, table := range clickhouseTables {
+		_, err = chTx.ExecContext(c.Request.Context(), fmt.Sprintf(`DELETE FROM %s WHERE server_id = $1`, table), serverId)
+		if err != nil {
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete plugin data from clickhouse"})
+			return
+		}
+	}
+
+	// Disconnect from RCON
+	_ = s.Dependencies.RconManager.DisconnectFromServer(serverId, true)
+
+	databaseTables := []string{
+		"public.server_admins",
+		"public.server_roles",
+		"public.server_bans",
+		"public.audit_logs",
+		"public.server_ban_list_subscriptions",
+	}
+
+	for _, table := range databaseTables {
+		_, err = tx.ExecContext(c.Request.Context(), fmt.Sprintf(`DELETE FROM %s WHERE server_id = $1`, table), serverId)
+		if err != nil {
+			responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete server data from database"})
+			return
+		}
 	}
 
 	// Delete the server
@@ -365,6 +416,11 @@ func (s *Server) ServerDelete(c *gin.Context) {
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
+	if err := chTx.Commit(); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit transaction"})
 		return
 	}

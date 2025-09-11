@@ -57,6 +57,10 @@ const bannedPlayers = ref<BannedPlayer[]>([]);
 const banLists = ref<any[]>([]);
 const subscribedBanLists = ref<any[]>([]);
 const availableBanLists = ref<any[]>([]);
+const serverRules = ref<any[]>([]);
+const playerHistory = ref<any[]>([]);
+const suggestedDuration = ref<number>(24);
+const isLoadingHistory = ref(false);
 const searchQuery = ref("");
 const showAddBanDialog = ref(false);
 const showEditBanDialog = ref(false);
@@ -83,6 +87,10 @@ interface BannedPlayer {
     updated_at: string;
     ban_list_id?: string;
     ban_list_name?: string;
+    rule_id?: string;
+    rule_name?: string;
+    rule_number?: string;
+    player_name?: string;
 }
 
 interface BannedPlayersResponse {
@@ -103,6 +111,7 @@ const formSchema = toTypedSchema(
         reason: z.string().min(1, "Reason is required"),
         duration: z.number().min(0, "Duration must be at least 0"),
         ban_list_id: z.string().optional(),
+        rule_id: z.string().optional(),
     }),
 );
 
@@ -112,6 +121,7 @@ const editFormSchema = toTypedSchema(
         reason: z.string().min(1, "Reason is required"),
         duration: z.number().min(0, "Duration must be at least 0"),
         ban_list_id: z.string().optional(),
+        rule_id: z.string().optional(),
     }),
 );
 
@@ -124,6 +134,7 @@ const form = useForm({
         reason: "",
         duration: 24,
         ban_list_id: "",
+        rule_id: "",
     },
 });
 
@@ -201,7 +212,7 @@ async function fetchBannedPlayers() {
 
 // Function to add a ban
 async function addBan(values: any) {
-    const { steam_id, player_name, reason, duration, ban_list_id } = values;
+    const { steam_id, player_name, reason, duration, ban_list_id, rule_id } = values;
 
     addBanLoading.value = true;
     error.value = null;
@@ -234,6 +245,11 @@ async function addBan(values: any) {
         // Add ban_list_id if selected
         if (ban_list_id && ban_list_id.trim()) {
             requestBody.ban_list_id = ban_list_id;
+        }
+
+        // Add rule_id if selected
+        if (rule_id && rule_id.trim()) {
+            requestBody.rule_id = rule_id;
         }
 
         const { data, error: fetchError } = await useFetch(
@@ -318,7 +334,7 @@ async function removeBan(banId: string) {
 
 // Function to edit a ban
 async function editBan(values: any) {
-    const { reason, duration, ban_list_id } = values;
+    const { reason, duration, ban_list_id, rule_id } = values;
 
     if (!editingBan.value) {
         error.value = "No ban selected for editing";
@@ -358,6 +374,14 @@ async function editBan(values: any) {
 
         if (currentBanListId !== newBanListId) {
             requestBody.ban_list_id = newBanListId || null;
+        }
+        
+        // Handle rule changes
+        const currentRuleId = editingBan.value.rule_id || "";
+        const newRuleId = rule_id || "";
+        
+        if (currentRuleId !== newRuleId) {
+            requestBody.rule_id = newRuleId || null;
         }
 
         // If no changes were made, just close the dialog
@@ -399,9 +423,34 @@ async function editBan(values: any) {
     }
 }
 
+// Function to get rule details by ID
+function getRuleDetails(ruleId: string) {
+    const rule = serverRules.value.find(r => r.id === ruleId);
+    return rule || null;
+}
+
 // Function to open edit ban dialog
-function openEditBanDialog(ban: BannedPlayer) {
+async function openEditBanDialog(ban: BannedPlayer) {
     editingBan.value = ban;
+    
+    // Ensure rules are loaded
+    if (serverRules.value.length === 0) {
+        await fetchServerRules();
+    }
+    
+    // If the ban has a rule_id but no rule_name/number, try to fetch the details
+    if (ban.rule_id && (!ban.rule_name || !ban.rule_number)) {
+        const ruleDetails = getRuleDetails(ban.rule_id);
+        if (ruleDetails) {
+            // Update the ban object with rule details
+            editingBan.value = {
+                ...ban,
+                rule_name: ruleDetails.title,
+                rule_number: ruleDetails.number
+            };
+        }
+    }
+    
     showEditBanDialog.value = true;
 }
 
@@ -552,11 +601,150 @@ function formatDate(dateString: string): string {
     return new Date(dateString).toLocaleString();
 }
 
+// Function to fetch server rules
+async function fetchServerRules() {
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+    const token = cookieToken.value;
+
+    if (!token) return;
+
+    try {
+        const { data, error: fetchError } = await useFetch(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/rules`,
+            {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            }
+        );
+
+        if (fetchError.value) {
+            throw new Error(fetchError.value.message || "Failed to fetch server rules");
+        }
+
+        if (data.value) {
+            // Flatten the rules hierarchy for easier selection in dropdown
+            serverRules.value = flattenRulesForDropdown(Array.isArray(data.value) ? data.value : []);
+        }
+    } catch (err: any) {
+        console.error("Failed to fetch server rules:", err);
+    }
+}
+
+// Helper function to flatten rules hierarchy for dropdown
+function flattenRulesForDropdown(rules: any[], parentTitle = "", parentNumber = "", result: any[] = []) {
+    rules.forEach((rule, index) => {
+        // Create a formatted title that shows the hierarchy
+        const formattedTitle = parentTitle 
+            ? `${parentTitle} > ${rule.title}`
+            : rule.title;
+            
+        // Create a rule number (e.g., "1.2.3")
+        const ruleNumber = parentNumber 
+            ? `${parentNumber}.${index + 1}`
+            : `${index + 1}`;
+            
+        result.push({
+            id: rule.id,
+            title: formattedTitle,
+            description: rule.description,
+            number: ruleNumber
+        });
+
+        // Process sub-rules if they exist
+        if (rule.sub_rules && rule.sub_rules.length > 0) {
+            flattenRulesForDropdown(rule.sub_rules, formattedTitle, ruleNumber, result);
+        }
+    });
+    
+    return result;
+}
+
+// Function to fetch player ban history
+async function fetchPlayerBanHistory(steamId: string) {
+    if (!steamId || steamId.length !== 17) {
+        playerHistory.value = [];
+        return;
+    }
+    
+    isLoadingHistory.value = true;
+    
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
+    const token = cookieToken.value;
+
+    if (!token) {
+        isLoadingHistory.value = false;
+        return;
+    }
+
+    try {
+        const { data, error: fetchError } = await useFetch<any>(
+            `${runtimeConfig.public.backendApi}/players/${steamId}/ban-history`,
+            {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            }
+        );
+
+        if (fetchError.value) {
+            throw new Error(fetchError.value.message || "Failed to fetch player history");
+        }
+
+        if (data.value && data.value.data) {
+            playerHistory.value = data.value.data.history || [];
+            // Calculate suggested ban duration based on history
+            calculateSuggestedDuration();
+        } else {
+            playerHistory.value = [];
+            suggestedDuration.value = 24; // Default for first offenders
+        }
+    } catch (err: any) {
+        console.error("Failed to fetch player history:", err);
+        playerHistory.value = [];
+    } finally {
+        isLoadingHistory.value = false;
+    }
+}
+
+// Calculate suggested ban duration based on player history
+function calculateSuggestedDuration() {
+    if (playerHistory.value.length === 0) {
+        // First offense - suggest 24 hours
+        suggestedDuration.value = 1;
+        return;
+    }
+    
+    // Sort history by date (newest first)
+    const sortedHistory = [...playerHistory.value].sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    
+    // Count previous offenses
+    const offenseCount = sortedHistory.length;
+    
+    // Progressive ban duration based on number of previous offenses
+    if (offenseCount === 1) {
+        suggestedDuration.value = 3; // 3 days for second offense
+    } else if (offenseCount === 2) {
+        suggestedDuration.value = 7; // 7 days for third offense
+    } else if (offenseCount === 3) {
+        suggestedDuration.value = 14; // 14 days for fourth offense
+    } else {
+        suggestedDuration.value = 0; // Permanent ban for repeat offenders
+    }
+}
+
 // Setup auto-refresh
 onMounted(async () => {
     await fetchBanLists();
     await fetchServerBanListSubscriptions();
     await fetchBannedPlayers();
+    await fetchServerRules();
 });
 
 // Manual refresh function
@@ -564,6 +752,7 @@ async function refreshData() {
     await fetchBanLists();
     await fetchServerBanListSubscriptions();
     await fetchBannedPlayers();
+    await fetchServerRules();
 }
 
 function copyBanCfgUrl() {
@@ -593,6 +782,7 @@ function copyBanCfgUrl() {
                         reason: '',
                         duration: 1,
                         ban_list_id: '',
+                        rule_id: '',
                     }"
                 >
                     <Dialog v-model:open="showAddBanDialog">
@@ -622,11 +812,50 @@ function copyBanCfgUrl() {
                                                 <Input
                                                     placeholder="76561198012345678"
                                                     v-bind="componentField"
+                                                    @input="(e: Event) => {
+                                                        const target = e.target as HTMLInputElement;
+                                                        if (target.value.length === 17) {
+                                                            fetchPlayerBanHistory(target.value);
+                                                        }
+                                                    }"
                                                 />
                                             </FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
+                                    
+                                    <!-- Player History Loading Indicator -->
+                                    <div v-if="isLoadingHistory" class="border rounded-md p-3 bg-muted/50 flex items-center">
+                                        <div class="animate-spin h-5 w-5 border-2 border-primary border-t-transparent rounded-full mr-2"></div>
+                                        <span class="text-sm">Looking up player history...</span>
+                                    </div>
+                                    
+                                    <!-- Player Ban History Card -->
+                                    <div v-else-if="playerHistory.length > 0" class="border rounded-md p-3 bg-muted/50">
+                                        <h4 class="font-medium mb-2 flex items-center">
+                                            <span class="text-orange-500 mr-1">⚠️</span> 
+                                            Previous Ban History
+                                        </h4>
+                                        <p class="text-sm text-muted-foreground mb-2">
+                                            This player has been banned {{ playerHistory.length }} time{{ playerHistory.length > 1 ? 's' : '' }} before.
+                                        </p>
+                                        <ul class="text-sm space-y-1 mb-2">
+                                            <li v-for="(ban, index) in playerHistory.slice(0, 3)" :key="index">
+                                                <span class="text-muted-foreground">{{ new Date(ban.created_at).toLocaleDateString() }}:</span> 
+                                                {{ ban.reason }}
+                                            </li>
+                                        </ul>
+                                        <div class="flex items-center border-t pt-2 mt-2">
+                                            <span class="mr-2 text-sm">Suggested ban:</span>
+                                            <Badge variant="destructive" v-if="suggestedDuration === 0">
+                                                Permanent
+                                            </Badge>
+                                            <Badge variant="default" v-else>
+                                                {{ suggestedDuration }} {{ suggestedDuration === 1 ? 'day' : 'days' }}
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                    
                                     <FormField
                                         name="player_name"
                                         v-slot="{ componentField }"
@@ -645,6 +874,36 @@ function copyBanCfgUrl() {
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
+                                    
+                                    <FormField
+                                        name="rule_id"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Rule Violated (Optional)</FormLabel>
+                                            <FormControl>
+                                                <Select v-bind="componentField">
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Select the rule that was violated" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem
+                                                            v-for="rule in serverRules"
+                                                            :key="rule.id"
+                                                            :value="rule.id"
+                                                        >
+                                                            {{ rule.title }}
+                                                        </SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </FormControl>
+                                            <FormDescription>
+                                                Select which server rule was violated
+                                            </FormDescription>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+                                    
                                     <FormField
                                         name="reason"
                                         v-slot="{ componentField }"
@@ -660,26 +919,38 @@ function copyBanCfgUrl() {
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
+                                    
                                     <FormField
                                         name="duration"
-                                        v-slot="{ componentField }"
+                                        v-slot="{ componentField, setValue }"
                                     >
                                         <FormItem>
                                             <FormLabel>Days</FormLabel>
-                                            <FormControl>
-                                                <Input
-                                                    type="number"
-                                                    min="0"
-                                                    v-bind="componentField"
-                                                />
-                                            </FormControl>
+                                            <div class="flex items-center space-x-2">
+                                                <FormControl>
+                                                    <Input
+                                                        type="number"
+                                                        min="0"
+                                                        v-bind="componentField"
+                                                    />
+                                                </FormControl>
+                                                <Button
+                                                    type="button" 
+                                                    variant="outline" 
+                                                    size="sm"
+                                                    @click="setValue(suggestedDuration)"
+                                                    v-if="playerHistory.length > 0"
+                                                >
+                                                    Use Suggested
+                                                </Button>
+                                            </div>
                                             <FormDescription
-                                                >Duration in days. 0 is
-                                                permanent</FormDescription
+                                                >Duration in days. 0 is permanent</FormDescription
                                             >
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
+                                    
                                     <FormField
                                         name="ban_list_id"
                                         v-slot="{ componentField }"
@@ -744,6 +1015,7 @@ function copyBanCfgUrl() {
                         reason: editingBan?.reason || '',
                         duration: editingBan?.duration,
                         ban_list_id: editingBan?.ban_list_id || '',
+                        rule_id: editingBan?.rule_id || '',
                     }"
                 >
                     <Dialog v-model:open="showEditBanDialog">
@@ -759,6 +1031,45 @@ function copyBanCfgUrl() {
                                 @submit="handleSubmit($event, editBan)"
                             >
                                 <div class="grid gap-4 py-4">
+                                    <!-- Display player information if available -->
+                                    <div v-if="editingBan?.player_name" class="border rounded-md p-3 bg-muted/50">
+                                        <h4 class="font-medium mb-2">Player Information</h4>
+                                        <div class="text-sm">
+                                            <p><span class="text-muted-foreground">Name:</span> {{ editingBan.player_name }}</p>
+                                            <p><span class="text-muted-foreground">Steam ID:</span> {{ editingBan.steam_id }}</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Rule selector -->
+                                    <FormField
+                                        name="rule_id"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Rule Violated (Optional)</FormLabel>
+                                            <FormControl>
+                                                <Select v-bind="componentField">
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Select the rule that was violated" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem
+                                                            v-for="rule in serverRules"
+                                                            :key="rule.id"
+                                                            :value="rule.id"
+                                                        >
+                                                            {{ rule.title }}
+                                                        </SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </FormControl>
+                                            <FormDescription>
+                                                Select which server rule was violated
+                                            </FormDescription>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+                                    
                                     <FormField
                                         name="reason"
                                         v-slot="{ componentField }"
@@ -912,6 +1223,7 @@ function copyBanCfgUrl() {
                             <TableRow>
                                 <TableHead>Steam ID</TableHead>
                                 <TableHead>Reason</TableHead>
+                                <TableHead>Rule</TableHead>
                                 <TableHead>Banned At</TableHead>
                                 <TableHead>Duration</TableHead>
                                 <TableHead>Source</TableHead>
@@ -930,8 +1242,20 @@ function copyBanCfgUrl() {
                                     <div class="font-medium">
                                         {{ player.steam_id }}
                                     </div>
+                                    <div v-if="player.player_name" class="text-xs text-muted-foreground">
+                                        {{ player.player_name }}
+                                    </div>
                                 </TableCell>
                                 <TableCell>{{ player.reason }}</TableCell>
+                                <TableCell>
+                                    <div v-if="player.rule_name" class="flex flex-col">
+                                        <span class="font-medium">{{ player.rule_name }}</span>
+                                        <span v-if="player.rule_number" class="text-xs text-muted-foreground">
+                                            Rule #{{ player.rule_number }}
+                                        </span>
+                                    </div>
+                                    <span v-else class="text-muted-foreground text-xs">No rule specified</span>
+                                </TableCell>
                                 <TableCell>{{
                                     formatDate(player.created_at)
                                 }}</TableCell>

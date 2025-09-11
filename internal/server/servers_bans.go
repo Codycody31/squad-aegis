@@ -473,6 +473,8 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		}
 	}
 
+	// TODO: Support updating/removing relevant rule_id
+
 	// If no fields to update, return error
 	if len(updateFields) == 0 {
 		responses.BadRequest(c, "No fields to update", &gin.H{"error": "At least one field must be provided for update"})
