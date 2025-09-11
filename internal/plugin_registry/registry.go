@@ -22,6 +22,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
 	"go.codycody31.dev/squad-aegis/internal/plugins/server_seeder_whitelist"
+	"go.codycody31.dev/squad-aegis/internal/plugins/squad_leader_whitelist"
 	"go.codycody31.dev/squad-aegis/internal/plugins/switch_teams"
 	"go.codycody31.dev/squad-aegis/internal/plugins/team_randomizer"
 )
@@ -147,6 +148,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Server Seeder Whitelist plugin
 	if err := pm.RegisterPlugin(server_seeder_whitelist.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Server Seeder Whitelist plugin")
+		return err
+	}
+
+	// Register Squad Leader Whitelist plugin
+	if err := pm.RegisterPlugin(squad_leader_whitelist.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Squad Leader Whitelist plugin")
 		return err
 	}
 
