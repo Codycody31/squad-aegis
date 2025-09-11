@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
@@ -235,6 +236,7 @@ func (s *Server) ServerPluginUpdate(c *gin.Context) {
 		return
 	}
 
+	log.Info().Str("server_id", serverID.String()).Str("plugin_id", instanceID.String()).Msg("Updated plugin instance configuration")
 	responses.Success(c, "Plugin instance updated successfully", nil)
 }
 
@@ -262,6 +264,7 @@ func (s *Server) ServerPluginEnable(c *gin.Context) {
 		return
 	}
 
+	log.Info().Str("server_id", serverID.String()).Str("plugin_id", instanceID.String()).Msg("Enabled plugin instance")
 	responses.Success(c, "Plugin instance enabled successfully", nil)
 }
 
@@ -289,6 +292,10 @@ func (s *Server) ServerPluginDisable(c *gin.Context) {
 		return
 	}
 
+	log.Debug().
+		Str("server_id", serverID.String()).
+		Str("plugin_instance_id", instanceID.String()).
+		Msg("Plugin instance disabled")
 	responses.Success(c, "Plugin instance disabled successfully", nil)
 }
 
@@ -316,6 +323,7 @@ func (s *Server) ServerPluginDelete(c *gin.Context) {
 		return
 	}
 
+	log.Info().Str("server_id", serverID.String()).Str("plugin_id", instanceID.String()).Msg("Deleted plugin instance")
 	responses.Success(c, "Plugin instance deleted successfully", nil)
 }
 

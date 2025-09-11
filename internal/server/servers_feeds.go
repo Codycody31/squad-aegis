@@ -2,13 +2,14 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
@@ -22,7 +23,17 @@ type FeedEvent struct {
 	Data      map[string]interface{} `json:"data"`
 }
 
-// ServerFeeds handles subscribing to live server events for feeds (chat, connections, teamkills)
+// WebSocket upgrader with permissive settings for development
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		// Allow connections from any origin (adjust for production)
+		return true
+	},
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
+
+// ServerFeeds handles subscribing to live server events for feeds (chat, connections, teamkills) via WebSocket
 func (s *Server) ServerFeeds(c *gin.Context) {
 	user := s.getUserFromSession(c)
 
@@ -61,6 +72,14 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 		}
 	}
 
+	// Upgrade HTTP connection to WebSocket
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		responses.BadRequest(c, "Failed to upgrade to WebSocket", &gin.H{"error": err.Error()})
+		return
+	}
+	defer conn.Close()
+
 	// Subscribe to events using the centralized event manager
 	subscriber := s.Dependencies.EventManager.Subscribe(event_manager.EventFilter{
 		Types:     eventTypes,
@@ -68,44 +87,48 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 	}, &serverId, 100)
 	defer s.Dependencies.EventManager.Unsubscribe(subscriber.ID)
 
-	// Set headers for SSE
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Connection", "keep-alive")
-	c.Writer.Header().Set("Transfer-Encoding", "chunked")
-	c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	c.Writer.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
-	c.Writer.Flush()
-
-	// Create a context that is canceled when the client disconnects
+	// Create a context that is canceled when the connection is closed
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 
-	// Create a goroutine to detect client disconnection
-	go func() {
-		<-c.Request.Context().Done()
-		cancel()
-	}()
+	// Send initial connection message
+	connectMsg := map[string]interface{}{
+		"type":    "connected",
+		"message": "Connected to feeds",
+		"types":   feedTypes,
+	}
+	if err := conn.WriteJSON(connectMsg); err != nil {
+		log.Error().Err(err).Msg("Failed to send initial connection message")
+		return
+	}
 
-	// Send a ping event every 30 seconds to keep the connection alive
+	// Set up ping/pong handlers for connection health
+	conn.SetPingHandler(func(appData string) error {
+		return conn.WriteMessage(websocket.PongMessage, []byte(appData))
+	})
+
+	// Send ping every 30 seconds to keep connection alive
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	// Create audit log for connection
-	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:feeds:connect",
-		map[string]interface{}{"feed_types": feedTypes})
-
-	// Send initial connection event
-	fmt.Fprintf(c.Writer, "event: connected\ndata: {\"message\": \"Connected to feeds\", \"types\": %s}\n\n",
-		formatStringArray(feedTypes))
-	c.Writer.Flush()
+	// Start a goroutine to handle client messages (for connection health)
+	go func() {
+		defer cancel()
+		for {
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					// Log unexpected close
+				}
+				return
+			}
+		}
+	}()
 
 	// Send events to client
 	for {
 		select {
 		case <-ctx.Done():
-			// Client disconnected
-			s.CreateAuditLog(context.Background(), &serverId, &user.Id, "server:feeds:disconnect", nil)
 			return
 		case event := <-subscriber.Channel:
 			// Format event for feeds
@@ -114,19 +137,18 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 				continue
 			}
 
-			// Convert event to JSON
-			eventJSON, err := json.Marshal(feedEvent)
-			if err != nil {
-				continue
-			}
-
 			// Send event to client
-			fmt.Fprintf(c.Writer, "event: feed\ndata: %s\n\n", eventJSON)
-			c.Writer.Flush()
+			if err := conn.WriteJSON(feedEvent); err != nil {
+				// Connection likely closed
+				log.Error().Err(err).Msg("Failed to send event to WebSocket client")
+				return
+			}
 		case <-ticker.C:
-			// Send ping event
-			fmt.Fprintf(c.Writer, "event: ping\ndata: %d\n\n", time.Now().Unix())
-			c.Writer.Flush()
+			// Send ping to keep connection alive
+			if err := conn.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
+				// Connection likely closed
+				return
+			}
 		}
 	}
 }
@@ -306,12 +328,6 @@ func (s *Server) getHistoricalTeamkills(serverId uuid.UUID, limit int) ([]FeedEv
 	return []FeedEvent{}, nil
 }
 
-// getClickHouseClient safely gets the ClickHouse client through PluginManager
-func (s *Server) getClickHouseClient() interface{} {
-	// TODO: Implement proper ClickHouse client access
-	return nil
-}
-
 // Helper functions
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
@@ -320,11 +336,6 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
-}
-
-func formatStringArray(arr []string) string {
-	data, _ := json.Marshal(arr)
-	return string(data)
 }
 
 func extractPlayerName(playerController string) string {

@@ -93,6 +93,11 @@ func (pm *PluginManager) Stop() error {
 	pm.mu.Lock()
 	for serverID, serverPlugins := range pm.plugins {
 		for instanceID, instance := range serverPlugins {
+			log.Trace().
+				Str("serverID", serverID.String()).
+				Str("instanceID", instanceID.String()).
+				Str("pluginID", instance.PluginID).
+				Msg("Stopping plugin instance")
 			if err := pm.stopPluginInstance(instance); err != nil {
 				log.Error().
 					Str("serverID", serverID.String()).
@@ -100,6 +105,21 @@ func (pm *PluginManager) Stop() error {
 					Str("pluginID", instance.PluginID).
 					Err(err).
 					Msg("Failed to stop plugin instance")
+			} else {
+				log.Info().
+					Str("serverID", serverID.String()).
+					Str("instanceID", instanceID.String()).
+					Str("pluginID", instance.PluginID).
+					Msg("Stopped plugin instance")
+			}
+
+			// Check if plugin was forcefully killed due to timeout
+			if instance.LastError == "Plugin shutdown timed out after 30 seconds" {
+				log.Warn().
+					Str("serverID", serverID.String()).
+					Str("instanceID", instanceID.String()).
+					Str("pluginID", instance.PluginID).
+					Msg("Plugin instance was forcefully killed due to shutdown timeout")
 			}
 		}
 	}
@@ -108,11 +128,25 @@ func (pm *PluginManager) Stop() error {
 	// Stop all connectors
 	pm.connectorMu.Lock()
 	for connectorID, instance := range pm.connectors {
+		log.Trace().
+			Str("connectorID", connectorID).
+			Msg("Stopping connector instance")
 		if err := pm.stopConnectorInstance(instance); err != nil {
 			log.Error().
 				Str("connectorID", connectorID).
 				Err(err).
 				Msg("Failed to stop connector instance")
+		} else {
+			log.Info().
+				Str("connectorID", connectorID).
+				Msg("Stopped connector instance")
+		}
+
+		// Check if connector was forcefully killed due to timeout
+		if instance.LastError == "Connector shutdown timed out after 30 seconds" {
+			log.Warn().
+				Str("connectorID", connectorID).
+				Msg("Connector instance was forcefully killed due to shutdown timeout")
 		}
 	}
 	pm.connectorMu.Unlock()
@@ -253,6 +287,7 @@ func (pm *PluginManager) GetPluginInstances(serverID uuid.UUID) []*PluginInstanc
 		// Create a copy with masked sensitive fields
 		maskedInstance := *instance
 		if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
+			maskedInstance.PluginName = definition.Name
 			maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
 		}
 		instances = append(instances, &maskedInstance)
@@ -279,6 +314,7 @@ func (pm *PluginManager) GetPluginInstance(serverID, instanceID uuid.UUID) (*Plu
 	// Create a copy with masked sensitive fields
 	maskedInstance := *instance
 	if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
+		maskedInstance.PluginName = definition.Name
 		maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
 	}
 
@@ -427,6 +463,15 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 			Str("instanceID", instanceID.String()).
 			Err(err).
 			Msg("Failed to stop plugin instance during disable")
+	}
+
+	// Check if plugin was forcefully killed due to timeout
+	if instance.LastError == "Plugin shutdown timed out after 30 seconds" {
+		log.Warn().
+			Str("serverID", serverID.String()).
+			Str("instanceID", instanceID.String()).
+			Str("pluginID", instance.PluginID).
+			Msg("Plugin instance was forcefully killed due to shutdown timeout during disable")
 	}
 
 	instance.Enabled = false
@@ -636,6 +681,10 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 }
 
 func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
+	if instance.Status != PluginStatusRunning {
+		return nil // Not running, nothing to do
+	}
+
 	instance.Status = PluginStatusStopping
 
 	// Cancel context
@@ -643,15 +692,34 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 		instance.Cancel()
 	}
 
-	// Stop plugin
-	if err := instance.Plugin.Stop(); err != nil {
-		instance.Status = PluginStatusError
-		instance.LastError = err.Error()
-		return fmt.Errorf("failed to stop plugin: %w", err)
-	}
+	// Stop plugin with 30-second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	instance.Status = PluginStatusStopped
-	return nil
+	stopChan := make(chan error, 1)
+
+	go func() {
+		stopChan <- instance.Plugin.Stop()
+	}()
+
+	select {
+	case err := <-stopChan:
+		if err != nil {
+			instance.Status = PluginStatusError
+			instance.LastError = err.Error()
+			return fmt.Errorf("failed to stop plugin: %w", err)
+		}
+		instance.Status = PluginStatusStopped
+		return nil
+	case <-ctx.Done():
+		log.Warn().
+			Str("pluginID", instance.PluginID).
+			Str("instanceID", instance.ID.String()).
+			Msg("Plugin shutdown timed out after 30 seconds, forcefully killing it")
+		instance.Status = PluginStatusStopped
+		instance.LastError = "Plugin shutdown timed out after 30 seconds"
+		return nil
+	}
 }
 
 func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID) *PluginAPIs {
@@ -922,16 +990,16 @@ func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, befo
 	}
 
 	// Build the query - aggregate logs from all plugins for this server
-	query := `SELECT 
-		log_id, 
-		timestamp, 
-		level, 
-		message, 
-		error_message, 
-		fields, 
+	query := `SELECT
+		log_id,
+		timestamp,
+		level,
+		message,
+		error_message,
+		fields,
 		ingested_at,
 		plugin_instance_id
-	FROM squad_aegis.plugin_logs 
+	FROM squad_aegis.plugin_logs
 	WHERE server_id = ?`
 	args := []interface{}{serverID}
 

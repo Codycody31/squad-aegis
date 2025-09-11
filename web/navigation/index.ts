@@ -34,13 +34,21 @@ const navigationItems: NavigationItem[] = [
     icon: "mdi:ban",
   },
   {
+    title: "Backup & Restore",
+    to: {
+      name: "backup",
+    },
+    icon: "mdi:backup-restore",
+    permissions: ["super_admin"],
+  },
+  {
     title: "Connectors",
     to: {
       name: "connectors",
     },
     icon: "lucide:plug",
     permissions: ["super_admin"],
-  }
+  },
 ];
 
 export default navigationItems;

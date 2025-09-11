@@ -1,6 +1,6 @@
-// Based on https://github.com/mikebjoyce/squadjs-squadlead-whitelister/tree/main/squad-leader-whitelist.js
+// Based on the server seeder whitelist plugin, adapted for squad leadership
 
-package server_seeder_whitelist
+package squad_leader_whitelist
 
 import (
 	"context"
@@ -16,8 +16,8 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
 
-// ServerSeederWhitelistPlugin manages a progressive whitelist for players who help seed the server
-type ServerSeederWhitelistPlugin struct {
+// SquadLeaderWhitelistPlugin manages a progressive whitelist for players who lead squads effectively
+type SquadLeaderWhitelistPlugin struct {
 	// Plugin configuration
 	config map[string]interface{}
 	apis   *plugin_manager.PluginAPIs
@@ -34,24 +34,35 @@ type ServerSeederWhitelistPlugin struct {
 	shuttingDown      bool
 
 	// Player tracking
-	playerProgress map[string]*PlayerProgressRecord
+	playerProgress     map[string]*PlayerProgressRecord
+	squadLeaderSession map[string]*SquadLeaderSession
 }
 
-// PlayerProgressRecord tracks a player's seeding progress
+// PlayerProgressRecord tracks a player's squad leadership progress
 type PlayerProgressRecord struct {
-	SteamID        string    `json:"steam_id"`
-	Progress       float64   `json:"progress"`
-	LastProgressed time.Time `json:"last_progressed"`
-	TotalSeeded    float64   `json:"total_seeded"`
-	LastSeen       time.Time `json:"last_seen"`
+	SteamID         string    `json:"steam_id"`
+	Progress        float64   `json:"progress"`
+	LastProgressed  time.Time `json:"last_progressed"`
+	TotalLeadership float64   `json:"total_leadership"`
+	LastSeen        time.Time `json:"last_seen"`
+}
+
+// SquadLeaderSession tracks an active squad leadership session
+type SquadLeaderSession struct {
+	SteamID   string    `json:"steam_id"`
+	StartTime time.Time `json:"start_time"`
+	LastCheck time.Time `json:"last_check"`
+	SquadSize int       `json:"squad_size"`
+	SquadName string    `json:"squad_name"`
+	Unlocked  bool      `json:"unlocked"`
 }
 
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "server_seeder_whitelist",
-		Name:                   "Server Seeder Whitelist",
-		Description:            "Tracks players who help seed the server and progressively adds them to a whitelist based on time spent seeding. Players earn progress when server is below seeding threshold and lose progress over time when inactive.",
+		ID:                     "squad_leader_whitelist",
+		Name:                   "Squad Leader Whitelist",
+		Description:            "Tracks players who serve as squad leaders with 5+ members and progressively adds them to a whitelist based on time spent leading. Players earn progress when leading unlocked squads with minimum members and lose progress over time when inactive.",
 		Version:                "1.0.0",
 		Author:                 "Squad Aegis",
 		AllowMultipleInstances: false,
@@ -61,46 +72,46 @@ func Define() plugin_manager.PluginDefinition {
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
 				{
-					Name:        "seeding_threshold",
-					Description: "Player count below which server is considered in seeding mode.",
+					Name:        "min_squad_size",
+					Description: "Minimum squad size required for squad leadership progress.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     50,
+					Default:     5,
 				},
 				{
 					Name:        "hours_to_whitelist",
-					Description: "Hours of seeding required to reach 100% whitelist status.",
+					Description: "Hours of squad leadership required to reach 100% whitelist status.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     6,
+					Default:     8,
 				},
 				{
 					Name:        "whitelist_duration_days",
 					Description: "How many days whitelist status lasts before expiring.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     7,
+					Default:     14,
 				},
 				{
 					Name:        "decay_after_hours",
-					Description: "Hours after last seeding before progress starts to decay.",
+					Description: "Hours after last leadership before progress starts to decay.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     48,
+					Default:     72,
 				},
 				{
 					Name:        "min_players_for_decay",
 					Description: "Minimum players on server for decay to be active.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     60,
+					Default:     40,
 				},
 				{
-					Name:        "min_players_for_seeding",
-					Description: "Minimum players on server before seeding progress can be awarded.",
+					Name:        "min_players_for_leadership",
+					Description: "Minimum players on server before leadership progress can be awarded.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     10,
+					Default:     20,
 				},
 				{
 					Name:        "progress_interval_seconds",
@@ -117,11 +128,18 @@ func Define() plugin_manager.PluginDefinition {
 					Default:     3600, // 1 hour
 				},
 				{
+					Name:        "require_unlocked_squad",
+					Description: "Only award progress for leading unlocked squads.",
+					Required:    false,
+					Type:        plug_config_schema.FieldTypeBool,
+					Default:     true,
+				},
+				{
 					Name:        "whitelist_group_name",
-					Description: "Admin group name for whitelisted players.",
+					Description: "Admin group name for whitelisted squad leaders.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeString,
-					Default:     "seeder_whitelist",
+					Default:     "squad_leader_whitelist",
 				},
 				{
 					Name:        "wait_on_new_games",
@@ -135,11 +153,11 @@ func Define() plugin_manager.PluginDefinition {
 					Description: "Time to wait after new game before resuming progress tracking in seconds.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     120,
+					Default:     300, // 5 minutes
 				},
 				{
 					Name:        "enable_chat_command",
-					Description: "Enable the !wl chat command for players to check their progress.",
+					Description: "Enable the !slwl chat command for players to check their progress.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeBool,
 					Default:     true,
@@ -163,14 +181,14 @@ func Define() plugin_manager.PluginDefinition {
 					Description: "How often to sync temporary admin status with current whitelist in minutes.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     15,
+					Default:     30,
 				},
 				{
 					Name:        "admin_renewal_hours_before_expiry",
 					Description: "How many hours before expiration to renew admin roles for qualifying players.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     24,
+					Default:     48,
 				},
 			},
 		},
@@ -179,23 +197,25 @@ func Define() plugin_manager.PluginDefinition {
 			event_manager.EventTypeLogNewGame,
 			event_manager.EventTypeRconChatMessage,
 			event_manager.EventTypeLogPlayerConnected,
+			// event_manager.EventTypeLogPlayerSquadChange,
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
-			return &ServerSeederWhitelistPlugin{
-				playerProgress: make(map[string]*PlayerProgressRecord),
+			return &SquadLeaderWhitelistPlugin{
+				playerProgress:     make(map[string]*PlayerProgressRecord),
+				squadLeaderSession: make(map[string]*SquadLeaderSession),
 			}
 		},
 	}
 }
 
 // GetDefinition returns the plugin definition
-func (p *ServerSeederWhitelistPlugin) GetDefinition() plugin_manager.PluginDefinition {
+func (p *SquadLeaderWhitelistPlugin) GetDefinition() plugin_manager.PluginDefinition {
 	return Define()
 }
 
 // Initialize initializes the plugin with its configuration and dependencies
-func (p *ServerSeederWhitelistPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
+func (p *SquadLeaderWhitelistPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -204,6 +224,7 @@ func (p *ServerSeederWhitelistPlugin) Initialize(config map[string]interface{}, 
 	p.status = plugin_manager.PluginStatusStopped
 	p.stopProgressRound = false
 	p.playerProgress = make(map[string]*PlayerProgressRecord)
+	p.squadLeaderSession = make(map[string]*SquadLeaderSession)
 
 	// Validate config
 	definition := p.GetDefinition()
@@ -224,7 +245,7 @@ func (p *ServerSeederWhitelistPlugin) Initialize(config map[string]interface{}, 
 }
 
 // Start begins plugin execution
-func (p *ServerSeederWhitelistPlugin) Start(ctx context.Context) error {
+func (p *SquadLeaderWhitelistPlugin) Start(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -256,7 +277,7 @@ func (p *ServerSeederWhitelistPlugin) Start(ctx context.Context) error {
 }
 
 // Stop gracefully stops the plugin
-func (p *ServerSeederWhitelistPlugin) Stop() error {
+func (p *SquadLeaderWhitelistPlugin) Stop() error {
 	// Check status first without holding mutex for too long
 	p.mu.Lock()
 	if p.status == plugin_manager.PluginStatusStopped {
@@ -305,7 +326,7 @@ func (p *ServerSeederWhitelistPlugin) Stop() error {
 }
 
 // HandleEvent processes events
-func (p *ServerSeederWhitelistPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
+func (p *SquadLeaderWhitelistPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
 	switch event.Type {
 	case "LOG_NEW_GAME":
 		return p.handleNewGame(event)
@@ -313,26 +334,28 @@ func (p *ServerSeederWhitelistPlugin) HandleEvent(event *plugin_manager.PluginEv
 		return p.handleChatMessage(event)
 	case "LOG_PLAYER_CONNECTED":
 		return p.handlePlayerConnected(event)
+	case "LOG_PLAYER_SQUAD_CHANGE":
+		return p.handleSquadChange(event)
 	}
 	return nil
 }
 
 // GetStatus returns the current plugin status
-func (p *ServerSeederWhitelistPlugin) GetStatus() plugin_manager.PluginStatus {
+func (p *SquadLeaderWhitelistPlugin) GetStatus() plugin_manager.PluginStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.status
 }
 
 // GetConfig returns the current plugin configuration
-func (p *ServerSeederWhitelistPlugin) GetConfig() map[string]interface{} {
+func (p *SquadLeaderWhitelistPlugin) GetConfig() map[string]interface{} {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.config
 }
 
 // UpdateConfig updates the plugin configuration
-func (p *ServerSeederWhitelistPlugin) UpdateConfig(config map[string]interface{}) error {
+func (p *SquadLeaderWhitelistPlugin) UpdateConfig(config map[string]interface{}) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -382,8 +405,8 @@ func (p *ServerSeederWhitelistPlugin) UpdateConfig(config map[string]interface{}
 		}
 	}
 
-	p.apis.LogAPI.Info("Server Seeder Whitelist plugin configuration updated", map[string]interface{}{
-		"seeding_threshold":       config["seeding_threshold"],
+	p.apis.LogAPI.Info("Squad Leader Whitelist plugin configuration updated", map[string]interface{}{
+		"min_squad_size":          config["min_squad_size"],
 		"hours_to_whitelist":      config["hours_to_whitelist"],
 		"whitelist_duration_days": config["whitelist_duration_days"],
 	})
@@ -392,22 +415,23 @@ func (p *ServerSeederWhitelistPlugin) UpdateConfig(config map[string]interface{}
 }
 
 // handleNewGame processes new game events
-func (p *ServerSeederWhitelistPlugin) handleNewGame(event *plugin_manager.PluginEvent) error {
+func (p *SquadLeaderWhitelistPlugin) handleNewGame(event *plugin_manager.PluginEvent) error {
 	if !p.getBoolConfig("wait_on_new_games") {
 		return nil
 	}
 
-	// Temporarily pause progress tracking
+	// Temporarily pause progress tracking and clear squad sessions
 	p.mu.Lock()
 	p.stopProgressRound = true
+	p.squadLeaderSession = make(map[string]*SquadLeaderSession) // Clear sessions on new game
 	p.mu.Unlock()
 
 	waitTime := p.getIntConfig("wait_time_on_new_game")
 	if waitTime <= 0 {
-		waitTime = 120
+		waitTime = 300
 	}
 
-	p.apis.LogAPI.Info("New game detected - temporarily pausing seeder progress tracking", map[string]interface{}{
+	p.apis.LogAPI.Info("New game detected - temporarily pausing squad leader progress tracking", map[string]interface{}{
 		"wait_time_seconds": waitTime,
 	})
 
@@ -421,7 +445,7 @@ func (p *ServerSeederWhitelistPlugin) handleNewGame(event *plugin_manager.Plugin
 			p.mu.Lock()
 			p.stopProgressRound = false
 			p.mu.Unlock()
-			p.apis.LogAPI.Info("Resuming seeder progress tracking after new game wait period", nil)
+			p.apis.LogAPI.Info("Resuming squad leader progress tracking after new game wait period", nil)
 		case <-p.ctx.Done():
 			return
 		}
@@ -431,7 +455,7 @@ func (p *ServerSeederWhitelistPlugin) handleNewGame(event *plugin_manager.Plugin
 }
 
 // handleChatMessage processes chat messages for the progress command
-func (p *ServerSeederWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
+func (p *SquadLeaderWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
 	if !p.getBoolConfig("enable_chat_command") {
 		return nil
 	}
@@ -441,7 +465,7 @@ func (p *ServerSeederWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager
 		return fmt.Errorf("invalid event data type")
 	}
 
-	if event.Message != "!wl" && event.Message != "!progress" {
+	if event.Message != "!slwl" && event.Message != "!squadleader" {
 		return nil
 	}
 
@@ -449,7 +473,7 @@ func (p *ServerSeederWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager
 }
 
 // handlePlayerConnected tracks when players connect for statistics
-func (p *ServerSeederWhitelistPlugin) handlePlayerConnected(event *plugin_manager.PluginEvent) error {
+func (p *SquadLeaderWhitelistPlugin) handlePlayerConnected(event *plugin_manager.PluginEvent) error {
 	// Extract player info from event data
 	eventData, ok := event.Data.(map[string]interface{})
 	if !ok {
@@ -471,36 +495,91 @@ func (p *ServerSeederWhitelistPlugin) handlePlayerConnected(event *plugin_manage
 	return nil
 }
 
+// handleSquadChange tracks squad membership changes to identify squad leaders
+func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.PluginEvent) error {
+	// Extract squad change info from event data
+	eventData, ok := event.Data.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	steamID, ok := eventData["steam_id"].(string)
+	if !ok || steamID == "" {
+		return nil
+	}
+
+	// Check if player is a squad leader
+	squadData, ok := eventData["squad"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	squadName, _ := squadData["name"].(string)
+	isLeader, _ := squadData["is_leader"].(bool)
+	unlocked, _ := squadData["unlocked"].(bool)
+	memberCount, _ := squadData["member_count"].(float64) // Comes as float64 from JSON
+
+	if !isLeader {
+		// Player is no longer a squad leader, remove their session
+		p.mu.Lock()
+		delete(p.squadLeaderSession, steamID)
+		p.mu.Unlock()
+		return nil
+	}
+
+	// Player is a squad leader, update or create their session
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if session, exists := p.squadLeaderSession[steamID]; exists {
+		session.LastCheck = time.Now()
+		session.SquadSize = int(memberCount)
+		session.SquadName = squadName
+		session.Unlocked = unlocked
+	} else {
+		p.squadLeaderSession[steamID] = &SquadLeaderSession{
+			SteamID:   steamID,
+			StartTime: time.Now(),
+			LastCheck: time.Now(),
+			SquadSize: int(memberCount),
+			SquadName: squadName,
+			Unlocked:  unlocked,
+		}
+	}
+
+	return nil
+}
+
 // progressTrackingLoop handles the periodic progress tracking
-func (p *ServerSeederWhitelistPlugin) progressTrackingLoop() {
+func (p *SquadLeaderWhitelistPlugin) progressTrackingLoop() {
 	for {
 		select {
 		case <-p.ctx.Done():
 			return
 		case <-p.progressTicker.C:
 			if err := p.trackProgress(); err != nil {
-				p.apis.LogAPI.Error("Failed to track seeder progress", err, nil)
+				p.apis.LogAPI.Error("Failed to track squad leader progress", err, nil)
 			}
 		}
 	}
 }
 
 // decayLoop handles the periodic progress decay
-func (p *ServerSeederWhitelistPlugin) decayLoop() {
+func (p *SquadLeaderWhitelistPlugin) decayLoop() {
 	for {
 		select {
 		case <-p.ctx.Done():
 			return
 		case <-p.decayTicker.C:
 			if err := p.decayProgress(); err != nil {
-				p.apis.LogAPI.Error("Failed to decay seeder progress", err, nil)
+				p.apis.LogAPI.Error("Failed to decay squad leader progress", err, nil)
 			}
 		}
 	}
 }
 
 // adminSyncLoop handles periodic admin synchronization
-func (p *ServerSeederWhitelistPlugin) adminSyncLoop() {
+func (p *SquadLeaderWhitelistPlugin) adminSyncLoop() {
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -513,8 +592,8 @@ func (p *ServerSeederWhitelistPlugin) adminSyncLoop() {
 	}
 }
 
-// trackProgress awards progress to players during seeding
-func (p *ServerSeederWhitelistPlugin) trackProgress() error {
+// trackProgress awards progress to players leading qualifying squads
+func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 	p.mu.Lock()
 	stopProgress := p.stopProgressRound
 	p.mu.Unlock()
@@ -531,51 +610,64 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 
 	// Count online players
 	onlinePlayerCount := 0
-	onlinePlayers := make([]*plugin_manager.PlayerInfo, 0)
 	for _, player := range players {
 		if player.IsOnline {
 			onlinePlayerCount++
-			onlinePlayers = append(onlinePlayers, player)
 		}
 	}
 
-	seedingThreshold := p.getIntConfig("seeding_threshold")
-	if onlinePlayerCount >= seedingThreshold {
-		return nil // Not in seeding mode
+	minPlayersForLeadership := p.getIntConfig("min_players_for_leadership")
+	if onlinePlayerCount < minPlayersForLeadership {
+		return nil // Not enough players to start awarding leadership progress
 	}
 
-	minPlayersForSeeding := p.getIntConfig("min_players_for_seeding")
-	if onlinePlayerCount < minPlayersForSeeding {
-		return nil // Not enough players to start awarding seeding progress
-	}
-
-	// Calculate progress increment based on interval
-	// Progress is calculated as: (hours spent seeding / hours needed for whitelist) * 100
+	// Get configuration values
+	minSquadSize := p.getIntConfig("min_squad_size")
+	requireUnlocked := p.getBoolConfig("require_unlocked_squad")
 	hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
 	intervalSeconds := float64(p.getIntConfig("progress_interval_seconds"))
 	progressIncrement := (intervalSeconds / 3600.0) / hoursToWhitelist * 100.0
 
-	whitelistThreshold := 100.0 // Fixed at 100%
+	whitelistThreshold := 100.0
 	notificationThresholds := p.getIntArrayConfig("progress_notification_thresholds")
 
 	now := time.Now()
 	var updatedPlayers []string
 
 	p.mu.Lock()
-	for _, player := range onlinePlayers {
-		steamID := player.SteamID
-		if steamID == "" {
+	// Process active squad leader sessions
+	for steamID, session := range p.squadLeaderSession {
+		// Check if squad meets size requirement
+		if session.SquadSize < minSquadSize {
 			continue
 		}
 
+		// Check if unlocked squad is required
+		if requireUnlocked && !session.Unlocked {
+			continue
+		}
+
+		// Find player name
+		var playerName string
+		for _, player := range players {
+			if player.SteamID == steamID {
+				playerName = player.Name
+				break
+			}
+		}
+
+		// Update session check time
+		session.LastCheck = now
+
+		// Get or create player progress record
 		record, exists := p.playerProgress[steamID]
 		if !exists {
 			record = &PlayerProgressRecord{
-				SteamID:        steamID,
-				Progress:       0,
-				LastProgressed: now,
-				TotalSeeded:    0,
-				LastSeen:       now,
+				SteamID:         steamID,
+				Progress:        0,
+				LastProgressed:  now,
+				TotalLeadership: 0,
+				LastSeen:        now,
 			}
 			p.playerProgress[steamID] = record
 		}
@@ -584,20 +676,20 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 		newProgress := record.Progress + progressIncrement
 		record.Progress = newProgress
 		record.LastProgressed = now
-		record.TotalSeeded += progressIncrement
+		record.TotalLeadership += progressIncrement
 		record.LastSeen = now
 
 		updatedPlayers = append(updatedPlayers, steamID)
 
 		// Check for notification thresholds and whitelist status changes
-		oldPercentage := (oldProgress / whitelistThreshold) * 100
-		newPercentage := (newProgress / whitelistThreshold) * 100
+		oldPercentage := oldProgress
+		newPercentage := newProgress
 
 		// Check if player just reached whitelist threshold
 		if oldProgress < whitelistThreshold && newProgress >= whitelistThreshold {
 			// Player just became whitelisted - add them as admin (skip if shutting down)
 			if !p.shuttingDown {
-				go p.addPlayerAsTemporaryAdmin(steamID, player.Name)
+				go p.addPlayerAsTemporaryAdmin(steamID, playerName)
 			}
 		}
 
@@ -605,7 +697,7 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 			thresholdFloat := float64(threshold)
 			if oldPercentage < thresholdFloat && newPercentage >= thresholdFloat {
 				// Player crossed a notification threshold
-				go p.sendProgressNotification(steamID, player.Name, newPercentage, newProgress >= whitelistThreshold)
+				go p.sendProgressNotification(steamID, playerName, newPercentage, newProgress >= whitelistThreshold)
 				break
 			}
 		}
@@ -619,10 +711,10 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 		}
 
 		// Only log occasionally to reduce log spam
-		if len(updatedPlayers) >= 5 || onlinePlayerCount <= 10 {
-			p.apis.LogAPI.Debug("Awarded seeder progress", map[string]interface{}{
+		if len(updatedPlayers) >= 3 {
+			p.apis.LogAPI.Debug("Awarded squad leader progress", map[string]interface{}{
 				"player_count":       onlinePlayerCount,
-				"seeding_threshold":  seedingThreshold,
+				"min_squad_size":     minSquadSize,
 				"progress_increment": progressIncrement,
 				"updated_players":    len(updatedPlayers),
 			})
@@ -632,8 +724,8 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 	return nil
 }
 
-// decayProgress applies progress decay to inactive players
-func (p *ServerSeederWhitelistPlugin) decayProgress() error {
+// decayProgress applies progress decay to inactive squad leaders
+func (p *SquadLeaderWhitelistPlugin) decayProgress() error {
 	// Get current players to check server population
 	players, err := p.apis.ServerAPI.GetPlayers()
 	if err != nil {
@@ -652,8 +744,7 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 		return nil // Server population too low for decay
 	}
 
-	// Calculate decay increment based on interval
-	// Decay is calculated to lose whitelist after the same amount of time it took to earn it
+	// Calculate decay increment
 	hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
 	decayAfterHours := float64(p.getIntConfig("decay_after_hours"))
 	intervalSeconds := float64(p.getIntConfig("decay_interval_seconds"))
@@ -675,7 +766,7 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 				decayedPlayers++
 
 				// Check if player lost whitelist status due to decay
-				whitelistThreshold := 100.0 // Fixed at 100%
+				whitelistThreshold := 100.0
 				if oldProgress >= whitelistThreshold && record.Progress < whitelistThreshold {
 					// Player lost whitelist status - remove admin privileges (skip if shutting down)
 					if !p.shuttingDown {
@@ -695,7 +786,7 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 
 		// Only log decay when significant numbers are affected
 		if decayedPlayers >= 3 {
-			p.apis.LogAPI.Debug("Applied seeder progress decay", map[string]interface{}{
+			p.apis.LogAPI.Debug("Applied squad leader progress decay", map[string]interface{}{
 				"decayed_players":   decayedPlayers,
 				"decay_increment":   decayIncrement,
 				"server_population": onlinePlayerCount,
@@ -707,17 +798,18 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 }
 
 // sendProgressToPlayer sends progress information to a specific player
-func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(steamID string) error {
+func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(steamID string) error {
 	p.mu.Lock()
 	record, exists := p.playerProgress[steamID]
+	session, hasActiveSession := p.squadLeaderSession[steamID]
 	p.mu.Unlock()
 
-	whitelistThreshold := 100.0 // Fixed at 100%
+	whitelistThreshold := 100.0
 
 	var message string
 	if !exists || record.Progress == 0 {
-		message = "No seeding progress found.\n" +
-			"Join during low population to earn progress!"
+		message = "No squad leadership progress found.\n" +
+			"Lead a squad with 5+ members to earn progress!"
 	} else {
 		percentage := record.Progress
 		if percentage > 100 {
@@ -734,31 +826,38 @@ func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(steamID string) error
 		}
 
 		hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
-		totalHours := record.TotalSeeded / 100.0 * hoursToWhitelist
+		totalHours := record.TotalLeadership / 100.0 * hoursToWhitelist
+
 		message = status + "\n" +
-			fmt.Sprintf("Total Seeded: %.1f hours", totalHours)
+			fmt.Sprintf("Total Leadership: %.1f hours", totalHours)
+
+		if hasActiveSession {
+			message += "\n" +
+				fmt.Sprintf("Currently leading squad: %s (%d members)", session.SquadName, session.SquadSize)
+			if !session.Unlocked {
+				message += " [LOCKED]"
+			}
+		}
 	}
 
 	if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
 		return fmt.Errorf("failed to send progress message: %w", err)
 	}
 
-	// Removed debug log to reduce log spam - only log on error
-
 	return nil
 }
 
 // sendProgressNotification sends a notification when a player crosses a threshold
-func (p *ServerSeederWhitelistPlugin) sendProgressNotification(steamID, playerName string, percentage float64, isWhitelisted bool) {
+func (p *SquadLeaderWhitelistPlugin) sendProgressNotification(steamID, playerName string, percentage float64, isWhitelisted bool) {
 	var message string
 	if isWhitelisted {
 		message = "🎉 CONGRATULATIONS! 🎉\n" +
-			"You are now WHITELISTED!\n" +
-			"Thank you for helping seed the server!"
+			"You are now SQUAD LEADER WHITELISTED!\n" +
+			"Thank you for your leadership!"
 	} else {
-		message = "🎉 SEEDER PROGRESS 🎉\n" +
-			fmt.Sprintf("Progress Update: %.0f%%", percentage) + "\n" +
-			"Keep seeding to earn whitelist!"
+		message = "🎉 SQUAD LEADER PROGRESS 🎉\n" +
+			fmt.Sprintf("Leadership Update: %.0f%%", percentage) + "\n" +
+			"Keep leading to earn whitelist!"
 	}
 
 	if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
@@ -770,8 +869,8 @@ func (p *ServerSeederWhitelistPlugin) sendProgressNotification(steamID, playerNa
 }
 
 // getPlayerRank returns the rank of a player among whitelisted players
-func (p *ServerSeederWhitelistPlugin) getPlayerRank(steamID string) int {
-	whitelistThreshold := 100.0 // Fixed at 100%
+func (p *SquadLeaderWhitelistPlugin) getPlayerRank(steamID string) int {
+	whitelistThreshold := 100.0
 
 	type playerRank struct {
 		steamID  string
@@ -806,7 +905,7 @@ func (p *ServerSeederWhitelistPlugin) getPlayerRank(steamID string) int {
 }
 
 // loadPlayerProgress loads player progress from database
-func (p *ServerSeederWhitelistPlugin) loadPlayerProgress() error {
+func (p *SquadLeaderWhitelistPlugin) loadPlayerProgress() error {
 	data, err := p.apis.DatabaseAPI.GetPluginData("player_progress")
 	if err != nil {
 		// No data found is okay, start fresh
@@ -823,7 +922,7 @@ func (p *ServerSeederWhitelistPlugin) loadPlayerProgress() error {
 }
 
 // savePlayerProgress saves player progress to database
-func (p *ServerSeederWhitelistPlugin) savePlayerProgress() error {
+func (p *SquadLeaderWhitelistPlugin) savePlayerProgress() error {
 	p.mu.Lock()
 	data, err := json.Marshal(p.playerProgress)
 	p.mu.Unlock()
@@ -837,14 +936,14 @@ func (p *ServerSeederWhitelistPlugin) savePlayerProgress() error {
 
 // Helper methods for config access
 
-func (p *ServerSeederWhitelistPlugin) getStringConfig(key string) string {
+func (p *SquadLeaderWhitelistPlugin) getStringConfig(key string) string {
 	if value, ok := p.config[key].(string); ok {
 		return value
 	}
 	return ""
 }
 
-func (p *ServerSeederWhitelistPlugin) getIntConfig(key string) int {
+func (p *SquadLeaderWhitelistPlugin) getIntConfig(key string) int {
 	if value, ok := p.config[key].(int); ok {
 		return value
 	}
@@ -854,14 +953,14 @@ func (p *ServerSeederWhitelistPlugin) getIntConfig(key string) int {
 	return 0
 }
 
-func (p *ServerSeederWhitelistPlugin) getBoolConfig(key string) bool {
+func (p *SquadLeaderWhitelistPlugin) getBoolConfig(key string) bool {
 	if value, ok := p.config[key].(bool); ok {
 		return value
 	}
 	return false
 }
 
-func (p *ServerSeederWhitelistPlugin) getIntArrayConfig(key string) []int {
+func (p *SquadLeaderWhitelistPlugin) getIntArrayConfig(key string) []int {
 	if value, ok := p.config[key].([]interface{}); ok {
 		result := make([]int, 0, len(value))
 		for _, item := range value {
@@ -881,14 +980,14 @@ func (p *ServerSeederWhitelistPlugin) getIntArrayConfig(key string) []int {
 }
 
 // addPlayerAsTemporaryAdmin adds a player as a temporary admin via direct database operations
-func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerName string) {
+func (p *SquadLeaderWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerName string) {
 	groupName := p.getStringConfig("whitelist_group_name")
 	if groupName == "" {
-		groupName = "seeder_whitelist"
+		groupName = "squad_leader_whitelist"
 	}
 
-	// Create admin notes indicating this is from the Seeder Whitelist plugin
-	notes := fmt.Sprintf("Plugin: Seeder Whitelist - Automatically added for server seeding contributions. Player: %s", playerName)
+	// Create admin notes indicating this is from the Squad Leader Whitelist plugin
+	notes := fmt.Sprintf("Plugin: Squad Leader Whitelist - Automatically added for squad leadership contributions. Player: %s", playerName)
 
 	// Calculate expiration time based on configuration
 	var expiresAt *time.Time
@@ -930,10 +1029,10 @@ func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerN
 		"notes":       notes,
 	})
 
-	// Also broadcast a server-wide message about the new seeder whitelist member
-	broadcastMessage := fmt.Sprintf("🌱 %s has earned seeder whitelist status! Thank you for helping populate the server!", playerName)
+	// Also broadcast a server-wide message about the new squad leader whitelist member
+	broadcastMessage := fmt.Sprintf("⭐ %s has earned squad leader whitelist status! Thank you for your leadership!", playerName)
 	if err := p.apis.RconAPI.Broadcast(broadcastMessage); err != nil {
-		p.apis.LogAPI.Error("Failed to broadcast seeder whitelist achievement", err, map[string]interface{}{
+		p.apis.LogAPI.Error("Failed to broadcast squad leader whitelist achievement", err, map[string]interface{}{
 			"steam_id":    steamID,
 			"player_name": playerName,
 		})
@@ -941,9 +1040,9 @@ func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerN
 }
 
 // removePlayerAsTemporaryAdmin removes a player as a temporary admin via direct database operations
-func (p *ServerSeederWhitelistPlugin) removePlayerAsTemporaryAdmin(steamID, playerName string) {
-	// Create admin notes indicating this is from the Seeder Whitelist plugin
-	notes := fmt.Sprintf("Plugin: Seeder Whitelist - Automatically removed (no longer qualifies). Player: %s", playerName)
+func (p *SquadLeaderWhitelistPlugin) removePlayerAsTemporaryAdmin(steamID, playerName string) {
+	// Create admin notes indicating this is from the Squad Leader Whitelist plugin
+	notes := fmt.Sprintf("Plugin: Squad Leader Whitelist - Automatically removed (no longer qualifies). Player: %s", playerName)
 
 	// Remove player as temporary admin
 	if err := p.apis.AdminAPI.RemoveTemporaryAdmin(steamID, notes); err != nil {
@@ -977,14 +1076,14 @@ func (p *ServerSeederWhitelistPlugin) removePlayerAsTemporaryAdmin(steamID, play
 }
 
 // renewPlayerAdminRole removes and re-adds a player's admin role to extend expiration
-func (p *ServerSeederWhitelistPlugin) renewPlayerAdminRole(steamID, playerName string) {
+func (p *SquadLeaderWhitelistPlugin) renewPlayerAdminRole(steamID, playerName string) {
 	groupName := p.getStringConfig("whitelist_group_name")
 	if groupName == "" {
-		groupName = "seeder_whitelist"
+		groupName = "squad_leader_whitelist"
 	}
 
-	// Create admin notes indicating this is a renewal from the Seeder Whitelist plugin
-	notes := fmt.Sprintf("Plugin: Seeder Whitelist - Role renewed to extend expiration. Player: %s", playerName)
+	// Create admin notes indicating this is a renewal from the Squad Leader Whitelist plugin
+	notes := fmt.Sprintf("Plugin: Squad Leader Whitelist - Role renewed to extend expiration. Player: %s", playerName)
 
 	// First remove the existing admin role
 	if err := p.apis.AdminAPI.RemoveTemporaryAdmin(steamID, "Role renewal - removing old assignment"); err != nil {
@@ -1037,10 +1136,10 @@ func (p *ServerSeederWhitelistPlugin) renewPlayerAdminRole(steamID, playerName s
 }
 
 // syncTemporaryAdmins synchronizes temporary admin status with current whitelist
-func (p *ServerSeederWhitelistPlugin) syncTemporaryAdmins() error {
+func (p *SquadLeaderWhitelistPlugin) syncTemporaryAdmins() error {
 	// This function ensures database consistency for all whitelisted players
 	// and refreshes admin roles that are about to expire
-	whitelistThreshold := 100.0 // Fixed at 100%
+	whitelistThreshold := 100.0
 	whitelistDurationDays := p.getIntConfig("whitelist_duration_days")
 
 	if whitelistDurationDays <= 0 {
@@ -1069,14 +1168,14 @@ func (p *ServerSeederWhitelistPlugin) syncTemporaryAdmins() error {
 			needsRenewal := false
 			groupName := p.getStringConfig("whitelist_group_name")
 			if groupName == "" {
-				groupName = "seeder_whitelist"
+				groupName = "squad_leader_whitelist"
 			}
 
 			for _, role := range adminStatus.Roles {
 				if role.RoleName == groupName && role.ExpiresAt != nil {
 					renewalHours := p.getIntConfig("admin_renewal_hours_before_expiry")
 					if renewalHours <= 0 {
-						renewalHours = 24 // Default to 24 hours
+						renewalHours = 48 // Default to 48 hours
 					}
 
 					timeUntilExpiry := time.Until(*role.ExpiresAt)
