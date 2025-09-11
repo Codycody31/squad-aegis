@@ -8,8 +8,7 @@ CREATE TABLE public.server_rules (
     title VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(server_id, created_at)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE TABLE public.server_rule_actions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -19,8 +18,7 @@ CREATE TABLE public.server_rule_actions (
     duration_minutes INT,
     message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(rule_id, violation_count)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE TABLE public.player_rule_violations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
