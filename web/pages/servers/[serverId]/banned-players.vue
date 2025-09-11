@@ -59,11 +59,14 @@ const subscribedBanLists = ref<any[]>([]);
 const availableBanLists = ref<any[]>([]);
 const searchQuery = ref("");
 const showAddBanDialog = ref(false);
+const showEditBanDialog = ref(false);
 const showBanListDialog = ref(false);
 const addBanLoading = ref(false);
+const editBanLoading = ref(false);
 const selectedBanListId = ref("");
 const subscribing = ref(false);
 const unsubscribing = ref<string>("");
+const editingBan = ref<BannedPlayer | null>(null);
 
 interface BannedPlayer {
     id: string;
@@ -103,7 +106,16 @@ const formSchema = toTypedSchema(
     }),
 );
 
-// Setup form
+// Form schema for editing a ban
+const editFormSchema = toTypedSchema(
+    z.object({
+        reason: z.string().min(1, "Reason is required"),
+        duration: z.number().min(0, "Duration must be at least 0"),
+        ban_list_id: z.string().optional(),
+    }),
+);
+
+// Setup forms
 const form = useForm({
     validationSchema: formSchema,
     initialValues: {
@@ -302,6 +314,101 @@ async function removeBan(banId: string) {
     } finally {
         loading.value = false;
     }
+}
+
+// Function to edit a ban
+async function editBan(values: any) {
+    const { reason, duration, ban_list_id } = values;
+
+    if (!editingBan.value) {
+        error.value = "No ban selected for editing";
+        return;
+    }
+
+    editBanLoading.value = true;
+    error.value = null;
+
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(
+        runtimeConfig.public.sessionCookieName as string,
+    );
+    const token = cookieToken.value;
+
+    if (!token) {
+        error.value = "Authentication required";
+        editBanLoading.value = false;
+        return;
+    }
+
+    try {
+        const requestBody: any = {};
+
+        // Only include fields that were actually changed
+        if (reason !== editingBan.value.reason) {
+            requestBody.reason = reason;
+        }
+
+        if (duration !== editingBan.value.duration) {
+            requestBody.duration = duration;
+        }
+
+        // Handle ban list changes
+        const currentBanListId = editingBan.value.ban_list_id || "";
+        const newBanListId = ban_list_id || "";
+
+        if (currentBanListId !== newBanListId) {
+            requestBody.ban_list_id = newBanListId || null;
+        }
+
+        // If no changes were made, just close the dialog
+        if (Object.keys(requestBody).length === 0) {
+            closeEditBanDialog();
+            return;
+        }
+
+        const { data, error: fetchError } = await useFetch(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/${editingBan.value.id}`,
+            {
+                method: "PUT",
+                body: requestBody,
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            },
+        );
+
+        if (fetchError.value) {
+            throw new Error(fetchError.value.message || "Failed to update ban");
+        }
+
+        // Reset form and close dialog
+        closeEditBanDialog();
+
+        toast({
+            title: "Success",
+            description: "Ban updated successfully",
+        });
+
+        // Refresh the banned players list
+        fetchBannedPlayers();
+    } catch (err: any) {
+        error.value = err.message || "An error occurred while updating the ban";
+        console.error(err);
+    } finally {
+        editBanLoading.value = false;
+    }
+}
+
+// Function to open edit ban dialog
+function openEditBanDialog(ban: BannedPlayer) {
+    editingBan.value = ban;
+    showEditBanDialog.value = true;
+}
+
+// Function to close edit ban dialog and reset state
+function closeEditBanDialog() {
+    showEditBanDialog.value = false;
+    editingBan.value = null;
 }
 
 // Function to fetch ban lists
@@ -625,6 +732,119 @@ function copyBanCfgUrl() {
                         </DialogContent>
                     </Dialog>
                 </Form>
+                
+                <!-- Edit Ban Dialog -->
+                <Form
+                    :key="editingBan?.id"
+                    v-slot="{ handleSubmit }"
+                    as=""
+                    keep-values
+                    :validation-schema="editFormSchema"
+                    :initial-values="{
+                        reason: editingBan?.reason || '',
+                        duration: editingBan?.duration,
+                        ban_list_id: editingBan?.ban_list_id || '',
+                    }"
+                >
+                    <Dialog v-model:open="showEditBanDialog">
+                        <DialogContent class="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                                <DialogTitle>Edit Ban</DialogTitle>
+                                <DialogDescription>
+                                    Update the ban details for player {{ editingBan?.steam_id }}.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <form
+                                id="editDialogForm"
+                                @submit="handleSubmit($event, editBan)"
+                            >
+                                <div class="grid gap-4 py-4">
+                                    <FormField
+                                        name="reason"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Reason</FormLabel>
+                                            <FormControl>
+                                                <Textarea
+                                                    placeholder="Reason for ban"
+                                                    v-bind="componentField"
+                                                />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+                                    <FormField
+                                        name="duration"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Days</FormLabel>
+                                            <FormControl>
+                                                <Input
+                                                    type="number"
+                                                    min="0"
+                                                    v-bind="componentField"
+                                                />
+                                            </FormControl>
+                                            <FormDescription>
+                                                Duration in days. 0 is permanent
+                                            </FormDescription>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+                                    <FormField
+                                        name="ban_list_id"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Ban List (Optional)</FormLabel>
+                                            <FormControl>
+                                                <Select v-bind="componentField">
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Select a ban list (optional)" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem
+                                                            v-for="banList in banLists.filter(bl => !bl.is_remote)"
+                                                            :key="banList.id"
+                                                            :value="banList.id.toString()"
+                                                        >
+                                                            {{ banList.name }}
+                                                        </SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </FormControl>
+                                            <FormDescription>
+                                                Select a ban list to add this ban to for sharing across servers
+                                            </FormDescription>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+                                </div>
+                                <DialogFooter>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        @click="closeEditBanDialog"
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        type="submit"
+                                        :disabled="editBanLoading"
+                                    >
+                                        {{
+                                            editBanLoading
+                                                ? "Updating..."
+                                                : "Update Ban"
+                                        }}
+                                    </Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                </Form>
                 <Button
                     @click="refreshData"
                     :disabled="loading"
@@ -736,15 +956,26 @@ function copyBanCfgUrl() {
                                     </Badge>
                                 </TableCell>
                                 <TableCell class="text-right">
-                                    <Button
-                                        variant="destructive"
-                                        size="sm"
-                                        @click="removeBan(player.id)"
-                                        :disabled="loading"
-                                        v-if="authStore.getServerPermission(serverId, 'ban')"
-                                    >
-                                        Unban
-                                    </Button>
+                                    <div class="flex gap-2 justify-end">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            @click="openEditBanDialog(player)"
+                                            :disabled="loading"
+                                            v-if="authStore.getServerPermission(serverId, 'ban')"
+                                        >
+                                            Edit
+                                        </Button>
+                                        <Button
+                                            variant="destructive"
+                                            size="sm"
+                                            @click="removeBan(player.id)"
+                                            :disabled="loading"
+                                            v-if="authStore.getServerPermission(serverId, 'ban')"
+                                        >
+                                            Unban
+                                        </Button>
+                                    </div>
                                 </TableCell>
                             </TableRow>
                         </TableBody>

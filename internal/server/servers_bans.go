@@ -350,6 +350,238 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	responses.Success(c, "Ban removed successfully", nil)
 }
 
+// ServerBansUpdate handles updating an existing ban
+func (s *Server) ServerBansUpdate(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	banIdString := c.Param("banId")
+	banId, err := uuid.Parse(banIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid ban ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	var request models.ServerBanUpdateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get the current ban details first
+	var currentBan models.ServerBan
+	var steamIDInt int64
+	var ruleID sql.NullString
+	var banListID sql.NullString
+	var banListName sql.NullString
+
+	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
+		FROM server_bans sb
+		JOIN users u ON sb.admin_id = u.id
+		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
+		WHERE sb.id = $1 AND sb.server_id = $2
+	`, banId, serverId).Scan(
+		&currentBan.ID,
+		&currentBan.ServerID,
+		&currentBan.AdminID,
+		&currentBan.AdminName,
+		&steamIDInt,
+		&currentBan.Reason,
+		&currentBan.Duration,
+		&ruleID,
+		&banListID,
+		&banListName,
+		&currentBan.CreatedAt,
+		&currentBan.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
+		} else {
+			responses.BadRequest(c, "Failed to get ban details", &gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	// Convert steamID from int64 to string
+	currentBan.SteamID = strconv.FormatInt(steamIDInt, 10)
+	currentBan.Name = currentBan.SteamID
+
+	// Set rule ID if present
+	if ruleID.Valid {
+		currentBan.RuleID = &ruleID.String
+	}
+
+	// Set ban list information if present
+	if banListID.Valid {
+		currentBan.BanListID = &banListID.String
+	}
+	if banListName.Valid {
+		currentBan.BanListName = &banListName.String
+	}
+
+	// Calculate if ban is permanent and expiry date
+	currentBan.Permanent = currentBan.Duration == 0
+	if !currentBan.Permanent {
+		currentBan.ExpiresAt = currentBan.CreatedAt.Add(time.Duration(currentBan.Duration) * time.Minute)
+	}
+
+	// Build update query dynamically based on provided fields
+	updateFields := []string{}
+	updateArgs := []interface{}{}
+	argIndex := 1
+
+	if request.Reason != nil && *request.Reason != "" {
+		updateFields = append(updateFields, fmt.Sprintf("reason = $%d", argIndex))
+		updateArgs = append(updateArgs, *request.Reason)
+		argIndex++
+	}
+
+	if request.Duration != nil {
+		if *request.Duration < 0 {
+			responses.BadRequest(c, "Duration must be a positive integer", &gin.H{"error": "Duration must be a positive integer"})
+			return
+		}
+		updateFields = append(updateFields, fmt.Sprintf("duration = $%d", argIndex))
+		updateArgs = append(updateArgs, *request.Duration)
+		argIndex++
+	}
+
+	if request.BanListID != nil {
+		if *request.BanListID == "" {
+			// Remove from ban list
+			updateFields = append(updateFields, fmt.Sprintf("ban_list_id = $%d", argIndex))
+			updateArgs = append(updateArgs, nil)
+			argIndex++
+		} else {
+			// Add to ban list
+			banListUUID, err := uuid.Parse(*request.BanListID)
+			if err != nil {
+				responses.BadRequest(c, "Invalid ban list ID format", &gin.H{"error": err.Error()})
+				return
+			}
+			updateFields = append(updateFields, fmt.Sprintf("ban_list_id = $%d", argIndex))
+			updateArgs = append(updateArgs, banListUUID)
+			argIndex++
+		}
+	}
+
+	// If no fields to update, return error
+	if len(updateFields) == 0 {
+		responses.BadRequest(c, "No fields to update", &gin.H{"error": "At least one field must be provided for update"})
+		return
+	}
+
+	// Add updated_at timestamp
+	now := time.Now()
+	updateFields = append(updateFields, fmt.Sprintf("updated_at = $%d", argIndex))
+	updateArgs = append(updateArgs, now)
+	argIndex++
+
+	// Build the final query
+	query := fmt.Sprintf("UPDATE server_bans SET %s WHERE id = $%d AND server_id = $%d",
+		strings.Join(updateFields, ", "), argIndex, argIndex+1)
+	updateArgs = append(updateArgs, banId, serverId)
+
+	// Execute the update
+	result, err := s.Dependencies.DB.ExecContext(c.Request.Context(), query, updateArgs...)
+	if err != nil {
+		responses.BadRequest(c, "Failed to update ban", &gin.H{"error": err.Error()})
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		responses.BadRequest(c, "Failed to get rows affected", &gin.H{"error": err.Error()})
+		return
+	}
+
+	if rowsAffected == 0 {
+		responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
+		return
+	}
+
+	// Get updated ban details for response and RCON
+	var updatedBan models.ServerBan
+	var updatedSteamIDInt int64
+	var updatedRuleID sql.NullString
+	var updatedBanListID sql.NullString
+	var updatedBanListName sql.NullString
+
+	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
+		FROM server_bans sb
+		JOIN users u ON sb.admin_id = u.id
+		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
+		WHERE sb.id = $1
+	`, banId).Scan(
+		&updatedBan.ID,
+		&updatedBan.ServerID,
+		&updatedBan.AdminID,
+		&updatedBan.AdminName,
+		&updatedSteamIDInt,
+		&updatedBan.Reason,
+		&updatedBan.Duration,
+		&updatedRuleID,
+		&updatedBanListID,
+		&updatedBanListName,
+		&updatedBan.CreatedAt,
+		&updatedBan.UpdatedAt,
+	)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get updated ban details", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Convert steamID from int64 to string
+	updatedBan.SteamID = strconv.FormatInt(updatedSteamIDInt, 10)
+	updatedBan.Name = updatedBan.SteamID
+
+	// Set rule ID if present
+	if updatedRuleID.Valid {
+		updatedBan.RuleID = &updatedRuleID.String
+	}
+
+	// Set ban list information if present
+	if updatedBanListID.Valid {
+		updatedBan.BanListID = &updatedBanListID.String
+	}
+	if updatedBanListName.Valid {
+		updatedBan.BanListName = &updatedBanListName.String
+	}
+
+	// Calculate if ban is permanent and expiry date
+	updatedBan.Permanent = updatedBan.Duration == 0
+	if !updatedBan.Permanent {
+		updatedBan.ExpiresAt = updatedBan.CreatedAt.Add(time.Duration(updatedBan.Duration) * time.Minute)
+	}
+
+	// Create detailed audit log
+	auditData := map[string]interface{}{
+		"banId":        banId.String(),
+		"steamId":      updatedBan.SteamID,
+		"oldReason":    currentBan.Reason,
+		"newReason":    updatedBan.Reason,
+		"oldDuration":  currentBan.Duration,
+		"newDuration":  updatedBan.Duration,
+		"oldBanListId": currentBan.BanListID,
+		"newBanListId": updatedBan.BanListID,
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:update", auditData)
+
+	responses.Success(c, "Ban updated successfully", &gin.H{
+		"ban": updatedBan,
+	})
+}
+
 // ServerBansCfg handles generating the ban config file for the server
 func (s *Server) ServerBansCfg(c *gin.Context) {
 	serverIdString := c.Param("serverId")

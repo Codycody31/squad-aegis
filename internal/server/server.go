@@ -215,6 +215,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				serverGroup.GET("/bans", server.ServerBansList)
 				serverGroup.POST("/bans", server.AuthHasAnyServerPermission("ban"), server.ServerBansAdd)
+				serverGroup.PUT("/bans/:banId", server.AuthHasAnyServerPermission("ban"), server.ServerBansUpdate)
 				serverGroup.DELETE("/bans/:banId", server.AuthHasAnyServerPermission("ban"), server.ServerBansRemove)
 
 				// Ban list subscription management
