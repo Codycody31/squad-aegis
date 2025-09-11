@@ -95,19 +95,20 @@ const (
 
 // PluginInstance represents an active plugin instance
 type PluginInstance struct {
-	ID        uuid.UUID              `json:"id"`
-	ServerID  uuid.UUID              `json:"server_id"`
-	PluginID  string                 `json:"plugin_id"`
-	Notes     string                 `json:"notes"`
-	Config    map[string]interface{} `json:"config"`
-	Status    PluginStatus           `json:"status"`
-	Enabled   bool                   `json:"enabled"`
-	Plugin    Plugin                 `json:"-"`
-	Context   context.Context        `json:"-"`
-	Cancel    context.CancelFunc     `json:"-"`
-	LastError string                 `json:"last_error,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
+	ID         uuid.UUID              `json:"id"`
+	ServerID   uuid.UUID              `json:"server_id"`
+	PluginID   string                 `json:"plugin_id"`
+	PluginName string                 `json:"plugin_name"`
+	Notes      string                 `json:"notes"`
+	Config     map[string]interface{} `json:"config"`
+	Status     PluginStatus           `json:"status"`
+	Enabled    bool                   `json:"enabled"`
+	Plugin     Plugin                 `json:"-"`
+	Context    context.Context        `json:"-"`
+	Cancel     context.CancelFunc     `json:"-"`
+	LastError  string                 `json:"last_error,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
+	UpdatedAt  time.Time              `json:"updated_at"`
 }
 
 // Connector represents a global service connector (Discord, Slack, etc.)

@@ -287,6 +287,7 @@ func (pm *PluginManager) GetPluginInstances(serverID uuid.UUID) []*PluginInstanc
 		// Create a copy with masked sensitive fields
 		maskedInstance := *instance
 		if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
+			maskedInstance.PluginName = definition.Name
 			maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
 		}
 		instances = append(instances, &maskedInstance)
@@ -313,6 +314,7 @@ func (pm *PluginManager) GetPluginInstance(serverID, instanceID uuid.UUID) (*Plu
 	// Create a copy with masked sensitive fields
 	maskedInstance := *instance
 	if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
+		maskedInstance.PluginName = definition.Name
 		maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
 	}
 
