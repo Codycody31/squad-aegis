@@ -111,17 +111,28 @@
       <TabsContent value="chat" class="space-y-4">
         <div class="flex items-center justify-between">
           <h3 class="text-lg font-semibold">Chat Messages</h3>
-          <Button variant="outline" size="sm" @click="clearFeed('chat')">
-            <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-            Clear
-          </Button>
+          <div class="flex items-center space-x-2">
+            <Button variant="outline" size="sm" @click="scrollToBottom('chat')">
+              <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
+              Bottom
+            </Button>
+            <Button variant="outline" size="sm" @click="clearFeed('chat')">
+              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
+              Clear
+            </Button>
+          </div>
         </div>
         <Card>
           <CardContent class="p-0">
             <div
               ref="chatContainer"
+              @scroll="(e) => handleScroll(e, 'chat')"
               class="max-h-96 overflow-y-auto border rounded-lg"
             >
+              <div v-if="loadingOlder && activeTab === 'chat'" class="p-2 text-center bg-blue-50 border-b">
+                <Icon name="mdi:loading" class="h-4 w-4 animate-spin inline mr-2" />
+                Loading older messages...
+              </div>
               <div v-if="chatMessages.length === 0" class="p-8 text-center text-muted-foreground">
                 <Icon name="mdi:message-text-outline" class="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No chat messages yet</p>
@@ -171,8 +182,13 @@
           <CardContent class="p-0">
             <div
               ref="connectionsContainer"
+              @scroll="(e) => handleScroll(e, 'connections')"
               class="max-h-96 overflow-y-auto border rounded-lg"
             >
+              <div v-if="loadingOlder && activeTab === 'connections'" class="p-2 text-center bg-blue-50 border-b">
+                <Icon name="mdi:loading" class="h-4 w-4 animate-spin inline mr-2" />
+                Loading older connections...
+              </div>
               <div v-if="connections.length === 0" class="p-8 text-center text-muted-foreground">
                 <Icon name="mdi:account-multiple-outline" class="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No connection events yet</p>
@@ -221,17 +237,28 @@
       <TabsContent value="teamkills" class="space-y-4">
         <div class="flex items-center justify-between">
           <h3 class="text-lg font-semibold">Teamkills</h3>
-          <Button variant="outline" size="sm" @click="clearFeed('teamkills')">
-            <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-            Clear
-          </Button>
+          <div class="flex items-center space-x-2">
+            <Button variant="outline" size="sm" @click="scrollToBottom('teamkills')">
+              <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
+              Bottom
+            </Button>
+            <Button variant="outline" size="sm" @click="clearFeed('teamkills')">
+              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
+              Clear
+            </Button>
+          </div>
         </div>
         <Card>
           <CardContent class="p-0">
             <div
               ref="teamkillsContainer"
+              @scroll="(e) => handleScroll(e, 'teamkills')"
               class="max-h-96 overflow-y-auto border rounded-lg"
             >
+              <div v-if="loadingOlder && activeTab === 'teamkills'" class="p-2 text-center bg-blue-50 border-b">
+                <Icon name="mdi:loading" class="h-4 w-4 animate-spin inline mr-2" />
+                Loading older teamkills...
+              </div>
               <div v-if="teamkills.length === 0" class="p-8 text-center text-muted-foreground">
                 <Icon name="mdi:skull-outline" class="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No teamkills yet</p>
