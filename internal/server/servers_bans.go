@@ -473,7 +473,11 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		}
 	}
 
-	// TODO: Support updating/removing relevant rule_id
+	if request.RuleID != nil {
+		updateFields = append(updateFields, fmt.Sprintf("rule_id = $%d", argIndex))
+		updateArgs = append(updateArgs, *request.RuleID)
+		argIndex++
+	}
 
 	// If no fields to update, return error
 	if len(updateFields) == 0 {
@@ -575,6 +579,8 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		"newDuration":  updatedBan.Duration,
 		"oldBanListId": currentBan.BanListID,
 		"newBanListId": updatedBan.BanListID,
+		"oldRuleId":    currentBan.RuleID,
+		"newRuleId":    updatedBan.RuleID,
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:update", auditData)
