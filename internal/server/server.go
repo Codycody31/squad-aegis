@@ -169,10 +169,6 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			adminGroup.Use(server.AuthIsSuperAdmin())
 
 			adminGroup.POST("/cleanup-expired-admins", server.ServerAdminsCleanupExpired)
-
-			// Backup and restore routes
-			adminGroup.GET("/backup", server.CreateBackup)
-			adminGroup.POST("/restore", server.RestoreBackup)
 		}
 
 		serversGroup := apiGroup.Group("/servers")
