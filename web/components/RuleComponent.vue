@@ -1,0 +1,381 @@
+<script setup lang="ts">
+import { ref, watch, computed, onMounted } from 'vue'
+import { FileText, Layers, Zap, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { Button } from '~/components/ui/button'
+
+interface ServerRuleAction {
+  id: string;
+  rule_id: string;
+  violation_count: number;
+  action_type: 'WARN' | 'KICK' | 'BAN';
+  duration_days?: number;
+  duration_minutes?: number;
+  message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ServerRule {
+  id: string;
+  server_id: string;
+  parent_id?: string | null;
+  display_order: number;
+  title: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+  actions?: ServerRuleAction[];
+  sub_rules?: ServerRule[];
+  // Support legacy property for compatibility
+  short_name?: string;
+}
+
+const props = defineProps<{
+  rule: ServerRule;
+  depth: number;
+  sectionNumber?: number;
+  subRuleIndex?: number;
+}>();
+
+const emit = defineEmits<{
+  update: [rule: ServerRule];
+  delete: [ruleId: string];
+  'add-sub-rule': [parentId: string];
+  'add-action': [parentId: string];
+  reorder: [payload: { ruleId: string; targetIndex: number; targetParentId?: string }];
+}>();
+
+const localRule = ref<ServerRule>({ ...props.rule });
+const isCollapsed = ref<boolean>(false);
+
+// Watch for prop changes and update local copy
+watch(() => props.rule, (newRule) => {
+  localRule.value = { ...newRule };
+}, { deep: true });
+
+const emitUpdate = () => {
+  emit('update', localRule.value);
+}
+
+const updateChild = (updatedChild: ServerRule) => {
+  if (!localRule.value.sub_rules) return;
+  
+  const updatedSubRules = localRule.value.sub_rules.map(subRule => 
+    subRule.id === updatedChild.id ? updatedChild : subRule
+  );
+  
+  localRule.value = { 
+    ...localRule.value, 
+    sub_rules: updatedSubRules,
+    updated_at: new Date().toISOString()
+  };
+  
+  emitUpdate();
+}
+
+const deleteChild = (childId: string) => {
+  if (!localRule.value.sub_rules) return;
+  
+  const updatedSubRules = localRule.value.sub_rules.filter(subRule => subRule.id !== childId);
+  
+  localRule.value = { 
+    ...localRule.value, 
+    sub_rules: updatedSubRules,
+    updated_at: new Date().toISOString()
+  };
+  
+  emitUpdate();
+}
+
+const addChildSubRule = (childId: string) => {
+  emit('add-sub-rule', childId);
+}
+
+const addChildAction = (childId: string) => {
+  emit('add-action', childId);
+}
+
+const handleChildReorder = (payload: { ruleId: string; targetIndex: number; targetParentId?: string }) => {
+  emit('reorder', payload);
+}
+
+const deleteAction = (actionId: string) => {
+  if (!localRule.value.actions) return;
+  
+  const updatedActions = localRule.value.actions.filter(action => action.id !== actionId);
+  
+  localRule.value = { 
+    ...localRule.value, 
+    actions: updatedActions,
+    updated_at: new Date().toISOString()
+  };
+  
+  emitUpdate();
+}
+
+const handleDragStart = (event: DragEvent) => {
+  event.dataTransfer?.setData('text/plain', JSON.stringify({
+    type: 'rule',
+    ruleId: localRule.value.id,
+    sourceParentId: localRule.value.parent_id
+  }));
+}
+
+const handleDrop = (event: DragEvent) => {
+  event.preventDefault();
+  const data = event.dataTransfer?.getData('text/plain');
+  
+  if (!data) return;
+  
+  try {
+    const dragData = JSON.parse(data);
+    
+    if (dragData.type === 'rule' && dragData.ruleId !== localRule.value.id) {
+      // Calculate target index based on current position
+      const targetIndex = localRule.value.display_order;
+      
+      emit('reorder', {
+        ruleId: dragData.ruleId,
+        targetIndex: targetIndex,
+        targetParentId: localRule.value.parent_id === null ? undefined : localRule.value.parent_id
+      });
+    }
+  } catch (error) {
+    console.error('Error handling drop:', error);
+  }
+}
+
+const ruleNumber = computed(() => {
+  if (props.subRuleIndex !== undefined && props.sectionNumber !== undefined) {
+    return `${props.sectionNumber}.${props.subRuleIndex}`;
+  }
+  return props.sectionNumber ? `${props.sectionNumber}.` : '';
+});
+
+const getRuleClasses = () => {
+  return props.rule.parent_id 
+    ? 'bg-secondary/10 border-secondary/20' 
+    : 'bg-primary/10 border-primary/20';
+}
+
+const getIcon = () => {
+  return props.rule.parent_id ? Layers : FileText;
+}
+
+const getIconColor = () => {
+  return props.rule.parent_id ? 'text-secondary' : 'text-primary';
+}
+
+const getTextColor = () => {
+  return 'text-foreground';
+}
+
+const getNumberColor = () => {
+  return props.rule.parent_id ? 'text-secondary' : 'text-primary';
+}
+</script>
+
+<template>
+  <div 
+    :class="[
+      'border rounded-lg p-4 transition-all cursor-move',
+      getRuleClasses(),
+      { 'ml-4': depth > 0 }
+    ]"
+    draggable="true"
+    @dragstart="handleDragStart"
+    @dragover.prevent
+    @drop="handleDrop"
+  >
+    <div class="flex items-start justify-between mb-3">
+      <div class="flex items-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          @click="isCollapsed = !isCollapsed"
+          class="h-7 w-7 mr-1 p-0.5"
+          title="Toggle collapse"
+        >
+          <ChevronDown v-if="isCollapsed" class="h-4 w-4" />
+          <ChevronUp v-else class="h-4 w-4" />
+        </Button>
+        <component :is="getIcon()" :class="['w-5 h-5 mr-2']" />
+        <div class="flex items-center">
+          <span :class="['font-mono text-sm mr-2']">{{ ruleNumber }}</span>
+          <input
+            v-model="localRule.title"
+            @input="emitUpdate"
+            class="font-semibold bg-transparent border-none outline-none"
+            :class="getTextColor()"
+          />
+        </div>
+      </div>
+      
+      <div class="flex items-center gap-1">
+        <Button
+          @click="$emit('add-sub-rule', rule.id)"
+          variant="ghost"
+          size="icon"
+          title="Add Sub-Rule"
+          class="h-8 w-8"
+        >
+          <Plus class="w-4 h-4" />
+        </Button>
+        
+        <Button
+          @click="$emit('add-action', rule.id)"
+          variant="ghost"
+          size="icon"
+          title="Add Action"
+          class="h-8 w-8"
+        >
+          <Zap class="w-4 h-4" />
+        </Button>
+        
+        <Button
+          @click="$emit('delete', rule.id)"
+          variant="destructive"
+          size="icon"
+          title="Delete"
+          class="h-8 w-8"
+        >
+          <Trash2 class="w-4 h-4" />
+        </Button>
+      </div>
+    </div>
+
+    <!-- Rule-specific fields -->
+    <div class="space-y-3">
+      <!-- Description is always shown for root rules (depth=0), but hidden for sub-rules when collapsed -->
+      <div v-if="!isCollapsed || depth === 0">
+        <label class="block text-sm font-medium mb-1" :class="getTextColor()">Description</label>
+        <textarea
+          v-model="localRule.description"
+          @input="emitUpdate"
+          class="w-full p-2 border border-input bg-background rounded text-sm"
+          rows="3"
+          placeholder="Describe this rule..."
+        />
+      </div>
+      
+      <!-- Short name field removed -->
+      
+      <!-- Display order field is always hidden when collapsed -->
+      <div v-if="!isCollapsed">
+        <label class="block text-sm font-medium mb-1" :class="getTextColor()">Display Order</label>
+        <input
+          v-model.number="localRule.display_order"
+          @input="emitUpdate"
+          type="number"
+          class="w-full p-2 border border-input bg-background rounded text-sm"
+          placeholder="0"
+        />
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div v-if="!isCollapsed && localRule.actions && localRule.actions.length > 0" class="mt-4">
+      <h3 class="text-sm font-medium mb-2" :class="getTextColor()">Actions</h3>
+      <div class="space-y-2">
+        <div 
+          v-for="action in localRule.actions" 
+          :key="action.id"
+          class="bg-warning/10 border border-warning/20 rounded p-3"
+        >
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center">
+              <Zap class="w-4 h-4 mr-2 text-warning" />
+              <span class="font-medium">Action</span>
+            </div>
+            <Button
+              @click="deleteAction(action.id)"
+              variant="destructive"
+              size="icon"
+              title="Delete Action"
+              class="h-6 w-6"
+            >
+              <Trash2 class="w-3 h-3" />
+            </Button>
+          </div>
+          
+          <div class="space-y-2">
+            <div>
+              <label class="block text-xs font-medium mb-1">Violation Count</label>
+              <input
+                v-model.number="action.violation_count"
+                @input="emitUpdate"
+                type="number"
+                min="1"
+                class="w-full p-1 border border-input bg-background rounded text-sm"
+                placeholder="Number of violations"
+              />
+            </div>
+            
+            <div>
+              <label class="block text-xs font-medium mb-1">Action Type</label>
+              <select
+                v-model="action.action_type"
+                @change="emitUpdate"
+                class="w-full p-1 border border-input bg-background rounded text-sm"
+              >
+                <option value="WARN">Warning</option>
+                <option value="KICK">Kick</option>
+                <option value="BAN">Ban</option>
+              </select>
+            </div>
+            
+            <div v-if="action.action_type === 'BAN'">
+              <label class="block text-xs font-medium mb-1">Duration (days, 0 = permanent)</label>
+              <input
+                v-model.number="action.duration_days"
+                @input="emitUpdate"
+                type="number"
+                min="0"
+                class="w-full p-1 border border-input bg-background rounded text-sm"
+                placeholder="0 for permanent"
+              />
+            </div>
+            
+            <div>
+              <label class="block text-xs font-medium mb-1">Message</label>
+              <input
+                v-model="action.message"
+                @input="emitUpdate"
+                class="w-full p-1 border border-input bg-background rounded text-sm"
+                placeholder="Violation message..."
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sub-rules -->
+    <div v-if="!isCollapsed && localRule.sub_rules && localRule.sub_rules.length > 0" class="mt-4 space-y-3">
+      <RuleComponent
+        v-for="(subRule, index) in localRule.sub_rules"
+        :key="subRule.id"
+        :rule="subRule"
+        :depth="depth + 1"
+        :section-number="sectionNumber"
+        :sub-rule-index="index + 1"
+        @update="updateChild"
+        @delete="deleteChild"
+        @add-sub-rule="addChildSubRule"
+        @add-action="addChildAction"
+        @reorder="handleChildReorder"
+      />
+    </div>
+  </div>
+</template>
+
+<style scoped>
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--ring));
+}
+
+[draggable="true"]:hover {
+  opacity: 0.8;
+}
+</style>

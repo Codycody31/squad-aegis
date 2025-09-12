@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"strings"
 
-	"go.codycody31.dev/squad-aegis/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
 func toUpperSnakeCase(s string) string {

@@ -26,6 +26,8 @@ variables:
       - "go.*"
       # Dockerfile changes
       - "docker/**"
+      # Migrations
+      - "**/*.sql"
       # pipeline config changes
       - ".woodpecker/docker.yaml"
 

@@ -395,20 +395,20 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 	// Check ping cooldown
 	if !p.canPing() {
 		// Send embed
-		if err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
+		if _, err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
 			return fmt.Errorf("failed to send embed: %w", err)
 		}
 	} else {
 		// Send with ping
 		content := pingString
 		if content != "" {
-			if err := p.discordAPI.SendMessage(channelID, content); err != nil {
+			if _, err := p.discordAPI.SendMessage(channelID, content); err != nil {
 				return fmt.Errorf("failed to send ping message: %w", err)
 			}
 		}
 
 		// Send embed
-		if err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
+		if _, err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
 			return fmt.Errorf("failed to send embed: %w", err)
 		}
 	}

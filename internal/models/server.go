@@ -121,6 +121,13 @@ type ServerBanCreateRequest struct {
 	BanListID *string `json:"ban_list_id,omitempty"`
 }
 
+type ServerBanUpdateRequest struct {
+	Reason    *string    `json:"reason,omitempty"`
+	Duration  *int       `json:"duration,omitempty"`
+	BanListID *string    `json:"ban_list_id,omitempty"`
+	RuleID    *uuid.UUID `json:"rule_id,omitempty"`
+}
+
 type BanListCreateRequest struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description,omitempty"`

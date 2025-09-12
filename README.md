@@ -38,7 +38,7 @@ The project is currently in the early stages of development and is not ready for
 
 ## Installation Guide
 
-To set up **Squad Aegis**, reference the docker-compose file provided in the repository. This will require some technical knowledge of Docker, Docker Compose, Go, and editing environment variables. The current state is not user friendly and requires some technical knowledge to get up and running.
+To set up **Squad Aegis**, follow these steps:
 
 ### Prerequisites
 
@@ -46,15 +46,73 @@ Ensure you have the following installed on your system:
 
 - **Docker Engine** 20.10.0 or newer: Container platform to deploy the application.
 - **Docker Compose V2**: Tool for defining and running multi-container Docker applications.
+- **Go 1.21+**: Required for building the application.
+- **Node.js 18+**: Required for building the web interface.
+- **Git**: For cloning the repository.
 - Minimum **1GB RAM**: For efficient performance.
 - At least **10GB available storage**: To store data and logs.
 
+### Quick Start
+
+1. **Clone the Repository**
+
+   ```bash
+   git clone https://github.com/Codycody31/squad-aegis.git
+   cd squad-aegis
+   ```
+
+2. **Install Dependencies**
+
+   ```bash
+   go mod tidy
+   go mod vendor
+   ```
+
+3. **Build the Application**
+
+   ```bash
+   make build-server
+   ```
+
+4. **Configure Environment**
+   Create a `.env` file with your configuration (see [Installation Guide](docs/installation.md) for details).
+
+5. **Start Services**
+
+   ```bash
+   docker compose -f docker-compose.dev.yml up -d
+   ```
+
+6. **Access the Web Interface**
+   Open <http://localhost:3113> in your browser.
+
+For detailed installation instructions, see the [Installation Guide](docs/installation.md).
+
 ## Development
 
-For those interested in development, utilize the development compose file to set up the environment:
+For development, you can use the provided development compose file to set up the environment:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
+```
+
+The development environment includes:
+
+- PostgreSQL database
+- ClickHouse for analytics (optional)
+- ClickHouse UI for database management
+
+To build the application during development:
+
+```bash
+# Build the server
+make build-server
+
+# Build everything including log watcher
+make build
+
+# Build only the web UI
+make build-web
 ```
 
 ## Screenshots

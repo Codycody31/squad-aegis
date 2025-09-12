@@ -25,7 +25,6 @@ type Struct struct {
 		}
 	}
 	ClickHouse struct {
-		Enabled  bool   `default:"false"`
 		Host     string `default:"localhost"`
 		Port     int    `default:"9000"`
 		Database string `default:"default"`

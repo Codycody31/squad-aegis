@@ -74,6 +74,13 @@ export default [
     permissions: ["super_admin", "manageserver"],
   },
   {
+    title: "Rules",
+    icon: "mdi:book-open",
+    to: {
+      name: "servers-serverId-rules",
+    },
+  },
+  {
     title: "Plugins",
     icon: "lucide:puzzle",
     to: {

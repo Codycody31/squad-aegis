@@ -265,7 +265,7 @@ func (p *DiscordSquadCreatedPlugin) sendEmbedMessage(channelID string, event *ev
 		Timestamp: func() *time.Time { t := time.Now(); return &t }(),
 	}
 
-	if err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
+	if _, err := p.discordAPI.SendEmbed(channelID, embed); err != nil {
 		return fmt.Errorf("failed to send Discord embed: %w", err)
 	}
 
@@ -289,7 +289,7 @@ func (p *DiscordSquadCreatedPlugin) sendTextMessage(channelID string, event *eve
 		event.TeamName,
 	)
 
-	if err := p.discordAPI.SendMessage(channelID, message); err != nil {
+	if _, err := p.discordAPI.SendMessage(channelID, message); err != nil {
 		return fmt.Errorf("failed to send Discord message: %w", err)
 	}
 
