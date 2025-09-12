@@ -1250,9 +1250,6 @@ function copyBanCfgUrl() {
                                 <TableCell>
                                     <div v-if="player.rule_name" class="flex flex-col">
                                         <span class="font-medium">{{ player.rule_name }}</span>
-                                        <span v-if="player.rule_number" class="text-xs text-muted-foreground">
-                                            Rule #{{ player.rule_number }}
-                                        </span>
                                     </div>
                                     <span v-else class="text-muted-foreground text-xs">No rule specified</span>
                                 </TableCell>
