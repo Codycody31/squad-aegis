@@ -39,6 +39,8 @@ type ServerBan struct {
 	Reason      string    `json:"reason"`
 	Duration    int       `json:"duration"`
 	RuleID      *string   `json:"rule_id,omitempty"`
+	RuleName    *string   `json:"rule_name,omitempty"`
+	RuleNumber  *string   `json:"rule_number,omitempty"`
 	BanListID   *string   `json:"ban_list_id,omitempty"`
 	BanListName *string   `json:"ban_list_name,omitempty"`
 	Permanent   bool      `json:"permanent"`
