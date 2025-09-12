@@ -11,14 +11,14 @@
         <Button
           variant="outline"
           size="sm"
-          @click="toggleConnection"
-          :disabled="connecting"
+          @click="refreshFeeds"
+          :disabled="loading || connecting"
         >
           <Icon
-            :name="isConnected ? 'mdi:pause' : 'mdi:play'"
-            class="h-4 w-4 mr-2"
+            :name="loading ? 'mdi:loading' : 'mdi:refresh'"
+            :class="['h-4 w-4 mr-2', { 'animate-spin': loading }]"
           />
-          {{ isConnected ? "Pause" : "Start" }}
+          Refresh
         </Button>
         <Button variant="outline" size="sm" @click="clearAllFeeds">
           <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
@@ -290,11 +290,21 @@ const activeTab = ref("chat");
 const isConnected = ref(false);
 const connecting = ref(false);
 const error = ref<string | null>(null);
+const loading = ref(true);
+const loadingOlder = ref(false);
 
-// Feed data
+// Feed data with infinite scroll support
 const chatMessages = ref<any[]>([]);
 const connections = ref<any[]>([]);
 const teamkills = ref<any[]>([]);
+
+const hasMoreChat = ref(true);
+const hasMoreConnections = ref(true);
+const hasMoreTeamkills = ref(true);
+
+const oldestChatTime = ref<string | null>(null);
+const oldestConnectionTime = ref<string | null>(null);
+const oldestTeamkillTime = ref<string | null>(null);
 
 // Container refs for auto-scrolling
 const chatContainer = ref<HTMLElement>();
@@ -308,6 +318,123 @@ let websocket: WebSocket | null = null;
 const chatCount = computed(() => chatMessages.value.length);
 const connectionsCount = computed(() => connections.value.length);
 const teamkillsCount = computed(() => teamkills.value.length);
+
+// Scroll tracking
+const isAtBottom = ref(true);
+
+// Load initial historical data
+const loadInitialHistoricalData = async () => {
+  await Promise.all([
+    loadHistoricalData("chat", 50),
+    loadHistoricalData("connections", 50),
+    loadHistoricalData("teamkills", 50),
+  ]);
+
+  // Scroll to bottom initially
+  await nextTick();
+  setTimeout(() => {
+    scrollToBottom("chat");
+    scrollToBottom("connections");
+    scrollToBottom("teamkills");
+  }, 100);
+};
+
+// Load historical data for a specific feed type
+const loadHistoricalData = async (type: string, limit: number = 50, before?: string) => {
+  try {
+    let url = `/api/servers/${serverId}/feeds/history?type=${type}&limit=${limit}`;
+    if (before) {
+      url += `&before=${before}`;
+    }
+
+    const response = await $fetch(url, {
+      headers: {
+        Authorization: `Bearer ${useCookie(useRuntimeConfig().public.sessionCookieName as string).value}`,
+      },
+    });
+
+    const newEvents = (response as any).data.events || [];
+    
+    if (newEvents.length > 0) {
+      if (type === "chat") {
+        if (before) {
+          // Prepend older events to the beginning
+          chatMessages.value.unshift(...newEvents);
+        } else {
+          // Initial load or refresh
+          chatMessages.value = newEvents;
+        }
+        oldestChatTime.value = newEvents[0]?.timestamp;
+        hasMoreChat.value = newEvents.length === limit;
+      } else if (type === "connections") {
+        if (before) {
+          connections.value.unshift(...newEvents);
+        } else {
+          connections.value = newEvents;
+        }
+        oldestConnectionTime.value = newEvents[0]?.timestamp;
+        hasMoreConnections.value = newEvents.length === limit;
+      } else if (type === "teamkills") {
+        if (before) {
+          teamkills.value.unshift(...newEvents);
+        } else {
+          teamkills.value = newEvents;
+        }
+        oldestTeamkillTime.value = newEvents[0]?.timestamp;
+        hasMoreTeamkills.value = newEvents.length === limit;
+      }
+    } else {
+      // No more data available
+      if (type === "chat") hasMoreChat.value = false;
+      else if (type === "connections") hasMoreConnections.value = false;
+      else if (type === "teamkills") hasMoreTeamkills.value = false;
+    }
+  } catch (err: any) {
+    console.error(`Failed to load ${type} history:`, err);
+  }
+};
+
+// Handle scroll events for infinite loading
+const handleScroll = async (event: Event, feedType: string) => {
+  const container = event.target as HTMLElement;
+  const scrollTop = container.scrollTop;
+  const scrollHeight = container.scrollHeight;
+  const clientHeight = container.clientHeight;
+
+  // Check if user is at the bottom
+  isAtBottom.value = scrollHeight - scrollTop - clientHeight < 100;
+
+  // Load older data when scrolling near the top
+  if (scrollTop < 200 && !loadingOlder.value) {
+    let hasMore = false;
+    let oldestTime = null;
+
+    if (feedType === "chat") {
+      hasMore = hasMoreChat.value;
+      oldestTime = oldestChatTime.value;
+    } else if (feedType === "connections") {
+      hasMore = hasMoreConnections.value;
+      oldestTime = oldestConnectionTime.value;
+    } else if (feedType === "teamkills") {
+      hasMore = hasMoreTeamkills.value;
+      oldestTime = oldestTeamkillTime.value;
+    }
+
+    if (hasMore && oldestTime) {
+      loadingOlder.value = true;
+      const previousScrollHeight = container.scrollHeight;
+
+      await loadHistoricalData(feedType, 50, oldestTime);
+
+      // Maintain scroll position
+      await nextTick();
+      const newScrollHeight = container.scrollHeight;
+      container.scrollTop = scrollTop + (newScrollHeight - previousScrollHeight);
+      
+      loadingOlder.value = false;
+    }
+  }
+};
 
 // Connect to WebSocket endpoint
 const connectToFeeds = async () => {
@@ -399,7 +526,7 @@ const toggleConnection = () => {
   }
 };
 
-// Handle incoming feed events
+// Handle incoming feed events (real-time)
 const handleFeedEvent = (event: any) => {
   // Handle connection message
   if (event.type === "connected") {
@@ -407,31 +534,37 @@ const handleFeedEvent = (event: any) => {
     return;
   }
 
-  const maxEvents = 500; // Limit to prevent memory issues
+  const maxEvents = 1000; // Increased limit for better history
 
   switch (event.type) {
     case "chat":
-      chatMessages.value.unshift(event);
+      chatMessages.value.push(event);
       if (chatMessages.value.length > maxEvents) {
-        chatMessages.value = chatMessages.value.slice(0, maxEvents);
+        chatMessages.value = chatMessages.value.slice(-maxEvents);
       }
-      nextTick(() => scrollToTop(chatContainer.value));
+      if (isAtBottom.value) {
+        nextTick(() => scrollToBottom("chat"));
+      }
       break;
 
     case "connection":
-      connections.value.unshift(event);
+      connections.value.push(event);
       if (connections.value.length > maxEvents) {
-        connections.value = connections.value.slice(0, maxEvents);
+        connections.value = connections.value.slice(-maxEvents);
       }
-      nextTick(() => scrollToTop(connectionsContainer.value));
+      if (isAtBottom.value) {
+        nextTick(() => scrollToBottom("connections"));
+      }
       break;
 
     case "teamkill":
-      teamkills.value.unshift(event);
+      teamkills.value.push(event);
       if (teamkills.value.length > maxEvents) {
-        teamkills.value = teamkills.value.slice(0, maxEvents);
+        teamkills.value = teamkills.value.slice(-maxEvents);
       }
-      nextTick(() => scrollToTop(teamkillsContainer.value));
+      if (isAtBottom.value) {
+        nextTick(() => scrollToBottom("teamkills"));
+      }
       break;
   }
 };
@@ -441,32 +574,64 @@ const clearFeed = (feedType: string) => {
   switch (feedType) {
     case "chat":
       chatMessages.value = [];
+      oldestChatTime.value = null;
+      hasMoreChat.value = true;
       break;
     case "connections":
       connections.value = [];
+      oldestConnectionTime.value = null;
+      hasMoreConnections.value = true;
       break;
     case "teamkills":
       teamkills.value = [];
+      oldestTeamkillTime.value = null;
+      hasMoreTeamkills.value = true;
       break;
   }
 };
 
 // Clear all feeds
 const clearAllFeeds = () => {
-  chatMessages.value = [];
-  connections.value = [];
-  teamkills.value = [];
+  clearFeed("chat");
+  clearFeed("connections");
+  clearFeed("teamkills");
+};
+
+// Refresh feeds (reload historical and reconnect)
+const refreshFeeds = async () => {
+  loading.value = true;
+  try {
+    // Clear existing data
+    clearAllFeeds();
+    
+    // Disconnect and reconnect websocket
+    disconnectFromFeeds();
+    
+    // Reload historical data
+    await loadInitialHistoricalData();
+    
+    // Reconnect websocket
+    await connectToFeeds();
+  } finally {
+    loading.value = false;
+  }
 };
 
 // Helper functions
-const scrollToTop = (container: HTMLElement | undefined) => {
+const scrollToBottom = (feedType: string) => {
+  let container: HTMLElement | undefined;
+  if (feedType === "chat") container = chatContainer.value;
+  else if (feedType === "connections") container = connectionsContainer.value;
+  else if (feedType === "teamkills") container = teamkillsContainer.value;
+
   if (container) {
-    container.scrollTop = 0;
+    container.scrollTop = container.scrollHeight;
+    isAtBottom.value = true;
   }
 };
 
 const formatTimestamp = (timestamp: string) => {
-  return new Date(timestamp).toLocaleTimeString();
+  return new Date(timestamp).toLocaleString();
 };
 
 const getChatTypeColor = (chatType: string) => {
@@ -500,8 +665,17 @@ const getChatTypeBadge = (chatType: string) => {
 };
 
 // Lifecycle
-onMounted(() => {
-  connectToFeeds();
+onMounted(async () => {
+  loading.value = true;
+  try {
+    // Load historical data first
+    await loadInitialHistoricalData();
+    
+    // Then connect to live feeds
+    await connectToFeeds();
+  } finally {
+    loading.value = false;
+  }
 });
 
 onUnmounted(() => {

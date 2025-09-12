@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -259,22 +260,31 @@ func (s *Server) ServerFeedsHistory(c *gin.Context) {
 		limit = 50
 	}
 
+	// Support pagination with 'before' parameter for loading older events
+	beforeStr := c.Query("before")
+	var beforeTime *time.Time
+	if beforeStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, beforeStr); err == nil {
+			beforeTime = &parsed
+		}
+	}
+
 	var events []FeedEvent
 
 	// Get historical data from ClickHouse through PluginManager
-	if s.Dependencies.PluginManager != nil {
+	if s.Dependencies.Clickhouse != nil {
 		switch feedType {
 		case "chat":
-			events, err = s.getHistoricalChatMessages(serverId, limit)
+			events, err = s.getHistoricalChatMessagesWithPagination(serverId, limit, beforeTime)
 		case "connections":
-			events, err = s.getHistoricalConnections(serverId, limit)
+			events, err = s.getHistoricalConnectionsWithPagination(serverId, limit, beforeTime)
 		case "teamkills":
-			events, err = s.getHistoricalTeamkills(serverId, limit)
+			events, err = s.getHistoricalTeamkillsWithPagination(serverId, limit, beforeTime)
 		default:
 			// Get all types
-			chatEvents, _ := s.getHistoricalChatMessages(serverId, limit/3)
-			connEvents, _ := s.getHistoricalConnections(serverId, limit/3)
-			tkEvents, _ := s.getHistoricalTeamkills(serverId, limit/3)
+			chatEvents, _ := s.getHistoricalChatMessagesWithPagination(serverId, limit/3, beforeTime)
+			connEvents, _ := s.getHistoricalConnectionsWithPagination(serverId, limit/3, beforeTime)
+			tkEvents, _ := s.getHistoricalTeamkillsWithPagination(serverId, limit/3, beforeTime)
 
 			events = append(events, chatEvents...)
 			events = append(events, connEvents...)
@@ -300,32 +310,17 @@ func (s *Server) ServerFeedsHistory(c *gin.Context) {
 		}
 	}
 
+	// Reverse events to show oldest first (like logs)
+	for i := 0; i < len(events)/2; i++ {
+		events[i], events[len(events)-1-i] = events[len(events)-1-i], events[i]
+	}
+
 	responses.Success(c, "Feed history retrieved successfully", &gin.H{
 		"events": events,
 		"type":   feedType,
 		"limit":  limit,
+		"before": beforeStr,
 	})
-}
-
-// getHistoricalChatMessages retrieves chat message history from ClickHouse
-func (s *Server) getHistoricalChatMessages(serverId uuid.UUID, limit int) ([]FeedEvent, error) {
-	// TODO: Implement ClickHouse access for historical chat messages
-	// For now, return empty results
-	return []FeedEvent{}, nil
-}
-
-// getHistoricalConnections retrieves connection history from ClickHouse
-func (s *Server) getHistoricalConnections(serverId uuid.UUID, limit int) ([]FeedEvent, error) {
-	// TODO: Implement ClickHouse access for historical connections
-	// For now, return empty results
-	return []FeedEvent{}, nil
-}
-
-// getHistoricalTeamkills retrieves teamkill history from ClickHouse
-func (s *Server) getHistoricalTeamkills(serverId uuid.UUID, limit int) ([]FeedEvent, error) {
-	// TODO: Implement ClickHouse access for historical teamkills
-	// For now, return empty results
-	return []FeedEvent{}, nil
 }
 
 // Helper functions
@@ -345,4 +340,262 @@ func extractPlayerName(playerController string) string {
 		return playerController[:20] + "..."
 	}
 	return playerController
+}
+
+// getHistoricalChatMessagesWithPagination retrieves chat message history with pagination
+func (s *Server) getHistoricalChatMessagesWithPagination(serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
+	if s.Dependencies.Clickhouse == nil {
+		return []FeedEvent{}, nil
+	}
+
+	query := `
+		SELECT 
+			message_id,
+			sent_at,
+			player_name,
+			steam_id,
+			eos_id,
+			message,
+			chat_type
+		FROM squad_aegis.server_player_chat_messages 
+		WHERE server_id = ?`
+
+	args := []interface{}{serverId}
+
+	if beforeTime != nil {
+		query += " AND sent_at < ?"
+		args = append(args, *beforeTime)
+	}
+
+	query += " ORDER BY sent_at DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []FeedEvent
+	for rows.Next() {
+		var messageId string
+		var sentAt time.Time
+		var playerName string
+		var steamId uint64
+		var eosId string
+		var message string
+		var chatType string
+
+		err := rows.Scan(&messageId, &sentAt, &playerName, &steamId, &eosId, &message, &chatType)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to scan chat message row")
+			continue
+		}
+
+		events = append(events, FeedEvent{
+			ID:        messageId,
+			Type:      "chat",
+			Timestamp: sentAt,
+			Data: map[string]interface{}{
+				"player_name": playerName,
+				"steam_id":    fmt.Sprintf("%d", steamId),
+				"eos_id":      eosId,
+				"message":     message,
+				"chat_type":   chatType,
+			},
+		})
+	}
+
+	return events, nil
+}
+
+// getHistoricalConnectionsWithPagination retrieves connection history with pagination
+func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
+	if s.Dependencies.Clickhouse == nil {
+		return []FeedEvent{}, nil
+	}
+
+	// Union query to get both connected and join succeeded events
+	var query string
+	var args []interface{}
+
+	if beforeTime != nil {
+		query = `
+			SELECT * FROM (
+				SELECT 
+					chain_id as id,
+					event_time,
+					'connected' as action,
+					player_controller,
+					ip,
+					steam,
+					eos
+				FROM squad_aegis.server_player_connected_events 
+				WHERE server_id = ? AND event_time < ?
+				UNION ALL
+				SELECT 
+					chain_id as id,
+					event_time,
+					'joined' as action,
+					player_suffix as player_controller,
+					ip,
+					steam,
+					eos
+				FROM squad_aegis.server_join_succeeded_events 
+				WHERE server_id = ? AND event_time < ?
+			) ORDER BY event_time DESC LIMIT ?`
+		args = []interface{}{serverId, *beforeTime, serverId, *beforeTime, limit}
+	} else {
+		query = `
+			SELECT * FROM (
+				SELECT 
+					chain_id as id,
+					event_time,
+					'connected' as action,
+					player_controller,
+					ip,
+					steam,
+					eos
+				FROM squad_aegis.server_player_connected_events 
+				WHERE server_id = ?
+				UNION ALL
+				SELECT 
+					chain_id as id,
+					event_time,
+					'joined' as action,
+					player_suffix as player_controller,
+					ip,
+					steam,
+					eos
+				FROM squad_aegis.server_join_succeeded_events 
+				WHERE server_id = ?
+			) ORDER BY event_time DESC LIMIT ?`
+		args = []interface{}{serverId, serverId, limit}
+	}
+
+	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []FeedEvent
+	for rows.Next() {
+		var id string
+		var eventTime time.Time
+		var action string
+		var playerController string
+		var ip string
+		var steam, eos *string
+
+		err := rows.Scan(&id, &eventTime, &action, &playerController, &ip, &steam, &eos)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to scan connection row")
+			continue
+		}
+
+		// Build data map with proper null handling
+		data := map[string]interface{}{
+			"action":     action,
+			"ip_address": ip,
+		}
+
+		if action == "connected" {
+			data["player_controller"] = playerController
+		} else {
+			data["player_suffix"] = playerController
+		}
+
+		if steam != nil {
+			data["steam_id"] = *steam
+		}
+		if eos != nil {
+			data["eos_id"] = *eos
+		}
+
+		events = append(events, FeedEvent{
+			ID:        id,
+			Type:      "connection",
+			Timestamp: eventTime,
+			Data:      data,
+		})
+	}
+
+	return events, nil
+}
+
+// getHistoricalTeamkillsWithPagination retrieves teamkill history with pagination
+func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
+	if s.Dependencies.Clickhouse == nil {
+		return []FeedEvent{}, nil
+	}
+
+	query := `
+		SELECT 
+			chain_id,
+			event_time,
+			victim_name,
+			attacker_player_controller,
+			attacker_steam,
+			attacker_eos,
+			weapon,
+			damage
+		FROM squad_aegis.server_player_died_events 
+		WHERE server_id = ? AND teamkill = 1`
+
+	args := []interface{}{serverId}
+
+	if beforeTime != nil {
+		query += " AND event_time < ?"
+		args = append(args, *beforeTime)
+	}
+
+	query += " ORDER BY event_time DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []FeedEvent
+	for rows.Next() {
+		var chainId string
+		var eventTime time.Time
+		var victimName string
+		var attackerController string
+		var attackerSteam, attackerEos *string
+		var weapon string
+		var damage float32
+
+		err := rows.Scan(&chainId, &eventTime, &victimName, &attackerController, &attackerSteam, &attackerEos, &weapon, &damage)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to scan teamkill row")
+			continue
+		}
+
+		data := map[string]interface{}{
+			"victim_name":   victimName,
+			"attacker_name": extractPlayerName(attackerController),
+			"weapon":        weapon,
+			"damage":        damage,
+		}
+
+		if attackerSteam != nil {
+			data["attacker_steam"] = *attackerSteam
+		}
+		if attackerEos != nil {
+			data["attacker_eos"] = *attackerEos
+		}
+
+		events = append(events, FeedEvent{
+			ID:        chainId,
+			Type:      "teamkill",
+			Timestamp: eventTime,
+			Data:      data,
+		})
+	}
+
+	return events, nil
 }
