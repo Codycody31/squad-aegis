@@ -192,7 +192,6 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				serverGroup.GET("/rcon/commands", server.RconCommandList)
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)
-				// FIXME: fix execute, should be based on the users permissions, on what they can execute
 				serverGroup.POST("/rcon/execute", server.ServerRconExecute)
 				serverGroup.GET("/rcon/server-population", server.ServerRconServerPopulation)
 				serverGroup.GET("/rcon/available-layers", server.ServerRconAvailableLayers)

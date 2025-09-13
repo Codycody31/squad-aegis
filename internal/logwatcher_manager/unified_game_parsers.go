@@ -16,22 +16,30 @@ func GetUnifiedGameEventParsers() []LogParser {
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadGameEvents: Display: Team ([0-9]), (.*) \( ?(.*?) ?\) has (won|lost) the match with ([0-9]+) Tickets on layer (.*) \(level (.*)\)!`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
-				data := map[string]interface{}{
-					"time":       args[1],
-					"chainID":    strings.TrimSpace(args[2]),
-					"team":       args[3],
-					"subfaction": args[4],
-					"faction":    args[5],
-					"action":     args[6],
-					"tickets":    args[7],
-					"layer":      args[8],
-					"level":      args[9],
-				}
-
 				if args[6] == "won" {
-					eventStore.StoreRoundWinner(data)
+					eventStore.StoreRoundWinner(&RoundWinnerData{
+						Time:       args[1],
+						ChainID:    strings.TrimSpace(args[2]),
+						Team:       args[3],
+						Subfaction: args[4],
+						Faction:    args[5],
+						Action:     args[6],
+						Tickets:    args[7],
+						Layer:      args[8],
+						Level:      args[9],
+					})
 				} else {
-					eventStore.StoreRoundLoser(data)
+					eventStore.StoreRoundLoser(&RoundLoserData{
+						Time:       args[1],
+						ChainID:    strings.TrimSpace(args[2]),
+						Team:       args[3],
+						Subfaction: args[4],
+						Faction:    args[5],
+						Action:     args[6],
+						Tickets:    args[7],
+						Layer:      args[8],
+						Level:      args[9],
+					})
 				}
 
 				// Create unified event for individual ticket events
@@ -56,15 +64,13 @@ func GetUnifiedGameEventParsers() []LogParser {
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQGameMode::)?DetermineMatchWinner\(\): (.+) won on (.+)`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
-				data := map[string]interface{}{
-					"time":    args[1],
-					"chainID": strings.TrimSpace(args[2]),
-					"winner":  args[3],
-					"layer":   args[4],
-				}
-
 				// Store WON data for correlation with NEW_GAME
-				eventStore.StoreWonData(data)
+				eventStore.StoreWonData(&WonData{
+					Time:    args[1],
+					ChainID: strings.TrimSpace(args[2]),
+					Winner:  &args[3],
+					Layer:   args[4],
+				})
 
 				// Create unified event for match winner
 				unifiedEvent := &event_manager.LogGameEventUnifiedData{
@@ -94,14 +100,10 @@ func GetUnifiedGameEventParsers() []LogParser {
 
 				// Add winner/loser data if available
 				if winnerData, exists := eventStore.GetRoundWinner(true); exists {
+					unifiedEvent.Winner = winnerData.Faction
+					unifiedEvent.Layer = winnerData.Layer
 					if winnerJSON, err := json.Marshal(winnerData); err == nil {
 						unifiedEvent.WinnerData = string(winnerJSON)
-						if winner, ok := winnerData["faction"].(string); ok {
-							unifiedEvent.Winner = winner
-						}
-						if layer, ok := winnerData["layer"].(string); ok {
-							unifiedEvent.Layer = layer
-						}
 					}
 				}
 
@@ -135,26 +137,26 @@ func GetUnifiedGameEventParsers() []LogParser {
 
 				// Merge with existing WON data if available
 				if wonData, exists := eventStore.GetWonData(); exists {
-					if team, ok := wonData["team"].(string); ok {
-						unifiedEvent.Team = team
+					if wonData.Team != "" {
+						unifiedEvent.Team = wonData.Team
 					}
-					if subfaction, ok := wonData["subfaction"].(string); ok {
-						unifiedEvent.Subfaction = subfaction
+					if wonData.Subfaction != "" {
+						unifiedEvent.Subfaction = wonData.Subfaction
 					}
-					if faction, ok := wonData["faction"].(string); ok {
-						unifiedEvent.Faction = faction
+					if wonData.Faction != "" {
+						unifiedEvent.Faction = wonData.Faction
 					}
-					if action, ok := wonData["action"].(string); ok {
-						unifiedEvent.Action = action
+					if wonData.Action != "" {
+						unifiedEvent.Action = wonData.Action
 					}
-					if tickets, ok := wonData["tickets"].(string); ok {
-						unifiedEvent.Tickets = tickets
+					if wonData.Tickets != "" {
+						unifiedEvent.Tickets = wonData.Tickets
 					}
-					if layer, ok := wonData["layer"].(string); ok {
-						unifiedEvent.Layer = layer
+					if wonData.Level != "" {
+						unifiedEvent.Level = wonData.Level
 					}
-					if level, ok := wonData["level"].(string); ok {
-						unifiedEvent.Level = level
+					if wonData.Layer != "" {
+						unifiedEvent.Layer = wonData.Layer
 					}
 
 					// Store as metadata for completeness

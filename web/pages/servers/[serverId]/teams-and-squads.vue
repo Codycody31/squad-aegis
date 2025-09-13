@@ -146,6 +146,11 @@ function getSquadLeaderName(squad: Squad): string {
   return leader ? leader.name : "No Leader";
 }
 
+// Check if a squad leader has an incorrect role (not containing _SL)
+function isSquadLeaderWithIncorrectRole(player: Player): boolean {
+  return player.isSquadLeader && (!player.role || !player.role.includes('_SL'));
+}
+
 function sortSquadsForDisplay(squads: Squad[]): Squad[] {
   return [...squads].sort((a, b) => {
     // Unlocked first, then by size desc, then by id asc
@@ -499,11 +504,22 @@ async function executePlayerAction() {
                         <tr v-for="player in getSortedSquadPlayers(squad)" :key="player.steam_id" class="border-b border-gray-800">
                           <td class="py-1">
                             <div class="flex items-center">
-                              <span v-if="player.isSquadLeader" class="mr-1 text-yellow-500">★</span>
-                              {{ player.name }}
+                              <span v-if="player.isSquadLeader" 
+                                    :class="isSquadLeaderWithIncorrectRole(player) ? 'mr-1 text-red-500' : 'mr-1 text-yellow-500'">★</span>
+                              <span :class="isSquadLeaderWithIncorrectRole(player) ? 'text-red-500 font-semibold' : ''">
+                                {{ player.name }}
+                              </span>
+                              <span v-if="isSquadLeaderWithIncorrectRole(player)" 
+                                    class="ml-2 text-xs text-red-500 bg-red-100 dark:bg-red-900 px-1 rounded">
+                                WRONG ROLE
+                              </span>
                             </div>
                           </td>
-                          <td class="py-1">{{ player.role || "Rifleman" }}</td>
+                          <td class="py-1">
+                            <span :class="isSquadLeaderWithIncorrectRole(player) ? 'text-red-500 font-semibold' : ''">
+                              {{ player.role || "Rifleman" }}
+                            </span>
+                          </td>
                           <td class="py-1 text-right">
                             <PlayerActionMenu :player="player" :serverId="serverId as string"
                               @warn="openActionDialog(player, 'warn')" @move="openActionDialog(player, 'move')"

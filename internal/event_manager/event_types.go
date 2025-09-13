@@ -113,46 +113,53 @@ func (d LogPlayerConnectedData) GetEventType() EventType { return EventTypeLogPl
 
 // LogPlayerDamagedData represents log player damaged event data
 type LogPlayerDamagedData struct {
-	Time               string `json:"time"`
-	ChainID            string `json:"chain_id"`
-	VictimName         string `json:"victim_name"`
-	Damage             string `json:"damage"`
-	AttackerName       string `json:"attacker_name"`
-	AttackerController string `json:"attacker_controller"`
-	Weapon             string `json:"weapon"`
-	AttackerEOS        string `json:"attacker_eos,omitempty"`
-	AttackerSteam      string `json:"attacker_steam,omitempty"`
+	Time               string      `json:"time"`
+	ChainID            string      `json:"chain_id"`
+	VictimName         string      `json:"victim_name,omitempty"`
+	Damage             string      `json:"damage"`
+	AttackerName       string      `json:"attacker_name,omitempty"`
+	AttackerController string      `json:"attacker_controller"`
+	Weapon             string      `json:"weapon"`
+	AttackerEOS        string      `json:"attacker_eos,omitempty"`
+	AttackerSteam      string      `json:"attacker_steam,omitempty"`
+	Victim             *PlayerInfo `json:"victim,omitempty"`
+	Attacker           *PlayerInfo `json:"attacker,omitempty"`
+	Teamkill           bool        `json:"teamkill,omitempty"`
 }
 
 func (d LogPlayerDamagedData) GetEventType() EventType { return EventTypeLogPlayerDamaged }
 
 // LogPlayerDiedData represents log player died event data
 type LogPlayerDiedData struct {
-	Time                     string `json:"time"`
-	WoundTime                string `json:"wound_time,omitempty"`
-	ChainID                  string `json:"chain_id"`
-	VictimName               string `json:"victim_name"`
-	Damage                   string `json:"damage"`
-	AttackerPlayerController string `json:"attacker_player_controller"`
-	Weapon                   string `json:"weapon"`
-	AttackerEOS              string `json:"attacker_eos,omitempty"`
-	AttackerSteam            string `json:"attacker_steam,omitempty"`
-	Teamkill                 bool   `json:"teamkill,omitempty"`
+	Time                     string      `json:"time"`
+	WoundTime                string      `json:"wound_time,omitempty"`
+	ChainID                  string      `json:"chain_id"`
+	VictimName               string      `json:"victim_name,omitempty"`
+	Damage                   string      `json:"damage"`
+	AttackerPlayerController string      `json:"attacker_player_controller"`
+	Weapon                   string      `json:"weapon"`
+	AttackerEOS              string      `json:"attacker_eos,omitempty"`
+	AttackerSteam            string      `json:"attacker_steam,omitempty"`
+	Victim                   *PlayerInfo `json:"victim,omitempty"`
+	Attacker                 *PlayerInfo `json:"attacker,omitempty"`
+	Teamkill                 bool        `json:"teamkill,omitempty"`
 }
 
 func (d LogPlayerDiedData) GetEventType() EventType { return EventTypeLogPlayerDied }
 
 // LogPlayerWoundedData represents log player wounded event data
 type LogPlayerWoundedData struct {
-	Time                     string `json:"time"`
-	ChainID                  string `json:"chain_id"`
-	VictimName               string `json:"victim_name"`
-	Damage                   string `json:"damage"`
-	AttackerPlayerController string `json:"attacker_player_controller"`
-	Weapon                   string `json:"weapon"`
-	AttackerEOS              string `json:"attacker_eos,omitempty"`
-	AttackerSteam            string `json:"attacker_steam,omitempty"`
-	Teamkill                 bool   `json:"teamkill,omitempty"`
+	Time                     string      `json:"time"`
+	ChainID                  string      `json:"chain_id"`
+	VictimName               string      `json:"victim_name,omitempty"`
+	Damage                   string      `json:"damage"`
+	AttackerPlayerController string      `json:"attacker_player_controller"`
+	Weapon                   string      `json:"weapon"`
+	AttackerEOS              string      `json:"attacker_eos,omitempty"`
+	AttackerSteam            string      `json:"attacker_steam,omitempty"`
+	Victim                   *PlayerInfo `json:"victim,omitempty"`
+	Attacker                 *PlayerInfo `json:"attacker,omitempty"`
+	Teamkill                 bool        `json:"teamkill,omitempty"`
 }
 
 func (d LogPlayerWoundedData) GetEventType() EventType { return EventTypeLogPlayerWounded }
@@ -215,12 +222,12 @@ func (d LogNewGameData) GetEventType() EventType { return EventTypeLogNewGame }
 
 // LogRoundEndedData represents log round ended event data
 type LogRoundEndedData struct {
-	Time       string                 `json:"time"`
-	ChainID    string                 `json:"chain_id,omitempty"`
-	Winner     string                 `json:"winner,omitempty"`
-	Layer      string                 `json:"layer,omitempty"`
-	WinnerData map[string]interface{} `json:"winner_data,omitempty"`
-	LoserData  map[string]interface{} `json:"loser_data,omitempty"`
+	Time       string           `json:"time"`
+	ChainID    string           `json:"chain_id,omitempty"`
+	Winner     string           `json:"winner,omitempty"`
+	Layer      string           `json:"layer,omitempty"`
+	WinnerData *RoundWinnerInfo `json:"winner_data,omitempty"`
+	LoserData  *RoundLoserInfo  `json:"loser_data,omitempty"`
 }
 
 func (d LogRoundEndedData) GetEventType() EventType { return EventTypeLogRoundEnded }
