@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,21 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
+)
+
+const (
+	DefaultCommandTimeout = 30 * time.Second
+	HealthCheckInterval   = 120 * time.Second
+	MaxReconnectAttempts  = 3
+	CommandQueueSize      = 1000
+	EventChannelSize      = 1000
+	MaxConcurrentCommands = 1
+
+	// Command priorities
+	PriorityLow      = 1
+	PriorityNormal   = 5
+	PriorityHigh     = 10
+	PriorityCritical = 15
 )
 
 // RconEvent represents an event from the RCON server
@@ -28,6 +44,10 @@ type RconEvent struct {
 type RconCommand struct {
 	Command  string
 	Response chan CommandResponse
+	Priority int             // Higher values = higher priority
+	Timeout  time.Duration   // Per-command timeout override
+	Retries  int             // Number of retries for this command
+	ctx      context.Context // Command-specific context
 }
 
 // CommandResponse represents the response from an RCON command
@@ -38,13 +58,16 @@ type CommandResponse struct {
 
 // ServerConnection represents a connection to an RCON server
 type ServerConnection struct {
-	ServerID     uuid.UUID
-	Rcon         *rcon.Rcon // Single connection for both commands and events
-	CommandChan  chan RconCommand
-	EventChan    chan RconEvent
-	LastUsed     time.Time
-	mu           sync.Mutex
-	cmdSemaphore chan struct{}
+	ServerID        uuid.UUID
+	Rcon            *rcon.Rcon // Single connection for both commands and events
+	CommandChan     chan RconCommand
+	EventChan       chan RconEvent
+	LastUsed        time.Time
+	LastHealthCheck time.Time
+	mu              sync.Mutex
+	cmdSemaphore    chan struct{}
+	isHealthy       bool
+	reconnectCount  int
 }
 
 // RconManager manages RCON connections to multiple servers
@@ -208,15 +231,18 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	}
 
 	// Create a semaphore to ensure only one command executes at a time
-	cmdSemaphore := make(chan struct{}, 1)
+	cmdSemaphore := make(chan struct{}, MaxConcurrentCommands)
 
 	conn := &ServerConnection{
-		ServerID:     serverID,
-		Rcon:         rconConn,
-		CommandChan:  make(chan RconCommand, 100),
-		EventChan:    make(chan RconEvent, 100),
-		LastUsed:     time.Now(),
-		cmdSemaphore: cmdSemaphore,
+		ServerID:        serverID,
+		Rcon:            rconConn,
+		CommandChan:     make(chan RconCommand, CommandQueueSize),
+		EventChan:       make(chan RconEvent, EventChannelSize),
+		LastUsed:        time.Now(),
+		LastHealthCheck: time.Now(),
+		cmdSemaphore:    cmdSemaphore,
+		isHealthy:       true,
+		reconnectCount:  0,
 	}
 
 	m.connections[serverID] = conn
@@ -224,12 +250,58 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	// Start listening for events and processing commands
 	go m.listenForEvents(serverID, rconConn)
 	go m.processCommands(serverID, conn)
+	go m.monitorConnection(serverID, conn)
 
 	log.Info().
 		Str("serverID", serverID.String()).
 		Msg("Connected to RCON server")
 
 	return nil
+}
+
+// monitorConnection monitors a connection's health and handles reconnection
+func (m *RconManager) monitorConnection(serverID uuid.UUID, conn *ServerConnection) {
+	ticker := time.NewTicker(HealthCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Perform periodic health check
+			if err := m.performHealthCheck(serverID, conn); err != nil {
+				log.Warn().
+					Str("serverID", serverID.String()).
+					Err(err).
+					Msg("Periodic health check failed")
+
+				// Attempt reconnection if configured
+				conn.mu.Lock()
+				if conn.reconnectCount < MaxReconnectAttempts {
+					conn.reconnectCount++
+					conn.mu.Unlock()
+
+					// TODO: Implement reconnection logic if needed
+					log.Info().
+						Str("serverID", serverID.String()).
+						Int("attempt", conn.reconnectCount).
+						Msg("Connection unhealthy, may need reconnection")
+				} else {
+					conn.mu.Unlock()
+				}
+			} else {
+				// Reset reconnect count on successful health check
+				conn.mu.Lock()
+				conn.reconnectCount = 0
+				conn.mu.Unlock()
+			}
+
+		case <-m.ctx.Done():
+			log.Debug().
+				Str("serverID", serverID.String()).
+				Msg("Stopping connection monitor")
+			return
+		}
+	}
 }
 
 // DisconnectFromServer disconnects from an RCON server
@@ -258,141 +330,272 @@ func (m *RconManager) DisconnectFromServer(serverID uuid.UUID, force bool) error
 	return nil
 }
 
-// ExecuteCommand executes a command on an RCON server
+// ExecuteCommand executes a command on an RCON server with improved error handling and performance
 func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string, error) {
+	return m.ExecuteCommandWithOptions(serverID, command, CommandOptions{
+		Priority: PriorityNormal,
+		Timeout:  DefaultCommandTimeout,
+		Retries:  1,
+	})
+}
+
+// CommandOptions provides configuration for command execution
+type CommandOptions struct {
+	Priority int
+	Timeout  time.Duration
+	Retries  int
+	Context  context.Context
+}
+
+// ExecuteCommandWithOptions executes a command with specific options
+func (m *RconManager) ExecuteCommandWithOptions(serverID uuid.UUID, command string, options CommandOptions) (string, error) {
+	// Validate input
+	if command == "" {
+		return "", errors.New("command cannot be empty")
+	}
+
+	// Set defaults
+	if options.Timeout == 0 {
+		options.Timeout = DefaultCommandTimeout
+	}
+	if options.Retries < 1 {
+		options.Retries = 1
+	}
+	if options.Context == nil {
+		options.Context = context.Background()
+	}
+
+	// Get connection with health check
+	conn, err := m.getHealthyConnection(serverID)
+	if err != nil {
+		return "", err
+	}
+
+	// Update last used time efficiently
+	conn.mu.Lock()
+	conn.LastUsed = time.Now()
+	conn.mu.Unlock()
+
+	// Create command context with timeout
+	ctx, cancel := context.WithTimeout(options.Context, options.Timeout)
+	defer cancel()
+
+	responseChan := make(chan CommandResponse, 1)
+	defer close(responseChan)
+
+	rconCmd := RconCommand{
+		Command:  command,
+		Response: responseChan,
+		Priority: options.Priority,
+		Timeout:  options.Timeout,
+		Retries:  options.Retries,
+		ctx:      ctx,
+	}
+
+	// Attempt to send command with retries
+	var lastErr error
+	for attempt := 0; attempt < options.Retries; attempt++ {
+		if attempt > 0 {
+			log.Debug().
+				Str("serverID", serverID.String()).
+				Str("command", command).
+				Int("attempt", attempt+1).
+				Msg("Retrying command execution")
+		}
+
+		// Send command to processor
+		select {
+		case conn.CommandChan <- rconCmd:
+			// Command queued successfully
+		case <-ctx.Done():
+			lastErr = ctx.Err()
+			if lastErr == context.DeadlineExceeded {
+				lastErr = errors.New("command queue timeout")
+			}
+			continue
+		case <-m.ctx.Done():
+			return "", errors.New("rcon manager shutting down")
+		}
+
+		// Wait for response
+		select {
+		case response := <-responseChan:
+			if response.Error != nil {
+				lastErr = response.Error
+				// Don't retry on certain errors
+				if isNonRetryableError(response.Error) {
+					break
+				}
+				continue
+			}
+			return response.Response, nil
+		case <-ctx.Done():
+			lastErr = ctx.Err()
+			if lastErr == context.DeadlineExceeded {
+				lastErr = errors.New("command execution timeout")
+				// Mark connection as potentially unhealthy
+				m.markConnectionUnhealthy(serverID)
+			}
+			continue
+		case <-m.ctx.Done():
+			return "", errors.New("rcon manager shutting down")
+		}
+	}
+
+	log.Error().
+		Str("serverID", serverID.String()).
+		Str("command", command).
+		Err(lastErr).
+		Int("attempts", options.Retries).
+		Msg("Command execution failed after all retries")
+
+	return "", fmt.Errorf("command failed after %d attempts: %w", options.Retries, lastErr)
+}
+
+// getHealthyConnection returns a healthy connection or error
+func (m *RconManager) getHealthyConnection(serverID uuid.UUID) (*ServerConnection, error) {
 	m.mu.RLock()
 	conn, exists := m.connections[serverID]
 	m.mu.RUnlock()
 
 	if !exists {
-		log.Error().
-			Str("serverID", serverID.String()).
-			Str("command", command).
-			Msg("Server not connected")
-		return "", errors.New("server not connected")
+		return nil, errors.New("server not connected")
 	}
 
+	// Check if health check is needed
 	conn.mu.Lock()
-	conn.LastUsed = time.Now()
+	needsHealthCheck := time.Since(conn.LastHealthCheck) > HealthCheckInterval || !conn.isHealthy
 	conn.mu.Unlock()
 
-	responseChan := make(chan CommandResponse, 1)
-
-	// Send command to command processor
-	select {
-	case conn.CommandChan <- RconCommand{Command: command, Response: responseChan}:
-		// Command queued successfully
-	case <-time.After(30 * time.Second):
-		log.Error().
-			Str("serverID", serverID.String()).
-			Str("command", command).
-			Msg("Command queue full, try again later")
-		return "", errors.New("command queue full, try again later")
-	case <-m.ctx.Done():
-		return "", errors.New("rcon manager shutting down")
+	if needsHealthCheck {
+		if err := m.performHealthCheck(serverID, conn); err != nil {
+			return nil, fmt.Errorf("server unhealthy: %w", err)
+		}
 	}
 
-	// Wait for response
-	select {
-	case response := <-responseChan:
-		if response.Error != nil {
-			log.Debug().
-				Str("serverID", serverID.String()).
-				Str("command", command).
-				Err(response.Error).
-				Msg("Command execution failed")
+	return conn, nil
+}
+
+// performHealthCheck performs a health check on the connection
+func (m *RconManager) performHealthCheck(serverID uuid.UUID, conn *ServerConnection) error {
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+
+	// Simple ping-like command to test connectivity
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+
+	// Use a lightweight command for health check
+	done := make(chan bool, 1)
+	var healthErr error
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				healthErr = fmt.Errorf("health check panic: %v", r)
+			}
+			done <- true
+		}()
+
+		// Try to execute a simple command
+		response := conn.Rcon.Execute("ShowServerInfo")
+		if response == "" {
+			healthErr = errors.New("empty response from health check")
 		}
-		return response.Response, response.Error
-	case <-time.After(30 * time.Second):
-		log.Error().
+	}()
+
+	select {
+	case <-done:
+		// Health check completed
+	case <-ctx.Done():
+		healthErr = errors.New("health check timeout")
+	}
+
+	duration := time.Since(start)
+
+	if healthErr != nil {
+		conn.isHealthy = false
+		log.Warn().
 			Str("serverID", serverID.String()).
-			Str("command", command).
-			Msg("Command timed out")
-		return "", errors.New("command timed out")
-	case <-m.ctx.Done():
-		return "", errors.New("rcon manager shutting down")
+			Err(healthErr).
+			Dur("duration", duration).
+			Msg("Health check failed")
+		return healthErr
+	}
+
+	conn.isHealthy = true
+	conn.LastHealthCheck = time.Now()
+
+	log.Debug().
+		Str("serverID", serverID.String()).
+		Dur("duration", duration).
+		Msg("Health check passed")
+
+	return nil
+}
+
+// markConnectionUnhealthy marks a connection as unhealthy
+func (m *RconManager) markConnectionUnhealthy(serverID uuid.UUID) {
+	m.mu.RLock()
+	conn, exists := m.connections[serverID]
+	m.mu.RUnlock()
+
+	if exists {
+		conn.mu.Lock()
+		conn.isHealthy = false
+		conn.mu.Unlock()
+
+		log.Warn().
+			Str("serverID", serverID.String()).
+			Msg("Marked connection as unhealthy")
 	}
 }
 
-// processCommands processes commands for a server
+// isNonRetryableError determines if an error should not be retried
+func isNonRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	nonRetryableErrors := []string{
+		"invalid command",
+		"permission denied",
+		"authentication failed",
+		"server not connected",
+		"rcon manager shutting down",
+	}
+
+	for _, nonRetryable := range nonRetryableErrors {
+		if strings.Contains(strings.ToLower(errStr), nonRetryable) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// processCommands processes commands for a server with improved error handling and resource management
 func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection) {
 	log.Debug().
 		Str("serverID", serverID.String()).
 		Msg("Starting command processor")
 
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().
+				Str("serverID", serverID.String()).
+				Interface("panic", r).
+				Msg("Command processor panic recovered")
+		}
+	}()
+
 	for {
 		select {
 		case cmd := <-conn.CommandChan:
-			// Acquire the semaphore
-			conn.cmdSemaphore <- struct{}{}
-
-			// Update last used time
-			conn.mu.Lock()
-			conn.LastUsed = time.Now()
-			conn.mu.Unlock()
-
-			// Execute command with timeout
-			responseChan := make(chan CommandResponse, 1)
-
-			startTime := time.Now()
-			go func() {
-				// Execute command using the single RCON connection
-				response := conn.Rcon.Execute(cmd.Command)
-				// Only log on errors, not every execution time
-				if response == "" {
-					execTime := time.Since(startTime)
-					log.Debug().
-						Str("serverID", serverID.String()).
-						Str("command", cmd.Command).
-						Err(errors.New("empty response")).
-						Dur("execTime", execTime).
-						Msg("Command execution returned empty response")
-				}
-				select {
-				case responseChan <- CommandResponse{
-					Response: response,
-				}:
-					// Response sent
-				default:
-					// Only log on failure
-					log.Debug().
-						Str("serverID", serverID.String()).
-						Str("command", cmd.Command).
-						Msg("Could not send response to channel, might be closed")
-				}
-			}()
-
-			// Wait for response with timeout
-			var cmdResponse CommandResponse
-			select {
-			case response := <-responseChan:
-				cmdResponse = response
-			case <-time.After(30 * time.Second):
-				cmdResponse = CommandResponse{
-					Response: "",
-					Error:    errors.New("command execution timed out"),
-				}
-				log.Debug().
-					Str("serverID", serverID.String()).
-					Str("command", cmd.Command).
-					Msg("Command execution timed out internally")
-			case <-m.ctx.Done():
-				cmdResponse = CommandResponse{
-					Response: "",
-					Error:    errors.New("rcon manager shutting down"),
-				}
-			}
-
-			// Send response back to caller
-			select {
-			case cmd.Response <- cmdResponse:
-				// Response sent
-			case <-m.ctx.Done():
-				// Manager is shutting down
-			}
-
-			// Release the semaphore
-			<-conn.cmdSemaphore
+			m.processCommand(serverID, conn, cmd)
 
 		case <-m.ctx.Done():
 			log.Debug().
@@ -401,6 +604,185 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 			return
 		}
 	}
+}
+
+// processCommand processes a single command with proper resource management
+func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection, cmd RconCommand) {
+	// Acquire the semaphore to limit concurrent commands
+	select {
+	case conn.cmdSemaphore <- struct{}{}:
+		// Acquired semaphore
+	case <-cmd.ctx.Done():
+		// Command context cancelled before acquiring semaphore
+		select {
+		case cmd.Response <- CommandResponse{
+			Response: "",
+			Error:    cmd.ctx.Err(),
+		}:
+		default:
+		}
+		return
+	case <-m.ctx.Done():
+		// Manager shutting down
+		select {
+		case cmd.Response <- CommandResponse{
+			Response: "",
+			Error:    errors.New("rcon manager shutting down"),
+		}:
+		default:
+		}
+		return
+	}
+
+	// Ensure semaphore is released
+	defer func() {
+		<-conn.cmdSemaphore
+	}()
+
+	// Update last used time
+	conn.mu.Lock()
+	conn.LastUsed = time.Now()
+	conn.mu.Unlock()
+
+	// Execute command with proper error handling and context
+	startTime := time.Now()
+	responseChan := make(chan CommandResponse, 1)
+
+	// Execute in goroutine with proper cleanup
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Interface("panic", r).
+					Msg("Command execution panic recovered")
+
+				select {
+				case responseChan <- CommandResponse{
+					Response: "",
+					Error:    fmt.Errorf("command execution panic: %v", r),
+				}:
+				default:
+				}
+			}
+		}()
+
+		// Check if connection is still healthy before executing
+		if !conn.isHealthy {
+			select {
+			case responseChan <- CommandResponse{
+				Response: "",
+				Error:    errors.New("connection is unhealthy"),
+			}:
+			default:
+			}
+			return
+		}
+
+		// Execute the command
+		response := conn.Rcon.Execute(cmd.Command)
+
+		// Handle empty responses more gracefully
+		var err error
+		if response == "" {
+			// Some commands legitimately return empty responses
+			// Only consider it an error for certain command types
+			if m.shouldHaveResponse(cmd.Command) {
+				err = errors.New("empty response received")
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Dur("execTime", time.Since(startTime)).
+					Msg("Command returned empty response")
+			}
+		}
+
+		select {
+		case responseChan <- CommandResponse{
+			Response: response,
+			Error:    err,
+		}:
+			// Response sent successfully
+		default:
+			// Channel might be closed or full
+			log.Debug().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Could not send response, channel unavailable")
+		}
+	}()
+
+	// Wait for response with proper timeout handling
+	var cmdResponse CommandResponse
+
+	select {
+	case response := <-responseChan:
+		cmdResponse = response
+
+	case <-cmd.ctx.Done():
+		// Command-specific timeout
+		cmdResponse = CommandResponse{
+			Response: "",
+			Error:    fmt.Errorf("command timeout: %w", cmd.ctx.Err()),
+		}
+
+		// Mark connection as potentially unhealthy if timeout
+		if cmd.ctx.Err() == context.DeadlineExceeded {
+			conn.mu.Lock()
+			conn.isHealthy = false
+			conn.mu.Unlock()
+
+			log.Debug().
+				Str("serverID", serverID.String()).
+				Str("command", cmd.Command).
+				Msg("Command timed out, marking connection as unhealthy")
+		}
+
+	case <-m.ctx.Done():
+		cmdResponse = CommandResponse{
+			Response: "",
+			Error:    errors.New("rcon manager shutting down"),
+		}
+	}
+
+	// Send response back to caller with timeout protection
+	select {
+	case cmd.Response <- cmdResponse:
+		// Response sent successfully
+	case <-time.After(1 * time.Second):
+		// Caller might have given up, log but don't block
+		log.Debug().
+			Str("serverID", serverID.String()).
+			Str("command", cmd.Command).
+			Msg("Could not send response to caller, caller may have timed out")
+	case <-m.ctx.Done():
+		// Manager shutting down, nothing we can do
+	}
+}
+
+// shouldHaveResponse determines if a command should return a non-empty response
+func (m *RconManager) shouldHaveResponse(command string) bool {
+	// Commands that typically return empty responses
+	emptyResponseCommands := []string{
+		"AdminWarn",
+		"AdminKick",
+		"AdminBan",
+		"AdminBroadcast",
+		"AdminForceTeamChange",
+		"AdminEndMatch",
+		"AdminSetMaxNumPlayers",
+		"AdminSlomo",
+	}
+
+	commandLower := strings.ToLower(command)
+	for _, emptyCmd := range emptyResponseCommands {
+		if strings.HasPrefix(commandLower, strings.ToLower(emptyCmd)) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // listenForEvents listens for events from an RCON server
@@ -586,4 +968,76 @@ func (m *RconManager) ProcessChatMessages(ctx context.Context, messageHandler fu
 			}
 		}
 	}()
+}
+
+// Convenience methods for common operations
+
+// ExecuteCommandAsync executes a command asynchronously and returns immediately
+func (m *RconManager) ExecuteCommandAsync(serverID uuid.UUID, command string, callback func(string, error)) {
+	go func() {
+		response, err := m.ExecuteCommand(serverID, command)
+		if callback != nil {
+			callback(response, err)
+		}
+	}()
+}
+
+// ExecuteHighPriorityCommand executes a command with high priority
+func (m *RconManager) ExecuteHighPriorityCommand(serverID uuid.UUID, command string) (string, error) {
+	return m.ExecuteCommandWithOptions(serverID, command, CommandOptions{
+		Priority: PriorityHigh,
+		Timeout:  DefaultCommandTimeout,
+		Retries:  2,
+	})
+}
+
+// ExecuteCriticalCommand executes a command with critical priority and extended timeout
+func (m *RconManager) ExecuteCriticalCommand(serverID uuid.UUID, command string) (string, error) {
+	return m.ExecuteCommandWithOptions(serverID, command, CommandOptions{
+		Priority: PriorityCritical,
+		Timeout:  60 * time.Second,
+		Retries:  3,
+	})
+}
+
+// ExecuteCommandWithTimeout executes a command with a specific timeout
+func (m *RconManager) ExecuteCommandWithTimeout(serverID uuid.UUID, command string, timeout time.Duration) (string, error) {
+	return m.ExecuteCommandWithOptions(serverID, command, CommandOptions{
+		Priority: PriorityNormal,
+		Timeout:  timeout,
+		Retries:  1,
+	})
+}
+
+// GetConnectionStats returns statistics about a connection
+func (m *RconManager) GetConnectionStats(serverID uuid.UUID) (ConnectionStats, error) {
+	m.mu.RLock()
+	conn, exists := m.connections[serverID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return ConnectionStats{}, errors.New("server not connected")
+	}
+
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+
+	return ConnectionStats{
+		ServerID:        serverID,
+		LastUsed:        conn.LastUsed,
+		LastHealthCheck: conn.LastHealthCheck,
+		IsHealthy:       conn.isHealthy,
+		ReconnectCount:  conn.reconnectCount,
+		QueueLength:     len(conn.CommandChan),
+	}, nil
+}
+
+// ConnectionStats represents statistics about a connection
+type ConnectionStats struct {
+	ServerID        uuid.UUID
+	LastUsed        time.Time
+	LastHealthCheck time.Time
+	IsHealthy       bool
+	ReconnectCount  int
+	QueueLength     int
 }

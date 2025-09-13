@@ -35,6 +35,7 @@ const props = defineProps<{
   depth: number;
   sectionNumber?: number;
   subRuleIndex?: number;
+  forceCollapsed?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -47,6 +48,12 @@ const emit = defineEmits<{
 
 const localRule = ref<ServerRule>({ ...props.rule });
 const isCollapsed = ref<boolean>(false);
+
+const effectivelyCollapsed = computed(() => {
+  // If forceCollapsed is explicitly set (true or false), use that
+  // Otherwise, use the individual rule's collapsed state
+  return props.forceCollapsed !== undefined ? props.forceCollapsed : isCollapsed.value;
+});
 
 // Watch for prop changes and update local copy
 watch(() => props.rule, (newRule) => {
@@ -178,14 +185,14 @@ const getNumberColor = () => {
 <template>
   <div 
     :class="[
-      'border rounded-lg p-4 transition-all',
+      'border rounded-lg p-3 transition-all',
       getRuleClasses(),
-      { 'ml-4': depth > 0 }
+      { 'ml-3': depth > 0 }
     ]"
     @dragover.prevent
     @drop="handleDrop"
   >
-    <div class="flex items-start justify-between mb-3">
+    <div class="flex items-start justify-between mb-2">
       <div class="flex items-center" style="width: 100%;">
         <!-- Drag handle: only this element is draggable so text inputs remain editable -->
         <!-- <Button
@@ -203,19 +210,21 @@ const getNumberColor = () => {
           variant="ghost"
           size="icon"
           @click="isCollapsed = !isCollapsed"
-          class="h-7 w-7 mr-1 p-0.5"
+          class="h-6 w-6 mr-1 p-0.5"
+          :class="{ 'opacity-50': props.forceCollapsed !== undefined }"
           title="Toggle collapse"
+          :disabled="props.forceCollapsed !== undefined"
         >
-          <ChevronDown v-if="isCollapsed" class="h-4 w-4" />
-          <ChevronUp v-else class="h-4 w-4" />
+          <ChevronDown v-if="effectivelyCollapsed" class="h-3 w-3" />
+          <ChevronUp v-else class="h-3 w-3" />
         </Button>
-        <component :is="getIcon()" :class="['w-5 h-5 mr-2']" />
+        <component :is="getIcon()" :class="['w-4 h-4 mr-2']" />
         <div class="flex items-center min-w-0 flex-1">
           <span :class="['font-mono text-sm mr-2']">{{ ruleNumber }}</span>
           <input
             v-model="localRule.title"
             @input="emitUpdate"
-            class="font-semibold bg-transparent border-none outline-none flex-1 min-w-0"
+            class="font-medium bg-transparent border-none outline-none flex-1 min-w-0 text-sm"
             :class="getTextColor()"
           />
         </div>
@@ -227,9 +236,9 @@ const getNumberColor = () => {
           variant="ghost"
           size="icon"
           title="Add Sub-Rule"
-          class="h-8 w-8"
+          class="h-6 w-6"
         >
-          <Plus class="w-4 h-4" />
+          <Plus class="w-3 h-3" />
         </Button>
         
         <Button
@@ -237,9 +246,9 @@ const getNumberColor = () => {
           variant="ghost"
           size="icon"
           title="Add Action"
-          class="h-8 w-8"
+          class="h-6 w-6"
         >
-          <Zap class="w-4 h-4" />
+          <Zap class="w-3 h-3" />
         </Button>
         
         <Button
@@ -247,23 +256,23 @@ const getNumberColor = () => {
           variant="destructive"
           size="icon"
           title="Delete"
-          class="h-8 w-8"
+          class="h-6 w-6"
         >
-          <Trash2 class="w-4 h-4" />
+          <Trash2 class="w-3 h-3" />
         </Button>
       </div>
     </div>
 
     <!-- Rule-specific fields -->
-    <div class="space-y-3">
+    <div class="space-y-2">
       <!-- Description is always shown for root rules (depth=0), but hidden for sub-rules when collapsed -->
-      <div v-if="!isCollapsed || depth === 0">
-        <label class="block text-sm font-medium mb-1" :class="getTextColor()">Description</label>
+      <div v-if="!effectivelyCollapsed || depth === 0">
+        <label class="block text-xs font-medium mb-1" :class="getTextColor()">Description</label>
         <textarea
           v-model="localRule.description"
           @input="emitUpdate"
-          class="w-full p-2 border border-input bg-background rounded text-sm"
-          rows="3"
+          class="w-full p-2 border border-input bg-background rounded text-xs"
+          rows="2"
           placeholder="Describe this rule..."
         />
       </div>
@@ -271,20 +280,20 @@ const getNumberColor = () => {
       <!-- Short name field removed -->
       
       <!-- Display order field is always hidden when collapsed -->
-      <div v-if="!isCollapsed">
-        <label class="block text-sm font-medium mb-1" :class="getTextColor()">Display Order</label>
+      <!-- <div v-if="!effectivelyCollapsed">
+        <label class="block text-xs font-medium mb-1" :class="getTextColor()">Display Order</label>
         <input
           v-model.number="localRule.display_order"
           @input="emitUpdate"
           type="number"
-          class="w-full p-2 border border-input bg-background rounded text-sm"
+          class="w-full p-2 border border-input bg-background rounded text-xs"
           placeholder="0"
         />
-      </div>
+      </div> -->
     </div>
 
     <!-- Actions -->
-    <div v-if="!isCollapsed && localRule.actions && localRule.actions.length > 0" class="mt-4">
+    <div v-if="!effectivelyCollapsed && localRule.actions && localRule.actions.length > 0" class="mt-4">
       <h3 class="text-sm font-medium mb-2" :class="getTextColor()">Actions</h3>
       <div class="space-y-2">
         <div 
@@ -361,7 +370,7 @@ const getNumberColor = () => {
     </div>
 
     <!-- Sub-rules -->
-    <div v-if="!isCollapsed && localRule.sub_rules && localRule.sub_rules.length > 0" class="mt-4 space-y-3">
+    <div v-if="!effectivelyCollapsed && localRule.sub_rules && localRule.sub_rules.length > 0" class="mt-3 space-y-2">
       <RuleComponent
         v-for="(subRule, index) in localRule.sub_rules"
         :key="subRule.id"
@@ -369,6 +378,7 @@ const getNumberColor = () => {
         :depth="depth + 1"
         :section-number="sectionNumber"
         :sub-rule-index="index + 1"
+        :force-collapsed="props.forceCollapsed"
         @update="updateChild"
         @delete="deleteChild"
         @add-sub-rule="addChildSubRule"
