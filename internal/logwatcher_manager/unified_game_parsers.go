@@ -15,7 +15,7 @@ func GetUnifiedGameEventParsers() []LogParser {
 		// Match when tickets appear in the log - store winner/loser data
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadGameEvents: Display: Team ([0-9]), (.*) \( ?(.*?) ?\) has (won|lost) the match with ([0-9]+) Tickets on layer (.*) \(level (.*)\)!`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				if args[6] == "won" {
 					eventStore.StoreRoundWinner(&RoundWinnerData{
 						Time:       args[1],
@@ -63,7 +63,7 @@ func GetUnifiedGameEventParsers() []LogParser {
 		// Match when game determines match winner
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQGameMode::)?DetermineMatchWinner\(\): (.+) won on (.+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				// Store WON data for correlation with NEW_GAME
 				eventStore.StoreWonData(&WonData{
 					Time:    args[1],
@@ -88,7 +88,7 @@ func GetUnifiedGameEventParsers() []LogParser {
 		// Match when game state changes to post-match (score board)
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogGameState: Match State Changed from InProgress to WaitingPostMatch`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				unifiedEvent := &event_manager.LogGameEventUnifiedData{
 					Time:      args[1],
 					ChainID:   strings.TrimSpace(args[2]),
@@ -119,7 +119,7 @@ func GetUnifiedGameEventParsers() []LogParser {
 		// Match when bringing world (new game/map change)
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogWorld: Bringing World \/([A-z0-9]+)\/(?:Maps\/)?([A-z0-9-]+)\/(?:.+\/)?([A-z0-9-]+)(?:\.[A-z0-9-]+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				// Skip transition map
 				if args[5] == "TransitionMap" {
 					return

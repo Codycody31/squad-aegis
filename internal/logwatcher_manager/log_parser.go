@@ -15,7 +15,7 @@ import (
 // LogParser represents a log parser with a regex and a handler function
 type LogParser struct {
 	regex   *regexp.Regexp
-	onMatch func([]string, uuid.UUID, *event_manager.EventManager, *EventStore)
+	onMatch func([]string, uuid.UUID, *event_manager.EventManager, EventStoreInterface)
 }
 
 // LogParsingMetrics tracks parsing performance metrics
@@ -27,6 +27,11 @@ type LogParsingMetrics struct {
 	totalMatchingLatency    time.Duration
 	lastMinuteLines         []time.Time
 	lastMinuteMatchingLines []time.Time
+}
+
+// ProcessLogForEvents detects events based on regex and publishes them
+func ProcessLogForEvents(logLine string, serverID uuid.UUID, parsers []LogParser, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
+	ProcessLogForEventsWithMetrics(logLine, serverID, parsers, eventManager, eventStore, nil)
 }
 
 // NewLogParsingMetrics creates a new metrics tracker
@@ -115,7 +120,7 @@ func GetLogParsers() []LogParser {
 	return []LogParser{
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: ADMIN COMMAND: Message broadcasted <(.+)> from (.+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				if args[4] != "RCON" {
 					var steamID string
 					steamIDStart := strings.Index(args[4], "steam: ")
@@ -145,7 +150,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQDeployable::)?TakeDamage\(\): ([A-z0-9_]+)_C_[0-9]+: ([0-9.]+) damage attempt by causer ([A-z0-9_]+)_C_[0-9]+ instigator (.+) with damage type ([A-z0-9_]+)_C health remaining ([0-9.]+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				eventData := &event_manager.LogDeployableDamagedData{
 					Time:            args[1],
 					ChainID:         strings.TrimSpace(args[2]),
@@ -162,7 +167,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: PostLogin: NewPlayer: BP_PlayerController_C .+PersistentLevel\.([^\s]+) \(IP: ([\d.]+) \| Online IDs:(?: EOS: ([^ )]+))?(?: steam: ([^ )]+))?\)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				// Build player data
 				player := &JoinRequestData{
 					PlayerController: args[3],
@@ -198,7 +203,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadGameEvents: Display: Team ([0-9]), (.*) \( ?(.*?) ?\) has (won|lost) the match with ([0-9]+) Tickets on layer (.*) \(level (.*)\)!`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				eventData := &event_manager.LogNewGameData{
 					Time:       args[1],
 					ChainID:    strings.TrimSpace(args[2]),
@@ -246,7 +251,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Player:(.+) ActualDamage=([0-9.]+) from (.+) \(Online IDs:(?: EOS: ([^ )|]+))?(?: steam: ([^ )|]+))?\s*\|\s*Player Controller ID: ([^ )]+)\)caused by ([A-Za-z0-9_-]+)_C`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				// Skip if IDs are invalid
 				if strings.Contains(args[6], "INVALID") {
 					return
@@ -340,7 +345,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQSoldier::)?Die\(\): Player:(.+) KillingDamage=(?:-)*([0-9.]+) from ([A-Za-z0-9_]+) \(Online IDs:(?: EOS: ([^ )|]+))?(?: steam: ([^ )|]+))?\s*\| Contoller ID: ([\w\d]+)\) caused by ([A-Za-z0-9_-]+)_C`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				// Skip if IDs are invalid
 				if strings.Contains(args[6], "INVALID") {
 					return
@@ -417,7 +422,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: Join succeeded: (.+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 
 				// Convert chainID to string
 				chainID := args[2]
@@ -463,7 +468,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQPlayerController::)?OnPossess\(\): PC=(.+) \(Online IDs:(?: EOS: ([^ )]+))?(?: steam: ([^ )]+))?\) Pawn=([A-Za-z0-9_]+)_C`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				eventManagerData := &event_manager.LogPlayerPossessData{
 					Time:             args[1],
 					ChainID:          args[2],
@@ -490,7 +495,7 @@ func GetLogParsers() []LogParser {
 					`has revived (.+) ` +
 					`\(Online IDs:(?: EOS: ([^ )]+))?(?: steam: ([^ )]+))?\)\.`,
 			),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				eventManagerData := &event_manager.LogPlayerRevivedData{
 					Time:         args[1],
 					ChainID:      args[2],
@@ -512,7 +517,7 @@ func GetLogParsers() []LogParser {
 					`\(Online IDs:(?: EOS: ([^ )|]+))?(?: steam: ([^ )|]+))?\s*\| Controller ID: ([\w\d]+)\) ` +
 					`caused by ([A-Za-z0-9_-]+)_C`,
 			),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				// Skip if IDs are invalid
 				if strings.Contains(args[6], "INVALID") {
 					return
@@ -594,7 +599,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: USQGameState: Server Tick Rate: ([0-9.]+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				eventManager.PublishEvent(serverID, &event_manager.LogTickRateData{
 					Time:     args[1],
 					ChainID:  args[2],
@@ -604,7 +609,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQGameMode::)?DetermineMatchWinner\(\): (.+) won on (.+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				eventData := &WonData{
 					Time:    args[1],
 					ChainID: args[2],
@@ -625,7 +630,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogGameState: Match State Changed from InProgress to WaitingPostMatch`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				eventData := &event_manager.LogRoundEndedData{
 					Time: args[1],
 				}
@@ -663,7 +668,7 @@ func GetLogParsers() []LogParser {
 		},
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogWorld: Bringing World \/([A-z]+)\/(?:Maps\/)?([A-z0-9-]+)\/(?:.+\/)?([A-z0-9-]+)(?:\.[A-z0-9-]+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 
 				// Skip transition map
 				if args[5] == "TransitionMap" {
@@ -712,13 +717,8 @@ func GetLogParsers() []LogParser {
 	}
 }
 
-// processLogForEvents detects events based on regex and publishes them
-func ProcessLogForEvents(logLine string, serverID uuid.UUID, parsers []LogParser, eventManager *event_manager.EventManager, eventStore *EventStore) {
-	ProcessLogForEventsWithMetrics(logLine, serverID, parsers, eventManager, eventStore, nil)
-}
-
 // ProcessLogForEventsWithMetrics detects events based on regex, publishes them, and tracks metrics
-func ProcessLogForEventsWithMetrics(logLine string, serverID uuid.UUID, parsers []LogParser, eventManager *event_manager.EventManager, eventStore *EventStore, metrics *LogParsingMetrics) {
+func ProcessLogForEventsWithMetrics(logLine string, serverID uuid.UUID, parsers []LogParser, eventManager *event_manager.EventManager, eventStore EventStoreInterface, metrics *LogParsingMetrics) {
 	if metrics != nil {
 		metrics.RecordLineProcessed()
 	}
