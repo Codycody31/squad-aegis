@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -86,6 +87,35 @@ func (s *Server) ServerRconExecute(c *gin.Context) {
 	ipAddress := server.IpAddress
 	if server.RconIpAddress != nil {
 		ipAddress = *server.RconIpAddress
+	}
+
+	// Grab the first word of the command to check if it's valid
+	commandParts := strings.Fields(request.Command)
+	if len(commandParts) == 0 {
+		responses.BadRequest(c, "Command cannot be empty", &gin.H{"error": "Command cannot be empty"})
+		return
+	}
+	commandName := commandParts[0]
+
+	// Check if the command is in the command matrix and supports RCON
+	var commandFound *commands.CommandInfo
+	for _, cmd := range commands.CommandMatrix {
+		if strings.EqualFold(cmd.Name, commandName) && cmd.SupportsRCON {
+			commandFound = &cmd
+			break
+		}
+	}
+
+	if !user.SuperAdmin {
+		perms, err := s.GetUserServerPermissions(c, user.Id, serverId)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to get user permissions: %w", err), nil)
+			return
+		}
+		if commandFound == nil || !commands.UserHasPermissionForCommand(perms, commandFound) {
+			responses.BadRequest(c, "Invalid or unsupported command", &gin.H{"error": "Invalid or unsupported command"})
+			return
+		}
 	}
 
 	// Ensure server is connected to RCON manager
