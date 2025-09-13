@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- wip [[#70](https://github.com/Codycody31/squad-aegis/pull/70)]
 - feat: integrate ClickHouse for event logging and analytics, add log c… [[#69](https://github.com/Codycody31/squad-aegis/pull/69)]
 - Refactor: cut down project into the working components [[#67](https://github.com/Codycody31/squad-aegis/pull/67)]
 - feat(logwatcher): refactor log processing and client broadcasting [[#45](https://github.com/Codycody31/squad-aegis/pull/45)]
