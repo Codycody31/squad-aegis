@@ -231,7 +231,7 @@ func (p *AutoKickUnassignedPlugin) Stop() error {
 
 // HandleEvent processes an event if the plugin is subscribed to it
 func (p *AutoKickUnassignedPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
-	if event.Type != "LOG_NEW_GAME" {
+	if event.Type != string(event_manager.EventTypeLogNewGame) {
 		return nil // Not interested in this event
 	}
 
