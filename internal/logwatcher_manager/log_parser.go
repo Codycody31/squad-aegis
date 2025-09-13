@@ -331,10 +331,6 @@ func GetLogParsers() []LogParser {
 					}
 				}
 
-				// Clear the name fields as they're now in victim/attacker objects
-				eventManagerData.VictimName = ""
-				eventManagerData.AttackerName = ""
-
 				if eventManagerData.Teamkill {
 					log.Info().Msg("Teamkill detected: " + fmt.Sprintf("%+v", eventManagerData))
 				}
@@ -415,9 +411,6 @@ func GetLogParsers() []LogParser {
 						}
 					}
 				}
-
-				// Clear the victim name field as it's now in victim object
-				eventManagerData.VictimName = ""
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])
 			},
@@ -589,9 +582,6 @@ func GetLogParsers() []LogParser {
 						}
 					}
 				}
-
-				// Clear the victim name field as it's now in victim object
-				eventManagerData.VictimName = ""
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])
 
