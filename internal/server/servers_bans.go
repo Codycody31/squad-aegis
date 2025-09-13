@@ -40,10 +40,11 @@ func (s *Server) ServerBansList(c *gin.Context) {
 
 	// Query the database for bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
+		LEFT JOIN server_rules sr ON sb.rule_id = sr.id
 		WHERE sb.server_id = $1
 		ORDER BY sb.created_at DESC
 	`, serverId)
@@ -58,6 +59,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		var ban models.ServerBan
 		var steamIDInt int64
 		var ruleID sql.NullString
+		var ruleTitle sql.NullString
 		var banListID sql.NullString
 		var banListName sql.NullString
 		err := rows.Scan(
@@ -69,6 +71,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			&ban.Reason,
 			&ban.Duration,
 			&ruleID,
+			&ruleTitle,
 			&banListID,
 			&banListName,
 			&ban.CreatedAt,
@@ -88,6 +91,11 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		// Set rule ID if present
 		if ruleID.Valid {
 			ban.RuleID = &ruleID.String
+		}
+
+		// Set rule name if present
+		if ruleTitle.Valid {
+			ban.RuleName = &ruleTitle.String
 		}
 
 		// Set ban list information if present
@@ -378,14 +386,16 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var currentBan models.ServerBan
 	var steamIDInt int64
 	var ruleID sql.NullString
+	var ruleTitle sql.NullString
 	var banListID sql.NullString
 	var banListName sql.NullString
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
+		LEFT JOIN server_rules sr ON sb.rule_id = sr.id
 		WHERE sb.id = $1 AND sb.server_id = $2
 	`, banId, serverId).Scan(
 		&currentBan.ID,
@@ -396,6 +406,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&currentBan.Reason,
 		&currentBan.Duration,
 		&ruleID,
+		&ruleTitle,
 		&banListID,
 		&banListName,
 		&currentBan.CreatedAt,
@@ -417,6 +428,11 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	// Set rule ID if present
 	if ruleID.Valid {
 		currentBan.RuleID = &ruleID.String
+	}
+
+	// Set rule name if present
+	if ruleTitle.Valid {
+		currentBan.RuleName = &ruleTitle.String
 	}
 
 	// Set ban list information if present
@@ -518,14 +534,16 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var updatedBan models.ServerBan
 	var updatedSteamIDInt int64
 	var updatedRuleID sql.NullString
+	var updatedRuleTitle sql.NullString
 	var updatedBanListID sql.NullString
 	var updatedBanListName sql.NullString
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
+		LEFT JOIN server_rules sr ON sb.rule_id = sr.id
 		WHERE sb.id = $1
 	`, banId).Scan(
 		&updatedBan.ID,
@@ -536,6 +554,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&updatedBan.Reason,
 		&updatedBan.Duration,
 		&updatedRuleID,
+		&updatedRuleTitle,
 		&updatedBanListID,
 		&updatedBanListName,
 		&updatedBan.CreatedAt,
@@ -553,6 +572,11 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	// Set rule ID if present
 	if updatedRuleID.Valid {
 		updatedBan.RuleID = &updatedRuleID.String
+	}
+
+	// Set rule name if present
+	if updatedRuleTitle.Valid {
+		updatedBan.RuleName = &updatedRuleTitle.String
 	}
 
 	// Set ban list information if present

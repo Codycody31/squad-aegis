@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
-import { FileText, Layers, Zap, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { FileText, Layers, Zap, Plus, Trash2, ChevronDown, ChevronUp, GripVertical } from 'lucide-vue-next'
 import { Button } from '~/components/ui/button'
 
 interface ServerRuleAction {
@@ -178,17 +178,27 @@ const getNumberColor = () => {
 <template>
   <div 
     :class="[
-      'border rounded-lg p-4 transition-all cursor-move',
+      'border rounded-lg p-4 transition-all',
       getRuleClasses(),
       { 'ml-4': depth > 0 }
     ]"
-    draggable="true"
-    @dragstart="handleDragStart"
     @dragover.prevent
     @drop="handleDrop"
   >
     <div class="flex items-start justify-between mb-3">
-      <div class="flex items-center">
+      <div class="flex items-center" style="width: 100%;">
+        <!-- Drag handle: only this element is draggable so text inputs remain editable -->
+        <!-- <Button
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7 mr-1 p-0.5 drag-handle"
+          title="Drag to reorder"
+          draggable="true"
+          @dragstart="handleDragStart"
+        >
+          <GripVertical class="h-4 w-4" />
+        </Button> -->
+
         <Button
           variant="ghost"
           size="icon"
@@ -200,12 +210,12 @@ const getNumberColor = () => {
           <ChevronUp v-else class="h-4 w-4" />
         </Button>
         <component :is="getIcon()" :class="['w-5 h-5 mr-2']" />
-        <div class="flex items-center">
+        <div class="flex items-center min-w-0 flex-1">
           <span :class="['font-mono text-sm mr-2']">{{ ruleNumber }}</span>
           <input
             v-model="localRule.title"
             @input="emitUpdate"
-            class="font-semibold bg-transparent border-none outline-none"
+            class="font-semibold bg-transparent border-none outline-none flex-1 min-w-0"
             :class="getTextColor()"
           />
         </div>
@@ -377,5 +387,13 @@ input:focus, textarea:focus, select:focus {
 
 [draggable="true"]:hover {
   opacity: 0.8;
+}
+
+/* Dedicated drag handle styles */
+.drag-handle {
+  cursor: grab;
+}
+.drag-handle:active {
+  cursor: grabbing;
 }
 </style>

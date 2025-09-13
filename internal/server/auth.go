@@ -194,6 +194,80 @@ func (s *Server) UpdateUserPassword(c *gin.Context) {
 	responses.SimpleSuccess(c, "Password updated successfully")
 }
 
+// GetUserServerPermissions retrieves the permissions a user has for a specific server
+func (s *Server) GetUserServerPermissions(c *gin.Context, userId, serverId uuid.UUID) ([]string, error) {
+	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+	sql, args, err := psql.Select("sr.permissions").
+		From("server_admins sa").
+		Join("server_roles sr ON sa.server_role_id = sr.id").
+		Where(squirrel.Eq{"sa.server_id": serverId, "sa.user_id": userId}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SQL query: %w", err)
+	}
+
+	var permissionsStr string
+	err = s.Dependencies.DB.QueryRowContext(c, sql, args...).Scan(&permissionsStr)
+	if err != nil {
+		if strings.Contains(err.Error(), "no rows") {
+			return []string{}, nil // User has no permissions for this server
+		}
+		return nil, fmt.Errorf("failed to get permissions: %w", err)
+	}
+
+	// Parse permissions from comma-separated string
+	if permissionsStr == "" {
+		return []string{}, nil
+	}
+
+	permissions := strings.Split(permissionsStr, ",")
+	// Trim whitespace from each permission
+	for i, perm := range permissions {
+		permissions[i] = strings.TrimSpace(perm)
+	}
+
+	return permissions, nil
+}
+
+// userHasServerPermission checks if a user has a specific permission for a server
+func (s *Server) userHasServerPermission(c *gin.Context, userId, serverId uuid.UUID, requiredPermission string) (bool, error) {
+	permissions, err := s.GetUserServerPermissions(c, userId, serverId)
+	if err != nil {
+		return false, err
+	}
+
+	// Check if the user has the required permission
+	for _, perm := range permissions {
+		if perm == requiredPermission || perm == "*" {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// userHasAnyServerPermission checks if a user has any of the specified permissions for a server
+func (s *Server) userHasAnyServerPermission(c *gin.Context, userId, serverId uuid.UUID, requiredPermissions []string) (bool, error) {
+	permissions, err := s.GetUserServerPermissions(c, userId, serverId)
+	if err != nil {
+		return false, err
+	}
+
+	// Check if the user has any of the required permissions
+	for _, userPerm := range permissions {
+		if userPerm == "*" {
+			return true, nil
+		}
+		for _, requiredPerm := range requiredPermissions {
+			if userPerm == requiredPerm {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
 // AuthHasServerPermission checks if the user has a specific permission for a server
 // This middleware expects the serverId to be in the URL parameters
 func (s *Server) AuthHasServerPermission(permission string) gin.HandlerFunc {
@@ -227,42 +301,12 @@ func (s *Server) AuthHasServerPermission(permission string) gin.HandlerFunc {
 			return
 		}
 
-		// Get the user's permissions for this server
-		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-		sql, args, err := psql.Select("sr.permissions").
-			From("server_admins sa").
-			Join("server_roles sr ON sa.server_role_id = sr.id").
-			Where(squirrel.Eq{"sa.server_id": serverId, "sa.user_id": user.Id}).
-			ToSql()
-		if err != nil {
-			responses.InternalServerError(c, fmt.Errorf("failed to create SQL query: %w", err), nil)
-			c.Abort()
-			return
-		}
-
-		var permissionsStr string
-		err = s.Dependencies.DB.QueryRowContext(c.Copy(), sql, args...).Scan(&permissionsStr)
-		if err != nil {
-			if strings.Contains(err.Error(), "no rows") {
-				responses.Forbidden(c, "You don't have permission to access this server", nil)
-				c.Abort()
-				return
-			}
-			responses.InternalServerError(c, fmt.Errorf("failed to get permissions: %w", err), nil)
-			c.Abort()
-			return
-		}
-
-		// Parse permissions from comma-separated string
-		permissions := strings.Split(permissionsStr, ",")
-
 		// Check if the user has the required permission
-		hasPermission := false
-		for _, p := range permissions {
-			if p == permission || p == "*" {
-				hasPermission = true
-				break
-			}
+		hasPermission, err := s.userHasServerPermission(c.Copy(), user.Id, serverId, permission)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to check permissions: %w", err), nil)
+			c.Abort()
+			return
 		}
 
 		if !hasPermission {
@@ -307,51 +351,12 @@ func (s *Server) AuthHasAnyServerPermission(permissions ...string) gin.HandlerFu
 			return
 		}
 
-		// Get the user's permissions for this server
-		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-		sql, args, err := psql.Select("sr.permissions").
-			From("server_admins sa").
-			Join("server_roles sr ON sa.server_role_id = sr.id").
-			Where(squirrel.Eq{"sa.server_id": serverId, "sa.user_id": user.Id}).
-			ToSql()
-		if err != nil {
-			responses.InternalServerError(c, fmt.Errorf("failed to create SQL query: %w", err), nil)
-			c.Abort()
-			return
-		}
-
-		var permissionsStr string
-		err = s.Dependencies.DB.QueryRowContext(c.Copy(), sql, args...).Scan(&permissionsStr)
-		if err != nil {
-			if strings.Contains(err.Error(), "no rows") {
-				responses.Forbidden(c, "You don't have permission to access this server", nil)
-				c.Abort()
-				return
-			}
-			responses.InternalServerError(c, fmt.Errorf("failed to get permissions: %w", err), nil)
-			c.Abort()
-			return
-		}
-
-		// Parse permissions from comma-separated string
-		userPermissions := strings.Split(permissionsStr, ",")
-
 		// Check if the user has any of the required permissions
-		hasPermission := false
-		for _, userPerm := range userPermissions {
-			if userPerm == "*" {
-				hasPermission = true
-				break
-			}
-			for _, requiredPerm := range permissions {
-				if userPerm == requiredPerm {
-					hasPermission = true
-					break
-				}
-			}
-			if hasPermission {
-				break
-			}
+		hasPermission, err := s.userHasAnyServerPermission(c.Copy(), user.Id, serverId, permissions)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to check permissions: %w", err), nil)
+			c.Abort()
+			return
 		}
 
 		if !hasPermission {
