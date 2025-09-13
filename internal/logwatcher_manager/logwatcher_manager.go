@@ -19,6 +19,7 @@ type ServerLogConnection struct {
 	LogSource         LogSource
 	Config            LogSourceConfig
 	EventStore        *EventStore
+	Metrics           *LogParsingMetrics
 	Connected         bool
 	LastUsed          time.Time
 	mu                sync.Mutex
@@ -141,6 +142,7 @@ func (m *LogwatcherManager) ConnectToServer(serverID uuid.UUID, config LogSource
 		LogSource:         logSource,
 		Config:            config,
 		EventStore:        NewEventStore(serverID),
+		Metrics:           NewLogParsingMetrics(),
 		Connected:         true,
 		LastUsed:          time.Now(),
 		cancel:            cancel,
@@ -289,7 +291,7 @@ func (m *LogwatcherManager) watchLogs(ctx context.Context, serverID uuid.UUID, c
 			conn.mu.Unlock()
 
 			// Process the log line for events
-			ProcessLogForEvents(logLine, serverID, m.parsers, m.eventManager, conn.EventStore)
+			ProcessLogForEventsWithMetrics(logLine, serverID, m.parsers, m.eventManager, conn.EventStore, conn.Metrics)
 		}
 	}
 }
@@ -405,11 +407,35 @@ func (m *LogwatcherManager) GetConnectionStats() map[string]interface{} {
 	connectedCount := 0
 	disconnectedCount := 0
 	sourceTypes := make(map[string]int)
+	serverMetrics := make(map[string]interface{})
 
-	for _, conn := range m.connections {
+	totalLinesPerMinute := 0.0
+	totalMatchingLinesPerMinute := 0.0
+	totalMatchingLatency := 0.0
+	activeConnections := 0
+
+	for serverID, conn := range m.connections {
 		conn.mu.Lock()
 		if conn.Connected {
 			connectedCount++
+
+			// Get metrics for this connection
+			if conn.Metrics != nil {
+				metrics := conn.Metrics.GetMetrics()
+				serverMetrics[serverID.String()] = metrics
+
+				// Aggregate metrics
+				if lpm, ok := metrics["linesPerMinute"].(float64); ok {
+					totalLinesPerMinute += lpm
+				}
+				if mlpm, ok := metrics["matchingLinesPerMinute"].(float64); ok {
+					totalMatchingLinesPerMinute += mlpm
+				}
+				if ml, ok := metrics["matchingLatency"].(float64); ok && ml > 0 {
+					totalMatchingLatency += ml
+					activeConnections++
+				}
+			}
 		} else {
 			disconnectedCount++
 		}
@@ -417,12 +443,44 @@ func (m *LogwatcherManager) GetConnectionStats() map[string]interface{} {
 		conn.mu.Unlock()
 	}
 
+	// Calculate average matching latency
+	averageMatchingLatency := 0.0
+	if activeConnections > 0 {
+		averageMatchingLatency = totalMatchingLatency / float64(activeConnections)
+	}
+
 	return map[string]interface{}{
 		"total_connections":        len(m.connections),
 		"connected_connections":    connectedCount,
 		"disconnected_connections": disconnectedCount,
 		"source_types":             sourceTypes,
+		"server_metrics":           serverMetrics,
+		"aggregate_metrics": map[string]interface{}{
+			"total_lines_per_minute":          totalLinesPerMinute,
+			"total_matching_lines_per_minute": totalMatchingLinesPerMinute,
+			"average_matching_latency":        averageMatchingLatency,
+		},
 	}
+}
+
+// GetServerMetrics returns parsing metrics for a specific server
+func (m *LogwatcherManager) GetServerMetrics(serverID uuid.UUID) (map[string]interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	conn, exists := m.connections[serverID]
+	if !exists {
+		return nil, errors.New("server connection not found")
+	}
+
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+
+	if !conn.Connected || conn.Metrics == nil {
+		return nil, errors.New("server not connected or metrics not available")
+	}
+
+	return conn.Metrics.GetMetrics(), nil
 }
 
 // StartConnectionManager starts the connection manager

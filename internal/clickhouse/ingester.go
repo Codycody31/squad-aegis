@@ -139,7 +139,7 @@ func (i *EventIngester) processEvent(event event_manager.Event) {
 	case <-i.ctx.Done():
 		return
 	default:
-		log.Warn().Msg("Event queue full, dropping event")
+		// log.Warn().Msg("Event queue full, dropping event")
 	}
 }
 

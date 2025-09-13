@@ -142,6 +142,7 @@ func IsPublicCommand(commandName string) bool {
 	return false
 }
 
+// UserHasPermissionForCommand checks if a user has permission to execute a specific command (check permission against command category)
 func UserHasPermissionForCommand(permissions []string, command *CommandInfo) bool {
-	return slices.Contains(permissions, command.Name)
+	return slices.Contains(permissions, command.Category)
 }

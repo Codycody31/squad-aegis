@@ -103,6 +103,11 @@ const roles = computed(() => {
   return Array.from(uniqueRoles) as string[];
 });
 
+// Check if a squad leader has an incorrect role (not containing _SL)
+function isSquadLeaderWithIncorrectRole(player: Player): boolean {
+  return player.isSquadLeader && (!player.role || !player.role.includes('_SL'));
+}
+
 // Computed property for filtered players
 const filteredPlayers = computed(() => {
   let filtered = connectedPlayers.value;
@@ -493,8 +498,15 @@ async function executePlayerAction() {
               <TableRow v-for="player in filteredPlayers" :key="player.playerId" class="hover:bg-muted/50">
                 <TableCell class="font-medium">
                   <div class="flex items-center">
-                    <span v-if="player.isSquadLeader" class="mr-1 text-yellow-500">★</span>
-                    {{ player.name }}
+                    <span v-if="player.isSquadLeader" 
+                          :class="isSquadLeaderWithIncorrectRole(player) ? 'mr-1 text-red-500' : 'mr-1 text-yellow-500'">★</span>
+                    <span :class="isSquadLeaderWithIncorrectRole(player) ? 'text-red-500 font-semibold' : ''">
+                      {{ player.name }}
+                    </span>
+                    <span v-if="isSquadLeaderWithIncorrectRole(player)" 
+                          class="ml-2 text-xs text-red-500 bg-red-100 dark:bg-red-900 px-1 rounded">
+                      WRONG ROLE
+                    </span>
                   </div>
                 </TableCell>
                 <TableCell>
@@ -511,7 +523,11 @@ async function executePlayerAction() {
                   </Badge>
                   <span v-else class="text-muted-foreground text-xs">Unassigned</span>
                 </TableCell>
-                <TableCell>{{ player.role || 'Unknown' }}</TableCell>
+                <TableCell>
+                  <span :class="isSquadLeaderWithIncorrectRole(player) ? 'text-red-500 font-semibold' : ''">
+                    {{ player.role || 'Unknown' }}
+                  </span>
+                </TableCell>
                 <TableCell class="text-right">
                   <div class="flex items-center justify-end gap-2">
                     <PlayerActionMenu :player="player" :serverId="serverId as string"

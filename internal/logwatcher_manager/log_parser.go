@@ -1,10 +1,14 @@
 package logwatcher_manager
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 )
 
@@ -12,6 +16,98 @@ import (
 type LogParser struct {
 	regex   *regexp.Regexp
 	onMatch func([]string, uuid.UUID, *event_manager.EventManager, *EventStore)
+}
+
+// LogParsingMetrics tracks parsing performance metrics
+type LogParsingMetrics struct {
+	mu                      sync.RWMutex
+	startTime               time.Time
+	totalLines              int64
+	matchingLines           int64
+	totalMatchingLatency    time.Duration
+	lastMinuteLines         []time.Time
+	lastMinuteMatchingLines []time.Time
+}
+
+// NewLogParsingMetrics creates a new metrics tracker
+func NewLogParsingMetrics() *LogParsingMetrics {
+	return &LogParsingMetrics{
+		startTime:               time.Now(),
+		lastMinuteLines:         make([]time.Time, 0),
+		lastMinuteMatchingLines: make([]time.Time, 0),
+	}
+}
+
+// RecordLineProcessed records that a line was processed
+func (m *LogParsingMetrics) RecordLineProcessed() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	m.totalLines++
+	m.lastMinuteLines = append(m.lastMinuteLines, now)
+	m.cleanupOldEntries(now)
+}
+
+// RecordMatchingLine records that a line matched and the time it took to process
+func (m *LogParsingMetrics) RecordMatchingLine(processingTime time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	m.matchingLines++
+	m.totalMatchingLatency += processingTime
+	m.lastMinuteMatchingLines = append(m.lastMinuteMatchingLines, now)
+	m.cleanupOldEntries(now)
+}
+
+// cleanupOldEntries removes entries older than 1 minute
+func (m *LogParsingMetrics) cleanupOldEntries(now time.Time) {
+	oneMinuteAgo := now.Add(-time.Minute)
+
+	// Clean up regular lines
+	newLines := make([]time.Time, 0, len(m.lastMinuteLines))
+	for _, t := range m.lastMinuteLines {
+		if t.After(oneMinuteAgo) {
+			newLines = append(newLines, t)
+		}
+	}
+	m.lastMinuteLines = newLines
+
+	// Clean up matching lines
+	newMatchingLines := make([]time.Time, 0, len(m.lastMinuteMatchingLines))
+	for _, t := range m.lastMinuteMatchingLines {
+		if t.After(oneMinuteAgo) {
+			newMatchingLines = append(newMatchingLines, t)
+		}
+	}
+	m.lastMinuteMatchingLines = newMatchingLines
+}
+
+// GetMetrics returns current metrics
+func (m *LogParsingMetrics) GetMetrics() map[string]interface{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	m.cleanupOldEntries(now)
+
+	linesPerMinute := float64(len(m.lastMinuteLines))
+	matchingLinesPerMinute := float64(len(m.lastMinuteMatchingLines))
+
+	var averageMatchingLatency float64
+	if m.matchingLines > 0 {
+		averageMatchingLatency = float64(m.totalMatchingLatency.Nanoseconds()) / float64(m.matchingLines) / 1000000 // Convert to milliseconds
+	}
+
+	return map[string]interface{}{
+		"linesPerMinute":         linesPerMinute,
+		"matchingLinesPerMinute": matchingLinesPerMinute,
+		"matchingLatency":        averageMatchingLatency, // in milliseconds
+		"totalLines":             m.totalLines,
+		"totalMatchingLines":     m.matchingLines,
+		"uptime":                 time.Since(m.startTime).Seconds(),
+	}
 }
 
 // GetLogParsers returns all log parsers for Squad logs
@@ -68,16 +164,21 @@ func GetLogParsers() []LogParser {
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: PostLogin: NewPlayer: BP_PlayerController_C .+PersistentLevel\.([^\s]+) \(IP: ([\d.]+) \| Online IDs:(?: EOS: ([^ )]+))?(?: steam: ([^ )]+))?\)`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
 				// Build player data
-				player := map[string]interface{}{
-					"playercontroller": args[3],
-					"ip":               args[4],
-					"steam":            args[6],
-					"eos":              args[5],
+				player := &JoinRequestData{
+					PlayerController: args[3],
+					IP:               args[4],
+					SteamID:          args[6],
+					EOSID:            args[5],
 				}
 
 				// Store player data in event store
 				eventStore.StoreJoinRequest(strings.TrimSpace(args[2]), player)
-				eventStore.StorePlayerData(args[6], player)
+				eventStore.StorePlayerData(args[6], &PlayerData{
+					PlayerController: args[3],
+					IP:               args[4],
+					SteamID:          args[6],
+					EOSID:            args[5],
+				})
 
 				// Handle reconnecting players
 				eventStore.RemoveDisconnectedPlayer(args[6])
@@ -110,23 +211,34 @@ func GetLogParsers() []LogParser {
 					Level:      args[9],
 				}
 
-				// Store in event store based on win/loss status (still using map for event store)
-				legacyData := map[string]interface{}{
-					"time":       args[1],
-					"chainID":    strings.TrimSpace(args[2]),
-					"team":       args[3],
-					"subfaction": args[4],
-					"faction":    args[5],
-					"action":     args[6],
-					"tickets":    args[7],
-					"layer":      args[8],
-					"level":      args[9],
+				// Store in event store based on win/loss status
+				roundData := &RoundWinnerData{
+					Time:       args[1],
+					ChainID:    strings.TrimSpace(args[2]),
+					Team:       args[3],
+					Subfaction: args[4],
+					Faction:    args[5],
+					Action:     args[6],
+					Tickets:    args[7],
+					Layer:      args[8],
+					Level:      args[9],
 				}
 
 				if args[6] == "won" {
-					eventStore.StoreRoundWinner(legacyData)
+					eventStore.StoreRoundWinner(roundData)
 				} else {
-					eventStore.StoreRoundLoser(legacyData)
+					loserData := &RoundLoserData{
+						Time:       args[1],
+						ChainID:    strings.TrimSpace(args[2]),
+						Team:       args[3],
+						Subfaction: args[4],
+						Faction:    args[5],
+						Action:     args[6],
+						Tickets:    args[7],
+						Layer:      args[8],
+						Level:      args[9],
+					}
+					eventStore.StoreRoundLoser(loserData)
 				}
 
 				eventManager.PublishEvent(serverID, eventData, args[0])
@@ -152,25 +264,80 @@ func GetLogParsers() []LogParser {
 					Weapon:             args[9],
 				}
 
-				// Build event data
-				eventData := map[string]interface{}{
-					"time":               args[1],
-					"chainID":            args[2],
-					"victimName":         args[3],
-					"damage":             args[4],
-					"attackerName":       args[5],
-					"attackerEOS":        args[6],
-					"attackerSteam":      args[7],
-					"attackerController": args[8],
-					"weapon":             args[9],
+				// Store session data for the victim
+				sessionData := &SessionData{
+					ChainID:            args[2],
+					VictimName:         args[3],
+					Damage:             args[4],
+					AttackerName:       args[5],
+					AttackerEOS:        args[6],
+					AttackerSteam:      args[7],
+					AttackerController: args[8],
+					Weapon:             args[9],
 				}
 
 				// Store session data for the victim
-				victimName := args[3]
-				eventStore.StoreSessionData(victimName, eventData)
-				eventStore.StorePlayerData(args[6], map[string]interface{}{
-					"controller": args[8],
-				})
+				eventStore.StoreSessionData(args[3], sessionData)
+
+				if _, exists := eventStore.GetPlayerData(args[6]); !exists {
+					// Store minimal player data if we don't have full data yet
+					playerData := &PlayerData{
+						Controller: args[8],
+					}
+					eventStore.StorePlayerData(args[6], playerData)
+				} else {
+					// Update existing player data with controller info
+					existingData, _ := eventStore.GetPlayerData(args[6])
+					existingData.Controller = args[8]
+					eventStore.StorePlayerData(args[6], existingData)
+				}
+
+				// Extra logic before publishing the event (similar to JavaScript)
+
+				// Get victim by name
+				if victim, exists := eventStore.GetPlayerInfoByName(args[3]); exists {
+					eventManagerData.Victim = victim
+				}
+
+				// Get attacker by EOS ID
+				if attacker, exists := eventStore.GetPlayerInfoByEOSID(args[6]); exists {
+					eventManagerData.Attacker = attacker
+
+					// Update attacker's playercontroller if missing
+					if attacker.PlayerController == "" && args[8] != "" {
+						// Update the PlayerData in the store
+						if playerData, playerExists := eventStore.GetPlayerData(args[6]); playerExists {
+							playerData.PlayerController = args[8]
+							eventStore.StorePlayerData(args[6], playerData)
+							// Refresh the attacker info
+							if updatedAttacker, exists := eventStore.GetPlayerInfoByEOSID(args[6]); exists {
+								eventManagerData.Attacker = updatedAttacker
+							}
+						}
+					}
+				}
+
+				// Check for teamkill if we have both victim and attacker data
+				if eventManagerData.Victim != nil && eventManagerData.Attacker != nil {
+					victimTeamID := eventManagerData.Victim.TeamID
+					attackerTeamID := eventManagerData.Attacker.TeamID
+					victimEOSID := eventManagerData.Victim.EOSID
+					attackerEOSID := args[6]
+
+					if victimTeamID != "" && attackerTeamID != "" && victimTeamID == attackerTeamID {
+						if victimEOSID != "" && victimEOSID != attackerEOSID {
+							eventManagerData.Teamkill = true
+						}
+					}
+				}
+
+				// Clear the name fields as they're now in victim/attacker objects
+				eventManagerData.VictimName = ""
+				eventManagerData.AttackerName = ""
+
+				if eventManagerData.Teamkill {
+					log.Info().Msg("Teamkill detected: " + fmt.Sprintf("%+v", eventManagerData))
+				}
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])
 			},
@@ -187,7 +354,7 @@ func GetLogParsers() []LogParser {
 				victimName := args[3]
 				existingData, _ := eventStore.GetSessionData(victimName)
 				if existingData == nil {
-					existingData = make(map[string]interface{})
+					existingData = &SessionData{}
 				}
 
 				eventManagerData := &event_manager.LogPlayerDiedData{
@@ -202,24 +369,55 @@ func GetLogParsers() []LogParser {
 					Weapon:                   args[9],
 				}
 
-				// Build event data, merging with existing session data
-				eventData := existingData
-				eventData["time"] = args[1]
-				eventData["woundTime"] = args[1]
-				eventData["chainID"] = args[2]
-				eventData["victimName"] = args[3]
-				eventData["damage"] = args[4]
-				eventData["attackerPlayerController"] = args[5]
-				eventData["weapon"] = args[9]
-
-				isTeamkill := eventStore.CheckTeamkill(victimName, args[6])
-				if isTeamkill {
-					eventManagerData.Teamkill = true
-					eventData["teamkill"] = true
+				// Build session data, merging with existing session data
+				sessionData := &SessionData{
+					ChainID:            existingData.ChainID,
+					Time:               args[1],
+					WoundTime:          args[1],
+					VictimName:         args[3],
+					Damage:             args[4],
+					AttackerName:       existingData.AttackerName,
+					AttackerEOS:        existingData.AttackerEOS,
+					AttackerSteam:      existingData.AttackerSteam,
+					AttackerController: args[5],
+					Weapon:             args[9],
+					TeamID:             existingData.TeamID,
+					EOSID:              existingData.EOSID,
 				}
 
 				// Update session data
-				eventStore.StoreSessionData(victimName, eventData)
+				eventStore.StoreSessionData(victimName, sessionData)
+
+				// Extra logic before publishing the event (similar to JavaScript)
+
+				// Get victim by name
+				if victim, exists := eventStore.GetPlayerInfoByName(args[3]); exists {
+					eventManagerData.Victim = victim
+				}
+
+				// Get attacker by EOS ID first, then by controller if not found
+				if attacker, exists := eventStore.GetPlayerInfoByEOSID(args[6]); exists {
+					eventManagerData.Attacker = attacker
+				} else if attacker, exists := eventStore.GetPlayerInfoByController(args[5]); exists {
+					eventManagerData.Attacker = attacker
+				}
+
+				// Check for teamkill if we have both victim and attacker data
+				if eventManagerData.Victim != nil && eventManagerData.Attacker != nil {
+					victimTeamID := eventManagerData.Victim.TeamID
+					attackerTeamID := eventManagerData.Attacker.TeamID
+					victimEOSID := eventManagerData.Victim.EOSID
+					attackerEOSID := args[6]
+
+					if victimTeamID != "" && attackerTeamID != "" && victimTeamID == attackerTeamID {
+						if victimEOSID != "" && victimEOSID != attackerEOSID {
+							eventManagerData.Teamkill = true
+						}
+					}
+				}
+
+				// Clear the victim name field as it's now in victim object
+				eventManagerData.VictimName = ""
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])
 			},
@@ -242,33 +440,29 @@ func GetLogParsers() []LogParser {
 					return
 				}
 
-				// Create event data by combining player data with new data
-				eventData := make(map[string]interface{})
+				// Create event manager data using the struct
 				eventManagerData := &event_manager.LogJoinSucceededData{
 					Time:         args[1],
 					ChainID:      chainID,
 					PlayerSuffix: args[3],
+					EOSID:        player.EOSID,
+					SteamID:      player.SteamID,
 				}
 
-				// Copy all player data to event data
-				for k, v := range player {
-					eventData[k] = v
+				// Update player data with suffix and store it
+				playerData := &PlayerData{
+					PlayerController: player.PlayerController,
+					IP:               player.IP,
+					SteamID:          player.SteamID,
+					EOSID:            player.EOSID,
+					PlayerSuffix:     args[3], // Update with suffix from join succeeded
 				}
 
-				// Add new fields
-				eventData["time"] = args[1]
-				eventData["chainID"] = chainID
-				eventData["playerSuffix"] = args[3]
-
-				// Update player data with suffix
-				player["playerSuffix"] = args[3]
-				// Store updated player data back if we have a player ID
-				if eosID, ok := player["eos"].(string); ok {
-					eventManagerData.EOSID = eosID
-					eventStore.StorePlayerData(eosID, player)
-				} else if steamID, ok := player["steam"].(string); ok {
-					eventManagerData.SteamID = steamID
-					eventStore.StorePlayerData(steamID, player)
+				// Store updated player data using EOS ID as primary key, fallback to Steam ID
+				if player.EOSID != "" {
+					eventStore.StorePlayerData(player.EOSID, playerData)
+				} else if player.SteamID != "" {
+					eventStore.StorePlayerData(player.SteamID, playerData)
 				}
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])
@@ -288,8 +482,8 @@ func GetLogParsers() []LogParser {
 
 				// Store chainID in session data for the player suffix
 				playerSuffix := args[3]
-				sessionData := map[string]interface{}{
-					"chainID": args[2],
+				sessionData := &SessionData{
+					ChainID: args[2],
 				}
 				eventStore.StoreSessionData(playerSuffix, sessionData)
 
@@ -335,7 +529,7 @@ func GetLogParsers() []LogParser {
 				victimName := args[3]
 				existingData, _ := eventStore.GetSessionData(victimName)
 				if existingData == nil {
-					existingData = make(map[string]interface{})
+					existingData = &SessionData{}
 				}
 
 				eventManagerData := &event_manager.LogPlayerWoundedData{
@@ -349,27 +543,63 @@ func GetLogParsers() []LogParser {
 					Weapon:                   args[9],
 				}
 
-				// Build event data, merging with existing session data
-				eventData := existingData
-				eventData["time"] = args[1]
-				eventData["chainID"] = args[2]
-				eventData["victimName"] = args[3]
-				eventData["damage"] = args[4]
-				eventData["attackerPlayerController"] = args[5]
-				eventData["attackerEOS"] = args[6]
-				eventData["attackerSteam"] = args[7]
-				eventData["weapon"] = args[9]
-
-				isTeamkill := eventStore.CheckTeamkill(victimName, args[6])
-				if isTeamkill {
-					eventManagerData.Teamkill = true
-					eventData["teamkill"] = true
+				// Build session data, merging with existing session data
+				sessionData := &SessionData{
+					ChainID:            existingData.ChainID,
+					Time:               args[1],
+					WoundTime:          existingData.WoundTime,
+					VictimName:         args[3],
+					Damage:             args[4],
+					AttackerName:       existingData.AttackerName,
+					AttackerEOS:        existingData.AttackerEOS,
+					AttackerSteam:      existingData.AttackerSteam,
+					AttackerController: args[5],
+					Weapon:             args[9],
+					TeamID:             existingData.TeamID,
+					EOSID:              existingData.EOSID,
 				}
 
 				// Update session data
-				eventStore.StoreSessionData(victimName, eventData)
+				eventStore.StoreSessionData(victimName, sessionData)
+
+				// Extra logic before publishing the event (similar to JavaScript)
+
+				// Get victim by name
+				if victim, exists := eventStore.GetPlayerInfoByName(args[3]); exists {
+					eventManagerData.Victim = victim
+				}
+
+				// Get attacker by EOS ID first, then by controller if not found
+				if attacker, exists := eventStore.GetPlayerInfoByEOSID(args[6]); exists {
+					eventManagerData.Attacker = attacker
+				} else if attacker, exists := eventStore.GetPlayerInfoByController(args[5]); exists {
+					eventManagerData.Attacker = attacker
+				}
+
+				// Check for teamkill if we have both victim and attacker data
+				if eventManagerData.Victim != nil && eventManagerData.Attacker != nil {
+					victimTeamID := eventManagerData.Victim.TeamID
+					attackerTeamID := eventManagerData.Attacker.TeamID
+					victimEOSID := eventManagerData.Victim.EOSID
+					attackerEOSID := args[6]
+
+					if victimTeamID != "" && attackerTeamID != "" && victimTeamID == attackerTeamID {
+						if victimEOSID != "" && victimEOSID != attackerEOSID {
+							eventManagerData.Teamkill = true
+						}
+					}
+				}
+
+				// Clear the victim name field as it's now in victim object
+				eventManagerData.VictimName = ""
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])
+
+				// Emit TEAMKILL event if this is a teamkill (similar to JavaScript logic)
+				if eventManagerData.Teamkill {
+					// You could publish a separate TEAMKILL event here if needed
+					// eventManager.PublishEvent(serverID, eventManagerData, "TEAMKILL")
+				}
 			},
 		},
 		{
@@ -385,11 +615,11 @@ func GetLogParsers() []LogParser {
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQGameMode::)?DetermineMatchWinner\(\): (.+) won on (.+)`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore *EventStore) {
-				eventData := map[string]interface{}{
-					"time":    args[1],
-					"chainID": args[2],
-					"winner":  args[3],
-					"layer":   args[4],
+				eventData := &WonData{
+					Time:    args[1],
+					ChainID: args[2],
+					Winner:  &args[3],
+					Layer:   args[4],
 				}
 
 				// Store WON data in event store for new game correlation
@@ -411,11 +641,31 @@ func GetLogParsers() []LogParser {
 				}
 
 				if winnerData, exists := eventStore.GetRoundWinner(true); exists {
-					eventData.WinnerData = winnerData
+					eventData.WinnerData = &event_manager.RoundWinnerInfo{
+						Time:       winnerData.Time,
+						ChainID:    winnerData.ChainID,
+						Team:       winnerData.Team,
+						Subfaction: winnerData.Subfaction,
+						Faction:    winnerData.Faction,
+						Action:     winnerData.Action,
+						Tickets:    winnerData.Tickets,
+						Layer:      winnerData.Layer,
+						Level:      winnerData.Level,
+					}
 				}
 
 				if loserData, exists := eventStore.GetRoundLoser(true); exists {
-					eventData.LoserData = loserData
+					eventData.LoserData = &event_manager.RoundLoserInfo{
+						Time:       loserData.Time,
+						ChainID:    loserData.ChainID,
+						Team:       loserData.Team,
+						Subfaction: loserData.Subfaction,
+						Faction:    loserData.Faction,
+						Action:     loserData.Action,
+						Tickets:    loserData.Tickets,
+						Layer:      loserData.Layer,
+						Level:      loserData.Level,
+					}
 				}
 
 				eventManager.PublishEvent(serverID, eventData, args[0])
@@ -440,37 +690,26 @@ func GetLogParsers() []LogParser {
 
 				// Merge with WON data if it exists
 				if wonData, exists := eventStore.GetWonData(); exists {
-					for k, v := range wonData {
-						switch k {
-						case "team":
-							if teamStr, ok := v.(string); ok {
-								eventManagerData.Team = teamStr
-							}
-						case "subfaction":
-							if subfactionStr, ok := v.(string); ok {
-								eventManagerData.Subfaction = subfactionStr
-							}
-						case "faction":
-							if factionStr, ok := v.(string); ok {
-								eventManagerData.Faction = factionStr
-							}
-						case "action":
-							if actionStr, ok := v.(string); ok {
-								eventManagerData.Action = actionStr
-							}
-						case "tickets":
-							if ticketsStr, ok := v.(string); ok {
-								eventManagerData.Tickets = ticketsStr
-							}
-						case "layer":
-							if layerStr, ok := v.(string); ok {
-								eventManagerData.Layer = layerStr
-							}
-						case "level":
-							if levelStr, ok := v.(string); ok {
-								eventManagerData.Level = levelStr
-							}
-						}
+					if wonData.Team != "" {
+						eventManagerData.Team = wonData.Team
+					}
+					if wonData.Subfaction != "" {
+						eventManagerData.Subfaction = wonData.Subfaction
+					}
+					if wonData.Faction != "" {
+						eventManagerData.Faction = wonData.Faction
+					}
+					if wonData.Action != "" {
+						eventManagerData.Action = wonData.Action
+					}
+					if wonData.Tickets != "" {
+						eventManagerData.Tickets = wonData.Tickets
+					}
+					if wonData.Layer != "" {
+						eventManagerData.Layer = wonData.Layer
+					}
+					if wonData.Level != "" {
+						eventManagerData.Level = wonData.Level
 					}
 				}
 
@@ -485,9 +724,29 @@ func GetLogParsers() []LogParser {
 
 // processLogForEvents detects events based on regex and publishes them
 func ProcessLogForEvents(logLine string, serverID uuid.UUID, parsers []LogParser, eventManager *event_manager.EventManager, eventStore *EventStore) {
+	ProcessLogForEventsWithMetrics(logLine, serverID, parsers, eventManager, eventStore, nil)
+}
+
+// ProcessLogForEventsWithMetrics detects events based on regex, publishes them, and tracks metrics
+func ProcessLogForEventsWithMetrics(logLine string, serverID uuid.UUID, parsers []LogParser, eventManager *event_manager.EventManager, eventStore *EventStore, metrics *LogParsingMetrics) {
+	if metrics != nil {
+		metrics.RecordLineProcessed()
+	}
+
 	for _, parser := range parsers {
 		if matches := parser.regex.FindStringSubmatch(logLine); matches != nil {
-			parser.onMatch(matches, serverID, eventManager, eventStore)
+			var processingTime time.Duration
+
+			if metrics != nil {
+				start := time.Now()
+				parser.onMatch(matches, serverID, eventManager, eventStore)
+				processingTime = time.Since(start)
+				metrics.RecordMatchingLine(processingTime)
+			} else {
+				parser.onMatch(matches, serverID, eventManager, eventStore)
+			}
+
+			return // Only process the first match
 		}
 	}
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { FileText, Layers, Download, Code, Upload, Save } from 'lucide-vue-next'
+import { FileText, Layers, Download, Code, Upload, Save, ChevronDown, ChevronUp, Minimize2, Maximize2 } from 'lucide-vue-next'
 import RuleComponent from '~/components/RuleComponent.vue'
 import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card"
@@ -46,6 +46,8 @@ const showExportDropdown = ref<boolean>(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const hasUnsavedChanges = ref<boolean>(false);
 const isSaving = ref<boolean>(false);
+const previewCollapsed = ref<boolean>(true);
+const rulesCollapsed = ref<boolean>(false);
 
 // fetch rules
 async function fetchRules() {
@@ -740,6 +742,10 @@ const handleClickOutside = (event: MouseEvent) => {
   }
 }
 
+const toggleCollapseAll = () => {
+  rulesCollapsed.value = !rulesCollapsed.value;
+}
+
 const annotateNumbers = () => {
   rules.value.forEach((rule, idx) => {
     (rule as any).displayId = (idx + 1).toString();
@@ -763,11 +769,12 @@ onUnmounted(() => {
 
 <template>
   <div class="rules-builder p-6 max-w-6xl mx-auto">
+    <!-- Header -->
     <div class="mb-6">
       <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 class="text-2xl font-bold mb-2">Rules Builder</h1>
-          <p class="text-muted-foreground">Drag and drop to create complex rule sets with numbered sections and subsections</p>
+          <p class="text-muted-foreground">Create and manage server rules with numbered sections and subsections</p>
         </div>
         
         <div class="flex items-center gap-2">
@@ -782,10 +789,12 @@ onUnmounted(() => {
             />
             <Button
               @click="fileInput?.click()"
+              variant="outline"
+              size="sm"
               class="flex items-center"
             >
               <Upload class="w-4 h-4 mr-2" />
-              Import Rules
+              Import
             </Button>
           </div>
           
@@ -794,6 +803,7 @@ onUnmounted(() => {
             @click="saveAllRules"
             :disabled="isSaving || !hasUnsavedChanges"
             :variant="hasUnsavedChanges ? 'default' : 'outline'"
+            size="sm"
             class="flex items-center"
           >
             <span v-if="isSaving" class="h-4 w-4 mr-2 animate-spin">
@@ -803,37 +813,38 @@ onUnmounted(() => {
               </svg>
             </span>
             <Save v-else class="h-4 w-4 mr-2" />
-            {{ isSaving ? 'Saving...' : 'Save Changes' }}
+            {{ isSaving ? 'Saving...' : 'Save' }}
           </Button>
           
           <!-- Export Dropdown -->
           <div class="relative">
             <Button
               @click="showExportDropdown = !showExportDropdown"
-              variant="secondary"
+              variant="outline"
+              size="sm"
               class="flex items-center"
             >
               <Download class="w-4 h-4 mr-2" />
-              Export Rules
+              Export
             </Button>
             
             <div 
               v-if="showExportDropdown"
-              class="absolute right-0 mt-2 w-48 bg-background border rounded-lg shadow-lg z-10"
+              class="absolute right-0 mt-2 w-40 bg-background border rounded-lg shadow-lg z-10"
             >
               <button
                 @click="exportAsText"
-                class="w-full text-left px-4 py-2 hover:bg-accent flex items-center"
+                class="w-full text-left px-3 py-2 hover:bg-accent flex items-center text-sm"
               >
                 <FileText class="w-4 h-4 mr-2" />
-                Export as Text
+                Text
               </button>
               <button
                 @click="exportAsJson"
-                class="w-full text-left px-4 py-2 hover:bg-accent flex items-center"
+                class="w-full text-left px-3 py-2 hover:bg-accent flex items-center text-sm"
               >
                 <Code class="w-4 h-4 mr-2" />
-                Export as JSON
+                JSON
               </button>
             </div>
           </div>
@@ -841,17 +852,39 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- Preview Panel (moved to top, collapsed by default) -->
+    <Card class="mb-6">
+      <CardHeader>
+        <div class="flex items-center justify-between">
+          <CardTitle class="text-lg">Rules Preview</CardTitle>
+          <Button
+            @click="previewCollapsed = !previewCollapsed"
+            variant="ghost"
+            size="sm"
+            class="flex items-center"
+          >
+            <ChevronDown v-if="previewCollapsed" class="h-4 w-4 mr-1" />
+            <ChevronUp v-else class="h-4 w-4 mr-1" />
+            {{ previewCollapsed ? 'Show' : 'Hide' }}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent v-if="!previewCollapsed">
+        <pre class="bg-muted p-4 rounded text-sm overflow-auto font-mono whitespace-pre-wrap max-h-96">{{ generateTextExport() }}</pre>
+      </CardContent>
+    </Card>
+
     <div v-if="error" class="bg-destructive text-destructive-foreground p-4 rounded mb-4">{{ error }}</div>
     <div v-if="loading" class="text-center py-8">
       <div class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
       <p>Loading rules...</p>
     </div>
 
-    <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Rule Components Panel -->
-      <Card>
-        <CardHeader>
-          <CardTitle>Rule Components</CardTitle>
+    <div v-else class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <!-- Rule Components Panel (smaller) -->
+      <Card class="lg:col-span-1">
+        <CardHeader class="pb-4">
+          <CardTitle class="text-lg">Components</CardTitle>
         </CardHeader>
         <CardContent>
           <div class="space-y-3">
@@ -862,10 +895,10 @@ onUnmounted(() => {
             >
               <div class="flex items-center">
                 <FileText class="w-4 h-4 mr-2 text-primary" />
-                <span class="font-medium">Rule Section</span>
+                <span class="font-medium text-sm">Rule Section</span>
               </div>
-              <p class="text-sm text-muted-foreground mt-1">Main rule section (e.g., "1. Respect & Conduct")</p>
-    </div>
+              <p class="text-xs text-muted-foreground mt-1">Main rule (e.g., "1. Respect")</p>
+            </div>
 
             <div 
               draggable="true"
@@ -874,20 +907,32 @@ onUnmounted(() => {
             >
               <div class="flex items-center">
                 <Layers class="w-4 h-4 mr-2 text-secondary" />
-                <span class="font-medium">Sub-Rule</span>
+                <span class="font-medium text-sm">Sub-Rule</span>
               </div>
-              <p class="text-sm text-muted-foreground mt-1">Specific rule (e.g., "1.1 No discrimination...")</p>
+              <p class="text-xs text-muted-foreground mt-1">Specific rule (e.g., "1.1 No spam")</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <!-- Rules Canvas -->
-      <Card class="lg:col-span-2 min-h-[600px]">
-        <CardHeader>
-          <CardTitle>Rules Canvas</CardTitle>
-            </CardHeader>
-            <CardContent>
+      <!-- Rules Canvas (larger) -->
+      <Card class="lg:col-span-3 min-h-[600px]">
+        <CardHeader class="pb-4">
+          <div class="flex items-center justify-between">
+            <CardTitle class="text-lg">Rules Canvas</CardTitle>
+            <Button
+              @click="toggleCollapseAll"
+              variant="outline"
+              size="sm"
+              class="flex items-center"
+            >
+              <Minimize2 v-if="!rulesCollapsed" class="h-4 w-4 mr-1" />
+              <Maximize2 v-else class="h-4 w-4 mr-1" />
+              {{ rulesCollapsed ? 'Expand All' : 'Collapse All' }}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
           <div 
             @dragover.prevent
             @drop="handleDrop($event)"
@@ -904,6 +949,7 @@ onUnmounted(() => {
                 :rule="rule"
                 :depth="0"
                 :section-number="index + 1"
+                :force-collapsed="rulesCollapsed ? true : undefined"
                 @update="updateRule"
                 @delete="deleteRule"
                 @add-sub-rule="addSubRule"
@@ -911,21 +957,10 @@ onUnmounted(() => {
                 @reorder="handleReorder"
               />
             </div>
-                  </div>
-            </CardContent>
-          </Card>
+          </div>
+        </CardContent>
+      </Card>
     </div>
-
-    <!-- Preview Panel -->
-    <Card class="mt-6">
-      <CardHeader>
-        <CardTitle>Rules Preview</CardTitle>
-        <div class="text-muted-foreground text-sm">Text format (as it will appear when exported)</div>
-      </CardHeader>
-      <CardContent>
-        <pre class="bg-muted p-4 rounded text-sm overflow-auto font-mono whitespace-pre-wrap">{{ generateTextExport() }}</pre>
-      </CardContent>
-    </Card>
   </div>
 </template>
 
