@@ -2,7 +2,6 @@ package discord_round_winner
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -149,8 +148,6 @@ func (p *DiscordRoundWinnerPlugin) Stop() error {
 
 	p.status = plugin_manager.PluginStatusStopped
 
-	p.apis.LogAPI.Info("Discord Round Winner plugin stopped", nil)
-
 	return nil
 }
 
@@ -204,51 +201,12 @@ func (p *DiscordRoundWinnerPlugin) UpdateConfig(config map[string]interface{}) e
 // handleNewGame processes new game events
 func (p *DiscordRoundWinnerPlugin) handleNewGame(rawEvent *plugin_manager.PluginEvent) error {
 	// Handle both old and new event types for backwards compatibility
-	var eventData *newGameEventData
+	var winner, layer string
 
 	if unifiedEvent, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData); ok {
-		if unifiedEvent.EventType == "NEW_GAME" {
-			eventData = &newGameEventData{
-				Team:           unifiedEvent.Team,
-				Subfaction:     unifiedEvent.Subfaction,
-				Faction:        unifiedEvent.Faction,
-				Action:         unifiedEvent.Action,
-				Tickets:        unifiedEvent.Tickets,
-				Layer:          unifiedEvent.Layer,
-				Level:          unifiedEvent.Level,
-				DLC:            unifiedEvent.DLC,
-				MapClassname:   unifiedEvent.MapClassname,
-				LayerClassname: unifiedEvent.LayerClassname,
-			}
-
-			// Parse metadata if available
-			if unifiedEvent.Metadata != "" {
-				var metadata map[string]interface{}
-				if err := json.Unmarshal([]byte(unifiedEvent.Metadata), &metadata); err == nil {
-					// Override with metadata values if they exist
-					if team, ok := metadata["team"].(string); ok {
-						eventData.Team = team
-					}
-					if subfaction, ok := metadata["subfaction"].(string); ok {
-						eventData.Subfaction = subfaction
-					}
-					if faction, ok := metadata["faction"].(string); ok {
-						eventData.Faction = faction
-					}
-					if action, ok := metadata["action"].(string); ok {
-						eventData.Action = action
-					}
-					if tickets, ok := metadata["tickets"].(string); ok {
-						eventData.Tickets = tickets
-					}
-					if layer, ok := metadata["layer"].(string); ok {
-						eventData.Layer = layer
-					}
-					if level, ok := metadata["level"].(string); ok {
-						eventData.Level = level
-					}
-				}
-			}
+		if unifiedEvent.EventType == "ROUND_ENDED" {
+			winner = unifiedEvent.Winner
+			layer = unifiedEvent.Layer
 		} else {
 			return nil // Not a new game event
 		}
@@ -256,60 +214,20 @@ func (p *DiscordRoundWinnerPlugin) handleNewGame(rawEvent *plugin_manager.Plugin
 		return fmt.Errorf("invalid event data type")
 	}
 
-	if err := p.sendRoundWinnerEmbed(eventData); err != nil {
+	if err := p.sendRoundWinnerEmbed(winner, layer); err != nil {
 		p.apis.LogAPI.Error("Failed to send Discord embed for round winner", err, map[string]interface{}{
-			"layer": eventData.Layer,
+			"layer": layer,
 		})
 	}
 
 	return nil
 }
 
-// newGameEventData represents normalized new game event data
-type newGameEventData struct {
-	Team           string
-	Subfaction     string
-	Faction        string
-	Action         string
-	Tickets        string
-	Layer          string
-	Level          string
-	DLC            string
-	MapClassname   string
-	LayerClassname string
-}
-
 // sendRoundWinnerEmbed sends the round winner as a Discord embed
-func (p *DiscordRoundWinnerPlugin) sendRoundWinnerEmbed(event *newGameEventData) error {
+func (p *DiscordRoundWinnerPlugin) sendRoundWinnerEmbed(winner, layer string) error {
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
 		return fmt.Errorf("channel_id not configured")
-	}
-
-	// Get current layer information
-	currentLayer := "Unknown"
-	if event.Layer != "" {
-		currentLayer = event.Layer
-	}
-
-	// Construct winner message based on available event data
-	var message string
-	if event.Team != "" && event.Action == "won" {
-		// Format: "{Team} {Faction} won on {Layer}"
-		faction := event.Faction
-		if faction == "" {
-			faction = "faction"
-		}
-		message = fmt.Sprintf("%s %s won on %s.", event.Team, faction, currentLayer)
-
-		// Add ticket information if available
-		if event.Tickets != "" {
-			message = fmt.Sprintf("%s %s won on %s with %s tickets remaining.",
-				event.Team, faction, currentLayer, event.Tickets)
-		}
-	} else {
-		// Fallback message when detailed winner info is not available
-		message = fmt.Sprintf("New game started on %s.", currentLayer)
 	}
 
 	embed := &discord.DiscordEmbed{
@@ -318,7 +236,7 @@ func (p *DiscordRoundWinnerPlugin) sendRoundWinnerEmbed(event *newGameEventData)
 		Fields: []*discord.DiscordEmbedField{
 			{
 				Name:  "Message",
-				Value: message,
+				Value: fmt.Sprintf("%s won on %s", winner, layer),
 			},
 		},
 		Timestamp: func() *time.Time { t := time.Now(); return &t }(),
@@ -330,12 +248,8 @@ func (p *DiscordRoundWinnerPlugin) sendRoundWinnerEmbed(event *newGameEventData)
 
 	p.apis.LogAPI.Info("Sent round winner notification to Discord", map[string]interface{}{
 		"channel_id": channelID,
-		"layer":      currentLayer,
-		"team":       event.Team,
-		"faction":    event.Faction,
-		"action":     event.Action,
-		"tickets":    event.Tickets,
-		"message":    message,
+		"winner":     winner,
+		"layer":      layer,
 	})
 
 	return nil
