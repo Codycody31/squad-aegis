@@ -61,7 +61,6 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogNewGame,          // Keep for backwards compatibility
 			event_manager.EventTypeLogGameEventUnified, // New unified events
 		},
 
@@ -157,7 +156,7 @@ func (p *DiscordRoundWinnerPlugin) Stop() error {
 
 // HandleEvent processes an event if the plugin is subscribed to it
 func (p *DiscordRoundWinnerPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
-	if event.Type != "LOG_NEW_GAME" {
+	if event.Type != string(event_manager.EventTypeLogGameEventUnified) {
 		return nil // Not interested in this event
 	}
 

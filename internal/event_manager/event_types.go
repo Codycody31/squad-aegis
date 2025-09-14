@@ -292,3 +292,17 @@ type LogGameEventUnifiedData struct {
 }
 
 func (d LogGameEventUnifiedData) GetEventType() EventType { return EventTypeLogGameEventUnified }
+
+// LogPlayerDisconnectedData represents log player disconnected event data
+type LogPlayerDisconnectedData struct {
+	Time             string `json:"time"`
+	ChainID          string `json:"chain_id"`
+	IP               string `json:"ip,omitempty"`
+	PlayerController string `json:"player_controller"`
+	PlayerSuffix     string `json:"player_suffix,omitempty"`
+	TeamID           string `json:"team_id,omitempty"`
+	SteamID          string `json:"steam_id,omitempty"`
+	EOSID            string `json:"eos_id,omitempty"`
+}
+
+func (d LogPlayerDisconnectedData) GetEventType() EventType { return EventTypeLogPlayerDisconnected }

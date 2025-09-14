@@ -62,7 +62,6 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogRoundEnded,       // Keep for backwards compatibility
 			event_manager.EventTypeLogGameEventUnified, // New unified events
 		},
 
@@ -156,7 +155,7 @@ func (p *DiscordRoundEndedPlugin) Stop() error {
 
 // HandleEvent processes an event if the plugin is subscribed to it
 func (p *DiscordRoundEndedPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
-	if event.Type != "LOG_ROUND_ENDED" {
+	if event.Type != string(event_manager.EventTypeLogGameEventUnified) {
 		return nil // Not interested in this event
 	}
 

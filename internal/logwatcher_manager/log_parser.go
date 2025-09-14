@@ -714,6 +714,32 @@ func GetLogParsers() []LogParser {
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])
 			},
 		},
+		{
+			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: UChannel::Close: Sending CloseBunch\. ChIndex == [0-9]+\. Name: \[UChannel\] ChIndex: [0-9]+, Closing: [0-9]+ \[UNetConnection\] RemoteAddr: ([\d.]+):[\d]+, Name: RedpointEOSIpNetConnection_[0-9]+, Driver: Name:GameNetDriver Def:GameNetDriver RedpointEOSNetDriver_[0-9]+, IsServer: YES, PC: ([^ ]+PlayerController_C_[0-9]+), Owner: [^ ]+PlayerController_C_[0-9]+, UniqueId: RedpointEOS:([\da-f]+)`),
+			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
+				player, ok := eventStore.GetPlayerData(args[5])
+				if !ok {
+					eventManager.PublishEvent(serverID, &event_manager.LogPlayerDisconnectedData{
+						Time:             args[1],
+						ChainID:          strings.TrimSpace(args[2]),
+						IP:               args[3],
+						PlayerController: args[4],
+						EOSID:            args[5],
+					}, args[0])
+				} else {
+					eventManager.PublishEvent(serverID, &event_manager.LogPlayerDisconnectedData{
+						Time:             args[1],
+						ChainID:          strings.TrimSpace(args[2]),
+						IP:               args[3],
+						PlayerController: args[4],
+						PlayerSuffix:     player.PlayerSuffix,
+						SteamID:          player.SteamID,
+						TeamID:           player.TeamID,
+						EOSID:            args[5],
+					}, args[0])
+				}
+			},
+		},
 	}
 }
 

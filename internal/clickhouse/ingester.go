@@ -217,6 +217,8 @@ func (i *EventIngester) ingestEventType(eventType event_manager.EventType, event
 	// TODO: support ingesting possessed and unpossessed admin camera
 	case event_manager.EventTypeLogPlayerConnected:
 		return i.ingestPlayerConnected(events)
+	case event_manager.EventTypeLogPlayerDisconnected:
+		return i.ingestPlayerDisconnected(events)
 	case event_manager.EventTypeLogPlayerDamaged:
 		return i.ingestPlayerDamaged(events)
 	case event_manager.EventTypeLogPlayerDied:
@@ -313,6 +315,50 @@ func (i *EventIngester) ingestPlayerConnected(events []*IngestEvent) error {
 			event.ServerID,
 			chainID,
 			playerController,
+			ip,
+			steam,
+			eos,
+			time.Now(),
+		)
+	}
+
+	query += strings.Join(values, ",")
+	return i.client.Exec(i.ctx, query, args...)
+}
+
+func (i *EventIngester) ingestPlayerDisconnected(events []*IngestEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+
+	query := `INSERT INTO squad_aegis.server_player_disconnected_events 
+		(event_time, server_id, chain_id, player_controller, player_suffix, team, ip, steam, eos, ingest_ts) VALUES`
+
+	values := make([]string, 0, len(events))
+	args := make([]interface{}, 0, len(events)*10)
+
+	for _, event := range events {
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+		// Extract data from structured event data
+		var chainID, playerController, playerSuffix, team, ip, steam, eos string
+		if disconnectedData, ok := event.Data.(*event_manager.LogPlayerDisconnectedData); ok {
+			chainID = disconnectedData.ChainID
+			playerController = disconnectedData.PlayerController
+			playerSuffix = disconnectedData.PlayerSuffix
+			team = disconnectedData.TeamID
+			ip = disconnectedData.IP
+			steam = disconnectedData.SteamID
+			eos = disconnectedData.EOSID
+		}
+
+		args = append(args,
+			event.EventTime,
+			event.ServerID,
+			chainID,
+			playerController,
+			playerSuffix,
+			team,
 			ip,
 			steam,
 			eos,
