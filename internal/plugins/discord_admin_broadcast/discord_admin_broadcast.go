@@ -56,13 +56,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeInt,
 					Default:     16761867, // Orange color
 				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
 			},
 		},
 
@@ -124,12 +117,6 @@ func (p *DiscordAdminBroadcastPlugin) Start(ctx context.Context) error {
 
 	if p.status == plugin_manager.PluginStatusRunning {
 		return nil // Already running
-	}
-
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Discord Admin Broadcast plugin is disabled", nil)
-		return nil
 	}
 
 	// Validate channel ID
@@ -213,7 +200,6 @@ func (p *DiscordAdminBroadcastPlugin) UpdateConfig(config map[string]interface{}
 	p.apis.LogAPI.Info("Discord Admin Broadcast plugin configuration updated", map[string]interface{}{
 		"channel_id": config["channel_id"],
 		"color":      config["color"],
-		"enabled":    config["enabled"],
 	})
 
 	return nil
@@ -221,10 +207,6 @@ func (p *DiscordAdminBroadcastPlugin) UpdateConfig(config map[string]interface{}
 
 // handleAdminBroadcast processes admin broadcast events
 func (p *DiscordAdminBroadcastPlugin) handleAdminBroadcast(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.LogAdminBroadcastData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")

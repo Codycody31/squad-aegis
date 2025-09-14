@@ -53,13 +53,6 @@ func Define() plugin_manager.PluginDefinition {
 					Default:     10000, // 10 seconds
 				},
 				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
-				{
 					Name:        "command_template",
 					Description: "The RCON command template to use for setting fog of war. Use {mode} as placeholder.",
 					Required:    false,
@@ -114,12 +107,6 @@ func (p *FogOfWarPlugin) Start(ctx context.Context) error {
 
 	if p.status == plugin_manager.PluginStatusRunning {
 		return nil // Already running
-	}
-
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Fog of War plugin is disabled", nil)
-		return nil
 	}
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
@@ -194,10 +181,6 @@ func (p *FogOfWarPlugin) UpdateConfig(config map[string]interface{}) error {
 
 // handleNewGame processes new game events
 func (p *FogOfWarPlugin) handleNewGame(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	delayMS := p.getIntConfig("delay_ms")
 	if delayMS < 0 {
 		delayMS = 10000 // Default fallback

@@ -55,13 +55,6 @@ func Define() plugin_manager.PluginDefinition {
 					Default:     300000, // 5 minutes = 5 * 60 * 1000
 				},
 				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
-				{
 					Name:        "shuffle_messages",
 					Description: "Whether to shuffle through messages in order or randomly.",
 					Required:    false,
@@ -115,12 +108,6 @@ func (p *IntervalledBroadcastsPlugin) Start(ctx context.Context) error {
 
 	if p.status == plugin_manager.PluginStatusRunning {
 		return nil // Already running
-	}
-
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Intervalled Broadcasts plugin is disabled", nil)
-		return nil
 	}
 
 	// Check if we have any broadcasts configured
@@ -215,12 +202,6 @@ func (p *IntervalledBroadcastsPlugin) UpdateConfig(config map[string]interface{}
 			p.broadcastTicker.Stop()
 		}
 
-		// Check if still enabled
-		if !p.getBoolConfig("enabled") {
-			p.apis.LogAPI.Info("Intervalled Broadcasts plugin disabled via config update", nil)
-			return nil
-		}
-
 		// Start new ticker with updated interval
 		intervalMS := p.getIntConfig("interval_ms")
 		if intervalMS <= 0 {
@@ -232,7 +213,6 @@ func (p *IntervalledBroadcastsPlugin) UpdateConfig(config map[string]interface{}
 	p.apis.LogAPI.Info("Intervalled Broadcasts plugin configuration updated", map[string]interface{}{
 		"interval_ms":     config["interval_ms"],
 		"broadcast_count": len(p.getStringArrayConfig("broadcasts")),
-		"enabled":         config["enabled"],
 	})
 
 	return nil

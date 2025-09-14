@@ -52,7 +52,6 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 {
   "channel_id": "123456789012345678",
   "threshold": 8,
-  "enabled": true,
   "api_timeout_seconds": 15
 }
 ```

@@ -43,7 +43,6 @@ The Intervalled Broadcasts plugin allows you to set up automated broadcast messa
     "Have fun and play fair!"
   ],
   "interval_ms": 600000,
-  "enabled": true,
   "shuffle_messages": true
 }
 ```

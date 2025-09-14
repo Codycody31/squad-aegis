@@ -52,13 +52,6 @@ func Define() plugin_manager.PluginDefinition {
 					Default:     "", // Empty string means no message to victim
 				},
 				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
-				{
 					Name:        "warn_attacker",
 					Description: "Whether to warn the attacker.",
 					Required:    false,
@@ -120,12 +113,6 @@ func (p *AutoTKWarnPlugin) Start(ctx context.Context) error {
 
 	if p.status == plugin_manager.PluginStatusRunning {
 		return nil // Already running
-	}
-
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Auto TK Warn plugin is disabled", nil)
-		return nil
 	}
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
@@ -194,7 +181,6 @@ func (p *AutoTKWarnPlugin) UpdateConfig(config map[string]interface{}) error {
 	p.config = config
 
 	p.apis.LogAPI.Info("Auto TK Warn plugin configuration updated", map[string]interface{}{
-		"enabled":       config["enabled"],
 		"warn_attacker": config["warn_attacker"],
 		"warn_victim":   config["warn_victim"],
 	})
@@ -204,10 +190,6 @@ func (p *AutoTKWarnPlugin) UpdateConfig(config map[string]interface{}) error {
 
 // handleTeamkill processes teamkill events
 func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.LogTeamkillData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")

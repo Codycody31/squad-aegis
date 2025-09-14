@@ -72,12 +72,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeArrayString,
 					Default:     []interface{}{"ChatSquad"},
 				},
-				plug_config_schema.NewBoolField(
-					"enabled",
-					"Whether the plugin is enabled",
-					false,
-					true,
-				),
 			},
 		},
 
@@ -141,12 +135,6 @@ func (p *DiscordChatPlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Discord Chat plugin is disabled", nil)
-		return nil
-	}
-
 	// Validate channel ID
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
@@ -155,12 +143,6 @@ func (p *DiscordChatPlugin) Start(ctx context.Context) error {
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
-
-	p.apis.LogAPI.Info("Discord Chat plugin started", map[string]interface{}{
-		"channel_id":   channelID,
-		"color":        p.getIntConfig("color"),
-		"ignore_chats": p.getArrayConfig("ignore_chats"),
-	})
 
 	return nil
 }
@@ -181,8 +163,6 @@ func (p *DiscordChatPlugin) Stop() error {
 	}
 
 	p.status = plugin_manager.PluginStatusStopped
-
-	p.apis.LogAPI.Info("Discord Chat plugin stopped", nil)
 
 	return nil
 }
@@ -230,7 +210,6 @@ func (p *DiscordChatPlugin) UpdateConfig(config map[string]interface{}) error {
 		"channel_id":   config["channel_id"],
 		"color":        config["color"],
 		"ignore_chats": config["ignore_chats"],
-		"enabled":      config["enabled"],
 	})
 
 	return nil
@@ -238,10 +217,6 @@ func (p *DiscordChatPlugin) UpdateConfig(config map[string]interface{}) error {
 
 // handleChatMessage processes chat message events
 func (p *DiscordChatPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")
