@@ -73,6 +73,16 @@ type RconSquadCreatedData struct {
 
 func (d RconSquadCreatedData) GetEventType() EventType { return EventTypeRconSquadCreated }
 
+// RconServerInfoData represents RCON server info event data
+type RconServerInfoData struct {
+	PlayerCount     int `json:"player_count"`
+	PublicQueue     int `json:"public_queue"`
+	ReservedQueue   int `json:"reserved_queue"`
+	TotalQueueCount int `json:"total_queue_count"` // PublicQueue + ReservedQueue
+}
+
+func (d RconServerInfoData) GetEventType() EventType { return EventTypeRconServerInfo }
+
 // Log Event Data Types
 
 // LogAdminBroadcastData represents log admin broadcast event data

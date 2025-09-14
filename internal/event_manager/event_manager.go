@@ -24,6 +24,7 @@ const (
 	EventTypeRconPossessedAdminCamera   EventType = "RCON_POSSESSED_ADMIN_CAMERA"
 	EventTypeRconUnpossessedAdminCamera EventType = "RCON_UNPOSSESSED_ADMIN_CAMERA"
 	EventTypeRconSquadCreated           EventType = "RCON_SQUAD_CREATED"
+	EventTypeRconServerInfo             EventType = "RCON_SERVER_INFO"
 
 	// Log Events
 	EventTypeLogAdminBroadcast     EventType = "LOG_ADMIN_BROADCAST"

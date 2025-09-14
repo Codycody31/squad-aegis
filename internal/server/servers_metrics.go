@@ -21,6 +21,7 @@ type MetricPoint struct {
 // ServerMetricsData represents the metrics response
 type ServerMetricsData struct {
 	PlayerCount            []MetricPoint  `json:"player_count"`
+	QueueCount             []MetricPoint  `json:"queue_count"`
 	TickRate               []MetricPoint  `json:"tick_rate"`
 	Rounds                 []MetricPoint  `json:"rounds"`
 	Maps                   []MetricPoint  `json:"maps"`
@@ -145,6 +146,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 			TotalPluginLogs:        0,
 		},
 		PlayerCount:            []MetricPoint{},
+		QueueCount:             []MetricPoint{},
 		TickRate:               []MetricPoint{},
 		ChatActivity:           []MetricPoint{},
 		ConnectionStats:        []MetricPoint{},
@@ -158,12 +160,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		AdminBroadcastStats:    []MetricPoint{},
 	}
 
-	// Query player count metrics - using connection events to estimate player count
+	// Query player count metrics from server info data
 	playerCountQuery := `
 		SELECT 
 			toUnixTimestamp(toStartOfInterval(event_time, INTERVAL ? minute)) * 1000 as timestamp,
-			sum(if(chain_id LIKE '%Connected%', 1, -1)) as net_change
-		FROM squad_aegis.server_player_connected_events 
+			avg(player_count) as avg_player_count
+		FROM squad_aegis.server_info_metrics 
 		WHERE server_id = ? 
 		AND event_time >= ? 
 		AND event_time <= ?
@@ -197,22 +199,49 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 	defer rows.Close()
 
-	playerCount := 0 // Running total
 	for rows.Next() {
 		var timestamp int64
-		var netChange int
-		if err := rows.Scan(&timestamp, &netChange); err != nil {
+		var avgPlayerCount float64
+		if err := rows.Scan(&timestamp, &avgPlayerCount); err != nil {
 			log.Error().Err(err).Msg("Failed to scan player count metric")
 			continue
 		}
-		playerCount += netChange
-		if playerCount < 0 {
-			playerCount = 0 // Prevent negative player counts
-		}
 		metricsData.PlayerCount = append(metricsData.PlayerCount, MetricPoint{
 			Timestamp: time.Unix(timestamp/1000, 0),
-			Value:     playerCount,
+			Value:     int(avgPlayerCount), // Convert to int for consistency
 		})
+	}
+
+	// Query queue count metrics from server info data
+	queueCountQuery := `
+		SELECT 
+			toUnixTimestamp(toStartOfInterval(event_time, INTERVAL ? minute)) * 1000 as timestamp,
+			avg(public_queue + reserved_queue) as avg_queue_count
+		FROM squad_aegis.server_info_metrics 
+		WHERE server_id = ? 
+		AND event_time >= ? 
+		AND event_time <= ?
+		GROUP BY toStartOfInterval(event_time, INTERVAL ? minute)
+		ORDER BY timestamp ASC
+	`
+
+	rows, err = clickhouseClient.Query(ctx, queueCountQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to query queue count metrics from ClickHouse")
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var timestamp int64
+			var avgQueueCount float64
+			if err := rows.Scan(&timestamp, &avgQueueCount); err != nil {
+				log.Error().Err(err).Msg("Failed to scan queue count metric")
+				continue
+			}
+			metricsData.QueueCount = append(metricsData.QueueCount, MetricPoint{
+				Timestamp: time.Unix(timestamp/1000, 0),
+				Value:     int(avgQueueCount), // Convert to int for consistency
+			})
+		}
 	}
 
 	// Query tick rate metrics

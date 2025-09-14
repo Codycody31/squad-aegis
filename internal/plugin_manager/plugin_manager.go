@@ -486,6 +486,8 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 	return nil
 }
 
+// TODO: RestartPluginInstance stops, wipes, and reinitializes a plugin instance
+
 // GetConnectorAPI returns a connector's API for use by plugins
 func (pm *PluginManager) GetConnectorAPI(connectorID string) (interface{}, error) {
 	pm.connectorMu.RLock()
