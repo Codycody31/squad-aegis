@@ -12,6 +12,15 @@ services:
     networks:
       - default
 
+  valkey:
+    image: redis:7-alpine
+    ports:
+      - 6379:6379
+    volumes:
+      - valkey-data:/data
+    networks:
+      - default
+
   clickhouse-server:
     image: clickhouse/clickhouse-server:25.3
     ports:
@@ -39,6 +48,7 @@ services:
 volumes:
   squad-aegis-database:
   clickhouse-data:
+  valkey-data:
 
 networks:
   default:

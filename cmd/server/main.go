@@ -30,6 +30,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 	"go.codycody31.dev/squad-aegis/internal/shared/logger"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
+	"go.codycody31.dev/squad-aegis/internal/valkey"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -159,12 +160,35 @@ func run(ctx context.Context) error {
 	eventIngester.Start()
 	defer eventIngester.Stop()
 
+	// Initialize Valkey client
+	valkeyConfig := valkey.Config{
+		Host:     config.Config.Valkey.Host,
+		Port:     config.Config.Valkey.Port,
+		Password: config.Config.Valkey.Password,
+		Database: config.Config.Valkey.Database,
+	}
+
+	log.Info().Msg("Connecting to Valkey...")
+	valkeyClient, err := valkey.NewClient(valkeyConfig)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create Valkey client")
+	}
+	defer valkeyClient.Close()
+
+	// Ping Valkey
+	err = valkeyClient.Ping(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to ping Valkey - will fallback to in-memory storage")
+	} else {
+		log.Info().Msg("Successfully connected to Valkey")
+	}
+
 	// Create RCON manager
 	rconManager := rcon_manager.NewRconManager(ctx, eventManager)
 	defer rconManager.Shutdown()
 
 	// Create logwatcher manager
-	logwatcherManager := logwatcher_manager.NewLogwatcherManager(ctx, eventManager)
+	logwatcherManager := logwatcher_manager.NewLogwatcherManager(ctx, eventManager, valkeyClient)
 	defer logwatcherManager.Shutdown()
 
 	// Create plugin manager

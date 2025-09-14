@@ -32,6 +32,12 @@ type Struct struct {
 		Password string `default:"squad_aegis"`
 		Debug    bool   `default:"false"`
 	}
+	Valkey struct {
+		Host     string `default:"localhost"`
+		Port     int    `default:"6379"`
+		Password string `default:""`
+		Database int    `default:"0"`
+	}
 	Log struct {
 		Level   string `default:"info"`
 		ShowGin bool   `default:"false"`

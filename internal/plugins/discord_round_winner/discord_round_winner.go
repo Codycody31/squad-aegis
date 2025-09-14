@@ -57,13 +57,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeInt,
 					Default:     16761867, // Orange color
 				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
 			},
 		},
 
@@ -128,12 +121,6 @@ func (p *DiscordRoundWinnerPlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Discord Round Winner plugin is disabled", nil)
-		return nil
-	}
-
 	// Validate channel ID
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
@@ -142,11 +129,6 @@ func (p *DiscordRoundWinnerPlugin) Start(ctx context.Context) error {
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
-
-	p.apis.LogAPI.Info("Discord Round Winner plugin started", map[string]interface{}{
-		"channel_id": channelID,
-		"color":      p.getIntConfig("color"),
-	})
 
 	return nil
 }
@@ -215,7 +197,6 @@ func (p *DiscordRoundWinnerPlugin) UpdateConfig(config map[string]interface{}) e
 	p.apis.LogAPI.Info("Discord Round Winner plugin configuration updated", map[string]interface{}{
 		"channel_id": config["channel_id"],
 		"color":      config["color"],
-		"enabled":    config["enabled"],
 	})
 
 	return nil
@@ -223,10 +204,6 @@ func (p *DiscordRoundWinnerPlugin) UpdateConfig(config map[string]interface{}) e
 
 // handleNewGame processes new game events
 func (p *DiscordRoundWinnerPlugin) handleNewGame(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	// Handle both old and new event types for backwards compatibility
 	var eventData *newGameEventData
 
@@ -276,32 +253,15 @@ func (p *DiscordRoundWinnerPlugin) handleNewGame(rawEvent *plugin_manager.Plugin
 		} else {
 			return nil // Not a new game event
 		}
-	} else if oldEvent, ok := rawEvent.Data.(*event_manager.LogNewGameData); ok {
-		// Legacy event format
-		eventData = &newGameEventData{
-			Team:           oldEvent.Team,
-			Subfaction:     oldEvent.Subfaction,
-			Faction:        oldEvent.Faction,
-			Action:         oldEvent.Action,
-			Tickets:        oldEvent.Tickets,
-			Layer:          oldEvent.Layer,
-			Level:          oldEvent.Level,
-			DLC:            oldEvent.DLC,
-			MapClassname:   oldEvent.MapClassname,
-			LayerClassname: oldEvent.LayerClassname,
-		}
 	} else {
 		return fmt.Errorf("invalid event data type")
 	}
 
-	// Send Discord embed in a goroutine to avoid blocking
-	go func() {
-		if err := p.sendRoundWinnerEmbed(eventData); err != nil {
-			p.apis.LogAPI.Error("Failed to send Discord embed for round winner", err, map[string]interface{}{
-				"layer": eventData.Layer,
-			})
-		}
-	}()
+	if err := p.sendRoundWinnerEmbed(eventData); err != nil {
+		p.apis.LogAPI.Error("Failed to send Discord embed for round winner", err, map[string]interface{}{
+			"layer": eventData.Layer,
+		})
+	}
 
 	return nil
 }
@@ -399,11 +359,4 @@ func (p *DiscordRoundWinnerPlugin) getIntConfig(key string) int {
 		return int(value)
 	}
 	return 0
-}
-
-func (p *DiscordRoundWinnerPlugin) getBoolConfig(key string) bool {
-	if value, ok := p.config[key].(bool); ok {
-		return value
-	}
-	return false
 }

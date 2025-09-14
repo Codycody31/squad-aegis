@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	valkeyClient "go.codycody31.dev/squad-aegis/internal/valkey"
 )
 
 // ServerLogConnection represents a log connection to a server
@@ -18,7 +19,7 @@ type ServerLogConnection struct {
 	ServerID          uuid.UUID
 	LogSource         LogSource
 	Config            LogSourceConfig
-	EventStore        *EventStore
+	EventStore        EventStoreInterface
 	Metrics           *LogParsingMetrics
 	Connected         bool
 	LastUsed          time.Time
@@ -33,19 +34,21 @@ type LogwatcherManager struct {
 	connections  map[uuid.UUID]*ServerLogConnection
 	eventManager *event_manager.EventManager
 	parsers      []LogParser
+	valkeyClient *valkeyClient.Client
 	mu           sync.RWMutex
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
 
 // NewLogwatcherManager creates a new logwatcher manager
-func NewLogwatcherManager(ctx context.Context, eventManager *event_manager.EventManager) *LogwatcherManager {
+func NewLogwatcherManager(ctx context.Context, eventManager *event_manager.EventManager, valkeyClient *valkeyClient.Client) *LogwatcherManager {
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &LogwatcherManager{
 		connections:  make(map[uuid.UUID]*ServerLogConnection),
 		eventManager: eventManager,
 		parsers:      GetOptimizedLogParsers(), // Use the unified parsers
+		valkeyClient: valkeyClient,
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -137,11 +140,15 @@ func (m *LogwatcherManager) ConnectToServer(serverID uuid.UUID, config LogSource
 	// Create connection context
 	ctx, cancel := context.WithCancel(m.ctx)
 
+	// Create event store - use Valkey if available, otherwise use in-memory
+	var eventStore EventStoreInterface
+	eventStore = NewValkeyEventStore(ctx, serverID, m.valkeyClient)
+
 	conn := &ServerLogConnection{
 		ServerID:          serverID,
 		LogSource:         logSource,
 		Config:            config,
-		EventStore:        NewEventStore(serverID),
+		EventStore:        eventStore,
 		Metrics:           NewLogParsingMetrics(),
 		Connected:         true,
 		LastUsed:          time.Now(),

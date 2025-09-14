@@ -58,13 +58,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeInt,
 					Default:     16761867, // Orange color
 				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
 			},
 		},
 
@@ -129,12 +122,6 @@ func (p *DiscordRoundEndedPlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Discord Round Ended plugin is disabled", nil)
-		return nil
-	}
-
 	// Validate channel ID
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
@@ -143,11 +130,6 @@ func (p *DiscordRoundEndedPlugin) Start(ctx context.Context) error {
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
-
-	p.apis.LogAPI.Info("Discord Round Ended plugin started", map[string]interface{}{
-		"channel_id": channelID,
-		"color":      p.getIntConfig("color"),
-	})
 
 	return nil
 }
@@ -168,8 +150,6 @@ func (p *DiscordRoundEndedPlugin) Stop() error {
 	}
 
 	p.status = plugin_manager.PluginStatusStopped
-
-	p.apis.LogAPI.Info("Discord Round Ended plugin stopped", nil)
 
 	return nil
 }
@@ -216,7 +196,6 @@ func (p *DiscordRoundEndedPlugin) UpdateConfig(config map[string]interface{}) er
 	p.apis.LogAPI.Info("Discord Round Ended plugin configuration updated", map[string]interface{}{
 		"channel_id": config["channel_id"],
 		"color":      config["color"],
-		"enabled":    config["enabled"],
 	})
 
 	return nil
@@ -224,10 +203,6 @@ func (p *DiscordRoundEndedPlugin) UpdateConfig(config map[string]interface{}) er
 
 // handleRoundEnded processes round ended events
 func (p *DiscordRoundEndedPlugin) handleRoundEnded(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	// Handle both old and new event types for backwards compatibility
 	var eventData *roundEndedEventData
 
@@ -242,35 +217,15 @@ func (p *DiscordRoundEndedPlugin) handleRoundEnded(rawEvent *plugin_manager.Plug
 		} else {
 			return nil // Not a round ended event
 		}
-	} else if oldEvent, ok := rawEvent.Data.(*event_manager.LogRoundEndedData); ok {
-		// Legacy event format
-		eventData = &roundEndedEventData{
-			Winner: oldEvent.Winner,
-			Layer:  oldEvent.Layer,
-		}
-		// Convert legacy winner/loser data if present
-		if oldEvent.WinnerData != nil {
-			if winnerJSON, err := json.Marshal(oldEvent.WinnerData); err == nil {
-				eventData.WinnerData = string(winnerJSON)
-			}
-		}
-		if oldEvent.LoserData != nil {
-			if loserJSON, err := json.Marshal(oldEvent.LoserData); err == nil {
-				eventData.LoserData = string(loserJSON)
-			}
-		}
 	} else {
 		return fmt.Errorf("invalid event data type")
 	}
 
-	// Send Discord embed in a goroutine to avoid blocking
-	go func() {
-		if err := p.sendRoundEndedEmbed(eventData); err != nil {
-			p.apis.LogAPI.Error("Failed to send Discord embed for round ended", err, map[string]interface{}{
-				"winner": eventData.Winner,
-			})
-		}
-	}()
+	if err := p.sendRoundEndedEmbed(eventData); err != nil {
+		p.apis.LogAPI.Error("Failed to send Discord embed for round ended", err, map[string]interface{}{
+			"winner": eventData.Winner,
+		})
+	}
 
 	return nil
 }
