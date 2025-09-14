@@ -36,10 +36,7 @@ const (
 	EventTypeLogPlayerPossess      EventType = "LOG_PLAYER_POSSESS"
 	EventTypeLogPlayerDisconnected EventType = "LOG_PLAYER_DISCONNECTED"
 	EventTypeLogJoinSucceeded      EventType = "LOG_JOIN_SUCCEEDED"
-	EventTypeLogNewGame            EventType = "LOG_NEW_GAME"
-	EventTypeLogRoundEnded         EventType = "LOG_ROUND_ENDED"
 	EventTypeLogTickRate           EventType = "LOG_TICK_RATE"
-	EventTypeLogTeamkill           EventType = "LOG_TEAMKILL"
 	EventTypeLogGameEventUnified   EventType = "LOG_GAME_EVENT_UNIFIED"
 )
 

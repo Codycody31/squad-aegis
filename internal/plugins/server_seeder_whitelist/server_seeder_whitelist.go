@@ -176,7 +176,7 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogNewGame,
+			event_manager.EventTypeLogGameEventUnified,
 			event_manager.EventTypeRconChatMessage,
 			event_manager.EventTypeLogPlayerConnected,
 		},
@@ -307,8 +307,12 @@ func (p *ServerSeederWhitelistPlugin) Stop() error {
 // HandleEvent processes events
 func (p *ServerSeederWhitelistPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
 	switch event.Type {
-	case "LOG_NEW_GAME":
-		return p.handleNewGame(event)
+	case string(event_manager.EventTypeLogGameEventUnified):
+		if unifiedEvent, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok {
+			if unifiedEvent.EventType == "NEW_GAME" {
+				return p.handleNewGame(event)
+			}
+		}
 	case "RCON_CHAT_MESSAGE":
 		return p.handleChatMessage(event)
 	case "LOG_PLAYER_CONNECTED":

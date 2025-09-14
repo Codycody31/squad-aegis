@@ -202,36 +202,6 @@ type LogJoinSucceededData struct {
 
 func (d LogJoinSucceededData) GetEventType() EventType { return EventTypeLogJoinSucceeded }
 
-// LogNewGameData represents log new game event data
-type LogNewGameData struct {
-	Time           string `json:"time"`
-	ChainID        string `json:"chain_id,omitempty"`
-	Team           string `json:"team,omitempty"`
-	Subfaction     string `json:"subfaction,omitempty"`
-	Faction        string `json:"faction,omitempty"`
-	Action         string `json:"action,omitempty"` // "won" or "lost"
-	Tickets        string `json:"tickets,omitempty"`
-	Layer          string `json:"layer,omitempty"`
-	Level          string `json:"level,omitempty"`
-	DLC            string `json:"dlc,omitempty"`
-	MapClassname   string `json:"map_classname,omitempty"`
-	LayerClassname string `json:"layer_classname,omitempty"`
-}
-
-func (d LogNewGameData) GetEventType() EventType { return EventTypeLogNewGame }
-
-// LogRoundEndedData represents log round ended event data
-type LogRoundEndedData struct {
-	Time       string           `json:"time"`
-	ChainID    string           `json:"chain_id,omitempty"`
-	Winner     string           `json:"winner,omitempty"`
-	Layer      string           `json:"layer,omitempty"`
-	WinnerData *RoundWinnerInfo `json:"winner_data,omitempty"`
-	LoserData  *RoundLoserInfo  `json:"loser_data,omitempty"`
-}
-
-func (d LogRoundEndedData) GetEventType() EventType { return EventTypeLogRoundEnded }
-
 // LogTickRateData represents log tick rate event data
 type LogTickRateData struct {
 	Time     string `json:"time"`
@@ -240,22 +210,6 @@ type LogTickRateData struct {
 }
 
 func (d LogTickRateData) GetEventType() EventType { return EventTypeLogTickRate }
-
-// LogTeamkillData represents log teamkill event data (same as LogPlayerDiedData or LogPlayerWoundedData with teamkill=true)
-type LogTeamkillData struct {
-	Time                     string `json:"time"`
-	WoundTime                string `json:"wound_time,omitempty"`
-	ChainID                  string `json:"chain_id"`
-	VictimName               string `json:"victim_name"`
-	Damage                   string `json:"damage"`
-	AttackerPlayerController string `json:"attacker_player_controller"`
-	Weapon                   string `json:"weapon"`
-	AttackerEOS              string `json:"attacker_eos,omitempty"`
-	AttackerSteam            string `json:"attacker_steam,omitempty"`
-	WasWounded               bool   `json:"was_wounded"` // true if from wounded event, false if from died event
-}
-
-func (d LogTeamkillData) GetEventType() EventType { return EventTypeLogTeamkill }
 
 // LogGameEventUnifiedData represents a unified game event that can handle multiple event types
 type LogGameEventUnifiedData struct {

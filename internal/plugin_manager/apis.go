@@ -131,14 +131,15 @@ func (api *serverAPI) GetPlayers() ([]*PlayerInfo, error) {
 	// Convert squad-rcon players to plugin API format
 	for _, player := range playersData.OnlinePlayers {
 		players = append(players, &PlayerInfo{
-			ID:       fmt.Sprintf("%d", player.Id),
-			Name:     player.Name,
-			SteamID:  player.SteamId,
-			EOSID:    player.EosId,
-			TeamID:   player.TeamId,
-			SquadID:  player.SquadId,
-			IsAdmin:  false, // We'll determine this separately
-			IsOnline: true,
+			ID:            fmt.Sprintf("%d", player.Id),
+			Name:          player.Name,
+			SteamID:       player.SteamId,
+			EOSID:         player.EosId,
+			TeamID:        player.TeamId,
+			SquadID:       player.SquadId,
+			IsSquadLeader: player.IsSquadLeader,
+			IsAdmin:       false, // We'll determine this separately
+			IsOnline:      true,
 		})
 	}
 

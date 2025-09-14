@@ -49,7 +49,7 @@ func Define() plugin_manager.PluginDefinition {
 					Description: "The message that will be sent to the victim.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeString,
-					Default:     "", // Empty string means no message to victim
+					Default:     "You have been TK'd...",
 				},
 				{
 					Name:        "warn_attacker",
@@ -69,7 +69,7 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogTeamkill,
+			event_manager.EventTypeLogPlayerDied,
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -190,9 +190,13 @@ func (p *AutoTKWarnPlugin) UpdateConfig(config map[string]interface{}) error {
 
 // handleTeamkill processes teamkill events
 func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) error {
-	event, ok := rawEvent.Data.(*event_manager.LogTeamkillData)
+	event, ok := rawEvent.Data.(*event_manager.LogPlayerDiedData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")
+	}
+
+	if event.AttackerEOS == "" || event.VictimName == "" || !event.Teamkill {
+		return nil // Not a teamkill or missing data
 	}
 
 	warnAttacker := p.getBoolConfig("warn_attacker")
