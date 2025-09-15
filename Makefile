@@ -97,7 +97,7 @@ test:
 ##@ Build
 
 build-web: ## Build Web UI
-	(cd web/; pnpm install --frozen-lockfile; pnpm run build)
+	(cd web/; pnpm install --frozen-lockfile; pnpm run generate)
 
 build-server: build-web ## Build server
 	CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -tags '$(TAGS)' -ldflags '${LDFLAGS}' -o ${DIST_DIR}/squad-aegis go.codycody31.dev/squad-aegis/cmd/server
