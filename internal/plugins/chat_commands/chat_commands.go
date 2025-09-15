@@ -80,12 +80,6 @@ func Define() plugin_manager.PluginDefinition {
 						}),
 					},
 				),
-				plug_config_schema.NewBoolField(
-					"enabled",
-					"Whether the plugin is enabled",
-					false,
-					true,
-				),
 			},
 		},
 
@@ -142,18 +136,8 @@ func (p *ChatCommandsPlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !plug_config_schema.GetBoolValue(p.config, "enabled") {
-		p.apis.LogAPI.Info("Chat Commands plugin is disabled", nil)
-		return nil
-	}
-
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
-
-	p.apis.LogAPI.Info("Chat Commands plugin started", map[string]interface{}{
-		"command_count": len(p.commands),
-	})
 
 	return nil
 }
@@ -280,10 +264,6 @@ func (p *ChatCommandsPlugin) parseCommands() error {
 
 // handleChatMessage processes chat message events to detect commands
 func (p *ChatCommandsPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
-	if !plug_config_schema.GetBoolValue(p.config, "enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")

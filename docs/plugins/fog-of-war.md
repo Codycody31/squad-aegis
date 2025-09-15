@@ -43,7 +43,6 @@ The Fog of War plugin automates the configuration of Squad's fog of war settings
 {
   "mode": 1,
   "delay_ms": 15000,
-  "enabled": true,
   "command_template": "AdminSetFogOfWar {mode}"
 }
 ```

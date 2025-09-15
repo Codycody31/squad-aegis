@@ -194,10 +194,9 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogNewGame,
+			event_manager.EventTypeLogGameEventUnified,
 			event_manager.EventTypeRconChatMessage,
 			event_manager.EventTypeLogPlayerConnected,
-			// event_manager.EventTypeLogPlayerSquadChange,
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -328,14 +327,16 @@ func (p *SquadLeaderWhitelistPlugin) Stop() error {
 // HandleEvent processes events
 func (p *SquadLeaderWhitelistPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
 	switch event.Type {
-	case "LOG_NEW_GAME":
-		return p.handleNewGame(event)
+	case string(event_manager.EventTypeLogGameEventUnified):
+		if unifiedEvent, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok {
+			if unifiedEvent.EventType == "NEW_GAME" {
+				return p.handleNewGame(event)
+			}
+		}
 	case "RCON_CHAT_MESSAGE":
 		return p.handleChatMessage(event)
 	case "LOG_PLAYER_CONNECTED":
 		return p.handlePlayerConnected(event)
-	case "LOG_PLAYER_SQUAD_CHANGE":
-		return p.handleSquadChange(event)
 	}
 	return nil
 }
@@ -550,6 +551,63 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 	return nil
 }
 
+// updateSquadLeaderSessions updates the squad leader sessions based on current player state
+func (p *SquadLeaderWhitelistPlugin) updateSquadLeaderSessions(players []*plugin_manager.PlayerInfo) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	now := time.Now()
+
+	// First, mark all existing sessions as potentially inactive
+	activeLeaders := make(map[string]bool)
+
+	// Check each online player to see if they're currently a squad leader
+	for _, player := range players {
+		if !player.IsOnline || !player.IsSquadLeader {
+			continue
+		}
+
+		activeLeaders[player.SteamID] = true
+
+		// Update or create squad leader session
+		if session, exists := p.squadLeaderSession[player.SteamID]; exists {
+			// Update existing session
+			session.LastCheck = now
+			session.SquadSize = p.getSquadSize(players, player.TeamID, player.SquadID)
+			session.SquadName = fmt.Sprintf("Squad %d", player.SquadID)
+			session.Unlocked = true // We don't have unlock info from the player API, assume unlocked for now
+		} else {
+			// Create new session for this squad leader
+			p.squadLeaderSession[player.SteamID] = &SquadLeaderSession{
+				SteamID:   player.SteamID,
+				StartTime: now,
+				LastCheck: now,
+				SquadSize: p.getSquadSize(players, player.TeamID, player.SquadID),
+				SquadName: fmt.Sprintf("Squad %d", player.SquadID),
+				Unlocked:  true, // We don't have unlock info from the player API, assume unlocked for now
+			}
+		}
+	}
+
+	// Remove sessions for players who are no longer squad leaders
+	for steamID := range p.squadLeaderSession {
+		if !activeLeaders[steamID] {
+			delete(p.squadLeaderSession, steamID)
+		}
+	}
+}
+
+// getSquadSize counts the number of players in a specific squad
+func (p *SquadLeaderWhitelistPlugin) getSquadSize(players []*plugin_manager.PlayerInfo, teamID, squadID int) int {
+	count := 0
+	for _, player := range players {
+		if player.IsOnline && player.TeamID == teamID && player.SquadID == squadID {
+			count++
+		}
+	}
+	return count
+}
+
 // progressTrackingLoop handles the periodic progress tracking
 func (p *SquadLeaderWhitelistPlugin) progressTrackingLoop() {
 	for {
@@ -620,6 +678,9 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 	if onlinePlayerCount < minPlayersForLeadership {
 		return nil // Not enough players to start awarding leadership progress
 	}
+
+	// Update squad leader sessions based on current player state
+	p.updateSquadLeaderSessions(players)
 
 	// Get configuration values
 	minSquadSize := p.getIntConfig("min_squad_size")

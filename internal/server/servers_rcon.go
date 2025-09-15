@@ -342,6 +342,7 @@ func (s *Server) ServerRconForceRestart(c *gin.Context) {
 	}
 
 	// First disconnect from the server
+	log.Info().Str("server_id", serverId.String()).Msg("Forcing RCON connection disconnect")
 	err = s.Dependencies.RconManager.DisconnectFromServer(serverId, true)
 	if err != nil && err.Error() != "server not connected" && err.Error() != "server already disconnected" {
 		responses.BadRequest(c, "Failed to disconnect from RCON", &gin.H{"error": err.Error()})
@@ -354,6 +355,7 @@ func (s *Server) ServerRconForceRestart(c *gin.Context) {
 	}
 
 	// Then reconnect to the server
+	log.Info().Str("server_id", serverId.String()).Msg("Reconnecting to RCON")
 	err = s.Dependencies.RconManager.ConnectToServer(serverId, ipAddress, server.RconPort, server.RconPassword)
 	if err != nil {
 		responses.BadRequest(c, "Failed to reconnect to RCON", &gin.H{"error": err.Error()})

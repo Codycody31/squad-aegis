@@ -67,13 +67,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeInt,
 					Default:     16761867, // Orange color
 				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
 			},
 		},
 
@@ -137,12 +130,6 @@ func (p *DiscordAdminCamLogsPlugin) Start(ctx context.Context) error {
 
 	if p.status == plugin_manager.PluginStatusRunning {
 		return nil // Already running
-	}
-
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Discord Admin Camera Logs plugin is disabled", nil)
-		return nil
 	}
 
 	// Validate channel ID
@@ -232,7 +219,6 @@ func (p *DiscordAdminCamLogsPlugin) UpdateConfig(config map[string]interface{}) 
 	p.apis.LogAPI.Info("Discord Admin Camera Logs plugin configuration updated", map[string]interface{}{
 		"channel_id": config["channel_id"],
 		"color":      config["color"],
-		"enabled":    config["enabled"],
 	})
 
 	return nil
@@ -240,10 +226,6 @@ func (p *DiscordAdminCamLogsPlugin) UpdateConfig(config map[string]interface{}) 
 
 // handleAdminCameraEntry processes admin camera possession events
 func (p *DiscordAdminCamLogsPlugin) handleAdminCameraEntry(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.RconAdminCameraData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")
@@ -274,10 +256,6 @@ func (p *DiscordAdminCamLogsPlugin) handleAdminCameraEntry(rawEvent *plugin_mana
 
 // handleAdminCameraExit processes admin camera unpossession events
 func (p *DiscordAdminCamLogsPlugin) handleAdminCameraExit(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.RconAdminCameraData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")
@@ -426,11 +404,4 @@ func (p *DiscordAdminCamLogsPlugin) getIntConfig(key string) int {
 		return int(value)
 	}
 	return 0
-}
-
-func (p *DiscordAdminCamLogsPlugin) getBoolConfig(key string) bool {
-	if value, ok := p.config[key].(bool); ok {
-		return value
-	}
-	return false
 }

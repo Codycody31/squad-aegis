@@ -60,13 +60,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeBool,
 					Default:     true,
 				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     false, // Matches defaultEnabled: false
-				},
 			},
 		},
 
@@ -130,12 +123,6 @@ func (p *DiscordSquadCreatedPlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Discord Squad Created plugin is disabled", nil)
-		return nil
-	}
-
 	// Validate channel ID
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
@@ -143,12 +130,6 @@ func (p *DiscordSquadCreatedPlugin) Start(ctx context.Context) error {
 	}
 
 	p.status = plugin_manager.PluginStatusRunning
-
-	p.apis.LogAPI.Info("Discord Squad Created plugin started", map[string]interface{}{
-		"channel_id": channelID,
-		"use_embed":  p.getBoolConfig("use_embed"),
-		"color":      p.getIntConfig("color"),
-	})
 
 	return nil
 }
@@ -163,8 +144,6 @@ func (p *DiscordSquadCreatedPlugin) Stop() error {
 	}
 
 	p.status = plugin_manager.PluginStatusStopped
-
-	p.apis.LogAPI.Info("Discord Squad Created plugin stopped", nil)
 
 	return nil
 }
@@ -212,7 +191,6 @@ func (p *DiscordSquadCreatedPlugin) UpdateConfig(config map[string]interface{}) 
 		"channel_id": config["channel_id"],
 		"use_embed":  config["use_embed"],
 		"color":      config["color"],
-		"enabled":    config["enabled"],
 	})
 
 	return nil
@@ -220,10 +198,6 @@ func (p *DiscordSquadCreatedPlugin) UpdateConfig(config map[string]interface{}) 
 
 // handleSquadCreated processes squad creation events
 func (p *DiscordSquadCreatedPlugin) handleSquadCreated(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.RconSquadCreatedData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")

@@ -202,54 +202,6 @@ func GetLogParsers() []LogParser {
 			},
 		},
 		{
-			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadGameEvents: Display: Team ([0-9]), (.*) \( ?(.*?) ?\) has (won|lost) the match with ([0-9]+) Tickets on layer (.*) \(level (.*)\)!`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
-				eventData := &event_manager.LogNewGameData{
-					Time:       args[1],
-					ChainID:    strings.TrimSpace(args[2]),
-					Team:       args[3],
-					Subfaction: args[4],
-					Faction:    args[5],
-					Action:     args[6],
-					Tickets:    args[7],
-					Layer:      args[8],
-					Level:      args[9],
-				}
-
-				// Store in event store based on win/loss status
-				roundData := &RoundWinnerData{
-					Time:       args[1],
-					ChainID:    strings.TrimSpace(args[2]),
-					Team:       args[3],
-					Subfaction: args[4],
-					Faction:    args[5],
-					Action:     args[6],
-					Tickets:    args[7],
-					Layer:      args[8],
-					Level:      args[9],
-				}
-
-				if args[6] == "won" {
-					eventStore.StoreRoundWinner(roundData)
-				} else {
-					loserData := &RoundLoserData{
-						Time:       args[1],
-						ChainID:    strings.TrimSpace(args[2]),
-						Team:       args[3],
-						Subfaction: args[4],
-						Faction:    args[5],
-						Action:     args[6],
-						Tickets:    args[7],
-						Layer:      args[8],
-						Level:      args[9],
-					}
-					eventStore.StoreRoundLoser(loserData)
-				}
-
-				eventManager.PublishEvent(serverID, eventData, args[0])
-			},
-		},
-		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: Player:(.+) ActualDamage=([0-9.]+) from (.+) \(Online IDs:(?: EOS: ([^ )|]+))?(?: steam: ([^ )|]+))?\s*\|\s*Player Controller ID: ([^ )]+)\)caused by ([A-Za-z0-9_-]+)_C`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
 				// Skip if IDs are invalid
@@ -608,110 +560,29 @@ func GetLogParsers() []LogParser {
 			},
 		},
 		{
-			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQGameMode::)?DetermineMatchWinner\(\): (.+) won on (.+)`),
+			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogNet: UChannel::Close: Sending CloseBunch\. ChIndex == [0-9]+\. Name: \[UChannel\] ChIndex: [0-9]+, Closing: [0-9]+ \[UNetConnection\] RemoteAddr: ([\d.]+):[\d]+, Name: RedpointEOSIpNetConnection_[0-9]+, Driver: Name:GameNetDriver Def:GameNetDriver RedpointEOSNetDriver_[0-9]+, IsServer: YES, PC: ([^ ]+PlayerController_C_[0-9]+), Owner: [^ ]+PlayerController_C_[0-9]+, UniqueId: RedpointEOS:([\da-f]+)`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
-				eventData := &WonData{
-					Time:    args[1],
-					ChainID: args[2],
-					Winner:  &args[3],
-					Layer:   args[4],
+				player, ok := eventStore.GetPlayerData(args[5])
+				if !ok {
+					eventManager.PublishEvent(serverID, &event_manager.LogPlayerDisconnectedData{
+						Time:             args[1],
+						ChainID:          strings.TrimSpace(args[2]),
+						IP:               args[3],
+						PlayerController: args[4],
+						EOSID:            args[5],
+					}, args[0])
+				} else {
+					eventManager.PublishEvent(serverID, &event_manager.LogPlayerDisconnectedData{
+						Time:             args[1],
+						ChainID:          strings.TrimSpace(args[2]),
+						IP:               args[3],
+						PlayerController: args[4],
+						PlayerSuffix:     player.PlayerSuffix,
+						SteamID:          player.SteamID,
+						TeamID:           player.TeamID,
+						EOSID:            args[5],
+					}, args[0])
 				}
-
-				// Store WON data in event store for new game correlation
-				eventStore.StoreWonData(eventData)
-
-				eventManager.PublishEvent(serverID, &event_manager.LogRoundEndedData{
-					Time:    args[1],
-					ChainID: args[2],
-					Winner:  args[3],
-					Layer:   args[4],
-				}, args[0])
-			},
-		},
-		{
-			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogGameState: Match State Changed from InProgress to WaitingPostMatch`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
-				eventData := &event_manager.LogRoundEndedData{
-					Time: args[1],
-				}
-
-				if winnerData, exists := eventStore.GetRoundWinner(true); exists {
-					eventData.WinnerData = &event_manager.RoundWinnerInfo{
-						Time:       winnerData.Time,
-						ChainID:    winnerData.ChainID,
-						Team:       winnerData.Team,
-						Subfaction: winnerData.Subfaction,
-						Faction:    winnerData.Faction,
-						Action:     winnerData.Action,
-						Tickets:    winnerData.Tickets,
-						Layer:      winnerData.Layer,
-						Level:      winnerData.Level,
-					}
-				}
-
-				if loserData, exists := eventStore.GetRoundLoser(true); exists {
-					eventData.LoserData = &event_manager.RoundLoserInfo{
-						Time:       loserData.Time,
-						ChainID:    loserData.ChainID,
-						Team:       loserData.Team,
-						Subfaction: loserData.Subfaction,
-						Faction:    loserData.Faction,
-						Action:     loserData.Action,
-						Tickets:    loserData.Tickets,
-						Layer:      loserData.Layer,
-						Level:      loserData.Level,
-					}
-				}
-
-				eventManager.PublishEvent(serverID, eventData, args[0])
-			},
-		},
-		{
-			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogWorld: Bringing World \/([A-z]+)\/(?:Maps\/)?([A-z0-9-]+)\/(?:.+\/)?([A-z0-9-]+)(?:\.[A-z0-9-]+)`),
-			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface) {
-
-				// Skip transition map
-				if args[5] == "TransitionMap" {
-					return
-				}
-
-				eventManagerData := &event_manager.LogNewGameData{
-					Time:           args[1],
-					ChainID:        args[2],
-					DLC:            args[3],
-					MapClassname:   args[4],
-					LayerClassname: args[5],
-				}
-
-				// Merge with WON data if it exists
-				if wonData, exists := eventStore.GetWonData(); exists {
-					if wonData.Team != "" {
-						eventManagerData.Team = wonData.Team
-					}
-					if wonData.Subfaction != "" {
-						eventManagerData.Subfaction = wonData.Subfaction
-					}
-					if wonData.Faction != "" {
-						eventManagerData.Faction = wonData.Faction
-					}
-					if wonData.Action != "" {
-						eventManagerData.Action = wonData.Action
-					}
-					if wonData.Tickets != "" {
-						eventManagerData.Tickets = wonData.Tickets
-					}
-					if wonData.Layer != "" {
-						eventManagerData.Layer = wonData.Layer
-					}
-					if wonData.Level != "" {
-						eventManagerData.Level = wonData.Level
-					}
-				}
-
-				// Clear the event store for the new game
-				eventStore.ClearNewGameData()
-
-				eventManager.PublishEvent(serverID, eventManagerData, args[0])
 			},
 		},
 	}

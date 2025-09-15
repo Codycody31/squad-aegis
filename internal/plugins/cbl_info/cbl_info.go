@@ -111,13 +111,6 @@ func Define() plugin_manager.PluginDefinition {
 					Default:     6,
 				},
 				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
-				{
 					Name:        "api_timeout_seconds",
 					Description: "Timeout for Community Ban List API requests in seconds.",
 					Required:    false,
@@ -196,12 +189,6 @@ func (p *CBLInfoPlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("CBL Info plugin is disabled", nil)
-		return nil
-	}
-
 	// Validate channel ID
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
@@ -210,11 +197,6 @@ func (p *CBLInfoPlugin) Start(ctx context.Context) error {
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
-
-	p.apis.LogAPI.Info("CBL Info plugin started", map[string]interface{}{
-		"channel_id": channelID,
-		"threshold":  p.getIntConfig("threshold"),
-	})
 
 	return nil
 }
@@ -235,8 +217,6 @@ func (p *CBLInfoPlugin) Stop() error {
 	}
 
 	p.status = plugin_manager.PluginStatusStopped
-
-	p.apis.LogAPI.Info("CBL Info plugin stopped", nil)
 
 	return nil
 }
@@ -290,7 +270,6 @@ func (p *CBLInfoPlugin) UpdateConfig(config map[string]interface{}) error {
 	p.apis.LogAPI.Info("CBL Info plugin configuration updated", map[string]interface{}{
 		"channel_id": config["channel_id"],
 		"threshold":  config["threshold"],
-		"enabled":    config["enabled"],
 	})
 
 	return nil
@@ -298,10 +277,6 @@ func (p *CBLInfoPlugin) UpdateConfig(config map[string]interface{}) error {
 
 // handlePlayerConnected processes player connected events
 func (p *CBLInfoPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.LogPlayerConnectedData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")

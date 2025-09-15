@@ -67,8 +67,7 @@ The `chat_colors` object maps chat types to color values:
     "ChatAdmin": 16711680
   },
   "color": 16761867,
-  "ignore_chats": ["ChatSquad"],
-  "enabled": true
+  "ignore_chats": ["ChatSquad"]
 }
 ```
 

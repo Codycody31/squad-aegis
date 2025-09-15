@@ -63,13 +63,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeBool,
 					Default:     false,
 				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     false, // Default disabled as in original
-				},
 			},
 		},
 
@@ -133,12 +126,6 @@ func (p *DiscordKillFeedPlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Discord Kill Feed plugin is disabled", nil)
-		return nil
-	}
-
 	// Validate channel ID
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
@@ -147,12 +134,6 @@ func (p *DiscordKillFeedPlugin) Start(ctx context.Context) error {
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
-
-	p.apis.LogAPI.Info("Discord Kill Feed plugin started", map[string]interface{}{
-		"channel_id":  channelID,
-		"color":       p.getIntConfig("color"),
-		"disable_cbl": p.getBoolConfig("disable_cbl"),
-	})
 
 	return nil
 }
@@ -173,8 +154,6 @@ func (p *DiscordKillFeedPlugin) Stop() error {
 	}
 
 	p.status = plugin_manager.PluginStatusStopped
-
-	p.apis.LogAPI.Info("Discord Kill Feed plugin stopped", nil)
 
 	return nil
 }
@@ -222,7 +201,6 @@ func (p *DiscordKillFeedPlugin) UpdateConfig(config map[string]interface{}) erro
 		"channel_id":  config["channel_id"],
 		"color":       config["color"],
 		"disable_cbl": config["disable_cbl"],
-		"enabled":     config["enabled"],
 	})
 
 	return nil
@@ -230,10 +208,6 @@ func (p *DiscordKillFeedPlugin) UpdateConfig(config map[string]interface{}) erro
 
 // handlePlayerWounded processes player wounded events
 func (p *DiscordKillFeedPlugin) handlePlayerWounded(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.LogPlayerWoundedData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")

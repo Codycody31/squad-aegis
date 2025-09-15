@@ -45,8 +45,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 {
   "channel_id": "123456789012345678",
   "color": 3447003,
-  "use_embed": true,
-  "enabled": true
+  "use_embed": true
 }
 ```
 

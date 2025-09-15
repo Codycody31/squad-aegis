@@ -49,14 +49,7 @@ func Define() plugin_manager.PluginDefinition {
 					Description: "The message that will be sent to the victim.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeString,
-					Default:     "", // Empty string means no message to victim
-				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
+					Default:     "You have been TK'd...",
 				},
 				{
 					Name:        "warn_attacker",
@@ -76,7 +69,7 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogTeamkill,
+			event_manager.EventTypeLogPlayerDied,
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -120,12 +113,6 @@ func (p *AutoTKWarnPlugin) Start(ctx context.Context) error {
 
 	if p.status == plugin_manager.PluginStatusRunning {
 		return nil // Already running
-	}
-
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Auto TK Warn plugin is disabled", nil)
-		return nil
 	}
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
@@ -194,7 +181,6 @@ func (p *AutoTKWarnPlugin) UpdateConfig(config map[string]interface{}) error {
 	p.config = config
 
 	p.apis.LogAPI.Info("Auto TK Warn plugin configuration updated", map[string]interface{}{
-		"enabled":       config["enabled"],
 		"warn_attacker": config["warn_attacker"],
 		"warn_victim":   config["warn_victim"],
 	})
@@ -204,13 +190,13 @@ func (p *AutoTKWarnPlugin) UpdateConfig(config map[string]interface{}) error {
 
 // handleTeamkill processes teamkill events
 func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
-	event, ok := rawEvent.Data.(*event_manager.LogTeamkillData)
+	event, ok := rawEvent.Data.(*event_manager.LogPlayerDiedData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")
+	}
+
+	if event.AttackerEOS == "" || event.VictimName == "" || !event.Teamkill {
+		return nil // Not a teamkill or missing data
 	}
 
 	warnAttacker := p.getBoolConfig("warn_attacker")

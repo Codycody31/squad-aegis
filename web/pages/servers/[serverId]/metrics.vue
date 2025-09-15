@@ -67,26 +67,22 @@
                   Peak Players
                 </p>
                 <p class="text-2xl font-bold">
-                  {{ metrics.summary.peak_player_count }}
+                  {{ metrics.summary.peak_player_count || 0 }}
                 </p>
                 <p class="text-xs text-muted-foreground">
-                  {{ metrics.summary.unique_players_count }} unique players
+                  Current: {{ metrics.summary.total_players || 0 }}
                 </p>
               </div>
             </div>
           </CardContent>
-        </Card>
-
-        <Card>
+        </Card>        <Card>
           <CardContent class="p-6">
             <div class="flex items-center space-x-2">
               <Icon name="mdi:speedometer" class="h-8 w-8 text-green-500" />
               <div>
                 <p class="text-sm font-medium text-muted-foreground">Avg TPS</p>
                 <p class="text-2xl font-bold">
-                                  <p class="text-xl font-bold text-foreground">
-                  {{ metrics.summary.avg_tick_rate.toFixed(2) }}
-                </p>
+                  {{ metrics.summary.avg_tick_rate?.toFixed(1) || '0.0' }}
                 </p>
               </div>
             </div>
@@ -99,13 +95,13 @@
               <Icon name="mdi:map" class="h-8 w-8 text-purple-500" />
               <div>
                 <p class="text-sm font-medium text-muted-foreground">
-                  Rounds Played
+                  Total Rounds
                 </p>
                 <p class="text-2xl font-bold">
-                  {{ metrics.summary.total_rounds }}
+                  {{ metrics.summary.total_rounds || 0 }}
                 </p>
                 <p class="text-xs text-muted-foreground">
-                  Most played: {{ metrics.summary.most_played_map }}
+                  Most Played: {{ metrics.summary.most_played_map || 'N/A' }}
                 </p>
               </div>
             </div>
@@ -121,10 +117,10 @@
                   Chat Messages
                 </p>
                 <p class="text-2xl font-bold">
-                  {{ metrics.summary.total_chat_messages }}
+                  {{ metrics.summary.total_chat_messages || 0 }}
                 </p>
                 <p class="text-xs text-muted-foreground">
-                  {{ metrics.summary.total_teamkills }} teamkills
+                  Total communications
                 </p>
               </div>
             </div>
@@ -137,13 +133,13 @@
               <Icon name="mdi:heart-broken" class="h-8 w-8 text-red-500" />
               <div>
                 <p class="text-sm font-medium text-muted-foreground">
-                  Player Deaths
+                  Teamkills
                 </p>
                 <p class="text-2xl font-bold">
-                  {{ metrics.summary.total_player_died }}
+                  {{ metrics.summary.total_teamkills || 0 }}
                 </p>
                 <p class="text-xs text-muted-foreground">
-                  {{ metrics.summary.total_player_wounded }} wounded
+                  Friendly fire incidents
                 </p>
               </div>
             </div>
@@ -152,6 +148,7 @@
 
         <Card>
           <CardContent class="p-6">
+
             <div class="flex items-center space-x-2">
               <Icon name="mdi:medical-bag" class="h-8 w-8 text-green-600" />
               <div>
@@ -319,9 +316,10 @@
       <!-- Maps and Rounds -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Recent Maps -->
+        <!-- Recent Maps -->
         <Card>
           <CardContent class="p-6">
-            <h3 class="text-lg font-semibold mb-4">Recent Maps</h3>
+            <h3 class="text-lg font-semibold mb-4">Recent Games (Last 10)</h3>
             <div class="space-y-3">
               <div
                 v-for="(map, index) in recentMaps"
@@ -329,21 +327,29 @@
                 class="flex items-center justify-between p-3 rounded-lg bg-muted/50"
               >
                 <div class="flex items-center space-x-3">
-                  <Icon name="mdi:map" class="h-5 w-5 text-purple-500" />
-                  <div>
-                    <p class="font-medium">{{ map.name }}</p>
-                    <p class="text-sm text-muted-foreground">
+                  <Icon name="mdi:map" class="h-4 w-4 text-muted-foreground" />
+                  <div class="flex-1">
+                    <span class="font-medium">{{ map.name }}</span>
+                    <p class="text-xs text-muted-foreground">
                       {{ formatTimestamp(map.timestamp) }}
                     </p>
                   </div>
+                  <div class="text-right">
+                    <Badge 
+                      :variant="map.winner !== 'Unknown' ? 'default' : 'secondary'"
+                      class="text-xs"
+                    >
+                      {{ map.winner }}
+                    </Badge>
+                  </div>
                 </div>
-                <Badge variant="secondary">{{ map.duration }}</Badge>
+              </div>
+              <div v-if="recentMaps.length === 0" class="text-center py-4">
+                <p class="text-muted-foreground">No recent games found</p>
               </div>
             </div>
           </CardContent>
-        </Card>
-
-        <!-- Server Statistics -->
+        </Card>        <!-- Server Statistics -->
         <Card>
           <CardContent class="p-6">
             <h3 class="text-lg font-semibold mb-4">Server Statistics</h3>
@@ -351,61 +357,61 @@
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Total Connections</span>
                 <span class="text-sm">{{
-                  metrics.summary.total_connections
+                  metrics.summary.total_connections || 0
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Unique Players</span>
                 <span class="text-sm">{{
-                  metrics.summary.unique_players_count
+                  metrics.summary.unique_players_count || 0
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Chat Messages</span>
                 <span class="text-sm">{{
-                  metrics.summary.total_chat_messages
+                  metrics.summary.total_chat_messages || 0
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Teamkills</span>
                 <span class="text-sm text-red-600">{{
-                  metrics.summary.total_teamkills
+                  metrics.summary.total_teamkills || 0
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Average TPS</span>
                 <span class="text-sm">{{
-                  metrics.summary.avg_tick_rate.toFixed(2)
+                  metrics.summary.avg_tick_rate?.toFixed(2) || '0.00'
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Player Deaths</span>
                 <span class="text-sm text-red-600">{{
-                  metrics.summary.total_player_died
+                  metrics.summary.total_player_died || 0
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Player Wounded</span>
                 <span class="text-sm text-orange-600">{{
-                  metrics.summary.total_player_wounded
+                  metrics.summary.total_player_wounded || 0
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Player Revived</span>
                 <span class="text-sm text-green-600">{{
-                  metrics.summary.total_player_revived
+                  metrics.summary.total_player_revived || 0
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">Admin Broadcasts</span>
                 <span class="text-sm">{{
-                  metrics.summary.total_admin_broadcasts
+                  metrics.summary.total_admin_broadcasts || 0
                 }}</span>
               </div>
               <div class="flex items-center justify-between">
-                <span class="text-sm font-medium">Plugin Logs</span>
-                <span class="text-sm">{{
-                  metrics.summary.total_plugin_logs
+                <span class="text-sm font-medium">Total Rounds</span>
+                <span class="text-sm text-blue-600">{{
+                  metrics.summary.total_rounds || 0
                 }}</span>
               </div>
             </div>
@@ -441,7 +447,6 @@ import PlayerDiedChart from "~/components/charts/PlayerDiedChart.vue";
 import PlayerDamagedChart from "~/components/charts/PlayerDamagedChart.vue";
 import DeployableDamagedChart from "~/components/charts/DeployableDamagedChart.vue";
 import AdminBroadcastChart from "~/components/charts/AdminBroadcastChart.vue";
-import PluginLogRateChart from "~/components/charts/PluginLogRateChart.vue";
 import type { AcceptableValue } from "reka-ui";
 
 definePageMeta({
@@ -462,13 +467,24 @@ const recentMaps = computed(() => {
   if (!metrics.value?.maps) return [];
 
   return metrics.value.maps
-    .slice(-5)
+    .slice(-10) // Get last 10 games instead of 5
     .reverse()
-    .map((map: any, index: number) => ({
-      name: map.value,
-      timestamp: map.timestamp,
-      duration: `${Math.floor(Math.random() * 60 + 30)}min`, // Sample duration
-    }));
+    .map((map: any) => {
+      // Handle new format with layer and winner data
+      if (typeof map.value === 'object' && map.value !== null) {
+        return {
+          name: map.value.layer || 'Unknown',
+          winner: map.value.winner || 'Unknown',
+          timestamp: map.timestamp,
+        };
+      }
+      // Handle legacy format
+      return {
+        name: map.value || 'Unknown',
+        winner: 'Unknown',
+        timestamp: map.timestamp,
+      };
+    });
 });
 
 // Fetch metrics data

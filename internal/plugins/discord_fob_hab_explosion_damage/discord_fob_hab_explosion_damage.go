@@ -61,13 +61,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeInt,
 					Default:     16761867, // Orange color
 				},
-				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
 			},
 		},
 
@@ -143,12 +136,6 @@ func (p *DiscordFOBHABExplosionDamagePlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Discord FOB/HAB Explosion Damage plugin is disabled", nil)
-		return nil
-	}
-
 	// Validate channel ID
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
@@ -157,11 +144,6 @@ func (p *DiscordFOBHABExplosionDamagePlugin) Start(ctx context.Context) error {
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
-
-	p.apis.LogAPI.Info("Discord FOB/HAB Explosion Damage plugin started", map[string]interface{}{
-		"channel_id": channelID,
-		"color":      p.getIntConfig("color"),
-	})
 
 	return nil
 }
@@ -182,8 +164,6 @@ func (p *DiscordFOBHABExplosionDamagePlugin) Stop() error {
 	}
 
 	p.status = plugin_manager.PluginStatusStopped
-
-	p.apis.LogAPI.Info("Discord FOB/HAB Explosion Damage plugin stopped", nil)
 
 	return nil
 }
@@ -230,7 +210,6 @@ func (p *DiscordFOBHABExplosionDamagePlugin) UpdateConfig(config map[string]inte
 	p.apis.LogAPI.Info("Discord FOB/HAB Explosion Damage plugin configuration updated", map[string]interface{}{
 		"channel_id": config["channel_id"],
 		"color":      config["color"],
-		"enabled":    config["enabled"],
 	})
 
 	return nil
@@ -238,10 +217,6 @@ func (p *DiscordFOBHABExplosionDamagePlugin) UpdateConfig(config map[string]inte
 
 // handleDeployableDamaged processes deployable damaged events
 func (p *DiscordFOBHABExplosionDamagePlugin) handleDeployableDamaged(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	event, ok := rawEvent.Data.(*event_manager.LogDeployableDamagedData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")

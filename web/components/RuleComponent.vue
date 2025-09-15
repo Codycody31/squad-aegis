@@ -120,35 +120,109 @@ const deleteAction = (actionId: string) => {
   emitUpdate();
 }
 
+const isDragging = ref(false);
+const isDragOver = ref(false);
+const dragPosition = ref<'above' | 'below' | 'nested'>('above');
+
 const handleDragStart = (event: DragEvent) => {
-  event.dataTransfer?.setData('text/plain', JSON.stringify({
+  console.log('Drag start triggered for rule:', localRule.value.id);
+  isDragging.value = true;
+  
+  const dragData = JSON.stringify({
     type: 'rule',
     ruleId: localRule.value.id,
     sourceParentId: localRule.value.parent_id
-  }));
+  });
+  
+  event.dataTransfer?.setData('text/plain', dragData);
+  
+  // Set drag effect
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    // Add a custom drag image to make it more obvious
+    event.dataTransfer.setDragImage(event.currentTarget as HTMLElement, 10, 10);
+  }
+}
+
+const handleDragEnd = () => {
+  isDragging.value = false;
+  isDragOver.value = false;
+}
+
+const handleDragOver = (event: DragEvent) => {
+  event.preventDefault();
+  event.stopPropagation();
+  
+  // Check if we have drag data by looking at the drag types
+  if (!event.dataTransfer?.types.includes('text/plain')) return;
+  
+  isDragOver.value = true;
+  
+  // Calculate drop position based on mouse position
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  const y = event.clientY - rect.top;
+  const height = rect.height;
+  
+  if (y < height * 0.25) {
+    dragPosition.value = 'above';
+  } else if (y > height * 0.75) {
+    dragPosition.value = 'below';
+  } else {
+    // Only allow nesting if this is not already a sub-rule
+    dragPosition.value = localRule.value.parent_id ? 'below' : 'nested';
+  }
+  
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move';
+  }
+}
+
+const handleDragLeave = (event: DragEvent) => {
+  // Only clear drag over if we're actually leaving this element
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  const x = event.clientX;
+  const y = event.clientY;
+  
+  if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+    isDragOver.value = false;
+  }
 }
 
 const handleDrop = (event: DragEvent) => {
   event.preventDefault();
-  const data = event.dataTransfer?.getData('text/plain');
+  event.stopPropagation();
   
+  const data = event.dataTransfer?.getData('text/plain');
   if (!data) return;
   
   try {
     const dragData = JSON.parse(data);
     
     if (dragData.type === 'rule' && dragData.ruleId !== localRule.value.id) {
-      // Calculate target index based on current position
-      const targetIndex = localRule.value.display_order;
+      let targetIndex: number;
+      let targetParentId: string | undefined;
+      
+      if (dragPosition.value === 'above') {
+        targetIndex = localRule.value.display_order;
+        targetParentId = localRule.value.parent_id === null ? undefined : localRule.value.parent_id;
+      } else if (dragPosition.value === 'below') {
+        targetIndex = localRule.value.display_order + 1;
+        targetParentId = localRule.value.parent_id === null ? undefined : localRule.value.parent_id;
+      } else { // nested
+        targetIndex = localRule.value.sub_rules ? localRule.value.sub_rules.length : 0;
+        targetParentId = localRule.value.id;
+      }
       
       emit('reorder', {
         ruleId: dragData.ruleId,
         targetIndex: targetIndex,
-        targetParentId: localRule.value.parent_id === null ? undefined : localRule.value.parent_id
+        targetParentId: targetParentId
       });
     }
   } catch (error) {
     console.error('Error handling drop:', error);
+  } finally {
+    isDragOver.value = false;
   }
 }
 
@@ -185,26 +259,31 @@ const getNumberColor = () => {
 <template>
   <div 
     :class="[
-      'border rounded-lg p-3 transition-all',
+      'border rounded-lg p-3 transition-all relative',
       getRuleClasses(),
-      { 'ml-3': depth > 0 }
+      { 'ml-3': depth > 0 },
+      { 'opacity-50': isDragging },
+      { 'ring-2 ring-primary': isDragOver && dragPosition === 'nested' },
+      { 'border-t-4 border-t-primary': isDragOver && dragPosition === 'above' },
+      { 'border-b-4 border-b-primary': isDragOver && dragPosition === 'below' }
     ]"
-    @dragover.prevent
+    @dragover="handleDragOver"
+    @dragleave="handleDragLeave"
     @drop="handleDrop"
   >
     <div class="flex items-start justify-between mb-2">
       <div class="flex items-center" style="width: 100%;">
         <!-- Drag handle: only this element is draggable so text inputs remain editable -->
-        <!-- <Button
-          variant="ghost"
-          size="icon"
-          class="h-7 w-7 mr-1 p-0.5 drag-handle"
-          title="Drag to reorder"
+        <div
+          class="drag-handle cursor-grab active:cursor-grabbing hover:bg-muted/50 p-1 rounded transition-colors"
+          title="Drag to reorder or nest"
           draggable="true"
           @dragstart="handleDragStart"
+          @dragend="handleDragEnd"
+          @mousedown="(e) => e.stopPropagation()"
         >
-          <GripVertical class="h-4 w-4" />
-        </Button> -->
+          <GripVertical class="h-4 w-4 text-muted-foreground" />
+        </div>
 
         <Button
           variant="ghost"
@@ -226,6 +305,7 @@ const getNumberColor = () => {
             @input="emitUpdate"
             class="font-medium bg-transparent border-none outline-none flex-1 min-w-0 text-sm"
             :class="getTextColor()"
+            placeholder="Rule title..."
           />
         </div>
       </div>
@@ -405,5 +485,44 @@ input:focus, textarea:focus, select:focus {
 }
 .drag-handle:active {
   cursor: grabbing;
+}
+
+/* Drag over visual feedback */
+.border-t-4 {
+  border-top-width: 4px !important;
+}
+
+.border-b-4 {
+  border-bottom-width: 4px !important;
+}
+
+/* Drag position indicators */
+.drag-position-above::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: hsl(var(--primary));
+  border-radius: 2px;
+  z-index: 10;
+}
+
+.drag-position-below::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: hsl(var(--primary));
+  border-radius: 2px;
+  z-index: 10;
+}
+
+.drag-position-nested {
+  background: hsl(var(--primary) / 0.1);
+  border: 2px dashed hsl(var(--primary));
 }
 </style>

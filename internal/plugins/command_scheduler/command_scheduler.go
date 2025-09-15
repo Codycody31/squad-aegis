@@ -95,7 +95,7 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogNewGame,
+			event_manager.EventTypeLogGameEventUnified,
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -220,11 +220,17 @@ func (p *CommandSchedulerPlugin) Stop() error {
 
 // HandleEvent processes an event if the plugin is subscribed to it
 func (p *CommandSchedulerPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
-	if event.Type != "LOG_NEW_GAME" {
+	if event.Type != string(event_manager.EventTypeLogGameEventUnified) {
 		return nil // Not interested in this event
 	}
 
-	return p.handleNewGame(event)
+	if unifiedEvent, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok {
+		if unifiedEvent.EventType == "NEW_GAME" {
+			return p.handleNewGame(event)
+		}
+	}
+
+	return nil
 }
 
 // GetStatus returns the current plugin status

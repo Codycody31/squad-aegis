@@ -21,11 +21,12 @@ type MetricPoint struct {
 // ServerMetricsData represents the metrics response
 type ServerMetricsData struct {
 	PlayerCount            []MetricPoint  `json:"player_count"`
+	QueueCount             []MetricPoint  `json:"queue_count"`
 	TickRate               []MetricPoint  `json:"tick_rate"`
 	Rounds                 []MetricPoint  `json:"rounds"`
 	Maps                   []MetricPoint  `json:"maps"`
 	ChatActivity           []MetricPoint  `json:"chat_activity"`
-	ConnectionStats        []MetricPoint  `json:"connection_stats"`
+	ConnectionStats        []MetricPoint  `json:"connection_stats"` // Connection activity (connects + disconnects)
 	TeamkillStats          []MetricPoint  `json:"teamkill_stats"`
 	PlayerWoundedStats     []MetricPoint  `json:"player_wounded_stats"`
 	PlayerRevivedStats     []MetricPoint  `json:"player_revived_stats"`
@@ -45,7 +46,7 @@ type MetricsSummary struct {
 	TotalRounds            int     `json:"total_rounds"`
 	UniquePlayersCount     int     `json:"unique_players_count"`
 	TotalChatMessages      int     `json:"total_chat_messages"`
-	TotalConnections       int     `json:"total_connections"`
+	TotalConnections       int     `json:"total_connections"` // Total connection activity (connects + disconnects)
 	TotalTeamkills         int     `json:"total_teamkills"`
 	TotalPlayerWounded     int     `json:"total_player_wounded"`
 	TotalPlayerRevived     int     `json:"total_player_revived"`
@@ -145,6 +146,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 			TotalPluginLogs:        0,
 		},
 		PlayerCount:            []MetricPoint{},
+		QueueCount:             []MetricPoint{},
 		TickRate:               []MetricPoint{},
 		ChatActivity:           []MetricPoint{},
 		ConnectionStats:        []MetricPoint{},
@@ -158,12 +160,14 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		AdminBroadcastStats:    []MetricPoint{},
 	}
 
-	// Query player count metrics - using connection events to estimate player count
+	// Query player count metrics from server info data (including public/reserved queue)
 	playerCountQuery := `
 		SELECT 
 			toUnixTimestamp(toStartOfInterval(event_time, INTERVAL ? minute)) * 1000 as timestamp,
-			sum(if(chain_id LIKE '%Connected%', 1, -1)) as net_change
-		FROM squad_aegis.server_player_connected_events 
+			avg(player_count) as avg_player_count,
+			avg(public_queue) as avg_public_queue,
+			avg(reserved_queue) as avg_reserved_queue
+		FROM squad_aegis.server_info_metrics 
 		WHERE server_id = ? 
 		AND event_time >= ? 
 		AND event_time <= ?
@@ -197,22 +201,54 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 	defer rows.Close()
 
-	playerCount := 0 // Running total
 	for rows.Next() {
 		var timestamp int64
-		var netChange int
-		if err := rows.Scan(&timestamp, &netChange); err != nil {
+		var avgPlayerCount, avgPublicQueue, avgReservedQueue float64
+		if err := rows.Scan(&timestamp, &avgPlayerCount, &avgPublicQueue, &avgReservedQueue); err != nil {
 			log.Error().Err(err).Msg("Failed to scan player count metric")
 			continue
 		}
-		playerCount += netChange
-		if playerCount < 0 {
-			playerCount = 0 // Prevent negative player counts
-		}
 		metricsData.PlayerCount = append(metricsData.PlayerCount, MetricPoint{
 			Timestamp: time.Unix(timestamp/1000, 0),
-			Value:     playerCount,
+			Value: map[string]interface{}{
+				"player_count":   int(avgPlayerCount),
+				"public_queue":   int(avgPublicQueue),
+				"reserved_queue": int(avgReservedQueue),
+				"total_queue":    int(avgPublicQueue + avgReservedQueue),
+			},
 		})
+	}
+
+	// Query queue count metrics from server info data
+	queueCountQuery := `
+		SELECT 
+			toUnixTimestamp(toStartOfInterval(event_time, INTERVAL ? minute)) * 1000 as timestamp,
+			avg(public_queue + reserved_queue) as avg_queue_count
+		FROM squad_aegis.server_info_metrics 
+		WHERE server_id = ? 
+		AND event_time >= ? 
+		AND event_time <= ?
+		GROUP BY toStartOfInterval(event_time, INTERVAL ? minute)
+		ORDER BY timestamp ASC
+	`
+
+	rows, err = clickhouseClient.Query(ctx, queueCountQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to query queue count metrics from ClickHouse")
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var timestamp int64
+			var avgQueueCount float64
+			if err := rows.Scan(&timestamp, &avgQueueCount); err != nil {
+				log.Error().Err(err).Msg("Failed to scan queue count metric")
+				continue
+			}
+			metricsData.QueueCount = append(metricsData.QueueCount, MetricPoint{
+				Timestamp: time.Unix(timestamp/1000, 0),
+				Value:     int(avgQueueCount), // Convert to int for consistency
+			})
+		}
 	}
 
 	// Query tick rate metrics
@@ -281,38 +317,64 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	// Fill in the chat activity data with 0s for missing intervals
 	metricsData.ChatActivity = fillTimeSeriesGaps(startTime, now, intervalMinutes, chatDataMap)
 
-	// Query connection metrics
+	// Query connection metrics - combine both connected and disconnected events
 	connectionQuery := `
+		WITH connection_events AS (
+			SELECT 
+				toUnixTimestamp(toStartOfInterval(event_time, INTERVAL ? minute)) * 1000 as timestamp,
+				count(*) as connected_count,
+				0 as disconnected_count
+			FROM squad_aegis.server_player_connected_events 
+			WHERE server_id = ? 
+			AND event_time >= ? 
+			AND event_time <= ?
+			GROUP BY toStartOfInterval(event_time, INTERVAL ? minute)
+			
+			UNION ALL
+			
+			SELECT 
+				toUnixTimestamp(toStartOfInterval(event_time, INTERVAL ? minute)) * 1000 as timestamp,
+				0 as connected_count,
+				count(*) as disconnected_count
+			FROM squad_aegis.server_player_disconnected_events 
+			WHERE server_id = ? 
+			AND event_time >= ? 
+			AND event_time <= ?
+			GROUP BY toStartOfInterval(event_time, INTERVAL ? minute)
+		)
 		SELECT 
-			toUnixTimestamp(toStartOfInterval(event_time, INTERVAL ? minute)) * 1000 as timestamp,
-			count(*) as connections
-		FROM squad_aegis.server_player_connected_events 
-		WHERE server_id = ? 
-		AND event_time >= ? 
-		AND event_time <= ?
-		GROUP BY toStartOfInterval(event_time, INTERVAL ? minute)
+			timestamp,
+			sum(connected_count) as total_connections,
+			sum(disconnected_count) as total_disconnections,
+			sum(connected_count) + sum(disconnected_count) as total_activity
+		FROM connection_events
+		GROUP BY timestamp
 		ORDER BY timestamp ASC
 	`
 
-	rows, err = clickhouseClient.Query(ctx, connectionQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	// Create a map to store connection data
+	connectionDataMap := make(map[int64]int)
+	rows, err = clickhouseClient.Query(ctx, connectionQuery,
+		intervalMinutes, serverId, startTime, now, intervalMinutes,
+		intervalMinutes, serverId, startTime, now, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query connection metrics from ClickHouse")
 	} else {
 		defer rows.Close()
 		for rows.Next() {
 			var timestamp int64
-			var connections int64
-			if err := rows.Scan(&timestamp, &connections); err != nil {
+			var totalConnections, totalDisconnections, totalActivity int64
+			if err := rows.Scan(&timestamp, &totalConnections, &totalDisconnections, &totalActivity); err != nil {
 				log.Error().Err(err).Msg("Failed to scan connection metric")
 				continue
 			}
-			// Use connections count as the main metric value
-			metricsData.ConnectionStats = append(metricsData.ConnectionStats, MetricPoint{
-				Timestamp: time.Unix(timestamp/1000, 0),
-				Value:     int(connections),
-			})
+			// Store total activity (connections + disconnections) as the main metric
+			connectionDataMap[timestamp] = int(totalActivity)
 		}
 	}
+
+	// Fill in the connection data with 0s for missing intervals
+	metricsData.ConnectionStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, connectionDataMap)
 
 	// Query teamkill metrics
 	teamkillQuery := `
@@ -587,12 +649,88 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	// Fill in the admin broadcast data with 0s for missing intervals
 	metricsData.AdminBroadcastStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, adminBroadcastDataMap)
 
+	// Query rounds data from unified game events (ROUND_ENDED events)
+	roundsQuery := `
+		SELECT 
+			toUnixTimestamp(toStartOfInterval(event_time, INTERVAL ? minute)) * 1000 as timestamp,
+			count(*) as value
+		FROM squad_aegis.server_game_events_unified 
+		WHERE server_id = ? 
+		AND event_time >= ? 
+		AND event_time <= ?
+		AND event_type = 'ROUND_ENDED'
+		GROUP BY toStartOfInterval(event_time, INTERVAL ? minute)
+		ORDER BY timestamp ASC
+	`
+
+	// Create a map to store rounds data
+	roundsDataMap := make(map[int64]int)
+	rows, err = clickhouseClient.Query(ctx, roundsQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to query rounds metrics from ClickHouse")
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var timestamp int64
+			var value int64
+			if err := rows.Scan(&timestamp, &value); err != nil {
+				log.Error().Err(err).Msg("Failed to scan rounds metric")
+				continue
+			}
+			roundsDataMap[timestamp] = int(value)
+		}
+	}
+
+	// Fill in the rounds data with 0s for missing intervals
+	metricsData.Rounds = fillTimeSeriesGaps(startTime, now, intervalMinutes, roundsDataMap)
+
+	// Query map data from ROUND_ENDED events to get completed games
+	mapsQuery := `
+		SELECT 
+			event_time,
+			layer,
+			winner
+		FROM squad_aegis.server_game_events_unified 
+		WHERE server_id = ? 
+		AND event_time >= ? 
+		AND event_time <= ?
+		AND event_type = 'ROUND_ENDED'
+		AND layer IS NOT NULL
+		AND layer != ''
+		ORDER BY event_time DESC
+		LIMIT 10
+	`
+
+	rows, err = clickhouseClient.Query(ctx, mapsQuery, serverId, startTime, now)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to query maps data from ClickHouse")
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var eventTime time.Time
+			var layer, winner string
+			if err := rows.Scan(&eventTime, &layer, &winner); err != nil {
+				log.Error().Err(err).Msg("Failed to scan map data")
+				continue
+			}
+			metricsData.Maps = append(metricsData.Maps, MetricPoint{
+				Timestamp: eventTime,
+				Value: map[string]interface{}{
+					"layer":  layer,
+					"winner": winner,
+				},
+			})
+		}
+	}
+
 	// Calculate summary metrics
 	if len(metricsData.PlayerCount) > 0 {
 		// Current players is the last data point
 		if lastPoint := metricsData.PlayerCount[len(metricsData.PlayerCount)-1]; lastPoint.Value != nil {
-			if playerCount, ok := lastPoint.Value.(int); ok {
-				metricsData.Summary.TotalPlayers = playerCount
+			if playerData, ok := lastPoint.Value.(map[string]interface{}); ok {
+				if playerCount, ok := playerData["player_count"].(int); ok {
+					metricsData.Summary.TotalPlayers = playerCount
+				}
 			}
 		}
 	}
@@ -626,7 +764,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	if len(metricsData.ConnectionStats) > 0 {
-		// Total connections
+		// Total connection activity (connections + disconnections)
 		for _, point := range metricsData.ConnectionStats {
 			if point.Value != nil {
 				if connCount, ok := point.Value.(int); ok {
@@ -723,6 +861,63 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 			}
 		}
 	}
+
+	if len(metricsData.Rounds) > 0 {
+		// Total rounds
+		for _, point := range metricsData.Rounds {
+			if point.Value != nil {
+				if roundCount, ok := point.Value.(int); ok {
+					metricsData.Summary.TotalRounds += roundCount
+				}
+			}
+		}
+	}
+
+	// Calculate peak player count and most played map
+	var peakPlayerCount int
+	mapCounts := make(map[string]int)
+
+	if len(metricsData.PlayerCount) > 0 {
+		for _, point := range metricsData.PlayerCount {
+			if point.Value != nil {
+				if playerData, ok := point.Value.(map[string]interface{}); ok {
+					if playerCount, ok := playerData["player_count"].(int); ok {
+						if playerCount > peakPlayerCount {
+							peakPlayerCount = playerCount
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(metricsData.Maps) > 0 {
+		for _, point := range metricsData.Maps {
+			if point.Value != nil {
+				if mapData, ok := point.Value.(map[string]interface{}); ok {
+					if mapName, ok := mapData["layer"].(string); ok && mapName != "" {
+						mapCounts[mapName]++
+					}
+				} else if mapName, ok := point.Value.(string); ok && mapName != "" {
+					// Backward compatibility for old format
+					mapCounts[mapName]++
+				}
+			}
+		}
+	}
+
+	// Find most played map
+	var mostPlayedMap string
+	var maxCount int
+	for mapName, count := range mapCounts {
+		if count > maxCount {
+			maxCount = count
+			mostPlayedMap = mapName
+		}
+	}
+
+	metricsData.Summary.PeakPlayerCount = peakPlayerCount
+	metricsData.Summary.MostPlayedMap = mostPlayedMap
 
 	// If no real data was found, fall back to sample data
 	if len(metricsData.PlayerCount) == 0 && len(metricsData.TickRate) == 0 && len(metricsData.ChatActivity) == 0 {
@@ -837,10 +1032,10 @@ func (s *Server) generateSampleMetrics(period string, interval int) ServerMetric
 			Value:     chatValue,
 		})
 
-		// Connection stats (connections per interval)
+		// Connection stats (connection activity: connects + disconnects per interval)
 		connectionValue := 0
-		if randomInt(0, 100) < 40 { // 40% chance of connections in any given interval
-			connectionValue = randomInt(1, 3)
+		if randomInt(0, 100) < 40 { // 40% chance of connection activity in any given interval
+			connectionValue = randomInt(1, 4) // Include both connects and disconnects
 		}
 		connectionStats = append(connectionStats, MetricPoint{
 			Timestamp: timestamp,
@@ -997,28 +1192,28 @@ func randomFloat(min, max float64) float64 {
 // fillTimeSeriesGaps fills in missing time intervals with zero values
 func fillTimeSeriesGaps(startTime, endTime time.Time, intervalMinutes int, dataMap map[int64]int) []MetricPoint {
 	var points []MetricPoint
-	
+
 	// Calculate the time step for intervals
 	interval := time.Duration(intervalMinutes) * time.Minute
-	
+
 	// Round start time to the nearest interval boundary using the same logic as ClickHouse
 	// ClickHouse's toStartOfInterval truncates to the interval boundary
 	startTimestamp := startTime.Truncate(interval)
-	
+
 	// Ensure we don't go beyond the end time
 	endTimestamp := endTime.Truncate(interval)
 	if endTime.After(endTimestamp) {
 		endTimestamp = endTimestamp.Add(interval)
 	}
-	
+
 	// Iterate through all possible time intervals
 	for current := startTimestamp; current.Before(endTimestamp) || current.Equal(endTimestamp); current = current.Add(interval) {
 		// Convert to milliseconds timestamp (same as ClickHouse query)
 		timestamp := current.Unix() * 1000
-		
+
 		// Check if we have data for this timestamp, try a few variations due to potential rounding differences
 		value := 0
-		
+
 		// Try exact match first
 		if val, exists := dataMap[timestamp]; exists {
 			value = val
@@ -1031,12 +1226,12 @@ func fillTimeSeriesGaps(startTime, endTime time.Time, intervalMinutes int, dataM
 				}
 			}
 		}
-		
+
 		points = append(points, MetricPoint{
 			Timestamp: current,
 			Value:     value,
 		})
 	}
-	
+
 	return points
 }

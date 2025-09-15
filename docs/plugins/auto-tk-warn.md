@@ -38,7 +38,6 @@ The Auto TK Warn plugin automatically sends warning messages to players when the
 {
   "attacker_message": "Team kill detected! Please apologize in all chat and be more careful.",
   "victim_message": "You've been team killed. The offending player has been warned.",
-  "enabled": true,
   "warn_attacker": true,
   "warn_victim": true
 }

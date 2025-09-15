@@ -53,13 +53,6 @@ func Define() plugin_manager.PluginDefinition {
 					Default:     10000, // 10 seconds
 				},
 				{
-					Name:        "enabled",
-					Description: "Whether the plugin is enabled.",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeBool,
-					Default:     true,
-				},
-				{
 					Name:        "command_template",
 					Description: "The RCON command template to use for setting fog of war. Use {mode} as placeholder.",
 					Required:    false,
@@ -70,7 +63,7 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogNewGame,
+			event_manager.EventTypeLogGameEventUnified,
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -116,12 +109,6 @@ func (p *FogOfWarPlugin) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Check if plugin is enabled
-	if !p.getBoolConfig("enabled") {
-		p.apis.LogAPI.Info("Fog of War plugin is disabled", nil)
-		return nil
-	}
-
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.status = plugin_manager.PluginStatusRunning
 
@@ -152,11 +139,17 @@ func (p *FogOfWarPlugin) Stop() error {
 
 // HandleEvent processes an event if the plugin is subscribed to it
 func (p *FogOfWarPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
-	if event.Type != "LOG_NEW_GAME" {
+	if event.Type != string(event_manager.EventTypeLogGameEventUnified) {
 		return nil // Not interested in this event
 	}
 
-	return p.handleNewGame(event)
+	if unifiedEvent, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok {
+		if unifiedEvent.EventType == "NEW_GAME" {
+			return p.handleNewGame(event)
+		}
+	}
+
+	return nil
 }
 
 // GetStatus returns the current plugin status
@@ -194,10 +187,6 @@ func (p *FogOfWarPlugin) UpdateConfig(config map[string]interface{}) error {
 
 // handleNewGame processes new game events
 func (p *FogOfWarPlugin) handleNewGame(rawEvent *plugin_manager.PluginEvent) error {
-	if !p.getBoolConfig("enabled") {
-		return nil // Plugin is disabled
-	}
-
 	delayMS := p.getIntConfig("delay_ms")
 	if delayMS < 0 {
 		delayMS = 10000 // Default fallback

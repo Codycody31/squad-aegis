@@ -341,14 +341,15 @@ type ServerInfo struct {
 
 // PlayerInfo contains player information
 type PlayerInfo struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	SteamID  string `json:"steam_id"`
-	EOSID    string `json:"eos_id"`
-	TeamID   int    `json:"team_id"`
-	SquadID  int    `json:"squad_id"`
-	IsAdmin  bool   `json:"is_admin"`
-	IsOnline bool   `json:"is_online"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	SteamID       string `json:"steam_id"`
+	EOSID         string `json:"eos_id"`
+	TeamID        int    `json:"team_id"`
+	SquadID       int    `json:"squad_id"`
+	IsSquadLeader bool   `json:"is_squad_leader"`
+	IsAdmin       bool   `json:"is_admin"`
+	IsOnline      bool   `json:"is_online"`
 }
 
 // AdminInfo contains admin information

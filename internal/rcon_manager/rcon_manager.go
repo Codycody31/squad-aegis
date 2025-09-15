@@ -3,6 +3,7 @@ package rcon_manager
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 const (
 	DefaultCommandTimeout = 30 * time.Second
 	HealthCheckInterval   = 120 * time.Second
+	ServerInfoInterval    = 60 * time.Second // Collect server info every 60 seconds
 	MaxReconnectAttempts  = 3
 	CommandQueueSize      = 1000
 	EventChannelSize      = 1000
@@ -58,16 +60,17 @@ type CommandResponse struct {
 
 // ServerConnection represents a connection to an RCON server
 type ServerConnection struct {
-	ServerID        uuid.UUID
-	Rcon            *rcon.Rcon // Single connection for both commands and events
-	CommandChan     chan RconCommand
-	EventChan       chan RconEvent
-	LastUsed        time.Time
-	LastHealthCheck time.Time
-	mu              sync.Mutex
-	cmdSemaphore    chan struct{}
-	isHealthy       bool
-	reconnectCount  int
+	ServerID           uuid.UUID
+	Rcon               *rcon.Rcon // Single connection for both commands and events
+	CommandChan        chan RconCommand
+	EventChan          chan RconEvent
+	LastUsed           time.Time
+	LastHealthCheck    time.Time
+	LastServerInfoTime time.Time
+	mu                 sync.Mutex
+	cmdSemaphore       chan struct{}
+	isHealthy          bool
+	reconnectCount     int
 }
 
 // RconManager manages RCON connections to multiple servers
@@ -197,6 +200,107 @@ func (m *RconManager) broadcastEvent(event RconEvent) {
 	}
 }
 
+// processShowServerInfoResponse processes a ShowServerInfo response and emits an event
+func (m *RconManager) processShowServerInfoResponse(serverID uuid.UUID, response string) {
+	// Parse the server info response using Squad's special format
+	playerCount, publicQueue, reservedQueue, err := m.parseServerInfoResponse(response)
+	if err != nil {
+		log.Error().
+			Str("serverID", serverID.String()).
+			Err(err).
+			Str("response", response).
+			Msg("Failed to parse ShowServerInfo response")
+		return
+	}
+
+	// Create and publish the server info event
+	serverInfoData := &event_manager.RconServerInfoData{
+		PlayerCount:     playerCount,
+		PublicQueue:     publicQueue,
+		ReservedQueue:   reservedQueue,
+		TotalQueueCount: publicQueue + reservedQueue,
+	}
+
+	if m.eventManager != nil {
+		m.eventManager.PublishEvent(serverID, serverInfoData, response)
+	}
+}
+
+// parseServerInfoResponse parses the Squad RCON server info response format
+func (m *RconManager) parseServerInfoResponse(response string) (playerCount, publicQueue, reservedQueue int, err error) {
+	// Create a map to hold the raw JSON data
+	var rawData map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &rawData); err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	// Helper function to extract integer from field with _I suffix
+	extractInt := func(key string) int {
+		if value, exists := rawData[key]; exists {
+			if strValue, ok := value.(string); ok {
+				if intValue, err := strconv.Atoi(strValue); err == nil {
+					return intValue
+				}
+			} else if numValue, ok := value.(float64); ok {
+				return int(numValue)
+			}
+		}
+		return 0
+	}
+
+	// Extract the specific fields we need
+	playerCount = extractInt("PlayerCount_I")
+	publicQueue = extractInt("PublicQueue_I")
+	reservedQueue = extractInt("ReservedQueue_I")
+
+	return playerCount, publicQueue, reservedQueue, nil
+}
+
+// collectServerInfo collects server info and emits a server info event
+func (m *RconManager) collectServerInfo(serverID uuid.UUID, conn *ServerConnection) {
+	conn.mu.Lock()
+	conn.LastServerInfoTime = time.Now()
+	conn.mu.Unlock()
+
+	// Execute ShowServerInfo command
+	response, err := m.ExecuteCommandWithOptions(serverID, "ShowServerInfo", CommandOptions{
+		Priority: PriorityLow,
+		Timeout:  10 * time.Second,
+		Retries:  1,
+	})
+
+	if err != nil {
+		log.Error().
+			Str("serverID", serverID.String()).
+			Err(err).
+			Msg("Failed to collect server info")
+		return
+	}
+
+	// Parse the server info response using Squad's special format
+	playerCount, publicQueue, reservedQueue, err := m.parseServerInfoResponse(response)
+	if err != nil {
+		log.Error().
+			Str("serverID", serverID.String()).
+			Err(err).
+			Str("response", response).
+			Msg("Failed to parse server info response")
+		return
+	}
+
+	// Create and publish the server info event
+	serverInfoData := &event_manager.RconServerInfoData{
+		PlayerCount:     playerCount,
+		PublicQueue:     publicQueue,
+		ReservedQueue:   reservedQueue,
+		TotalQueueCount: publicQueue + reservedQueue,
+	}
+
+	if m.eventManager != nil {
+		m.eventManager.PublishEvent(serverID, serverInfoData, response)
+	}
+}
+
 // ConnectToServer connects to an RCON server
 func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int, password string) error {
 	m.mu.Lock()
@@ -234,15 +338,16 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 	cmdSemaphore := make(chan struct{}, MaxConcurrentCommands)
 
 	conn := &ServerConnection{
-		ServerID:        serverID,
-		Rcon:            rconConn,
-		CommandChan:     make(chan RconCommand, CommandQueueSize),
-		EventChan:       make(chan RconEvent, EventChannelSize),
-		LastUsed:        time.Now(),
-		LastHealthCheck: time.Now(),
-		cmdSemaphore:    cmdSemaphore,
-		isHealthy:       true,
-		reconnectCount:  0,
+		ServerID:           serverID,
+		Rcon:               rconConn,
+		CommandChan:        make(chan RconCommand, CommandQueueSize),
+		EventChan:          make(chan RconEvent, EventChannelSize),
+		LastUsed:           time.Now(),
+		LastHealthCheck:    time.Now(),
+		LastServerInfoTime: time.Time{}, // Initialize to zero time so it triggers immediately
+		cmdSemaphore:       cmdSemaphore,
+		isHealthy:          true,
+		reconnectCount:     0,
 	}
 
 	m.connections[serverID] = conn
@@ -261,38 +366,54 @@ func (m *RconManager) ConnectToServer(serverID uuid.UUID, host string, port int,
 
 // monitorConnection monitors a connection's health and handles reconnection
 func (m *RconManager) monitorConnection(serverID uuid.UUID, conn *ServerConnection) {
-	ticker := time.NewTicker(HealthCheckInterval)
+	// Use a shorter interval to handle both health checks and server info collection
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
+			now := time.Now()
+
+			// Check if health check is needed
+			conn.mu.Lock()
+			needsHealthCheck := now.Sub(conn.LastHealthCheck) >= HealthCheckInterval
+			needsServerInfo := now.Sub(conn.LastServerInfoTime) >= ServerInfoInterval
+			conn.mu.Unlock()
+
 			// Perform periodic health check
-			if err := m.performHealthCheck(serverID, conn); err != nil {
-				log.Warn().
-					Str("serverID", serverID.String()).
-					Err(err).
-					Msg("Periodic health check failed")
-
-				// Attempt reconnection if configured
-				conn.mu.Lock()
-				if conn.reconnectCount < MaxReconnectAttempts {
-					conn.reconnectCount++
-					conn.mu.Unlock()
-
-					// TODO: Implement reconnection logic if needed
-					log.Info().
+			if needsHealthCheck {
+				if err := m.performHealthCheck(serverID, conn); err != nil {
+					log.Warn().
 						Str("serverID", serverID.String()).
-						Int("attempt", conn.reconnectCount).
-						Msg("Connection unhealthy, may need reconnection")
+						Err(err).
+						Msg("Periodic health check failed")
+
+					// Attempt reconnection if configured
+					conn.mu.Lock()
+					if conn.reconnectCount < MaxReconnectAttempts {
+						conn.reconnectCount++
+						conn.mu.Unlock()
+
+						// TODO: Implement reconnection logic if needed
+						log.Info().
+							Str("serverID", serverID.String()).
+							Int("attempt", conn.reconnectCount).
+							Msg("Connection unhealthy, may need reconnection")
+					} else {
+						conn.mu.Unlock()
+					}
 				} else {
+					// Reset reconnect count on successful health check
+					conn.mu.Lock()
+					conn.reconnectCount = 0
 					conn.mu.Unlock()
 				}
-			} else {
-				// Reset reconnect count on successful health check
-				conn.mu.Lock()
-				conn.reconnectCount = 0
-				conn.mu.Unlock()
+			}
+
+			// Collect server info periodically
+			if needsServerInfo && conn.isHealthy {
+				go m.collectServerInfo(serverID, conn)
 			}
 
 		case <-m.ctx.Done():
@@ -696,6 +817,11 @@ func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection,
 					Dur("execTime", time.Since(startTime)).
 					Msg("Command returned empty response")
 			}
+		}
+
+		// Check if this was a ShowServerInfo command and process it
+		if strings.EqualFold(strings.TrimSpace(cmd.Command), "ShowServerInfo") && response != "" && err == nil {
+			go m.processShowServerInfoResponse(serverID, response)
 		}
 
 		select {
