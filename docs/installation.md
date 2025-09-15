@@ -38,11 +38,11 @@ Here is a template you can customize:
 
 ```env
 # Application Configuration
-APP_ISDEVELOPMENT=false
-APP_WEBUIPROXY=
+APP_IS_DEVELOPMENT=false
+APP_WEB_UI_PROXY=
 APP_PORT=3113
 APP_URL=http://localhost:3113
-APP_INCONTAINER=false
+APP_IN_CONTAINER=false
 
 # Initial Admin User
 INITIAL_ADMIN_USERNAME=admin
@@ -57,12 +57,12 @@ DB_PASS=squad-aegis
 DB_MIGRATE_VERBOSE=false
 
 # ClickHouse Configuration
-CLICKHOUSE_HOST=clickhouse
-CLICKHOUSE_PORT=9000
-CLICKHOUSE_DATABASE=default
-CLICKHOUSE_USERNAME=squad_aegis
-CLICKHOUSE_PASSWORD=squad_aegis
-CLICKHOUSE_DEBUG=false
+CLICK_HOUSE_HOST=clickhouse
+CLICK_HOUSE_PORT=9000
+CLICK_HOUSE_DATABASE=default
+CLICK_HOUSE_USERNAME=squad_aegis
+CLICK_HOUSE_PASSWORD=squad_aegis
+CLICK_HOUSE_DEBUG=false
 
 # Valkey Configuration
 VALKEY_HOST=valkey
@@ -70,12 +70,12 @@ VALKEY_PORT=6379
 
 # Logging Configuration
 LOG_LEVEL=info
-LOG_SHOWGIN=false
+LOG_SHOW_GIN=false
 LOG_FILE=
 
 # Debug Configuration
 DEBUG_PRETTY=true
-DEBUG_NOCOLOR=false
+DEBUG_NO_COLOR=false
 ```
 
 ⚠️ **Important Security Note:** Always change the default `INITIAL_ADMIN_PASSWORD` and database credentials before deployment.
