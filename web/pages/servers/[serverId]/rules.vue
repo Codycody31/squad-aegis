@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { FileText, Layers, Download, Code, Upload, Save, ChevronDown, ChevronUp, Minimize2, Maximize2 } from 'lucide-vue-next'
+import { FileText, Layers, Download, Code, Upload, Save, ChevronDown, ChevronUp, Minimize2, Maximize2, Plus } from 'lucide-vue-next'
 import RuleComponent from '~/components/RuleComponent.vue'
 import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card"
@@ -41,7 +41,6 @@ const { toast } = useToast();
 const loading = ref<boolean>(true);
 const rules = ref<ServerRule[]>([]);
 const error = ref<string | null>(null);
-const draggedType = ref<string>('');
 const showExportDropdown = ref<boolean>(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const hasUnsavedChanges = ref<boolean>(false);
@@ -89,32 +88,43 @@ async function fetchRules() {
   }
 }
 
-// Drag and drop handlers
-const handleDragStart = (event: DragEvent, type: string) => {
-  draggedType.value = type;
-  event.dataTransfer?.setData('text/plain', type);
+const addNewRule = (type: 'rule') => {
+  const newRule: ServerRule = {
+    id: crypto.randomUUID(),
+    server_id: serverId,
+    parent_id: null,
+    display_order: rules.value.length,
+    title: `Rule ${rules.value.length + 1}`,
+    description: '',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    actions: [],
+    sub_rules: []
+  };
+  
+  rules.value.push(newRule);
+  hasUnsavedChanges.value = true;
+  annotateNumbers();
 }
 
 const handleDrop = (event: DragEvent) => {
   event.preventDefault();
-  const type = event.dataTransfer?.getData('text/plain');
   
-  if (type === 'rule' || type === 'sub-rule') {
-    const newRule: ServerRule = {
-      id: crypto.randomUUID(),
-      server_id: serverId,
-      parent_id: type === 'sub-rule' ? undefined : null,
-      display_order: rules.value.length,
-      title: `${type.charAt(0).toUpperCase() + type.slice(1)} ${rules.value.length + 1}`,
-      description: '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      actions: [],
-      sub_rules: []
-    };
-    
-    rules.value.push(newRule);
+  // This is now only for reordering existing rules
+  // New rules are added via the buttons
+}
+
+const handleCanvasDragOver = (event: DragEvent) => {
+  event.preventDefault();
+  
+  // Check if we have valid drag data
+  if (event.dataTransfer?.types.includes('text/plain')) {
+    event.dataTransfer.dropEffect = 'copy';
   }
+}
+
+const handleCanvasDragLeave = (event: DragEvent) => {
+  // No longer needed since we removed the visual feedback
 }
 
 const handleFileImport = (event: Event) => {
@@ -415,7 +425,7 @@ const handleReorder = (payload: { ruleId: string; targetIndex: number; targetPar
   
   // Find and remove the rule from its current position
   let ruleToMove: ServerRule | null = null;
-  let sourceParentId: string | undefined | null;
+  let sourceParentId: string | undefined | null = undefined;
   
   const findAndRemoveRule = (rulesList: ServerRule[]): ServerRule[] => {
     return rulesList.filter(rule => {
@@ -427,7 +437,7 @@ const handleReorder = (payload: { ruleId: string; targetIndex: number; targetPar
       if (rule.sub_rules && rule.sub_rules.length > 0) {
         rule.sub_rules = findAndRemoveRule(rule.sub_rules);
       }
-  return true;
+      return true;
     });
   };
   
@@ -435,22 +445,59 @@ const handleReorder = (payload: { ruleId: string; targetIndex: number; targetPar
   
   if (!ruleToMove) return;
   
-  // TypeScript type assertion to fix type issue
-  const ruleToMoveTyped = ruleToMove as ServerRule;
+  // TypeScript assertion to fix type issues
+  const moveableRule = ruleToMove as ServerRule;
   
-  // Update the rule's parent and display order
-  ruleToMoveTyped.parent_id = targetParentId;
-  ruleToMoveTyped.display_order = targetIndex;
-  ruleToMoveTyped.updated_at = new Date().toISOString();
+  // Prevent dropping a rule into itself or its descendants
+  if (targetParentId && isDescendant(moveableRule.id, targetParentId, rules.value)) {
+    // Restore the rule to its original position
+    insertRuleAtPosition(moveableRule, sourceParentId || undefined);
+    return;
+  }
+  
+  // Update the rule's parent
+  moveableRule.parent_id = targetParentId || null;
+  moveableRule.updated_at = new Date().toISOString();
   
   // Insert the rule at the new position
-  if (targetParentId) {
+  insertRuleAtPosition(moveableRule, targetParentId, targetIndex);
+  
+  // Re-normalize display orders
+  normalizeDisplayOrders();
+  
+  hasUnsavedChanges.value = true;
+}
+
+// Helper function to check if a rule is a descendant of another
+const isDescendant = (ancestorId: string, potentialDescendantId: string, rulesList: ServerRule[]): boolean => {
+  for (const rule of rulesList) {
+    if (rule.id === potentialDescendantId) {
+      if (rule.parent_id === ancestorId) {
+        return true;
+      }
+      if (rule.parent_id) {
+        return isDescendant(ancestorId, rule.parent_id, rulesList);
+      }
+    }
+    if (rule.sub_rules && rule.sub_rules.length > 0) {
+      if (isDescendant(ancestorId, potentialDescendantId, rule.sub_rules)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Helper function to insert a rule at a specific position
+const insertRuleAtPosition = (ruleToInsert: ServerRule, parentId?: string, index?: number) => {
+  if (parentId) {
     // Insert as sub-rule
     const insertSubRule = (rulesList: ServerRule[]): ServerRule[] => {
       return rulesList.map(rule => {
-        if (rule.id === targetParentId) {
+        if (rule.id === parentId) {
           const newSubRules = rule.sub_rules || [];
-          newSubRules.splice(targetIndex, 0, ruleToMoveTyped);
+          const insertIndex = index !== undefined ? Math.min(index, newSubRules.length) : newSubRules.length;
+          newSubRules.splice(insertIndex, 0, ruleToInsert);
           return { 
             ...rule, 
             sub_rules: newSubRules,
@@ -471,16 +518,29 @@ const handleReorder = (payload: { ruleId: string; targetIndex: number; targetPar
     rules.value = insertSubRule(rules.value);
   } else {
     // Insert as main rule
-    const newRules = [...rules.value];
-    newRules.splice(targetIndex, 0, ruleToMoveTyped);
-    rules.value = newRules.map((rule, index) => ({
-      ...rule,
-      display_order: index,
-      updated_at: new Date().toISOString()
-    }));
+    const insertIndex = index !== undefined ? Math.min(index, rules.value.length) : rules.value.length;
+    rules.value.splice(insertIndex, 0, ruleToInsert);
   }
+}
+
+// Helper function to normalize display orders after reordering
+const normalizeDisplayOrders = () => {
+  // Normalize main rules
+  rules.value.forEach((rule, index) => {
+    rule.display_order = index;
+    rule.updated_at = new Date().toISOString();
+    
+    // Normalize sub-rules
+    if (rule.sub_rules && rule.sub_rules.length > 0) {
+      rule.sub_rules.forEach((subRule, subIndex) => {
+        subRule.display_order = subIndex;
+        subRule.updated_at = new Date().toISOString();
+      });
+    }
+  });
   
-  hasUnsavedChanges.value = true;
+  // Re-annotate numbers
+  annotateNumbers();
 }
 
 async function saveRule(rule: ServerRule) {
@@ -880,66 +940,50 @@ onUnmounted(() => {
       <p>Loading rules...</p>
     </div>
 
-    <div v-else class="grid grid-cols-1 lg:grid-cols-4 gap-6">
-      <!-- Rule Components Panel (smaller) -->
-      <Card class="lg:col-span-1">
-        <CardHeader class="pb-4">
-          <CardTitle class="text-lg">Components</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div class="space-y-3">
-            <div 
-              draggable="true"
-              @dragstart="handleDragStart($event, 'rule')"
-              class="p-3 bg-primary/10 border border-primary/20 rounded cursor-move hover:bg-primary/15 transition-colors"
-            >
-              <div class="flex items-center">
-                <FileText class="w-4 h-4 mr-2 text-primary" />
-                <span class="font-medium text-sm">Rule Section</span>
-              </div>
-              <p class="text-xs text-muted-foreground mt-1">Main rule (e.g., "1. Respect")</p>
-            </div>
-
-            <div 
-              draggable="true"
-              @dragstart="handleDragStart($event, 'sub-rule')"
-              class="p-3 bg-secondary/10 border border-secondary/20 rounded cursor-move hover:bg-secondary/15 transition-colors"
-            >
-              <div class="flex items-center">
-                <Layers class="w-4 h-4 mr-2 text-secondary" />
-                <span class="font-medium text-sm">Sub-Rule</span>
-              </div>
-              <p class="text-xs text-muted-foreground mt-1">Specific rule (e.g., "1.1 No spam")</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <!-- Rules Canvas (larger) -->
-      <Card class="lg:col-span-3 min-h-[600px]">
+    <div v-else class="flex justify-center">
+      <!-- Rules Canvas (full width) -->
+      <Card class="w-full max-w-6xl min-h-[600px]">
         <CardHeader class="pb-4">
           <div class="flex items-center justify-between">
             <CardTitle class="text-lg">Rules Canvas</CardTitle>
-            <Button
-              @click="toggleCollapseAll"
-              variant="outline"
-              size="sm"
-              class="flex items-center"
-            >
-              <Minimize2 v-if="!rulesCollapsed" class="h-4 w-4 mr-1" />
-              <Maximize2 v-else class="h-4 w-4 mr-1" />
-              {{ rulesCollapsed ? 'Expand All' : 'Collapse All' }}
-            </Button>
+            <div class="flex items-center gap-2">
+              <!-- Add Rule Button -->
+              <Button
+                @click="addNewRule('rule')"
+                variant="outline"
+                size="sm"
+                class="flex items-center"
+              >
+                <Plus class="h-4 w-4 mr-1" />
+                Add Rule
+              </Button>
+              
+              <Button
+                @click="toggleCollapseAll"
+                variant="outline"
+                size="sm"
+                class="flex items-center"
+              >
+                <Minimize2 v-if="!rulesCollapsed" class="h-4 w-4 mr-1" />
+                <Maximize2 v-else class="h-4 w-4 mr-1" />
+                {{ rulesCollapsed ? 'Expand All' : 'Collapse All' }}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
-          <div 
-            @dragover.prevent
-            @drop="handleDrop($event)"
-            class="border-2 border-dashed border-border rounded-lg p-4 min-h-[500px] bg-muted/50"
-          >
+          <div class="border-2 border-dashed border-border rounded-lg p-4 min-h-[500px] bg-muted/50">
             <div v-if="rules.length === 0" class="text-center text-muted-foreground mt-20">
-              <p>Drag rule components here to start building</p>
+              <div>
+                <p class="text-lg mb-2">Start building your server rules</p>
+                <p class="text-sm mb-4">Use the "Add Rule" button above to create your first rule</p>
+                <div class="mt-4 text-xs space-y-1 max-w-md mx-auto">
+                  <p>• <strong>Drag Handle</strong>: Use the grip icon (⋮⋮) to reorder rules</p>
+                  <p>• <strong>Sub-Rules</strong>: Use the + button on any rule to add sub-rules</p>
+                  <p>• <strong>Nesting</strong>: Drag a rule onto another to make it a sub-rule</p>
+                  <p>• <strong>Actions</strong>: Use the ⚡ button to add enforcement actions</p>
+                </div>
+              </div>
             </div>
           
             <div v-else class="space-y-4">
@@ -967,5 +1011,34 @@ onUnmounted(() => {
 <style scoped>
 .rules-builder {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Drag and drop enhancements */
+[draggable="true"] {
+  transition: opacity 0.2s ease;
+}
+
+[draggable="true"]:hover {
+  opacity: 0.9;
+}
+
+.cursor-move:hover {
+  transform: scale(1.05);
+  transition: transform 0.15s ease;
+}
+
+/* Canvas drop zone animations */
+.border-dashed {
+  transition: all 0.2s ease;
+}
+
+/* Rule drag feedback */
+.drag-feedback {
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 </style>
