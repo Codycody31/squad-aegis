@@ -65,25 +65,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 	// Setup user last seen for session
 	router.Use(server.customUserLastSeen)
 
-	// // Setup the no route handler
-	// router.NoRoute(gin.WrapF(func(w http.ResponseWriter, r *http.Request) {
-	// 	if strings.HasPrefix(r.URL.Path, "/api") {
-	// 		http.Error(w, "Not Found", http.StatusNotFound)
-	// 		return
-	// 	}
-
-	// 	origin, _ := url.Parse(config.Config.App.WebUiProxy)
-
-	// 	director := func(req *http.Request) {
-	// 		req.Header.Add("X-Forwarded-Host", req.Host)
-	// 		req.Header.Add("X-Origin-Host", origin.Host)
-	// 		req.URL.Scheme = origin.Scheme
-	// 		req.URL.Host = origin.Host
-	// 	}
-
-	// 	proxy := &httputil.ReverseProxy{Director: director}
-	// 	proxy.ServeHTTP(w, r)
-	// }))
+	// Setup the no route handler
 	router.NoRoute(gin.WrapF(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api") {
 			http.Error(w, "Not Found", http.StatusNotFound)

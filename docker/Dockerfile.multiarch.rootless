@@ -19,7 +19,6 @@ COPY . .
 COPY --from=nuxt-build /app/web/.output /app/web/.output
 COPY --from=nuxt-build /app/web/web_embed.go /app/web/web_embed.go
 
-# build a single static binary (adjust ./cmd/... path to your main)
 RUN go mod tidy && go mod vendor && \
     go build -tags "${TAGS}" -ldflags="-s -w -extldflags '-static'" -o /out/squad-aegis ./cmd/server
 
