@@ -180,6 +180,19 @@ func (es *EventStore) GetPlayerData(playerID string) (*PlayerData, bool) {
 	return &playerData, true
 }
 
+// RemovePlayerData removes persistent player data by playerID
+func (es *EventStore) RemovePlayerData(playerID string) error {
+	es.mu.Lock()
+	defer es.mu.Unlock()
+
+	key := es.playerKey(playerID)
+	if err := es.client.Del(es.ctx, key); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // StoreSessionData stores non-persistent session data by key (usually player name)
 func (es *EventStore) StoreSessionData(key string, data *SessionData) {
 
@@ -267,31 +280,6 @@ func (es *EventStore) GetSessionData(key string) (*SessionData, bool) {
 	}
 
 	return &sessionData, true
-}
-
-// StoreDisconnectedPlayer stores disconnection data for a player
-func (es *EventStore) StoreDisconnectedPlayer(playerID string, data *DisconnectedPlayerData) {
-
-	key := es.disconnectedKey(playerID)
-	dataBytes, err := json.Marshal(data)
-	if err != nil {
-		log.Error().Err(err).Str("playerID", playerID).Msg("failed to marshal disconnected player data")
-		return
-	}
-
-	// Store with 24 hour expiration
-	if err := es.client.Set(es.ctx, key, string(dataBytes), 24*time.Hour); err != nil {
-		log.Error().Err(err).Str("key", key).Msg("failed to store disconnected player in valkey")
-	}
-}
-
-// RemoveDisconnectedPlayer removes a player from the disconnected list (when they reconnect)
-func (es *EventStore) RemoveDisconnectedPlayer(playerID string) {
-
-	key := es.disconnectedKey(playerID)
-	if err := es.client.Del(es.ctx, key); err != nil {
-		log.Error().Err(err).Str("key", key).Msg("failed to remove disconnected player from valkey")
-	}
 }
 
 // StoreRoundWinner stores round winner data
