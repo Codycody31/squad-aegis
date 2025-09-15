@@ -3,14 +3,16 @@ title: Installation Guide
 icon: lucide:download
 ---
 
-
 # Installation Guide
 
-This guide will walk you through installing and configuring Squad Aegis, the comprehensive control panel for Squad game server administration.
+This guide will walk you through installing and configuring **Squad Aegis**, the comprehensive control panel for Squad game server administration.
+It includes both a quick "run with Docker Compose" path and a more detailed manual build process.
+
+---
 
 ## Prerequisites
 
-Before installing Squad Aegis, ensure you have the following:
+Before installing Squad Aegis, ensure you have:
 
 - **Docker Engine** 20.10.0 or newer
 - **Docker Compose V2**
@@ -18,22 +20,25 @@ Before installing Squad Aegis, ensure you have the following:
 - At least **10GB available storage**
 - Basic knowledge of Docker and command-line operations
 
-## Installation Steps
+---
 
-### 1. Clone the Repository
+## 1. Clone the Repository
 
 ```bash
 git clone https://github.com/Codycody31/squad-aegis.git
 cd squad-aegis
-```
+````
 
-### 2. Configure Environment Variables
+---
 
-Create a `.env` file in the project root directory with your configuration settings. Below is a template based on the configuration structure:
+## 2. Configure Environment Variables
+
+Create a `.env` file in the project root (same directory as `docker-compose.yml`).
+Here is a template you can customize:
 
 ```env
 # Application Configuration
-APP_ISDEVELOPMENT=true
+APP_ISDEVELOPMENT=false
 APP_WEBUIPROXY=
 APP_PORT=3113
 APP_URL=http://localhost:3113
@@ -44,22 +49,23 @@ INITIAL_ADMIN_USERNAME=admin
 INITIAL_ADMIN_PASSWORD=your_secure_password
 
 # Database Configuration
-DB_HOST=localhost
+DB_HOST=database
 DB_PORT=5432
 DB_NAME=squad-aegis
 DB_USER=squad-aegis
-DB_PASS=your_db_password
+DB_PASS=squad-aegis
 DB_MIGRATE_VERBOSE=false
 
-# ClickHouse Configuration 
-CLICKHOUSE_HOST=localhost
+# ClickHouse Configuration
+CLICKHOUSE_HOST=clickhouse
 CLICKHOUSE_PORT=9000
 CLICKHOUSE_DATABASE=default
 CLICKHOUSE_USERNAME=squad_aegis
-CLICKHOUSE_PASSWORD=your_clickhouse_password
+CLICKHOUSE_PASSWORD=squad_aegis
 CLICKHOUSE_DEBUG=false
 
-VALKEY_HOST=localhost
+# Valkey Configuration
+VALKEY_HOST=valkey
 VALKEY_PORT=6379
 
 # Logging Configuration
@@ -72,18 +78,51 @@ DEBUG_PRETTY=true
 DEBUG_NOCOLOR=false
 ```
 
-**Important Security Note:** Change the default `INITIAL_ADMIN_PASSWORD` and database credentials before deployment.
+⚠️ **Important Security Note:** Always change the default `INITIAL_ADMIN_PASSWORD` and database credentials before deployment.
 
-### 3. Build the Application
+---
 
-Before running with Docker, you need to build the application. The project uses a Makefile for building:
+## 3. Running with Docker Compose
+
+You have two options depending on your needs:
+
+### Option A: Quick Start (non-dev stack)
+
+Run everything with the production-style `docker-compose.yml`:
+
+```bash
+docker compose up -d
+```
+
+This will start the following containers:
+
+* **PostgreSQL 14** – main application database
+* **ClickHouse 25.3** – analytics database
+* **Valkey 8.1.3** – caching / key-value store
+* **Squad Aegis Server** – main application
+
+### Option B: Development stack
+
+If you want to build locally and run alongside databases:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
+Just make sure to update the `.env` file and swap out the database connection settings.
+
+---
+
+## 4. (Optional) Build the Application Yourself
+
+If you prefer to build the server and web UI locally before containerizing:
 
 ```bash
 # Install dependencies
 go mod tidy
 go mod vendor
 
-# Build the server (this also builds the web UI)
+# Build the server (includes web UI)
 make build-server
 
 # Or build everything
@@ -92,115 +131,110 @@ make build
 
 This will create binaries in the `dist/` directory.
 
-### 4. Set Up Docker Compose
-
-The project provides Docker Compose files for deployment. For development, you can use the provided `docker-compose.dev.yml` which includes database and ClickHouse services:
+You can also build your own Docker image:
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d
-```
-
-For production deployment, you'll need to build your own Docker image or modify the `docker-compose.yml` file to use a local build. The provided `docker-compose.yml` references a private registry image that may not be accessible.
-
-To build and run with Docker:
-
-```bash
-# Build the Docker image
 docker build -f docker/Dockerfile.multiarch.rootless -t squad-aegis:latest .
-
-# Then modify docker-compose.yml to use your local image
-# Change: image: registry.vmgware.dev/insidiousfiddler/squad-aegis:latest
-# To: image: squad-aegis:latest
-
-# Run the services
-docker compose up -d
 ```
 
-### 5. Database Migration
+Then edit `docker-compose.yml` to use:
 
-The application will automatically run database migrations on startup if configured properly. You can verify migration status by checking the logs:
+```yaml
+image: squad-aegis:latest
+```
+
+---
+
+## 5. Database Migration
+
+The application automatically runs database migrations on startup.
+Check migration status:
 
 ```bash
 docker compose logs -f squad-aegis
 ```
 
-### 5. Access the Web Interface
+---
 
-Once the containers are running, access the Squad Aegis interface at:
+## 6. Verify and Access the Application
 
+Check logs:
+
+```bash
+docker compose logs -f
 ```
-http://localhost:3113
+
+Check container health:
+
+```bash
+docker ps
 ```
 
-Log in with the credentials you configured in the `.env` file (default: `admin`/`admin`).
+Then open your browser:
 
-## Configuration Options
+👉 [http://localhost:3113](http://localhost:3113)
 
-### Application Settings
+Log in with:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `APP_ISDEVELOPMENT` | Enable development mode | `true` |
-| `APP_WEBUIPROXY` | Reverse proxy configuration | `""` |
-| `APP_PORT` | Web interface port | `3113` |
-| `APP_URL` | Base URL for the application | `http://localhost:3113` |
-| `APP_INCONTAINER` | Indicates if running in container | `false` |
+* **Username:** `admin`
+* **Password:** the one you set in `.env`
 
-### Database Configuration
+---
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DB_HOST` | Database server host | `localhost` |
-| `DB_PORT` | Database server port | `5432` |
-| `DB_NAME` | Database name | `squad-aegis` |
-| `DB_USER` | Database username | `squad-aegis` |
-| `DB_PASS` | Database password | `squad-aegis` |
-| `DB_MIGRATE_VERBOSE` | Enable verbose migration logging | `false` |
+## 7. Stopping & Restarting
 
-### ClickHouse Configuration
+To stop the stack:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CLICKHOUSE_ENABLED` | Enable ClickHouse integration | `false` |
-| `CLICKHOUSE_HOST` | ClickHouse server host | `localhost` |
-| `CLICKHOUSE_PORT` | ClickHouse server port | `9000` |
-| `CLICKHOUSE_DATABASE` | ClickHouse database name | `default` |
-| `CLICKHOUSE_USERNAME` | ClickHouse username | `squad_aegis` |
-| `CLICKHOUSE_PASSWORD` | ClickHouse password | `squad_aegis` |
-| `CLICKHOUSE_DEBUG` | Enable ClickHouse debug logging | `false` |
+```bash
+docker compose down
+```
 
-### Logging Configuration
+To restart:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `LOG_LEVEL` | Logging level (debug, info, warn, error) | `info` |
-| `LOG_SHOWGIN` | Show Gin framework logs | `false` |
-| `LOG_FILE` | Path to log file (empty for stdout) | `""` |
+```bash
+docker compose up -d
+```
 
-## Post-Installation Steps
+---
 
-1. **Change Default Credentials**: Immediately change the default admin password after first login
-2. **Configure Servers**: Add your Squad servers through the web interface
-3. **Set Up Users**: Create additional user accounts with appropriate permissions
-4. **Configure Plugins**: Enable and configure any necessary plugins
-5. **Set Up Backups**: Implement a backup strategy for your database
+## 8. Data Persistence
+
+The following named volumes persist data between container restarts:
+
+* `database` – PostgreSQL data
+* `clickhouse` – ClickHouse data
+* `valkey` – Valkey data
+* `data` – Squad Aegis config
+
+---
+
+## 9. Post-Installation Steps
+
+1. **Change Default Credentials** immediately after first login
+2. **Configure Servers**: Add your Squad servers in the web UI
+3. **Set Up Users** with appropriate permissions
+4. **Configure Plugins** as needed
+
+---
 
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Port Already in Use**
-   - Change the `APP_PORT` in your `.env` file
-   - Update the port mapping in `docker-compose.yml`
+
+   * Change `APP_PORT` in `.env`
+   * Update the port mapping in `docker-compose.yml`
 
 2. **Database Connection Errors**
-   - Verify database service is running
-   - Check connection parameters in `.env`
-   - Ensure database user has proper permissions
+
+   * Verify the database container is running
+   * Check connection parameters in `.env`
+   * Ensure user permissions are correct
 
 3. **Permission Issues**
-   - Verify Docker has proper permissions
-   - Check volume mount permissions
+
+   * Verify Docker volume permissions
 
 ### Viewing Logs
 
@@ -215,10 +249,10 @@ docker compose logs squad-aegis
 docker compose logs -f squad-aegis
 ```
 
+---
+
 ## Support
 
-For additional help:
-
-- Check the [Issue Tracker](https://github.com/Codycody31/squad-aegis/issues)
-- Review the project documentation
-- Contact the development team through GitHub
+* [Issue Tracker](https://github.com/Codycody31/squad-aegis/issues)
+* Project documentation
+* Contact the dev team via GitHub
