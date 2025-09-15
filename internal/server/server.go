@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
+	"go.codycody31.dev/squad-aegis/internal/server/web"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 
 	"github.com/gin-gonic/gin"
@@ -63,24 +65,50 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 	// Setup user last seen for session
 	router.Use(server.customUserLastSeen)
 
-	// Setup the no route handler
+	// // Setup the no route handler
+	// router.NoRoute(gin.WrapF(func(w http.ResponseWriter, r *http.Request) {
+	// 	if strings.HasPrefix(r.URL.Path, "/api") {
+	// 		http.Error(w, "Not Found", http.StatusNotFound)
+	// 		return
+	// 	}
+
+	// 	origin, _ := url.Parse(config.Config.App.WebUiProxy)
+
+	// 	director := func(req *http.Request) {
+	// 		req.Header.Add("X-Forwarded-Host", req.Host)
+	// 		req.Header.Add("X-Origin-Host", origin.Host)
+	// 		req.URL.Scheme = origin.Scheme
+	// 		req.URL.Host = origin.Host
+	// 	}
+
+	// 	proxy := &httputil.ReverseProxy{Director: director}
+	// 	proxy.ServeHTTP(w, r)
+	// }))
 	router.NoRoute(gin.WrapF(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api") {
 			http.Error(w, "Not Found", http.StatusNotFound)
 			return
 		}
 
-		origin, _ := url.Parse(config.Config.App.WebUiProxy)
+		if config.Config.App.IsDevelopment && config.Config.App.WebUiProxy != "" {
+			origin, _ := url.Parse(config.Config.App.WebUiProxy)
 
-		director := func(req *http.Request) {
-			req.Header.Add("X-Forwarded-Host", req.Host)
-			req.Header.Add("X-Origin-Host", origin.Host)
-			req.URL.Scheme = origin.Scheme
-			req.URL.Host = origin.Host
+			director := func(req *http.Request) {
+				req.Header.Add("X-Forwarded-Host", req.Host)
+				req.Header.Add("X-Origin-Host", origin.Host)
+				req.URL.Scheme = origin.Scheme
+				req.URL.Host = origin.Host
+			}
+
+			proxy := &httputil.ReverseProxy{Director: director}
+			proxy.ServeHTTP(w, r)
+		} else {
+			webEngine, err := web.New(serverDependencies.DB)
+			if err != nil {
+				log.Println("failed to create web engine", err)
+			}
+			webEngine.ServeHTTP(w, r)
 		}
-
-		proxy := &httputil.ReverseProxy{Director: director}
-		proxy.ServeHTTP(w, r)
 	}))
 
 	// Setup route group for the API
