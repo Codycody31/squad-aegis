@@ -17,14 +17,11 @@ type EventStoreInterface interface {
 	// Player data methods
 	StorePlayerData(playerID string, data *PlayerData)
 	GetPlayerData(playerID string) (*PlayerData, bool)
-	RemovePlayerData(playerID string) bool
+	RemovePlayerData(playerID string) error
 
 	// Session data methods
 	StoreSessionData(key string, data *SessionData)
 	GetSessionData(key string) (*SessionData, bool)
-
-	// Disconnected player methods
-	RemoveDisconnectedPlayer(playerID string)
 
 	// Round data methods
 	StoreRoundWinner(data *RoundWinnerData)
