@@ -35,8 +35,7 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       sessionCookieName: "session", // can be overridden by NUXT_PUBLIC_SESSION_COOKIE_NAME environment variable
-      backendApi: "http://127.0.0.1:3113/api", // can be overridden by NUXT_PUBLIC_BACKEND_API environment variable
-      baseUrl: "http://127.0.0.1:3113", // can be overridden by NUXT_PUBLIC_BASE_URL environment variable
+      backendApi: "/api", // can be overridden by NUXT_PUBLIC_BACKEND_API environment variable
     },
   },
 
