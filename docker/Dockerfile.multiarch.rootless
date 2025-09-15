@@ -8,6 +8,7 @@ RUN pnpm run generate
 
 FROM --platform=$BUILDPLATFORM docker.io/golang:1.24 AS go-build
 
+ENV TAGS=embed
 RUN groupadd -g 1000 squad-aegis && \
     useradd -u 1000 -g 1000 squad-aegis && \
     mkdir -p /var/lib/squad-aegis && \
