@@ -52,13 +52,15 @@ DB_PASS=your_db_password
 DB_MIGRATE_VERBOSE=false
 
 # ClickHouse Configuration 
-CLICKHOUSE_ENABLED=false
 CLICKHOUSE_HOST=localhost
 CLICKHOUSE_PORT=9000
 CLICKHOUSE_DATABASE=default
 CLICKHOUSE_USERNAME=squad_aegis
 CLICKHOUSE_PASSWORD=your_clickhouse_password
 CLICKHOUSE_DEBUG=false
+
+VALKEY_HOST=localhost
+VALKEY_PORT=6379
 
 # Logging Configuration
 LOG_LEVEL=info
