@@ -6,38 +6,27 @@ RUN pnpm install --frozen-lockfile
 COPY web/ .
 RUN pnpm run generate
 
-FROM --platform=$BUILDPLATFORM docker.io/golang:1.24 AS go-build
-
-ENV TAGS=embed
-RUN groupadd -g 1000 squad-aegis && \
-    useradd -u 1000 -g 1000 squad-aegis && \
-    mkdir -p /var/lib/squad-aegis && \
-    chown -R squad-aegis:squad-aegis /var/lib/squad-aegis
+# Build Go statically
+FROM --platform=$BUILDPLATFORM golang:1.24 AS go-build
+ARG TARGETOS TARGETARCH
+ENV CGO_ENABLED=0 \
+    GOOS=$TARGETOS \
+    GOARCH=$TARGETARCH \
+    TAGS="embed netgo"
 
 WORKDIR /app
 COPY . .
-RUN apt-get update && apt-get install -y zip && rm -rf /var/lib/apt/lists/*
 COPY --from=nuxt-build /app/web/.output /app/web/.output
 COPY --from=nuxt-build /app/web/web_embed.go /app/web/web_embed.go
-RUN go mod tidy && \
-    go mod vendor && \
-    make release-server
 
-ARG TARGETOS TARGETARCH
-ENV GODEBUG=netdns=go
-ENV APP_IN_CONTAINER=true
-ENV XDG_CACHE_HOME=/var/lib/squad-aegis
-ENV XDG_DATA_HOME=/var/lib/squad-aegis
-RUN cp dist/${TARGETOS}_${TARGETARCH}/squad-aegis /bin/
+# build a single static binary (adjust ./cmd/... path to your main)
+RUN go mod tidy && go mod vendor && \
+    go build -tags "${TAGS}" -ldflags="-s -w -extldflags '-static'" -o /out/squad-aegis ./cmd/server
 
+# minimal runtime
 FROM scratch
-
 COPY --from=go-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=go-build /bin/squad-aegis /bin/squad-aegis
+COPY --from=go-build /out/squad-aegis /squad-aegis
 ENV APP_IN_CONTAINER=true
-ENV XDG_CACHE_HOME=/var/lib/squad-aegis
-ENV XDG_DATA_HOME=/var/lib/squad-aegis
-
 EXPOSE 3113
-
-ENTRYPOINT ["/bin/squad-aegis"]
+ENTRYPOINT ["/squad-aegis"]
