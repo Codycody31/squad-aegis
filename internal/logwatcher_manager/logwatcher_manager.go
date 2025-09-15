@@ -140,15 +140,11 @@ func (m *LogwatcherManager) ConnectToServer(serverID uuid.UUID, config LogSource
 	// Create connection context
 	ctx, cancel := context.WithCancel(m.ctx)
 
-	// Create event store - use Valkey if available, otherwise use in-memory
-	var eventStore EventStoreInterface
-	eventStore = NewValkeyEventStore(ctx, serverID, m.valkeyClient)
-
 	conn := &ServerLogConnection{
 		ServerID:          serverID,
 		LogSource:         logSource,
 		Config:            config,
-		EventStore:        eventStore,
+		EventStore:        NewEventStore(ctx, serverID, m.valkeyClient),
 		Metrics:           NewLogParsingMetrics(),
 		Connected:         true,
 		LastUsed:          time.Now(),
@@ -327,7 +323,7 @@ func (m *LogwatcherManager) calculateReconnectDelay(attempts int) time.Duration 
 func (m *LogwatcherManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 	// Get all servers from the database with log configuration
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, log_source_type, log_file_path, log_host, log_port, log_username, 
+		SELECT id, log_source_type, log_file_path, log_host, log_port, log_username,
 		       log_password, log_poll_frequency, log_read_from_start
 		FROM servers
 		WHERE log_source_type IS NOT NULL AND log_file_path IS NOT NULL AND log_file_path != ''

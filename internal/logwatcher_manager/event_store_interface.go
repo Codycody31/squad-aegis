@@ -16,7 +16,6 @@ type EventStoreInterface interface {
 
 	// Player data methods
 	StorePlayerData(playerID string, data *PlayerData)
-	StorePlayerDataFromMap(playerID string, data map[string]interface{})
 	GetPlayerData(playerID string) (*PlayerData, bool)
 
 	// Session data methods
@@ -45,9 +44,4 @@ type EventStoreInterface interface {
 	GetPlayerInfoByName(name string) (*event_manager.PlayerInfo, bool)
 	GetPlayerInfoByEOSID(eosID string) (*event_manager.PlayerInfo, bool)
 	GetPlayerInfoByController(controllerID string) (*event_manager.PlayerInfo, bool)
-
-	// Legacy methods for backwards compatibility (deprecated)
-	GetPlayerByName(name string) (map[string]interface{}, bool)
-	GetPlayerByEOSID(eosID string) (map[string]interface{}, bool)
-	GetPlayerByController(controllerID string) (map[string]interface{}, bool)
 }
