@@ -1,118 +1,121 @@
 {
-    "theme": {
-        "name": "opener",
-        "logo": {
-            "light": "/public/assets/logo.svg",
-            "dark": "/public/assets/logo-dark.svg"
-        },
-        "favicon": "/public/assets/logo.svg",
-        "icons": {
-            "library": [
-                "lucide"
-            ]
-        },
-        "colorScheme": "dark",
-        "appearance": {
-            "banner": {
-                "fixed": "true"
-            }
-        }
+  "theme": {
+    "name": "opener",
+    "logo": {
+      "light": "/public/assets/logo.svg",
+      "dark": "/public/assets/logo-dark.svg"
     },
-    "navigation": {
-        "tabs": [
-            {
-                "title": "Guides",
-                "page": "",
-                "href": "introduction"
-            }
-        ],
-        "sidebar": [
-            {
-                "group": "Get Started",
-                "pages": [
-                    "introduction",
-                    "installation"
-                ]
-            },
-            {
-                "group": "Plugins",
-                "pages": [
-                    "plugins/overview",
-                    "plugins/auto-kick-unassigned",
-                    "plugins/auto-tk-warn",
-                    "plugins/cbl-info",
-                    "plugins/chat-commands",
-                    "plugins/command-scheduler",
-                    "plugins/discord-admin-broadcast",
-                    "plugins/discord-admin-cam-logs",
-                    "plugins/discord-admin-request",
-                    "plugins/discord-chat",
-                    "plugins/discord-kill-feed",
-                    "plugins/discord-round-ended",
-                    "plugins/discord-squad-created",
-                    "plugins/fog-of-war",
-                    "plugins/intervalled-broadcasts",
-                    "plugins/seeding-mode",
-                    "plugins/server-seeder-whitelist",
-                    "plugins/squad-leader-whitelist",
-                    "plugins/switch-teams",
-                    "plugins/team-randomizer"
-                ]
-            },
-            {
-                "group": "Developers",
-                "pages": [
-                    "developers/overview",
-                    "developers/architecture"
-                ]
-            },
-            {
-                "group": "Misc",
-                "pages": [
-                    "screenshots",
-                    "acknowledgements"
-                ]
-            }
-        ]
+    "favicon": "/public/assets/logo.svg",
+    "icons": {
+      "library": [
+        "lucide"
+      ]
     },
-    "seo": {
-        "metatags": {
-            "og:image": "https://codycody31.github.io/squad-aegis/public/assets/og-image.png",
-            "og:title": "Squad Aegis - Control Panel for Squad Game Servers",
-            "description": "Comprehensive control panel for managing multiple Squad game servers efficiently.",
-            "keywords": "Squad Aegis, Squad game server, control panel, server management, game server administration, Squad server cluster, Squad server monitoring"
-        }
-    },
-    "redirects": [
-        {
-            "source": "index",
-            "destination": "introduction"
-        }
-    ],
-    "integrations": {
-        ".apps": {
-            "githubStar": {
-                "title": "Star",
-                "label": "Show your support! Star us on GitHub ⭐️",
-                "href": "https://github.com/Codycody31/squad-aegis",
-                "dataIcon": "octicon-star",
-                "dataSize": "large",
-                "dataShowCount": true,
-                "ariaLabel": "Star Codycody31/squad-aegis on GitHub"
-            }
-        },
-        "editLink": {
-            "baseUrl": "https://github.com/Codycody31/squad-aegis/edit/master/docs/",
-            "title": "Edit this page",
-            "icon": "lucide:clipboard-edit"
-        }
-    },
-    "components": {
-        "banner": {
-            "content": "The project is currently in the early stages of development and is not ready for production use.",
-            "label": "Notice",
-            "icon": "warning",
-            "href": "https://github.com/Codycody31/squad-aegis/releases"
-        }
+    "colorScheme": "dark",
+    "appearance": {
+      "banner": {
+        "fixed": "true"
+      }
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "title": "Guides",
+        "page": "",
+        "href": "index"
+      }
+    ],
+    "sidebar": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "index",
+          "installation"
+        ]
+      },
+      {
+        "group": "Plugins",
+        "pages": [
+          "plugins/overview",
+          "plugins/auto-kick-unassigned",
+          "plugins/auto-tk-warn",
+          "plugins/cbl-info",
+          "plugins/chat-commands",
+          "plugins/command-scheduler",
+          "plugins/discord-admin-broadcast",
+          "plugins/discord-admin-cam-logs",
+          "plugins/discord-admin-request",
+          "plugins/discord-chat",
+          "plugins/discord-kill-feed",
+          "plugins/discord-round-ended",
+          "plugins/discord-squad-created",
+          "plugins/fog-of-war",
+          "plugins/intervalled-broadcasts",
+          "plugins/seeding-mode",
+          "plugins/server-seeder-whitelist",
+          "plugins/squad-leader-whitelist",
+          "plugins/switch-teams",
+          "plugins/team-randomizer"
+        ]
+      },
+      {
+        "group": "Workflows",
+        "pages": [
+          "workflows/overview",
+          "workflows/creating-a-workflow",
+          "workflows/workflow-steps",
+          "workflows/lua-scripting"
+        ]
+      },
+      {
+        "group": "Developers",
+        "pages": [
+          "developers/overview",
+          "developers/architecture"
+        ]
+      },
+      {
+        "group": "Misc",
+        "pages": [
+          "screenshots",
+          "acknowledgements"
+        ]
+      }
+    ]
+  },
+  "seo": {
+    "metatags": {
+      "og:image": "https://codycody31.github.io/squad-aegis/public/assets/og-image.png",
+      "og:title": "Squad Aegis - Control Panel for Squad Game Servers",
+      "description": "Comprehensive control panel for managing multiple Squad game servers efficiently.",
+      "keywords": "Squad Aegis, Squad game server, control panel, server management, game server administration, Squad server cluster, Squad server monitoring"
+    }
+  },
+  "integrations": {
+    ".apps": {
+      "githubStar": {
+        "title": "Star",
+        "label": "Show your support! Star us on GitHub ⭐️",
+        "href": "https://github.com/Codycody31/squad-aegis",
+        "dataIcon": "octicon-star",
+        "dataSize": "large",
+        "dataShowCount": true,
+        "ariaLabel": "Star Codycody31/squad-aegis on GitHub"
+      }
+    },
+    "editLink": {
+      "baseUrl": "https://github.com/Codycody31/squad-aegis/edit/master/docs/",
+      "title": "Edit this page",
+      "icon": "lucide:clipboard-edit"
+    }
+  },
+  "components": {
+    "banner": {
+      "content": "The project is currently in the early stages of development and is not ready for production use.",
+      "label": "Notice",
+      "icon": "warning",
+      "href": "https://github.com/Codycody31/squad-aegis/releases"
+    }
+  }
 }

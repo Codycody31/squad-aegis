@@ -482,10 +482,10 @@ const connectToFeeds = async () => {
     }
 
     // Convert HTTP/HTTPS URL to WebSocket URL
-    const backendUrl = runtimeConfig.public.backendApi;
+    const backendUrl = window.location.origin;
     const wsProtocol = backendUrl.startsWith('https') ? 'wss' : 'ws';
     const baseUrl = backendUrl.replace(/^https?:\/\//, '');
-    const url = `${wsProtocol}://${baseUrl}/servers/${serverId}/feeds?types=chat&types=connections&types=teamkills&token=${token}`;
+    const url = `${wsProtocol}://${baseUrl}/api/servers/${serverId}/feeds?types=chat&types=connections&types=teamkills&token=${token}`;
     
     websocket = new WebSocket(url);
 

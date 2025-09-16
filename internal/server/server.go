@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -13,7 +14,9 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
+	"go.codycody31.dev/squad-aegis/internal/server/web"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/workflow_manager"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,6 +32,7 @@ type Dependencies struct {
 	EventManager         *event_manager.EventManager
 	LogwatcherManager    *logwatcher_manager.LogwatcherManager
 	PluginManager        *plugin_manager.PluginManager
+	WorkflowManager      *workflow_manager.WorkflowManager
 	RemoteBanSyncService *core.RemoteBanSyncService
 }
 
@@ -70,17 +74,25 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			return
 		}
 
-		origin, _ := url.Parse(config.Config.App.WebUiProxy)
+		if config.Config.App.IsDevelopment && config.Config.App.WebUiProxy != "" {
+			origin, _ := url.Parse(config.Config.App.WebUiProxy)
 
-		director := func(req *http.Request) {
-			req.Header.Add("X-Forwarded-Host", req.Host)
-			req.Header.Add("X-Origin-Host", origin.Host)
-			req.URL.Scheme = origin.Scheme
-			req.URL.Host = origin.Host
+			director := func(req *http.Request) {
+				req.Header.Add("X-Forwarded-Host", req.Host)
+				req.Header.Add("X-Origin-Host", origin.Host)
+				req.URL.Scheme = origin.Scheme
+				req.URL.Host = origin.Host
+			}
+
+			proxy := &httputil.ReverseProxy{Director: director}
+			proxy.ServeHTTP(w, r)
+		} else {
+			webEngine, err := web.New(serverDependencies.DB)
+			if err != nil {
+				log.Println("failed to create web engine", err)
+			}
+			webEngine.ServeHTTP(w, r)
 		}
-
-		proxy := &httputil.ReverseProxy{Director: director}
-		proxy.ServeHTTP(w, r)
 	}))
 
 	// Setup route group for the API
@@ -253,6 +265,40 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 					rulesGroup.PUT("/:ruleId", server.updateServerRule)
 					rulesGroup.DELETE("/:ruleId", server.AuthIsSuperAdmin(), server.deleteServerRule)
 					rulesGroup.PUT("/bulk", server.bulkUpdateServerRules) // Bulk update endpoint
+				}
+
+				// Server Workflows
+				workflowsGroup := serverGroup.Group("/workflows")
+				{
+					workflowsGroup.Use(server.AuthHasServerPermission("manageserver"))
+					workflowsGroup.GET("", server.ServerWorkflowsList)
+					workflowsGroup.POST("", server.ServerWorkflowCreate)
+
+					workflowGroup := workflowsGroup.Group("/:workflowId")
+					{
+						workflowGroup.GET("", server.ServerWorkflowGet)
+						workflowGroup.PUT("", server.ServerWorkflowUpdate)
+						workflowGroup.DELETE("", server.ServerWorkflowDelete)
+						workflowGroup.POST("/execute", server.ServerWorkflowExecute)
+						workflowGroup.GET("/executions", server.ServerWorkflowExecutions)
+
+						// Workflow execution details and logs
+						executionGroup := workflowGroup.Group("/executions/:executionId")
+						{
+							executionGroup.GET("", server.ServerWorkflowExecutionGet)
+							executionGroup.GET("/logs", server.ServerWorkflowExecutionLogs)
+							executionGroup.GET("/messages", server.ServerWorkflowExecutionMessages)
+						}
+
+						// Workflow variables
+						variablesGroup := workflowGroup.Group("/variables")
+						{
+							variablesGroup.GET("", server.ServerWorkflowVariablesList)
+							variablesGroup.POST("", server.ServerWorkflowVariableCreate)
+							variablesGroup.PUT("/:variableId", server.ServerWorkflowVariableUpdate)
+							variablesGroup.DELETE("/:variableId", server.ServerWorkflowVariableDelete)
+						}
+					}
 				}
 			}
 		}

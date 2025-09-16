@@ -31,6 +31,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/logger"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	"go.codycody31.dev/squad-aegis/internal/valkey"
+	"go.codycody31.dev/squad-aegis/internal/workflow_manager"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -209,6 +210,15 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to start plugin manager: %w", err)
 	}
 
+	// Create workflow manager
+	workflowManager := workflow_manager.NewWorkflowManager(ctx, database, eventManager, rconManager, clickhouseClient)
+	defer workflowManager.Stop()
+
+	// Start workflow manager
+	if err := workflowManager.Start(); err != nil {
+		return fmt.Errorf("failed to start workflow manager: %w", err)
+	}
+
 	// Start connection managers
 	go rconManager.StartConnectionManager()
 	go logwatcherManager.StartConnectionManager()
@@ -264,6 +274,7 @@ func run(ctx context.Context) error {
 			EventManager:         eventManager,
 			LogwatcherManager:    logwatcherManager,
 			PluginManager:        pluginManager,
+			WorkflowManager:      workflowManager,
 			RemoteBanSyncService: core.NewRemoteBanSyncService(database, database),
 		}
 

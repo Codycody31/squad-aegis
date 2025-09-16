@@ -62,7 +62,7 @@ func (api *serverAPI) GetServerInfo() (*ServerInfo, error) {
 	// Get basic server info from database
 	query := `
 		SELECT id, name, ip_address, game_port, rcon_port
-		FROM servers 
+		FROM servers
 		WHERE id = $1
 	`
 
@@ -234,7 +234,7 @@ func (api *adminAPI) AddTemporaryAdmin(steamID string, roleName string, notes st
 	// First, get or create the role for this server
 	var roleID uuid.UUID
 	err := api.db.QueryRow(`
-		SELECT id FROM server_roles 
+		SELECT id FROM server_roles
 		WHERE server_id = $1 AND name = $2
 	`, api.serverID, roleName).Scan(&roleID)
 
@@ -261,7 +261,7 @@ func (api *adminAPI) AddTemporaryAdmin(steamID string, roleName string, notes st
 	// Check if admin record already exists
 	var existingID uuid.UUID
 	err = api.db.QueryRow(`
-		SELECT id FROM server_admins 
+		SELECT id FROM server_admins
 		WHERE server_id = $1 AND steam_id = $2 AND server_role_id = $3
 	`, api.serverID, steamIDInt, roleID).Scan(&existingID)
 
@@ -280,23 +280,13 @@ func (api *adminAPI) AddTemporaryAdmin(steamID string, roleName string, notes st
 	} else {
 		// Update existing admin record
 		_, err = api.db.Exec(`
-			UPDATE server_admins 
+			UPDATE server_admins
 			SET expires_at = $1, notes = $2
 			WHERE id = $3
 		`, expiresAt, notes, existingID)
 		if err != nil {
 			return fmt.Errorf("failed to update admin record: %w", err)
 		}
-	}
-
-	// Also add via RCON for immediate effect
-	rconCommand := fmt.Sprintf("AdminAdd %s %s", steamID, roleName)
-	if _, err := api.rconManager.ExecuteCommand(api.serverID, rconCommand); err != nil {
-		// Log but don't fail - database record is created
-		log.Debug().Err(err).
-			Str("steam_id", steamID).
-			Str("role", roleName).
-			Msg("RCON AdminAdd command failed, relying on database record only")
 	}
 
 	return nil
@@ -311,7 +301,7 @@ func (api *adminAPI) RemoveTemporaryAdmin(steamID string, notes string) error {
 
 	// Find and remove admin records for this steam ID
 	rows, err := api.db.Query(`
-		SELECT id FROM server_admins 
+		SELECT id FROM server_admins
 		WHERE server_id = $1 AND steam_id = $2
 	`, api.serverID, steamIDInt)
 	if err != nil {
@@ -338,15 +328,6 @@ func (api *adminAPI) RemoveTemporaryAdmin(steamID string, notes string) error {
 		if err != nil {
 			return fmt.Errorf("failed to remove admin record %s: %w", adminID, err)
 		}
-	}
-
-	// Also remove via RCON for immediate effect
-	rconCommand := fmt.Sprintf("AdminRemove %s", steamID)
-	if _, err := api.rconManager.ExecuteCommand(api.serverID, rconCommand); err != nil {
-		// Log but don't fail - database record is removed
-		log.Debug().Err(err).
-			Str("steam_id", steamID).
-			Msg("RCON AdminRemove command failed, relying on database record removal only")
 	}
 
 	return nil
@@ -714,7 +695,7 @@ func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fi
 	// Insert into ClickHouse
 	insertQuery := `
 		INSERT INTO squad_aegis.plugin_logs (
-			timestamp, server_id, plugin_instance_id, 
+			timestamp, server_id, plugin_instance_id,
 			level, message, error_message, fields
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`

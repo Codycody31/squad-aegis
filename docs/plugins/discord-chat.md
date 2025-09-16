@@ -3,11 +3,11 @@ title: Discord Chat
 icon: lucide:plug
 ---
 
-## Discord Chat
+# Discord Chat
 
 The Discord Chat plugin logs in-game chat messages to a specified Discord channel, allowing administrators to monitor player communication from Discord.
 
-### Features
+## Features
 
 - Logs all in-game chat to Discord
 - Color-coded embeds for different chat types
@@ -15,11 +15,11 @@ The Discord Chat plugin logs in-game chat messages to a specified Discord channe
 - Option to ignore specific chat types
 - Customizable embed colors
 
-### Requirements
+## Requirements
 
 This plugin requires the Discord connector to be configured with a valid bot token and appropriate permissions.
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -29,7 +29,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 | `ignore_chats` | Array of chat types to ignore | ["ChatSquad"] | No |
 | `enabled` | Whether the plugin is enabled | true | No |
 
-### Chat Colors Configuration
+## Chat Colors Configuration
 
 The `chat_colors` object maps chat types to color values:
 
@@ -41,14 +41,14 @@ The `chat_colors` object maps chat types to color values:
 }
 ```
 
-### Supported Chat Types
+## Supported Chat Types
 
 - `ChatAll` - All chat messages
 - `ChatTeam` - Team chat messages
 - `ChatSquad` - Squad chat messages
 - `ChatAdmin` - Admin chat messages
 
-### How It Works
+## How It Works
 
 1. The plugin listens for all in-game chat messages
 2. Messages are filtered based on the `ignore_chats` configuration
@@ -56,7 +56,7 @@ The `chat_colors` object maps chat types to color values:
 4. The embed color is determined by the chat type or uses the default color
 5. Messages are sent to the configured Discord channel
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -71,7 +71,7 @@ The `chat_colors` object maps chat types to color values:
 }
 ```
 
-### Discord Setup
+## Discord Setup
 
 1. Create a Discord bot and get its token
 2. Add the bot to your Discord server with appropriate permissions
@@ -79,7 +79,7 @@ The `chat_colors` object maps chat types to color values:
 4. Copy the channel ID and use it in the plugin configuration
 5. Ensure the bot has permission to send messages in the channel
 
-### Tips
+## Tips
 
 - Use different colors for different chat types to make logs easier to read
 - Consider ignoring squad chat if it creates too much noise

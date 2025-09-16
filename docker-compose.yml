@@ -49,7 +49,7 @@ services:
       - clickhouse
       - valkey
     ports:
-      - 3113:80
+      - 3113:3113
     volumes:
       - data:/etc/squad-aegis
     env_file:

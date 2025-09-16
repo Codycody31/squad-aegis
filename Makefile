@@ -35,7 +35,7 @@ CGO_ENABLED ?= 1 # only used to compile server
 HAS_GO = $(shell hash go > /dev/null 2>&1 && echo "GO" || echo "NOGO" )
 ifeq ($(HAS_GO),GO)
   # renovate: datasource=docker depName=docker.io/techknowlogick/xgo
-	XGO_VERSION ?= go-1.23.x
+	XGO_VERSION ?= go-1.24.x
 	CGO_CFLAGS ?= $(shell go env CGO_CFLAGS)
 endif
 CGO_CFLAGS ?=
@@ -97,10 +97,7 @@ test:
 ##@ Build
 
 build-web: ## Build Web UI
-	(cd web/; corepack enable; pnpm install --frozen-lockfile; pnpm run build)
-
-build-logwatcher: ## Build LogWatcher
-	CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -tags '$(TAGS)' -ldflags '${LDFLAGS}' -o ${DIST_DIR}/squad-aegis-logwatcher go.codycody31.dev/squad-aegis/cmd/logwatcher
+	(cd web/; pnpm install --frozen-lockfile; pnpm run generate)
 
 build-server: build-web ## Build server
 	CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -tags '$(TAGS)' -ldflags '${LDFLAGS}' -o ${DIST_DIR}/squad-aegis go.codycody31.dev/squad-aegis/cmd/server
@@ -117,33 +114,15 @@ build-tarball: ## Build tar archive
 	  .
 
 .PHONY: build
-build: build-logwatcher build-server ## Build all binaries
+build: build-server ## Build all binaries
 
 release-server: ## Create binaries for release
 	GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) CGO_ENABLED=${CGO_ENABLED} go build  -ldflags '${LDFLAGS}' -tags '$(TAGS)' -o ${DIST_DIR}/$(TARGETOS)_$(TARGETARCH)/squad-aegis go.codycody31.dev/squad-aegis/cmd/server
 	tar -czf ${DIST_DIR}/squad-aegis_$(TARGETOS)_$(TARGETARCH).tar.gz -C ${DIST_DIR}/$(TARGETOS)_$(TARGETARCH) squad-aegis
-
-release-logwatcher: ## Create binaries for release
-	# compile
-	GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '${LDFLAGS}' -tags 'grpcnotrace $(TAGS)' -o ${DIST_DIR}/logwatcher/linux_amd64/squad-aegis-logwatcher       go.codycody31.dev/squad-aegis/cmd/logwatcher
-	GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -ldflags '${LDFLAGS}' -tags 'grpcnotrace $(TAGS)' -o ${DIST_DIR}/logwatcher/linux_arm64/squad-aegis-logwatcher       go.codycody31.dev/squad-aegis/cmd/logwatcher
-	GOOS=linux   GOARCH=arm   CGO_ENABLED=0 go build -ldflags '${LDFLAGS}' -tags 'grpcnotrace $(TAGS)' -o ${DIST_DIR}/logwatcher/linux_arm/squad-aegis-logwatcher         go.codycody31.dev/squad-aegis/cmd/logwatcher
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '${LDFLAGS}' -tags 'grpcnotrace $(TAGS)' -o ${DIST_DIR}/logwatcher/windows_amd64/squad-aegis-logwatcher.exe go.codycody31.dev/squad-aegis/cmd/logwatcher
-	GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags '${LDFLAGS}' -tags 'grpcnotrace $(TAGS)' -o ${DIST_DIR}/logwatcher/darwin_amd64/squad-aegis-logwatcher      go.codycody31.dev/squad-aegis/cmd/logwatcher
-	GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags '${LDFLAGS}' -tags 'grpcnotrace $(TAGS)' -o ${DIST_DIR}/logwatcher/darwin_arm64/squad-aegis-logwatcher      go.codycody31.dev/squad-aegis/cmd/logwatcher
-	# tar binary files
-	tar -cvzf ${DIST_DIR}/squad-aegis-logwatcher_linux_amd64.tar.gz   -C ${DIST_DIR}/logwatcher/linux_amd64   squad-aegis-logwatcher
-	tar -cvzf ${DIST_DIR}/squad-aegis-logwatcher_linux_arm64.tar.gz   -C ${DIST_DIR}/logwatcher/linux_arm64   squad-aegis-logwatcher
-	tar -cvzf ${DIST_DIR}/squad-aegis-logwatcher_linux_arm.tar.gz     -C ${DIST_DIR}/logwatcher/linux_arm     squad-aegis-logwatcher
-	tar -cvzf ${DIST_DIR}/squad-aegis-logwatcher_darwin_amd64.tar.gz  -C ${DIST_DIR}/logwatcher/darwin_amd64  squad-aegis-logwatcher
-	tar -cvzf ${DIST_DIR}/squad-aegis-logwatcher_darwin_arm64.tar.gz  -C ${DIST_DIR}/logwatcher/darwin_arm64  squad-aegis-logwatcher
-	# zip binary files
-	rm -f  ${DIST_DIR}/squad-aegis-logwatcher_windows_amd64.zip
-	zip -j ${DIST_DIR}/squad-aegis-logwatcher_windows_amd64.zip          ${DIST_DIR}/logwatcher/windows_amd64/squad-aegis-logwatcher.exe
 
 release-checksums: ## Create checksums for all release files
 	# generate shas for tar files
 	(cd ${DIST_DIR}/; sha256sum *.* > checksums.txt)
 
 .PHONY: release
-release: release-server release-logwatcher ## Create release binaries
+release: release-server ## Create release binaries

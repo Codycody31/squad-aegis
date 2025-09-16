@@ -3,11 +3,11 @@ title: Discord Kill Feed
 icon: lucide:plug
 ---
 
-## Discord Kill Feed
+# Discord Kill Feed
 
 The Discord Kill Feed plugin logs all player wounds and kill-related information to a Discord channel, providing administrators with detailed combat logs for review and moderation.
 
-### Features
+## Features
 
 - Logs all player wounds and deaths
 - Includes weapon information and damage details
@@ -15,11 +15,11 @@ The Discord Kill Feed plugin logs all player wounds and kill-related information
 - Color-coded embeds for easy identification
 - Configurable Discord channel
 
-### Requirements
+## Requirements
 
 This plugin requires the Discord connector to be configured with a valid bot token and appropriate permissions.
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -28,7 +28,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 | `disable_cbl` | Disable Community Ban List information in logs | false | No |
 | `enabled` | Whether the plugin is enabled | false | No |
 
-### How It Works
+## How It Works
 
 1. The plugin monitors all player wound events from the game logs
 2. Each wound/kill is formatted into a detailed Discord embed
@@ -40,7 +40,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
    - CBL status (if enabled)
 4. Embeds are sent to the configured Discord channel
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -50,7 +50,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 }
 ```
 
-### Discord Setup
+## Discord Setup
 
 1. Create a Discord bot and get its token
 2. Add the bot to your Discord server
@@ -58,7 +58,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 4. Copy the channel ID for the plugin configuration
 5. Ensure the bot has message sending permissions
 
-### CBL Integration
+## CBL Integration
 
 When `disable_cbl` is set to `false`, the plugin will include Community Ban List information in the logs:
 
@@ -67,7 +67,7 @@ When `disable_cbl` is set to `false`, the plugin will include Community Ban List
 - Ban expiration dates
 - Links to ban details
 
-### Tips
+## Tips
 
 - Use a dedicated Discord channel for kill feed to avoid cluttering other channels
 - The orange color (16761867) provides good visibility for kill events

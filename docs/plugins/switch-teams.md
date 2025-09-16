@@ -3,11 +3,11 @@ title: Switch Teams
 icon: lucide:plug
 ---
 
-## Switch Teams
+# Switch Teams
 
 The Switch Teams plugin allows players to request immediate team switches using a chat command, with built-in balance checking to prevent team imbalance exploitation.
 
-### Features
+## Features
 
 - Player-initiated team switching via chat command
 - Automatic team balance validation
@@ -15,7 +15,7 @@ The Switch Teams plugin allows players to request immediate team switches using 
 - Admin-only mode option
 - Immediate execution (no queuing)
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -24,7 +24,7 @@ The Switch Teams plugin allows players to request immediate team switches using 
 | `team_imbalance_threshold` | Allowed team size difference | 2 | No |
 | `admin_only` | Restrict to admins only | false | No |
 
-### How It Works
+## How It Works
 
 1. Players type the command in chat (e.g., `!switch`)
 2. The plugin checks:
@@ -35,14 +35,14 @@ The Switch Teams plugin allows players to request immediate team switches using 
 4. If balance would be worsened, the switch is denied
 5. Success/failure messages are sent to the player
 
-### Team Balance Logic
+## Team Balance Logic
 
 - The plugin allows switches that don't worsen imbalance
 - If teams are already imbalanced by more than the threshold, switches from the larger to smaller team are allowed
 - Switches that would increase imbalance beyond the threshold are blocked
 - The goal is to maintain fair gameplay while allowing reasonable team movement
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -53,14 +53,14 @@ The Switch Teams plugin allows players to request immediate team switches using 
 }
 ```
 
-### Usage Examples
+## Usage Examples
 
 - Player types `!switch` in chat
 - If teams are balanced (e.g., 25 vs 25), switch is allowed
 - If teams are imbalanced (e.g., 28 vs 22), switch from larger to smaller team is allowed
 - If switch would make imbalance worse (e.g., 26 vs 24 → 25 vs 25), it's blocked
 
-### Tips
+## Tips
 
 - Use a reasonable cooldown to prevent spam switching
 - The imbalance threshold should match your server's typical player counts

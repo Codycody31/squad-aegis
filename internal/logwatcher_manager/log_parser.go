@@ -185,9 +185,6 @@ func GetLogParsers() []LogParser {
 					EOSID:            args[5],
 				})
 
-				// Handle reconnecting players
-				eventStore.RemoveDisconnectedPlayer(args[6])
-
 				// Create structured event data
 				eventData := &event_manager.LogPlayerConnectedData{
 					Time:             args[1],
@@ -572,6 +569,8 @@ func GetLogParsers() []LogParser {
 						EOSID:            args[5],
 					}, args[0])
 				} else {
+					_ = eventStore.RemovePlayerData(player.EOSID)
+					_ = eventStore.RemovePlayerData(player.SteamID)
 					eventManager.PublishEvent(serverID, &event_manager.LogPlayerDisconnectedData{
 						Time:             args[1],
 						ChainID:          strings.TrimSpace(args[2]),
