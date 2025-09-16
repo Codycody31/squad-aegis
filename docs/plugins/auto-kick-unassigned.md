@@ -3,11 +3,11 @@ title: Auto-Kick Unassigned Players
 icon: lucide:plug
 ---
 
-## Auto-Kick Unassigned Players
+# Auto-Kick Unassigned Players
 
 The Auto-Kick Unassigned plugin automatically kicks players that are not in a squad after a specified amount of time. This helps maintain server performance and encourages players to join organized gameplay.
 
-### Features
+## Features
 
 - Automatically tracks unassigned players
 - Sends warning messages before kicking
@@ -17,7 +17,7 @@ The Auto-Kick Unassigned plugin automatically kicks players that are not in a sq
 - Option to ignore admins
 - Periodic cleanup of disconnected players
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -31,7 +31,7 @@ The Auto-Kick Unassigned plugin automatically kicks players that are not in a sq
 | `tracking_update_interval` | How often in seconds to update the tracking list | 60 | No |
 | `cleanup_interval` | How often in seconds to clean up disconnected players | 1200 | No |
 
-### How It Works
+## How It Works
 
 1. The plugin monitors all players on the server
 2. When a player is detected as unassigned (not in a squad), they are added to the tracking list
@@ -40,7 +40,7 @@ The Auto-Kick Unassigned plugin automatically kicks players that are not in a sq
 5. The plugin respects the player threshold - kicking only occurs when there are enough players online
 6. After a round starts, there's a delay before kicking resumes to allow squad formation
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -54,7 +54,7 @@ The Auto-Kick Unassigned plugin automatically kicks players that are not in a sq
 }
 ```
 
-### Tips
+## Tips
 
 - Set the `player_threshold` to prevent kicking during low population periods
 - Use a reasonable `round_start_delay` to give players time to form squads at the beginning of rounds

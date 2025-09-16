@@ -3,11 +3,11 @@ title: Seeding Mode
 icon: lucide:plug
 ---
 
-## Seeding Mode
+# Seeding Mode
 
 The Seeding Mode plugin automatically broadcasts seeding rules to players when the server is below a specified player threshold, and can announce when the server goes "live" with sufficient players.
 
-### Features
+## Features
 
 - Automatic seeding message broadcasts based on player count
 - "Live" announcements when server reaches full capacity
@@ -15,7 +15,7 @@ The Seeding Mode plugin automatically broadcasts seeding rules to players when t
 - Event-driven execution after new games
 - Adjustable broadcast intervals
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -28,7 +28,7 @@ The Seeding Mode plugin automatically broadcasts seeding rules to players when t
 | `wait_on_new_games` | Wait for new game events | true | No |
 | `wait_time_on_new_game` | Delay after new game in seconds | 30 | No |
 
-### How It Works
+## How It Works
 
 1. The plugin monitors player count continuously
 2. When player count is below `seeding_threshold`:
@@ -39,7 +39,7 @@ The Seeding Mode plugin automatically broadcasts seeding rules to players when t
    - Stops seeding broadcasts
 4. After new games, waits for the configured delay before checking player counts
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -54,7 +54,7 @@ The Seeding Mode plugin automatically broadcasts seeding rules to players when t
 }
 ```
 
-### Tips
+## Tips
 
 - Set seeding threshold lower than live threshold to prevent rapid switching
 - Use clear, concise messages that players will see and understand

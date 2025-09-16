@@ -3,11 +3,11 @@ title: Squad Leader Whitelist
 icon: lucide:plug
 ---
 
-## Squad Leader Whitelist
+# Squad Leader Whitelist
 
 The Squad Leader Whitelist plugin tracks players who effectively lead squads and progressively grants them whitelist privileges based on their leadership time, helping to reward and retain skilled squad leaders.
 
-### Features
+## Features
 
 - Tracks squad leadership with minimum member requirements
 - Progressive whitelist system based on leadership hours
@@ -16,7 +16,7 @@ The Squad Leader Whitelist plugin tracks players who effectively lead squads and
 - Chat command for players to check progress
 - Configurable thresholds and timeframes
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -33,7 +33,7 @@ The Squad Leader Whitelist plugin tracks players who effectively lead squads and
 | `wait_on_new_games` | Pause after new games | true | No |
 | `wait_time_on_new_game` | Delay after new game | 30 | No |
 
-### How It Works
+## How It Works
 
 1. **Leadership Tracking**: Monitors players leading squads with minimum members
 2. **Progress Accumulation**: Awards progress points based on leadership time
@@ -41,7 +41,7 @@ The Squad Leader Whitelist plugin tracks players who effectively lead squads and
 4. **Decay System**: Reduces progress for inactive players
 5. **Automatic Management**: Handles admin group assignments and expirations
 
-### Progress System
+## Progress System
 
 - Players earn progress when leading squads with 5+ members
 - Progress accumulates over time toward the whitelist threshold
@@ -49,7 +49,7 @@ The Squad Leader Whitelist plugin tracks players who effectively lead squads and
 - Progress decays if players become inactive
 - Whitelist status expires after the configured duration
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -64,7 +64,7 @@ The Squad Leader Whitelist plugin tracks players who effectively lead squads and
 }
 ```
 
-### Admin Group Setup
+## Admin Group Setup
 
 The plugin automatically manages an admin group for whitelisted players. Ensure your server configuration includes:
 
@@ -73,7 +73,7 @@ The plugin automatically manages an admin group for whitelisted players. Ensure 
 GroupName=squad_leader_whitelist
 ```
 
-### Tips
+## Tips
 
 - Adjust `hours_to_whitelist` based on your server's activity level
 - Use `require_unlocked_squad` to ensure only public squads count

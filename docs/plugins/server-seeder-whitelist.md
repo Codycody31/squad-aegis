@@ -3,11 +3,11 @@ title: Server Seeder Whitelist
 icon: lucide:plug
 ---
 
-## Server Seeder Whitelist
+# Server Seeder Whitelist
 
 The Server Seeder Whitelist plugin rewards players who help populate the server during low-population periods by progressively granting them whitelist privileges based on their seeding time.
 
-### Features
+## Features
 
 - Tracks players who help seed the server during low population
 - Progressive whitelist system based on seeding hours
@@ -16,7 +16,7 @@ The Server Seeder Whitelist plugin rewards players who help populate the server 
 - Chat command for players to check progress
 - Configurable seeding thresholds and timeframes
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -33,7 +33,7 @@ The Server Seeder Whitelist plugin rewards players who help populate the server 
 | `wait_time_on_new_game` | Delay after new game | 120 | No |
 | `enable_chat_command` | Enable !wl command | true | No |
 
-### How It Works
+## How It Works
 
 1. **Seeding Detection**: Monitors when server is below seeding threshold
 2. **Progress Accumulation**: Awards progress to players present during seeding
@@ -41,7 +41,7 @@ The Server Seeder Whitelist plugin rewards players who help populate the server 
 4. **Decay System**: Reduces progress for inactive players
 5. **Automatic Management**: Handles admin group assignments and expirations
 
-### Progress System
+## Progress System
 
 - Players earn progress when server population is below threshold
 - Progress accumulates over time toward the whitelist threshold
@@ -49,7 +49,7 @@ The Server Seeder Whitelist plugin rewards players who help populate the server 
 - Progress decays if players become inactive
 - Whitelist status expires after the configured duration
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -63,7 +63,7 @@ The Server Seeder Whitelist plugin rewards players who help populate the server 
 }
 ```
 
-### Admin Group Setup
+## Admin Group Setup
 
 The plugin automatically manages an admin group for whitelisted players. Ensure your server configuration includes:
 
@@ -72,7 +72,7 @@ The plugin automatically manages an admin group for whitelisted players. Ensure 
 GroupName=seeder_whitelist
 ```
 
-### Tips
+## Tips
 
 - Set seeding threshold based on your server's typical population
 - Adjust hours requirement based on how often your server needs seeding

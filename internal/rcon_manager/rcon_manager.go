@@ -649,7 +649,7 @@ func (m *RconManager) performHealthCheck(serverID uuid.UUID, conn *ServerConnect
 	conn.isHealthy = true
 	conn.LastHealthCheck = time.Now()
 
-	log.Debug().
+	log.Trace().
 		Str("serverID", serverID.String()).
 		Dur("duration", duration).
 		Msg("Health check passed")

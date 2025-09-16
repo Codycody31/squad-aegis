@@ -225,7 +225,7 @@ func (d LogTickRateData) GetEventType() EventType { return EventTypeLogTickRate 
 type LogGameEventUnifiedData struct {
 	Time      string `json:"time"`
 	ChainID   string `json:"chain_id,omitempty"`
-	EventType string `json:"event_type"` // "ROUND_ENDED", "NEW_GAME", "MATCH_WINNER", "GAME_STATE_CHANGE"
+	EventType string `json:"event_type"` // "ROUND_ENDED", "NEW_GAME", "MATCH_WINNER", "TICKET_UPDATE"
 
 	// Round/Match data
 	Winner     string `json:"winner,omitempty"`

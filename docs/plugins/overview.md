@@ -3,13 +3,13 @@ title: Overview
 icon: lucide:plug
 ---
 
-## Plugin Overview
+# Plugin Overview
 
 Squad Aegis features a comprehensive plugin system that allows you to extend the functionality of your server administration panel. Plugins can be enabled, disabled, and configured through the web interface.
 
-## Available Plugins
+# Available Plugins
 
-### Core Plugins
+## Core Plugins
 
 - **[Auto Kick Unassigned](/plugins/auto-kick-unassigned)** - Automatically kicks players who are not in a squad after a specified time
 - **[Auto TK Warn](/plugins/auto-tk-warn)** - Warns players for team kills
@@ -23,7 +23,7 @@ Squad Aegis features a comprehensive plugin system that allows you to extend the
 - **[Switch Teams](/plugins/switch-teams)** - Allows players to request team switches
 - **[Team Randomizer](/plugins/team-randomizer)** - Randomizes team assignments
 
-### Discord Integration Plugins
+## Discord Integration Plugins
 
 - **[Discord Admin Broadcast](/plugins/discord-admin-broadcast)** - Broadcasts admin messages to Discord
 - **[Discord Admin Camera Logs](/plugins/discord-admin-cam-logs)** - Logs admin camera usage to Discord
@@ -36,11 +36,11 @@ Squad Aegis features a comprehensive plugin system that allows you to extend the
 - **[Discord Server Status](/plugins/discord-server-status)** - Logs server status changes to Discord
 - **[Discord Squad Created](/plugins/discord-squad-created)** - Logs squad creation to Discord
 
-### Information Plugins
+## Information Plugins
 
 - **[Community Ban List Info](/plugins/cbl-info)** - Provides Community Ban List information
 
-## Plugin Configuration
+# Plugin Configuration
 
 Each plugin can be configured through the web interface under the Plugins section. Configuration options include:
 
@@ -49,7 +49,7 @@ Each plugin can be configured through the web interface under the Plugins sectio
 - Configure Discord channel IDs for Discord plugins
 - Set timers, thresholds, and messages
 
-## Required Connectors
+# Required Connectors
 
 Some plugins require additional connectors to be configured:
 
@@ -58,10 +58,10 @@ Some plugins require additional connectors to be configured:
   - Set up Discord channels
   - Enable necessary permissions
 
-## Plugin Development
+# Plugin Development
 
 Plugins are written in Go and follow a standardized interface. If you're interested in developing custom plugins, refer to the plugin development documentation in the source code.
 
-## Compatibility
+# Compatibility
 
 Squad Aegis plugins are designed to be compatible with SquadJS plugins where possible, making migration easier for existing SquadJS users.

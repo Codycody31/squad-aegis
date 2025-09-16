@@ -3,11 +3,11 @@ title: Fog of War
 icon: lucide:plug
 ---
 
-## Fog of War
+# Fog of War
 
 The Fog of War plugin automates the configuration of Squad's fog of war settings, allowing you to set the desired fog of war mode automatically after each new game or with a configurable delay.
 
-### Features
+## Features
 
 - Automatic fog of war mode configuration
 - Configurable delay after game start
@@ -15,7 +15,7 @@ The Fog of War plugin automates the configuration of Squad's fog of war settings
 - Customizable RCON command template
 - Event-driven execution
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -24,20 +24,20 @@ The Fog of War plugin automates the configuration of Squad's fog of war settings
 | `enabled` | Whether the plugin is enabled | true | No |
 | `command_template` | RCON command template (use {mode} placeholder) | "AdminSetFogOfWar {mode}" | No |
 
-### Fog of War Modes
+## Fog of War Modes
 
 - **Mode 0**: Disabled - No fog of war, full map visibility
 - **Mode 1**: Enabled - Standard fog of war (recommended)
 - **Mode 2**: Enemies only - Fog of war affects only enemy positions
 
-### How It Works
+## How It Works
 
 1. The plugin listens for new game events
 2. After the configured delay, it executes the fog of war command
 3. The command sets the desired fog of war mode for the match
 4. The delay allows the game to fully initialize before applying settings
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -47,7 +47,7 @@ The Fog of War plugin automates the configuration of Squad's fog of war settings
 }
 ```
 
-### Tips
+## Tips
 
 - Use a delay of 10-15 seconds to ensure the game has fully loaded
 - Mode 1 (standard fog of war) is recommended for competitive play

@@ -3,11 +3,11 @@ title: Auto TK Warn
 icon: lucide:plug
 ---
 
-## Auto TK Warn
+# Auto TK Warn
 
 The Auto TK Warn plugin automatically sends warning messages to players when they commit team kills (TKs), helping to maintain server discipline and encourage proper communication.
 
-### Features
+## Features
 
 - Automatically detects team kills from game logs
 - Sends customizable warning messages to attackers
@@ -15,7 +15,7 @@ The Auto TK Warn plugin automatically sends warning messages to players when the
 - Configurable enable/disable for each message type
 - Integrates with Squad's logging system
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -25,14 +25,14 @@ The Auto TK Warn plugin automatically sends warning messages to players when the
 | `warn_attacker` | Whether to warn the attacker | true | No |
 | `warn_victim` | Whether to warn the victim | false | No |
 
-### How It Works
+## How It Works
 
 1. The plugin monitors game logs for team kill events
 2. When a team kill is detected, it identifies both the attacker and victim
 3. Based on configuration, sends appropriate warning messages to the players
 4. Messages are sent through the game's chat system
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -43,7 +43,7 @@ The Auto TK Warn plugin automatically sends warning messages to players when the
 }
 ```
 
-### Tips
+## Tips
 
 - Use clear, firm language in warning messages to discourage team killing
 - Consider enabling victim warnings to improve player experience

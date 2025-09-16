@@ -3,11 +3,11 @@ title: Command Scheduler
 icon: lucide:plug
 ---
 
-## Command Scheduler
+# Command Scheduler
 
 The Command Scheduler plugin allows you to automate the execution of RCON commands at specified intervals or in response to game events, helping you maintain server configuration and perform routine administrative tasks automatically.
 
-### Features
+## Features
 
 - Schedule commands to run at regular intervals
 - Execute commands after specific game events (like new games)
@@ -15,7 +15,7 @@ The Command Scheduler plugin allows you to automate the execution of RCON comman
 - Individual enable/disable control for each command
 - Persistent timing across server restarts
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -31,7 +31,7 @@ Each command in the array has the following properties:
 | `interval` | Interval in seconds between executions | No |
 | `on_new_game` | Execute after new game events | No |
 
-### How It Works
+## How It Works
 
 1. The plugin maintains a schedule for each configured command
 2. Commands can be triggered by:
@@ -41,7 +41,7 @@ Each command in the array has the following properties:
 3. Commands are executed through the RCON interface
 4. The plugin tracks execution times and schedules next runs
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -71,7 +71,7 @@ Each command in the array has the following properties:
 }
 ```
 
-### Common Use Cases
+## Common Use Cases
 
 - **Server maintenance**: Reload configuration files periodically
 - **Player monitoring**: List players at regular intervals
@@ -79,7 +79,7 @@ Each command in the array has the following properties:
 - **Administrative tasks**: Send periodic broadcasts or warnings
 - **Log management**: Clear old logs or generate reports
 
-### Tips
+## Tips
 
 - Use descriptive names for commands to make management easier
 - Start with longer intervals and adjust based on server needs

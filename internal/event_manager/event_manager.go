@@ -220,6 +220,10 @@ func (em *EventManager) eventMatchesFilter(event Event, subscriber *EventSubscri
 		}
 	}
 
+	if (len(subscriber.Filter.Types) == 1 && subscriber.Filter.Types[0] == EventTypeAll) || len(subscriber.Filter.Types) == 0 {
+		return true
+	}
+
 	// Check event types in filter
 	if len(subscriber.Filter.Types) > 0 {
 		found := false
