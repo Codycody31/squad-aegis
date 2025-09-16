@@ -74,7 +74,7 @@ func run(ctx context.Context) error {
 	}
 
 	// set gin mode based on log level
-	if zerolog.GlobalLevel() > zerolog.DebugLevel {
+	if zerolog.GlobalLevel() > zerolog.DebugLevel || !config.Config.App.IsDevelopment {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
