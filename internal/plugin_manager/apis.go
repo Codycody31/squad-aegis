@@ -668,23 +668,32 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 
 // eventAPI implements EventAPI interface
 type eventAPI struct {
-	serverID     uuid.UUID
-	eventManager *event_manager.EventManager
+	serverID         uuid.UUID
+	pluginInstanceID uuid.UUID
+	pluginName       string
+	eventManager     *event_manager.EventManager
 }
 
-func NewEventAPI(serverID uuid.UUID, eventManager *event_manager.EventManager) EventAPI {
+func NewEventAPI(serverID uuid.UUID, pluginInstanceID uuid.UUID, pluginName string, eventManager *event_manager.EventManager) EventAPI {
 	return &eventAPI{
-		serverID:     serverID,
-		eventManager: eventManager,
+		serverID:         serverID,
+		pluginInstanceID: pluginInstanceID,
+		pluginName:       pluginName,
+		eventManager:     eventManager,
 	}
 }
 
 func (api *eventAPI) PublishEvent(eventType string, data map[string]interface{}, raw string) error {
-	// Create custom event type for plugin events
-	// FIXME: Implement publishing custom events from plugins
-	// pluginEventType := event_manager.EventType(fmt.Sprintf("PLUGIN_%s", strings.ToUpper(eventType)))
+	// Create custom event data for plugin events
+	pluginEventData := &event_manager.PluginCustomEventData{
+		PluginName: api.pluginName,
+		EventType:  eventType,
+		Data:       data,
+	}
 
-	// api.eventManager.PublishEventLegacy(api.serverID, pluginEventType, data, raw)
+	// Publish the event using the event manager
+	api.eventManager.PublishEvent(api.serverID, pluginEventData, raw)
+
 	return nil
 }
 

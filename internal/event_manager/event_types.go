@@ -270,3 +270,14 @@ type LogPlayerDisconnectedData struct {
 }
 
 func (d LogPlayerDisconnectedData) GetEventType() EventType { return EventTypeLogPlayerDisconnected }
+
+// Plugin Event Data Types
+
+// PluginCustomEventData represents custom event data from plugins
+type PluginCustomEventData struct {
+	PluginName string                 `json:"plugin_name"`
+	EventType  string                 `json:"event_type"`
+	Data       map[string]interface{} `json:"data"`
+}
+
+func (d PluginCustomEventData) GetEventType() EventType { return EventTypePluginCustom }

@@ -39,6 +39,9 @@ const (
 	EventTypeLogJoinSucceeded      EventType = "LOG_JOIN_SUCCEEDED"
 	EventTypeLogTickRate           EventType = "LOG_TICK_RATE"
 	EventTypeLogGameEventUnified   EventType = "LOG_GAME_EVENT_UNIFIED"
+
+	// Plugin Events
+	EventTypePluginCustom EventType = "PLUGIN_CUSTOM"
 )
 
 // Event represents a unified event from any source
