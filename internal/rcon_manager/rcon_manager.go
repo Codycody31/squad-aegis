@@ -395,7 +395,6 @@ func (m *RconManager) monitorConnection(serverID uuid.UUID, conn *ServerConnecti
 						conn.reconnectCount++
 						conn.mu.Unlock()
 
-						// TODO: Implement reconnection logic if needed
 						log.Info().
 							Str("serverID", serverID.String()).
 							Int("attempt", conn.reconnectCount).

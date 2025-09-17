@@ -147,13 +147,20 @@ func (api *serverAPI) GetPlayers() ([]*PlayerInfo, error) {
 }
 
 func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
-	// FIXME: will only grab admins that have a user account, not ones that are just defined by the steam id
+	// Get admins that have either a user account or are defined by steam ID only
 	query := `
-		SELECT sa.id, u.name, u.steam_id, sr.name as role
+		SELECT sa.id, 
+		       COALESCE(u.name, 'Steam ID: ' || sa.steam_id) as name,
+		       COALESCE(u.steam_id, sa.steam_id) as steam_id,
+		       sr.id as role_id,
+		       sr.name as role_name,
+		       sa.notes,
+		       sa.expires_at
 		FROM server_admins sa
 		LEFT JOIN users u ON sa.user_id = u.id
 		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
 		WHERE sa.server_id = $1
+		ORDER BY COALESCE(u.name, 'Steam ID: ' || sa.steam_id), sr.name
 	`
 
 	rows, err := api.db.Query(query, api.serverID)
@@ -162,42 +169,76 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	}
 	defer rows.Close()
 
-	var admins []*AdminInfo
+	adminMap := make(map[string]*AdminInfo)
 	adminSteamIDs := make(map[string]*AdminInfo)
 
 	for rows.Next() {
-		var admin AdminInfo
+		var adminID, roleID string
 		var steamID sql.NullInt64
-		var name sql.NullString
-		var role sql.NullString
+		var name, roleName sql.NullString
+		var notes sql.NullString
+		var expiresAt sql.NullTime
 
-		err := rows.Scan(&admin.ID, &name, &steamID, &role)
+		err := rows.Scan(&adminID, &name, &steamID, &roleID, &roleName, &notes, &expiresAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan admin row: %w", err)
 		}
 
-		if name.Valid {
-			admin.Name = name.String
-		} else {
-			admin.Name = "Unknown"
-		}
-
+		var steamIDStr string
 		if steamID.Valid {
-			admin.SteamID = fmt.Sprintf("%d", steamID.Int64)
+			steamIDStr = fmt.Sprintf("%d", steamID.Int64)
 		}
 
-		if role.Valid {
-			admin.Role = role.String
-		} else {
-			admin.Role = "Admin"
+		// Create or get existing admin info
+		admin, exists := adminMap[adminID]
+		if !exists {
+			admin = &AdminInfo{
+				ID:       adminID,
+				SteamID:  steamIDStr,
+				IsOnline: false,
+				Roles:    make([]*PlayerAdminRole, 0),
+			}
+
+			if name.Valid {
+				admin.Name = name.String
+			} else {
+				admin.Name = "Unknown"
+			}
+
+			adminMap[adminID] = admin
+			if steamIDStr != "" {
+				adminSteamIDs[steamIDStr] = admin
+			}
 		}
 
-		admin.IsOnline = false // Default to offline
-		admins = append(admins, &admin)
+		// Add role to admin
+		if roleID != "" {
+			role := &PlayerAdminRole{
+				ID:       roleID,
+				RoleName: "Admin", // Default role name
+			}
 
-		if admin.SteamID != "" {
-			adminSteamIDs[admin.SteamID] = &admin
+			if roleName.Valid {
+				role.RoleName = roleName.String
+			}
+
+			if notes.Valid {
+				role.Notes = notes.String
+			}
+
+			if expiresAt.Valid {
+				role.ExpiresAt = &expiresAt.Time
+				role.IsExpired = expiresAt.Time.Before(time.Now())
+			}
+
+			admin.Roles = append(admin.Roles, role)
 		}
+	}
+
+	// Convert map to slice
+	var admins []*AdminInfo
+	for _, admin := range adminMap {
+		admins = append(admins, admin)
 	}
 
 	// Get online players to determine which admins are online

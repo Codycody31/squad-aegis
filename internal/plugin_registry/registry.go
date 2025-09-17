@@ -20,6 +20,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_squad_created"
 	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
+	"go.codycody31.dev/squad-aegis/internal/plugins/rule_lookup"
 	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
 	"go.codycody31.dev/squad-aegis/internal/plugins/server_seeder_whitelist"
 	"go.codycody31.dev/squad-aegis/internal/plugins/squad_leader_whitelist"
@@ -154,6 +155,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Squad Leader Whitelist plugin
 	if err := pm.RegisterPlugin(squad_leader_whitelist.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Squad Leader Whitelist plugin")
+		return err
+	}
+
+	// Register Rule Lookup plugin
+	if err := pm.RegisterPlugin(rule_lookup.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Rule Lookup plugin")
 		return err
 	}
 
