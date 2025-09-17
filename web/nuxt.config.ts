@@ -47,6 +47,8 @@ export default defineNuxtConfig({
 
   modules: ["@nuxtjs/tailwindcss", "shadcn-nuxt", "@pinia/nuxt", "@nuxt/icon"],
 
+  css: ["monaco-editor-vue3/dist/style.css"],
+
   shadcn: {
     /**
      * Prefix for all the imported component
