@@ -553,12 +553,14 @@ func (api *databaseAPI) DeletePluginData(key string) error {
 // rconAPI implements RconAPI interface
 type rconAPI struct {
 	serverID    uuid.UUID
+	db          *sql.DB
 	rconManager *rcon_manager.RconManager
 }
 
-func NewRconAPI(serverID uuid.UUID, rconManager *rcon_manager.RconManager) RconAPI {
+func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager) RconAPI {
 	return &rconAPI{
 		serverID:    serverID,
+		db:          db,
 		rconManager: rconManager,
 	}
 }
@@ -619,7 +621,47 @@ func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Dura
 		return fmt.Errorf("failed to ban player: %w", err)
 	}
 
-	// FIXME: Need to extend logic here to support updating the DB with ban info
+	// Store ban information in database
+	err = api.storeBanInDatabase(playerID, reason, duration)
+	if err != nil {
+		// Log error but don't fail the ban operation since RCON command succeeded
+		log.Error().Err(err).Str("playerID", playerID).Msg("Failed to store ban in database")
+	}
+
+	return nil
+}
+
+// storeBanInDatabase stores the ban information in the database
+func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration time.Duration) error {
+	// Convert playerID (which should be a Steam ID) to int64
+	steamID, err := strconv.ParseInt(playerID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid Steam ID format: %w", err)
+	}
+
+	// Convert duration to minutes for database storage
+	durationMinutes := int(duration.Minutes())
+
+	// Insert ban into database
+	// We use NULL for admin_id since this is a plugin-initiated ban, not a specific user
+	now := time.Now()
+	query := `
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+	`
+
+	_, err = api.db.Exec(query,
+		uuid.New(),      // id
+		api.serverID,    // server_id
+		steamID,         // steam_id
+		reason,          // reason
+		durationMinutes, // duration in minutes
+		now,             // created_at
+		now,             // updated_at
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert ban into database: %w", err)
+	}
 
 	return nil
 }
