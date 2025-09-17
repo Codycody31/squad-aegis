@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-09-17
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### ✨ Features
+
+- wip [[#70](https://github.com/Codycody31/squad-aegis/pull/70)]
+- feat: integrate ClickHouse for event logging and analytics, add log c… [[#69](https://github.com/Codycody31/squad-aegis/pull/69)]
+- Refactor: cut down project into the working components [[#67](https://github.com/Codycody31/squad-aegis/pull/67)]
+- feat(logwatcher): refactor log processing and client broadcasting [[#45](https://github.com/Codycody31/squad-aegis/pull/45)]
+
+### 📈 Enhancement
+
+- refactor: update audit log ui structure and formatting along with small bug fixes [[#62](https://github.com/Codycody31/squad-aegis/pull/62)]
+- refactor: switch to squad-rcon-go v2 for RCON handling [[#58](https://github.com/Codycody31/squad-aegis/pull/58)]
+- refactor: initiate RCON connection to all servers on startup [[#55](https://github.com/Codycody31/squad-aegis/pull/55)]
+- enhancement(metrics): add analytics/telemetry support with metrics collection [[#52](https://github.com/Codycody31/squad-aegis/pull/52)]
+- refactor(logging): update log statements to structured logging [[#50](https://github.com/Codycody31/squad-aegis/pull/50)]
+- enhancement(rcon): manage active connections in RconManager [[#49](https://github.com/Codycody31/squad-aegis/pull/49)]
+- enhancement: add avatar functionality to server switcher [[#47](https://github.com/Codycody31/squad-aegis/pull/47)]
+- feat: add server metrics endpoint and fetching logic [[#43](https://github.com/Codycody31/squad-aegis/pull/43)]
+- feat(settings): add server settings page and update routes [[#40](https://github.com/Codycody31/squad-aegis/pull/40)]
+
+### 🐛 Bug Fixes
+
+- fix: unable to delete server & dashboard incorrectly showing number o… [[#61](https://github.com/Codycody31/squad-aegis/pull/61)]
+- fix: correct teamMap indexing for squad assignment [[#60](https://github.com/Codycody31/squad-aegis/pull/60)]
+- fix(analytics): add sdk_name parameter to Countly URLs [[#53](https://github.com/Codycody31/squad-aegis/pull/53)]
+- fix(logwatcher): temp directory and file creation for sources [[#46](https://github.com/Codycody31/squad-aegis/pull/46)]
+
+### 📚 Documentation
+
+- docs: Update README for clarity and formatting improvements [[#54](https://github.com/Codycody31/squad-aegis/pull/54)]
+- docs: update README for improved configuration setup [[#42](https://github.com/Codycody31/squad-aegis/pull/42)]
+
 ## [0.1.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.1.0) - 2025-03-24
 
 ### ❤️ Thanks to all contributors! ❤️
