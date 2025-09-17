@@ -40,8 +40,8 @@ import {
     ComboboxInput,
     ComboboxItem,
     ComboboxList,
+    ComboboxTrigger,
 } from "~/components/ui/combobox";
-import ComboboxTrigger from "~/components/ui/combobox/ComboboxTrigger.vue";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
