@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.1) - 2025-09-25
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### Misc
+
+- chore: update release-helper image version [[#73](https://github.com/Codycody31/squad-aegis/pull/73)]
+
 ## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-09-17
 
 ### ❤️ Thanks to all contributors! ❤️
