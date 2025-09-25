@@ -49,7 +49,6 @@ func Conflict(c *gin.Context, message string, data *gin.H) {
 
 // InternalServerError sends a 500 Internal Server Error response
 func InternalServerError(c *gin.Context, err error, data *gin.H) {
-	// TODO: Log the error to Exceptionless and the console
 	log.Error().Err(err).Msg("Internal Server Error")
 
 	if config.Config.App.IsDevelopment {

@@ -3,11 +3,11 @@ title: Discord Squad Created
 icon: lucide:plug
 ---
 
-## Discord Squad Created
+# Discord Squad Created
 
 The Discord Squad Created plugin logs squad creation events to Discord, allowing administrators to track when new squads are formed during matches.
 
-### Features
+## Features
 
 - Logs all squad creation events to Discord
 - Includes squad name, creator, and team information
@@ -15,11 +15,11 @@ The Discord Squad Created plugin logs squad creation events to Discord, allowing
 - Configurable Discord channel
 - Embed or plain text message format
 
-### Requirements
+## Requirements
 
 This plugin requires the Discord connector to be configured with a valid bot token and appropriate permissions.
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -28,7 +28,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 | `use_embed` | Send as embed or plain text | true | No |
 | `enabled` | Whether the plugin is enabled | false | No |
 
-### How It Works
+## How It Works
 
 1. The plugin monitors squad creation events from the game server
 2. When a player creates a squad, it captures:
@@ -39,7 +39,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 3. Formats the information into a Discord message or embed
 4. Sends the notification to the configured Discord channel
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -49,14 +49,14 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 }
 ```
 
-### Discord Setup
+## Discord Setup
 
 1. Create a Discord bot and get its token
 2. Add the bot to your Discord server with message sending permissions
 3. Create a channel for squad activity logs
 4. Copy the channel ID and use it in the plugin configuration
 
-### Tips
+## Tips
 
 - Use embeds for better formatting and visual appeal
 - Choose a color that stands out for squad creation events

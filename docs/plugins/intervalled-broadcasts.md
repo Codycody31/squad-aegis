@@ -3,11 +3,11 @@ title: Intervalled Broadcasts
 icon: lucide:plug
 ---
 
-## Intervalled Broadcasts
+# Intervalled Broadcasts
 
 The Intervalled Broadcasts plugin allows you to set up automated broadcast messages that are sent to all players at regular intervals, perfect for server rules, announcements, or promotional messages.
 
-### Features
+## Features
 
 - Automated periodic broadcasts to all players
 - Multiple messages with sequential or random rotation
@@ -15,7 +15,7 @@ The Intervalled Broadcasts plugin allows you to set up automated broadcast messa
 - Enable/disable control
 - Message shuffling option
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -24,7 +24,7 @@ The Intervalled Broadcasts plugin allows you to set up automated broadcast messa
 | `enabled` | Whether the plugin is enabled | true | No |
 | `shuffle_messages` | Random message order | false | No |
 
-### How It Works
+## How It Works
 
 1. The plugin maintains a list of broadcast messages
 2. At configured intervals, it sends the next message to all players
@@ -32,7 +32,7 @@ The Intervalled Broadcasts plugin allows you to set up automated broadcast messa
 4. The cycle repeats when all messages have been sent
 5. Continues until disabled or server shutdown
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -47,7 +47,7 @@ The Intervalled Broadcasts plugin allows you to set up automated broadcast messa
 }
 ```
 
-### Tips
+## Tips
 
 - Use intervals of 5-15 minutes for optimal player experience
 - Keep messages concise and relevant

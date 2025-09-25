@@ -7,7 +7,9 @@
     },
     "favicon": "/public/assets/logo.svg",
     "icons": {
-      "library": ["lucide"]
+      "library": [
+        "lucide"
+      ]
     },
     "colorScheme": "dark",
     "appearance": {
@@ -27,7 +29,10 @@
     "sidebar": [
       {
         "group": "Get Started",
-        "pages": ["index", "installation"]
+        "pages": [
+          "index",
+          "installation"
+        ]
       },
       {
         "group": "Plugins",
@@ -55,12 +60,27 @@
         ]
       },
       {
+        "group": "Workflows",
+        "pages": [
+          "workflows/overview",
+          "workflows/creating-a-workflow",
+          "workflows/workflow-steps",
+          "workflows/lua-scripting"
+        ]
+      },
+      {
         "group": "Developers",
-        "pages": ["developers/overview", "developers/architecture"]
+        "pages": [
+          "developers/overview",
+          "developers/architecture"
+        ]
       },
       {
         "group": "Misc",
-        "pages": ["screenshots", "acknowledgements"]
+        "pages": [
+          "screenshots",
+          "acknowledgements"
+        ]
       }
     ]
   },

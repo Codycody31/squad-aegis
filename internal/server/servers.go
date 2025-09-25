@@ -331,7 +331,6 @@ func (s *Server) ServerDelete(c *gin.Context) {
 	}
 	defer chTx.Rollback()
 
-	// TODO: Get and shutdown plugins
 	plugins := s.Dependencies.PluginManager.GetPluginInstances(serverId)
 	for _, plugin := range plugins {
 		err = s.Dependencies.PluginManager.DeletePluginInstance(serverId, plugin.ID)

@@ -89,6 +89,14 @@ export default [
     permissions: ["super_admin", "manageserver"],
   },
   {
+    title: "Workflows",
+    icon: "mdi:workflow",
+    to: {
+      name: "servers-serverId-workflows",
+    },
+    permissions: ["super_admin", "manageserver"],
+  },
+  {
     title: "Settings",
     icon: "mdi:cog",
     to: {

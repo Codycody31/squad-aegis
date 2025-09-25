@@ -3,18 +3,18 @@ title: Chat Commands
 icon: lucide:plug
 ---
 
-## Chat Commands
+# Chat Commands
 
 The Chat Commands plugin allows you to configure custom chat commands that can broadcast messages to all players or send private warnings to the player who triggered the command.
 
-### Features
+## Features
 
 - Configure multiple custom chat commands
 - Support for broadcast (public) and warn (private) message types
 - Ignore specific chat types for each command
 - Easy configuration through the web interface
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -29,7 +29,7 @@ Each command in the array has the following properties:
 | `response` | The message to send when command is triggered | Yes |
 | `ignoreChats` | Array of chat types to ignore for this command | No |
 
-### How It Works
+## How It Works
 
 1. Players type commands in chat using the `!` prefix (e.g., `!help`)
 2. The plugin checks if the command matches any configured commands
@@ -37,7 +37,7 @@ Each command in the array has the following properties:
 4. Warn commands are sent privately to the player
 5. Broadcast commands are sent to all players
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -64,7 +64,7 @@ Each command in the array has the following properties:
 }
 ```
 
-### Supported Chat Types
+## Supported Chat Types
 
 The `ignoreChats` array can contain any of the following chat types:
 
@@ -73,7 +73,7 @@ The `ignoreChats` array can contain any of the following chat types:
 - `ChatSquad` - Squad chat
 - `ChatAdmin` - Admin chat
 
-### Tips
+## Tips
 
 - Use warn commands for personal information like Discord links
 - Use broadcast commands for server-wide announcements

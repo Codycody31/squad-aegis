@@ -18,8 +18,6 @@ import (
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
-// TODO: Support passing the name of the player when banning via the API
-
 // ServerBansList handles listing all bans for a server
 func (s *Server) ServerBansList(c *gin.Context) {
 	user := s.getUserFromSession(c)

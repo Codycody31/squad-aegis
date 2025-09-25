@@ -3,11 +3,11 @@ title: Discord Admin Requests
 icon: lucide:plug
 ---
 
-## Discord Admin Requests
+# Discord Admin Requests
 
 The Discord Admin Requests plugin allows players to request administrator assistance through in-game chat, automatically notifying admins via Discord with configurable ping options.
 
-### Features
+## Features
 
 - Player-initiated admin requests via `!admin` command
 - Discord notifications with player information
@@ -16,11 +16,11 @@ The Discord Admin Requests plugin allows players to request administrator assist
 - Optional in-game admin notifications
 - Chat type filtering
 
-### Requirements
+## Requirements
 
 This plugin requires the Discord connector to be configured with a valid bot token and appropriate permissions.
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -33,7 +33,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 | `warn_in_game_admins` | Notify in-game admins | false | No |
 | `show_in_game_admins` | Show admin count to players | true | No |
 
-### How It Works
+## How It Works
 
 1. Players type `!admin` in game chat to request assistance
 2. The plugin checks cooldown and chat type filters
@@ -45,7 +45,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 5. Optionally notifies in-game admins
 6. Shows active admin count to requesting player
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -60,7 +60,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 }
 ```
 
-### Discord Setup
+## Discord Setup
 
 1. Create a Discord bot and get its token
 2. Add the bot to your Discord server with message sending permissions
@@ -68,7 +68,7 @@ This plugin requires the Discord connector to be configured with a valid bot tok
 4. Get role IDs for admin roles you want to ping
 5. Copy channel and role IDs to the plugin configuration
 
-### Tips
+## Tips
 
 - Use role pings for specific admin groups or @here for all online members
 - Set appropriate cooldowns to prevent spam

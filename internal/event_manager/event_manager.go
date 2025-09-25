@@ -39,6 +39,9 @@ const (
 	EventTypeLogJoinSucceeded      EventType = "LOG_JOIN_SUCCEEDED"
 	EventTypeLogTickRate           EventType = "LOG_TICK_RATE"
 	EventTypeLogGameEventUnified   EventType = "LOG_GAME_EVENT_UNIFIED"
+
+	// Plugin Events
+	EventTypePluginCustom EventType = "PLUGIN_CUSTOM"
 )
 
 // Event represents a unified event from any source
@@ -218,6 +221,10 @@ func (em *EventManager) eventMatchesFilter(event Event, subscriber *EventSubscri
 		if !found {
 			return false
 		}
+	}
+
+	if (len(subscriber.Filter.Types) == 1 && subscriber.Filter.Types[0] == EventTypeAll) || len(subscriber.Filter.Types) == 0 {
+		return true
 	}
 
 	// Check event types in filter

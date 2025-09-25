@@ -180,6 +180,19 @@ func (es *EventStore) GetPlayerData(playerID string) (*PlayerData, bool) {
 	return &playerData, true
 }
 
+// RemovePlayerData removes persistent player data by playerID
+func (es *EventStore) RemovePlayerData(playerID string) error {
+	es.mu.Lock()
+	defer es.mu.Unlock()
+
+	key := es.playerKey(playerID)
+	if err := es.client.Del(es.ctx, key); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // StoreSessionData stores non-persistent session data by key (usually player name)
 func (es *EventStore) StoreSessionData(key string, data *SessionData) {
 
@@ -267,31 +280,6 @@ func (es *EventStore) GetSessionData(key string) (*SessionData, bool) {
 	}
 
 	return &sessionData, true
-}
-
-// StoreDisconnectedPlayer stores disconnection data for a player
-func (es *EventStore) StoreDisconnectedPlayer(playerID string, data *DisconnectedPlayerData) {
-
-	key := es.disconnectedKey(playerID)
-	dataBytes, err := json.Marshal(data)
-	if err != nil {
-		log.Error().Err(err).Str("playerID", playerID).Msg("failed to marshal disconnected player data")
-		return
-	}
-
-	// Store with 24 hour expiration
-	if err := es.client.Set(es.ctx, key, string(dataBytes), 24*time.Hour); err != nil {
-		log.Error().Err(err).Str("key", key).Msg("failed to store disconnected player in valkey")
-	}
-}
-
-// RemoveDisconnectedPlayer removes a player from the disconnected list (when they reconnect)
-func (es *EventStore) RemoveDisconnectedPlayer(playerID string) {
-
-	key := es.disconnectedKey(playerID)
-	if err := es.client.Del(es.ctx, key); err != nil {
-		log.Error().Err(err).Str("key", key).Msg("failed to remove disconnected player from valkey")
-	}
 }
 
 // StoreRoundWinner stores round winner data
@@ -596,106 +584,4 @@ func (es *EventStore) GetPlayerInfoByController(controllerID string) (*event_man
 	}
 
 	return nil, false
-}
-
-// Legacy methods for backwards compatibility during migration - these return maps
-// TODO: Remove these once all code is migrated to use the struct versions
-
-// GetPlayerByName finds a player by their name in session data (legacy)
-func (es *EventStore) GetPlayerByName(name string) (map[string]interface{}, bool) {
-	playerInfo, exists := es.GetPlayerInfoByName(name)
-	if !exists {
-		return nil, false
-	}
-
-	// Convert PlayerInfo back to map for compatibility
-	result := make(map[string]interface{})
-	if playerInfo.PlayerController != "" {
-		result["playercontroller"] = playerInfo.PlayerController
-	}
-	if playerInfo.IP != "" {
-		result["ip"] = playerInfo.IP
-	}
-	if playerInfo.SteamID != "" {
-		result["steam"] = playerInfo.SteamID
-	}
-	if playerInfo.EOSID != "" {
-		result["eos"] = playerInfo.EOSID
-	}
-	if playerInfo.PlayerSuffix != "" {
-		result["playerSuffix"] = playerInfo.PlayerSuffix
-	}
-	if playerInfo.Controller != "" {
-		result["controller"] = playerInfo.Controller
-	}
-	if playerInfo.TeamID != "" {
-		result["teamID"] = playerInfo.TeamID
-	}
-	return result, true
-}
-
-// GetPlayerByEOSID finds a player by their EOS ID (legacy)
-func (es *EventStore) GetPlayerByEOSID(eosID string) (map[string]interface{}, bool) {
-	playerInfo, exists := es.GetPlayerInfoByEOSID(eosID)
-	if !exists {
-		return nil, false
-	}
-
-	// Convert PlayerInfo back to map for compatibility
-	result := make(map[string]interface{})
-	if playerInfo.PlayerController != "" {
-		result["playercontroller"] = playerInfo.PlayerController
-	}
-	if playerInfo.IP != "" {
-		result["ip"] = playerInfo.IP
-	}
-	if playerInfo.SteamID != "" {
-		result["steam"] = playerInfo.SteamID
-	}
-	if playerInfo.EOSID != "" {
-		result["eos"] = playerInfo.EOSID
-	}
-	if playerInfo.PlayerSuffix != "" {
-		result["playerSuffix"] = playerInfo.PlayerSuffix
-	}
-	if playerInfo.Controller != "" {
-		result["controller"] = playerInfo.Controller
-	}
-	if playerInfo.TeamID != "" {
-		result["teamID"] = playerInfo.TeamID
-	}
-	return result, true
-}
-
-// GetPlayerByController finds a player by their controller ID (legacy)
-func (es *EventStore) GetPlayerByController(controllerID string) (map[string]interface{}, bool) {
-	playerInfo, exists := es.GetPlayerInfoByController(controllerID)
-	if !exists {
-		return nil, false
-	}
-
-	// Convert PlayerInfo back to map for compatibility
-	result := make(map[string]interface{})
-	if playerInfo.PlayerController != "" {
-		result["playercontroller"] = playerInfo.PlayerController
-	}
-	if playerInfo.IP != "" {
-		result["ip"] = playerInfo.IP
-	}
-	if playerInfo.SteamID != "" {
-		result["steam"] = playerInfo.SteamID
-	}
-	if playerInfo.EOSID != "" {
-		result["eos"] = playerInfo.EOSID
-	}
-	if playerInfo.PlayerSuffix != "" {
-		result["playerSuffix"] = playerInfo.PlayerSuffix
-	}
-	if playerInfo.Controller != "" {
-		result["controller"] = playerInfo.Controller
-	}
-	if playerInfo.TeamID != "" {
-		result["teamID"] = playerInfo.TeamID
-	}
-	return result, true
 }

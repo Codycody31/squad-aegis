@@ -185,9 +185,6 @@ func GetLogParsers() []LogParser {
 					EOSID:            args[5],
 				})
 
-				// Handle reconnecting players
-				eventStore.RemoveDisconnectedPlayer(args[6])
-
 				// Create structured event data
 				eventData := &event_manager.LogPlayerConnectedData{
 					Time:             args[1],
@@ -236,17 +233,14 @@ func GetLogParsers() []LogParser {
 				// Store session data for the victim
 				eventStore.StoreSessionData(args[3], sessionData)
 
-				if _, exists := eventStore.GetPlayerData(args[6]); !exists {
-					// Store minimal player data if we don't have full data yet
-					playerData := &PlayerData{
-						Controller: args[8],
-					}
-					eventStore.StorePlayerData(args[6], playerData)
+				attacker, exists := eventStore.GetPlayerData(args[6])
+				if !exists {
+					eventStore.StorePlayerData(args[6], &PlayerData{
+						Controller: args[5],
+					})
 				} else {
-					// Update existing player data with controller info
-					existingData, _ := eventStore.GetPlayerData(args[6])
-					existingData.Controller = args[8]
-					eventStore.StorePlayerData(args[6], existingData)
+					attacker.Controller = args[5]
+					eventStore.StorePlayerData(args[6], attacker)
 				}
 
 				// Extra logic before publishing the event (similar to JavaScript)
@@ -572,6 +566,8 @@ func GetLogParsers() []LogParser {
 						EOSID:            args[5],
 					}, args[0])
 				} else {
+					_ = eventStore.RemovePlayerData(player.EOSID)
+					_ = eventStore.RemovePlayerData(player.SteamID)
 					eventManager.PublishEvent(serverID, &event_manager.LogPlayerDisconnectedData{
 						Time:             args[1],
 						ChainID:          strings.TrimSpace(args[2]),

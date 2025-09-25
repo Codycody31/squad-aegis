@@ -147,13 +147,20 @@ func (api *serverAPI) GetPlayers() ([]*PlayerInfo, error) {
 }
 
 func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
-	// FIXME: will only grab admins that have a user account, not ones that are just defined by the steam id
+	// Get admins that have either a user account or are defined by steam ID only
 	query := `
-		SELECT sa.id, u.name, u.steam_id, sr.name as role
+		SELECT sa.id, 
+		       COALESCE(u.name, 'Steam ID: ' || sa.steam_id) as name,
+		       COALESCE(u.steam_id, sa.steam_id) as steam_id,
+		       sr.id as role_id,
+		       sr.name as role_name,
+		       sa.notes,
+		       sa.expires_at
 		FROM server_admins sa
 		LEFT JOIN users u ON sa.user_id = u.id
 		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
 		WHERE sa.server_id = $1
+		ORDER BY COALESCE(u.name, 'Steam ID: ' || sa.steam_id), sr.name
 	`
 
 	rows, err := api.db.Query(query, api.serverID)
@@ -162,42 +169,76 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	}
 	defer rows.Close()
 
-	var admins []*AdminInfo
+	adminMap := make(map[string]*AdminInfo)
 	adminSteamIDs := make(map[string]*AdminInfo)
 
 	for rows.Next() {
-		var admin AdminInfo
+		var adminID, roleID string
 		var steamID sql.NullInt64
-		var name sql.NullString
-		var role sql.NullString
+		var name, roleName sql.NullString
+		var notes sql.NullString
+		var expiresAt sql.NullTime
 
-		err := rows.Scan(&admin.ID, &name, &steamID, &role)
+		err := rows.Scan(&adminID, &name, &steamID, &roleID, &roleName, &notes, &expiresAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan admin row: %w", err)
 		}
 
-		if name.Valid {
-			admin.Name = name.String
-		} else {
-			admin.Name = "Unknown"
-		}
-
+		var steamIDStr string
 		if steamID.Valid {
-			admin.SteamID = fmt.Sprintf("%d", steamID.Int64)
+			steamIDStr = fmt.Sprintf("%d", steamID.Int64)
 		}
 
-		if role.Valid {
-			admin.Role = role.String
-		} else {
-			admin.Role = "Admin"
+		// Create or get existing admin info
+		admin, exists := adminMap[adminID]
+		if !exists {
+			admin = &AdminInfo{
+				ID:       adminID,
+				SteamID:  steamIDStr,
+				IsOnline: false,
+				Roles:    make([]*PlayerAdminRole, 0),
+			}
+
+			if name.Valid {
+				admin.Name = name.String
+			} else {
+				admin.Name = "Unknown"
+			}
+
+			adminMap[adminID] = admin
+			if steamIDStr != "" {
+				adminSteamIDs[steamIDStr] = admin
+			}
 		}
 
-		admin.IsOnline = false // Default to offline
-		admins = append(admins, &admin)
+		// Add role to admin
+		if roleID != "" {
+			role := &PlayerAdminRole{
+				ID:       roleID,
+				RoleName: "Admin", // Default role name
+			}
 
-		if admin.SteamID != "" {
-			adminSteamIDs[admin.SteamID] = &admin
+			if roleName.Valid {
+				role.RoleName = roleName.String
+			}
+
+			if notes.Valid {
+				role.Notes = notes.String
+			}
+
+			if expiresAt.Valid {
+				role.ExpiresAt = &expiresAt.Time
+				role.IsExpired = expiresAt.Time.Before(time.Now())
+			}
+
+			admin.Roles = append(admin.Roles, role)
 		}
+	}
+
+	// Convert map to slice
+	var admins []*AdminInfo
+	for _, admin := range adminMap {
+		admins = append(admins, admin)
 	}
 
 	// Get online players to determine which admins are online
@@ -512,12 +553,14 @@ func (api *databaseAPI) DeletePluginData(key string) error {
 // rconAPI implements RconAPI interface
 type rconAPI struct {
 	serverID    uuid.UUID
+	db          *sql.DB
 	rconManager *rcon_manager.RconManager
 }
 
-func NewRconAPI(serverID uuid.UUID, rconManager *rcon_manager.RconManager) RconAPI {
+func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager) RconAPI {
 	return &rconAPI{
 		serverID:    serverID,
+		db:          db,
 		rconManager: rconManager,
 	}
 }
@@ -578,30 +621,79 @@ func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Dura
 		return fmt.Errorf("failed to ban player: %w", err)
 	}
 
-	// FIXME: Need to extend logic here to support updating the DB with ban info
+	// Store ban information in database
+	err = api.storeBanInDatabase(playerID, reason, duration)
+	if err != nil {
+		// Log error but don't fail the ban operation since RCON command succeeded
+		log.Error().Err(err).Str("playerID", playerID).Msg("Failed to store ban in database")
+	}
+
+	return nil
+}
+
+// storeBanInDatabase stores the ban information in the database
+func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration time.Duration) error {
+	// Convert playerID (which should be a Steam ID) to int64
+	steamID, err := strconv.ParseInt(playerID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid Steam ID format: %w", err)
+	}
+
+	// Convert duration to minutes for database storage
+	durationMinutes := int(duration.Minutes())
+
+	// Insert ban into database
+	// We use NULL for admin_id since this is a plugin-initiated ban, not a specific user
+	now := time.Now()
+	query := `
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+	`
+
+	_, err = api.db.Exec(query,
+		uuid.New(),      // id
+		api.serverID,    // server_id
+		steamID,         // steam_id
+		reason,          // reason
+		durationMinutes, // duration in minutes
+		now,             // created_at
+		now,             // updated_at
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert ban into database: %w", err)
+	}
 
 	return nil
 }
 
 // eventAPI implements EventAPI interface
 type eventAPI struct {
-	serverID     uuid.UUID
-	eventManager *event_manager.EventManager
+	serverID         uuid.UUID
+	pluginInstanceID uuid.UUID
+	pluginName       string
+	eventManager     *event_manager.EventManager
 }
 
-func NewEventAPI(serverID uuid.UUID, eventManager *event_manager.EventManager) EventAPI {
+func NewEventAPI(serverID uuid.UUID, pluginInstanceID uuid.UUID, pluginName string, eventManager *event_manager.EventManager) EventAPI {
 	return &eventAPI{
-		serverID:     serverID,
-		eventManager: eventManager,
+		serverID:         serverID,
+		pluginInstanceID: pluginInstanceID,
+		pluginName:       pluginName,
+		eventManager:     eventManager,
 	}
 }
 
 func (api *eventAPI) PublishEvent(eventType string, data map[string]interface{}, raw string) error {
-	// Create custom event type for plugin events
-	// FIXME: Implement publishing custom events from plugins
-	// pluginEventType := event_manager.EventType(fmt.Sprintf("PLUGIN_%s", strings.ToUpper(eventType)))
+	// Create custom event data for plugin events
+	pluginEventData := &event_manager.PluginCustomEventData{
+		PluginName: api.pluginName,
+		EventType:  eventType,
+		Data:       data,
+	}
 
-	// api.eventManager.PublishEventLegacy(api.serverID, pluginEventType, data, raw)
+	// Publish the event using the event manager
+	api.eventManager.PublishEvent(api.serverID, pluginEventData, raw)
+
 	return nil
 }
 

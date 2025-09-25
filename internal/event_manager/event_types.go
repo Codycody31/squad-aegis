@@ -225,7 +225,7 @@ func (d LogTickRateData) GetEventType() EventType { return EventTypeLogTickRate 
 type LogGameEventUnifiedData struct {
 	Time      string `json:"time"`
 	ChainID   string `json:"chain_id,omitempty"`
-	EventType string `json:"event_type"` // "ROUND_ENDED", "NEW_GAME", "MATCH_WINNER", "GAME_STATE_CHANGE"
+	EventType string `json:"event_type"` // "ROUND_ENDED", "NEW_GAME", "MATCH_WINNER", "TICKET_UPDATE"
 
 	// Round/Match data
 	Winner     string `json:"winner,omitempty"`
@@ -270,3 +270,14 @@ type LogPlayerDisconnectedData struct {
 }
 
 func (d LogPlayerDisconnectedData) GetEventType() EventType { return EventTypeLogPlayerDisconnected }
+
+// Plugin Event Data Types
+
+// PluginCustomEventData represents custom event data from plugins
+type PluginCustomEventData struct {
+	PluginName string                 `json:"plugin_name"`
+	EventType  string                 `json:"event_type"`
+	Data       map[string]interface{} `json:"data"`
+}
+
+func (d PluginCustomEventData) GetEventType() EventType { return EventTypePluginCustom }

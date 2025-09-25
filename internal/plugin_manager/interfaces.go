@@ -354,11 +354,11 @@ type PlayerInfo struct {
 
 // AdminInfo contains admin information
 type AdminInfo struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	SteamID  string `json:"steam_id"`
-	IsOnline bool   `json:"is_online"`
-	Role     string `json:"role"`
+	ID       string             `json:"id"`
+	Name     string             `json:"name"`
+	SteamID  string             `json:"steam_id"`
+	IsOnline bool               `json:"is_online"`
+	Roles    []*PlayerAdminRole `json:"roles"`
 }
 
 // PluginRegistry manages available plugin definitions

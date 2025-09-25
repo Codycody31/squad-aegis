@@ -99,6 +99,13 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeBool,
 					Default:     true,
 				},
+				{
+					Name:        "admin_roles",
+					Description: "Array of role names that are considered admins for public broadcast (empty array allows all admin roles)",
+					Required:    false,
+					Type:        plug_config_schema.FieldTypeArrayString,
+					Default:     []interface{}{},
+				},
 			},
 		},
 
@@ -236,7 +243,6 @@ func (p *DiscordAdminRequestPlugin) UpdateConfig(config map[string]interface{}) 
 
 // handleChatMessage processes chat messages looking for admin requests
 func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
-	// TODO: Array of roles that are considered admins
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")
@@ -270,8 +276,17 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 
 	onlineAdmins := 0
 	for _, admin := range admins {
-		if admin.IsOnline {
-			onlineAdmins++
+		if admin.SteamID == event.SteamID {
+			permittedRoles := plug_config_schema.GetArrayStringValue(p.config, "admin_roles")
+			for _, role := range permittedRoles {
+				for _, adminRole := range admin.Roles {
+					if role == adminRole.RoleName {
+						onlineAdmins++
+						break
+					}
+				}
+			}
+			break
 		}
 	}
 

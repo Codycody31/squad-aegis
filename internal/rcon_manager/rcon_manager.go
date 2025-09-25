@@ -395,7 +395,6 @@ func (m *RconManager) monitorConnection(serverID uuid.UUID, conn *ServerConnecti
 						conn.reconnectCount++
 						conn.mu.Unlock()
 
-						// TODO: Implement reconnection logic if needed
 						log.Info().
 							Str("serverID", serverID.String()).
 							Int("attempt", conn.reconnectCount).
@@ -649,7 +648,7 @@ func (m *RconManager) performHealthCheck(serverID uuid.UUID, conn *ServerConnect
 	conn.isHealthy = true
 	conn.LastHealthCheck = time.Now()
 
-	log.Debug().
+	log.Trace().
 		Str("serverID", serverID.String()).
 		Dur("duration", duration).
 		Msg("Health check passed")

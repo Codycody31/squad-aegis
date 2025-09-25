@@ -18,6 +18,8 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-vue-next": "^0.477.0",
+    "monaco-editor": "^0.53.0",
+    "monaco-editor-vue3": "^1.0.3",
     "nuxt": "^3.15.4",
     "pinia": "^3.0.1",
     "reka-ui": "^2.0.2",

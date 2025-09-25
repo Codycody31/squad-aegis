@@ -3,11 +3,11 @@ title: Team Randomizer
 icon: lucide:plug
 ---
 
-## Team Randomizer
+# Team Randomizer
 
 The Team Randomizer plugin allows administrators to randomize team assignments to break up clan stacks or for social events, promoting fair and mixed gameplay.
 
-### Features
+## Features
 
 - Random team assignment for all players
 - Chat command activation
@@ -16,7 +16,7 @@ The Team Randomizer plugin allows administrators to randomize team assignments t
 - Cooldown system to prevent abuse
 - Optional announcement to all players
 
-### Configuration Options
+## Configuration Options
 
 | Option | Description | Default | Required |
 |--------|-------------|---------|----------|
@@ -26,7 +26,7 @@ The Team Randomizer plugin allows administrators to randomize team assignments t
 | `announce_randomization` | Announce to all players | true | No |
 | `cooldown_seconds` | Cooldown between uses | 30 | No |
 
-### How It Works
+## How It Works
 
 1. Administrator types the command in the appropriate chat
 2. The plugin validates permissions and cooldown
@@ -34,7 +34,7 @@ The Team Randomizer plugin allows administrators to randomize team assignments t
 4. Squad assignments are cleared (players become unassigned)
 5. Optional announcement is broadcast to all players
 
-### Example Configuration
+## Example Configuration
 
 ```json
 {
@@ -46,19 +46,19 @@ The Team Randomizer plugin allows administrators to randomize team assignments t
 }
 ```
 
-### Usage
+## Usage
 
 - **Admin chat**: `!randomize` (if `require_admin_chat` is true)
 - **All chat**: `!randomize` (if `require_admin_chat` is false, but admin_only should be true)
 
-### Important Notes
+## Important Notes
 
 - **Squad clearing**: All players become unassigned from squads after randomization
 - **Immediate effect**: Randomization happens instantly
 - **No undo**: Once executed, randomization cannot be reversed
 - **All players**: Affects every player currently on the server
 
-### Tips
+## Tips
 
 - Use during clan matches to break up stacked teams
 - Announce randomization in advance to prepare players
