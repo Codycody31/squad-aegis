@@ -8,6 +8,7 @@
 
 ### Misc
 
+- ci(release-config): add option to skip commits without PRs [[#75](https://github.com/Codycody31/squad-aegis/pull/75)]
 - chore: update release-helper image version [[#73](https://github.com/Codycody31/squad-aegis/pull/73)]
 
 ## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-09-17
