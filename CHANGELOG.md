@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.0) - 2025-09-26
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### 📈 Enhancement
+
+- refactor: attempt to improve locking logic in DisconnectFromServer method [[#79](https://github.com/Codycody31/squad-aegis/pull/79)]
+- refactor: server feed now shows player disconnects in connection history [[#77](https://github.com/Codycody31/squad-aegis/pull/77)]
+- refactor(ui): Remove Connected Players in favor of Teams & Squads [[#76](https://github.com/Codycody31/squad-aegis/pull/76)]
+
+### 🐛 Bug Fixes
+
+- refactor: remove broadcast messages for whitelist achievements [[#82](https://github.com/Codycody31/squad-aegis/pull/82)]
+- fix: remove unnecessary await for fetch functions in Vue + bump squad-rcon-go [[#81](https://github.com/Codycody31/squad-aegis/pull/81)]
+- fix: log watcher restart endpoint missing [[#78](https://github.com/Codycody31/squad-aegis/pull/78)]
+
+### Misc
+
+- chore: remove health check logic and methods [[#80](https://github.com/Codycody31/squad-aegis/pull/80)]
+- ci(release-config): add option to skip commits without PRs [[#75](https://github.com/Codycody31/squad-aegis/pull/75)]
+- chore: update release-helper image version [[#73](https://github.com/Codycody31/squad-aegis/pull/73)]
+
 ## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-09-17
 
 ### ❤️ Thanks to all contributors! ❤️
