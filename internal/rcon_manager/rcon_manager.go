@@ -377,38 +377,8 @@ func (m *RconManager) monitorConnection(serverID uuid.UUID, conn *ServerConnecti
 
 			// Check if health check is needed
 			conn.mu.Lock()
-			needsHealthCheck := now.Sub(conn.LastHealthCheck) >= HealthCheckInterval
 			needsServerInfo := now.Sub(conn.LastServerInfoTime) >= ServerInfoInterval
 			conn.mu.Unlock()
-
-			// Perform periodic health check
-			if needsHealthCheck {
-				if err := m.performHealthCheck(serverID, conn); err != nil {
-					log.Warn().
-						Str("serverID", serverID.String()).
-						Err(err).
-						Msg("Periodic health check failed")
-
-					// Attempt reconnection if configured
-					conn.mu.Lock()
-					if conn.reconnectCount < MaxReconnectAttempts {
-						conn.reconnectCount++
-						conn.mu.Unlock()
-
-						log.Info().
-							Str("serverID", serverID.String()).
-							Int("attempt", conn.reconnectCount).
-							Msg("Connection unhealthy, may need reconnection")
-					} else {
-						conn.mu.Unlock()
-					}
-				} else {
-					// Reset reconnect count on successful health check
-					conn.mu.Lock()
-					conn.reconnectCount = 0
-					conn.mu.Unlock()
-				}
-			}
 
 			// Collect server info periodically
 			if needsServerInfo && conn.isHealthy {
@@ -490,9 +460,12 @@ func (m *RconManager) ExecuteCommandWithOptions(serverID uuid.UUID, command stri
 	}
 
 	// Get connection with health check
-	conn, err := m.getHealthyConnection(serverID)
-	if err != nil {
-		return "", err
+	m.mu.RLock()
+	conn, exists := m.connections[serverID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return "", errors.New("server not connected")
 	}
 
 	// Update last used time efficiently
@@ -557,8 +530,6 @@ func (m *RconManager) ExecuteCommandWithOptions(serverID uuid.UUID, command stri
 			lastErr = ctx.Err()
 			if lastErr == context.DeadlineExceeded {
 				lastErr = errors.New("command execution timeout")
-				// Mark connection as potentially unhealthy
-				m.markConnectionUnhealthy(serverID)
 			}
 			continue
 		case <-m.ctx.Done():
@@ -574,107 +545,6 @@ func (m *RconManager) ExecuteCommandWithOptions(serverID uuid.UUID, command stri
 		Msg("Command execution failed after all retries")
 
 	return "", fmt.Errorf("command failed after %d attempts: %w", options.Retries, lastErr)
-}
-
-// getHealthyConnection returns a healthy connection or error
-func (m *RconManager) getHealthyConnection(serverID uuid.UUID) (*ServerConnection, error) {
-	m.mu.RLock()
-	conn, exists := m.connections[serverID]
-	m.mu.RUnlock()
-
-	if !exists {
-		return nil, errors.New("server not connected")
-	}
-
-	// Check if health check is needed
-	conn.mu.Lock()
-	needsHealthCheck := time.Since(conn.LastHealthCheck) > HealthCheckInterval || !conn.isHealthy
-	conn.mu.Unlock()
-
-	if needsHealthCheck {
-		if err := m.performHealthCheck(serverID, conn); err != nil {
-			return nil, fmt.Errorf("server unhealthy: %w", err)
-		}
-	}
-
-	return conn, nil
-}
-
-// performHealthCheck performs a health check on the connection
-func (m *RconManager) performHealthCheck(serverID uuid.UUID, conn *ServerConnection) error {
-	conn.mu.Lock()
-	defer conn.mu.Unlock()
-
-	// Simple ping-like command to test connectivity
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	start := time.Now()
-
-	// Use a lightweight command for health check
-	done := make(chan bool, 1)
-	var healthErr error
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				healthErr = fmt.Errorf("health check panic: %v", r)
-			}
-			done <- true
-		}()
-
-		// Try to execute a simple command
-		response := conn.Rcon.Execute("ShowServerInfo")
-		if response == "" {
-			healthErr = errors.New("empty response from health check")
-		}
-	}()
-
-	select {
-	case <-done:
-		// Health check completed
-	case <-ctx.Done():
-		healthErr = errors.New("health check timeout")
-	}
-
-	duration := time.Since(start)
-
-	if healthErr != nil {
-		conn.isHealthy = false
-		log.Warn().
-			Str("serverID", serverID.String()).
-			Err(healthErr).
-			Dur("duration", duration).
-			Msg("Health check failed")
-		return healthErr
-	}
-
-	conn.isHealthy = true
-	conn.LastHealthCheck = time.Now()
-
-	log.Trace().
-		Str("serverID", serverID.String()).
-		Dur("duration", duration).
-		Msg("Health check passed")
-
-	return nil
-}
-
-// markConnectionUnhealthy marks a connection as unhealthy
-func (m *RconManager) markConnectionUnhealthy(serverID uuid.UUID) {
-	m.mu.RLock()
-	conn, exists := m.connections[serverID]
-	m.mu.RUnlock()
-
-	if exists {
-		conn.mu.Lock()
-		conn.isHealthy = false
-		conn.mu.Unlock()
-
-		log.Warn().
-			Str("serverID", serverID.String()).
-			Msg("Marked connection as unhealthy")
-	}
 }
 
 // isNonRetryableError determines if an error should not be retried
