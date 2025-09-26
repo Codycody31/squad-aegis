@@ -1,15 +1,22 @@
 # Changelog
 
-## [0.2.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.1) - 2025-09-26
+## [0.3.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.0) - 2025-09-26
 
 ### ❤️ Thanks to all contributors! ❤️
 
 @Codycody31
 
-### Misc
+### 📈 Enhancement
 
 - refactor: server feed now shows player disconnects in connection history [[#77](https://github.com/Codycody31/squad-aegis/pull/77)]
 - refactor(ui): Remove Connected Players in favor of Teams & Squads [[#76](https://github.com/Codycody31/squad-aegis/pull/76)]
+
+### 🐛 Bug Fixes
+
+- fix: log watcher restart endpoint missing [[#78](https://github.com/Codycody31/squad-aegis/pull/78)]
+
+### Misc
+
 - ci(release-config): add option to skip commits without PRs [[#75](https://github.com/Codycody31/squad-aegis/pull/75)]
 - chore: update release-helper image version [[#73](https://github.com/Codycody31/squad-aegis/pull/73)]
 
