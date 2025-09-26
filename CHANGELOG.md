@@ -18,6 +18,7 @@
 
 ### Misc
 
+- chore: remove health check logic and methods [[#80](https://github.com/Codycody31/squad-aegis/pull/80)]
 - ci(release-config): add option to skip commits without PRs [[#75](https://github.com/Codycody31/squad-aegis/pull/75)]
 - chore: update release-helper image version [[#73](https://github.com/Codycody31/squad-aegis/pull/73)]
 
