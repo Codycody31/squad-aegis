@@ -533,414 +533,407 @@ refresh();
     </div>
 
     <div v-else>
-      <Tabs v-model="activeTab" class="w-full">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="players">Players</TabsTrigger>
-        </TabsList>
-
-        <!-- Overview Tab -->
-        <TabsContent value="overview">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <!-- Server Info Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>Server Information</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div class="space-y-2">
-                  <div class="flex justify-between">
-                    <span class="text-sm font-medium">Name:</span>
-                    <span class="text-sm">{{
-                      serverInfo?.server?.name || "Unknown"
-                    }}</span>
-                  </div>
-                  <div class="flex justify-between">
-                    <span class="text-sm font-medium">IP Address:</span>
-                    <span class="text-sm">{{
-                      serverInfo?.server?.ip_address || "Unknown"
-                    }}</span>
-                  </div>
-                  <div class="flex justify-between">
-                    <span class="text-sm font-medium">Game Port:</span>
-                    <span class="text-sm">{{
-                      serverInfo?.server?.game_port || "Unknown"
-                    }}</span>
-                  </div>
-                  <div class="flex justify-between">
-                    <span class="text-sm font-medium">RCON IP Address:</span>
-                    <span class="text-sm">{{
-                      serverInfo?.server?.rcon_ip_address || "Unknown"
-                    }}</span>
-                  </div>
-                  <div class="flex justify-between">
-                    <span class="text-sm font-medium">RCON Port:</span>
-                    <span class="text-sm">{{
-                      serverInfo?.server?.rcon_port || "Unknown"
-                    }}</span>
-                  </div>
-                  <div class="flex justify-between">
-                    <span class="text-sm font-medium">Server Version:</span>
-                    <span class="text-sm">{{
-                      rconServerInfo?.version || rconServerInfo?.game_version || "Unknown"
-                    }}</span>
-                  </div>
-                  <div class="flex justify-between">
-                    <span class="text-sm font-medium">License Status:</span>
-                    <span class="text-sm">
-                      <Badge 
-                        :variant="rconServerInfo?.licensed_server ? 'default' : 'destructive'"
-                        v-if="rconServerInfo?.licensed_server !== undefined"
-                      >
-                        {{ rconServerInfo?.licensed_server ? 'Licensed' : 'Unlicensed' }}
-                      </Badge>
-                      <span v-else>Unknown</span>
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <!-- Current Map Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>Current Map</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div class="text-center">
-                  <div
-                    class="relative w-full h-32 bg-gray-200 rounded-md mb-2 overflow-hidden"
-                  >
-                    <div
-                      class="absolute inset-0 flex items-center justify-center text-gray-500"
-                    >
-                      Map Preview
-                    </div>
-                    <img
-                      :src="`https://raw.githubusercontent.com/mahtoid/SquadMaps/refs/heads/master/img/maps/thumbnails/${serverInfo.metrics?.current?.layer}.jpg`"
-                      class="absolute inset-0 w-full h-full object-cover"
-                    />
-                  </div>
-                  <h3 class="text-lg font-medium">
-                    {{ serverInfo.metrics?.current?.map }}
-                    {{
-                      serverInfo.metrics?.next
-                        ? `-> ${serverInfo.metrics?.next?.map}`
-                        : ""
-                    }}
-                  </h3>
-                  <p class="text-sm text-muted-foreground">
-                    <template
-                      v-if="
-                        rconServerInfo?.match_timeout * 60 -
-                          rconServerInfo?.playtime >
-                        0
-                      "
-                    >
-                      Time Remaining:
-                      {{
-                        Math.floor(
-                          (rconServerInfo.match_timeout * 60 -
-                            rconServerInfo.playtime) /
-                            60
-                        )
-                      }}
-                      minutes
-                    </template>
-                    <template v-else> Time Remaining: 0 minutes </template>
-                  </p>
-                </div>
-              </CardContent>
-              <CardFooter>
-                <div class="w-full">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    class="w-full"
-                    @click="openMapChangeDialog"
-                  >
-                    Change Layer
-                  </Button>
-                </div>
-              </CardFooter>
-            </Card>
-
-            <!-- Player Count Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>Player Count</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div class="text-center">
-                  <div class="text-3xl font-bold mb-2">
-                    {{
-                      formattedPlayerCount ||
-                      `${serverInfo.metrics?.players?.total} / ${serverInfo.metrics?.players?.max}`
-                    }}
-                  </div>
-                  <Progress
-                    :value="
-                      (serverInfo.metrics?.players?.total /
-                        serverInfo.metrics?.players?.max) *
-                      100
-                    "
-                    class="h-2 mb-4"
-                  />
-                  <div class="grid grid-cols-2 gap-2">
-                    <div class="bg-blue-50 p-2 rounded-md">
-                      <div class="text-sm font-medium text-blue-700">
-                        {{ teamsData[0]?.name || "Team 1" }}
-                      </div>
-                      <div class="text-xl font-bold text-blue-800">
-                        {{ serverInfo.metrics?.players?.teams?.[1] || 0 }}
-                      </div>
-                    </div>
-                    <div class="bg-red-50 p-2 rounded-md">
-                      <div class="text-sm font-medium text-red-700">
-                        {{ teamsData[1]?.name || "Team 2" }}
-                      </div>
-                      <div class="text-xl font-bold text-red-800">
-                        {{ serverInfo.metrics?.players?.teams?.[2] || 0 }}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-              <CardFooter>
-                <NuxtLink
-                  :to="`/servers/${serverId}/connected-players`"
-                  class="w-full"
-                >
-                  <Button variant="outline" size="sm" class="w-full">
-                    View All Players
-                  </Button>
-                </NuxtLink>
-              </CardFooter>
-            </Card>
-          </div>
-
-          <!-- Quick Actions -->
-          <Card class="mb-4">
-            <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-              <CardDescription>Common server management tasks</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <NuxtLink :to="`/servers/${serverId}/console`" class="w-full">
-                  <Button
-                    variant="outline"
-                    class="w-full h-full flex flex-col items-center justify-center p-4"
-                  >
-                    <div class="text-xl mb-2">💻</div>
-                    <div class="text-sm">Console</div>
-                  </Button>
-                </NuxtLink>
-                <NuxtLink
-                  :to="`/servers/${serverId}/banned-players`"
-                  class="w-full"
-                >
-                  <Button
-                    variant="outline"
-                    class="w-full h-full flex flex-col items-center justify-center p-4"
-                  >
-                    <div class="text-xl mb-2">🚫</div>
-                    <div class="text-sm">Bans</div>
-                  </Button>
-                </NuxtLink>
-                <NuxtLink
-                  :to="`/servers/${serverId}/users-and-roles`"
-                  class="w-full"
-                >
-                  <Button
-                    variant="outline"
-                    class="w-full h-full flex flex-col items-center justify-center p-4"
-                  >
-                    <div class="text-xl mb-2">👥</div>
-                    <div class="text-sm">Users & Roles</div>
-                  </Button>
-                </NuxtLink>
-                <NuxtLink
-                  :to="`/servers/${serverId}/audit-logs`"
-                  class="w-full"
-                >
-                  <Button
-                    variant="outline"
-                    class="w-full h-full flex flex-col items-center justify-center p-4"
-                  >
-                    <div class="text-xl mb-2">📋</div>
-                    <div class="text-sm">Audit Logs</div>
-                  </Button>
-                </NuxtLink>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <!-- Server Info Card -->
+        <Card>
+          <CardHeader>
+            <CardTitle>Server Information</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="space-y-2">
+              <div class="flex justify-between">
+                <span class="text-sm font-medium">Name:</span>
+                <span class="text-sm">{{
+                  serverInfo?.server?.name || "Unknown"
+                }}</span>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+              <div class="flex justify-between">
+                <span class="text-sm font-medium">IP Address:</span>
+                <span class="text-sm">{{
+                  serverInfo?.server?.ip_address || "Unknown"
+                }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-sm font-medium">Game Port:</span>
+                <span class="text-sm">{{
+                  serverInfo?.server?.game_port || "Unknown"
+                }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-sm font-medium">RCON IP Address:</span>
+                <span class="text-sm">{{
+                  serverInfo?.server?.rcon_ip_address || "Unknown"
+                }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-sm font-medium">RCON Port:</span>
+                <span class="text-sm">{{
+                  serverInfo?.server?.rcon_port || "Unknown"
+                }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-sm font-medium">Server Version:</span>
+                <span class="text-sm">{{
+                  rconServerInfo?.version ||
+                  rconServerInfo?.game_version ||
+                  "Unknown"
+                }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-sm font-medium">License Status:</span>
+                <span class="text-sm">
+                  <Badge
+                    :variant="
+                      rconServerInfo?.licensed_server
+                        ? 'default'
+                        : 'destructive'
+                    "
+                    v-if="rconServerInfo?.licensed_server !== undefined"
+                  >
+                    {{
+                      rconServerInfo?.licensed_server
+                        ? "Licensed"
+                        : "Unlicensed"
+                    }}
+                  </Badge>
+                  <span v-else>Unknown</span>
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <!-- Players Tab -->
-        <TabsContent value="players">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <!-- Connected Players Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>Connected Players</CardTitle>
-                <CardDescription>Currently online players</CardDescription>
-              </CardHeader>
-              <CardContent>
+        <!-- Current Map Card -->
+        <Card>
+          <CardHeader>
+            <CardTitle>Current Map</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="text-center">
+              <div
+                class="relative w-full h-32 bg-gray-200 rounded-md mb-2 overflow-hidden"
+              >
                 <div
-                  v-if="loadingTeams && connectedPlayers.length === 0"
-                  class="text-center py-4"
+                  class="absolute inset-0 flex items-center justify-center text-gray-500"
                 >
-                  <div
-                    class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
-                  ></div>
-                  <p class="text-sm">Loading players...</p>
+                  Map Preview
                 </div>
-                <div v-else-if="errorTeams" class="text-red-500 text-sm py-2">
-                  {{ errorTeams }}
+                <img
+                  :src="`https://raw.githubusercontent.com/mahtoid/SquadMaps/refs/heads/master/img/maps/thumbnails/${serverInfo.metrics?.current?.layer}.jpg`"
+                  class="absolute inset-0 w-full h-full object-cover"
+                />
+              </div>
+              <h3 class="text-lg font-medium">
+                {{ serverInfo.metrics?.current?.map }}
+                {{
+                  serverInfo.metrics?.next
+                    ? `-> ${serverInfo.metrics?.next?.map}`
+                    : ""
+                }}
+              </h3>
+              <p class="text-sm text-muted-foreground">
+                <template
+                  v-if="
+                    rconServerInfo?.match_timeout * 60 -
+                      rconServerInfo?.playtime >
+                    0
+                  "
+                >
+                  Time Remaining:
+                  {{
+                    Math.floor(
+                      (rconServerInfo.match_timeout * 60 -
+                        rconServerInfo.playtime) /
+                        60
+                    )
+                  }}
+                  minutes
+                </template>
+                <template v-else> Time Remaining: 0 minutes </template>
+              </p>
+            </div>
+          </CardContent>
+          <CardFooter>
+            <div class="w-full">
+              <Button
+                variant="outline"
+                size="sm"
+                class="w-full"
+                @click="openMapChangeDialog"
+              >
+                Change Layer
+              </Button>
+            </div>
+          </CardFooter>
+        </Card>
+
+        <!-- Player Count Card -->
+        <Card>
+          <CardHeader>
+            <CardTitle>Player Count</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="text-center">
+              <div class="text-3xl font-bold mb-2">
+                {{
+                  formattedPlayerCount ||
+                  `${serverInfo.metrics?.players?.total} / ${serverInfo.metrics?.players?.max}`
+                }}
+              </div>
+              <Progress
+                :value="
+                  (serverInfo.metrics?.players?.total /
+                    serverInfo.metrics?.players?.max) *
+                  100
+                "
+                class="h-2 mb-4"
+              />
+              <div class="grid grid-cols-2 gap-2">
+                <div class="bg-blue-50 p-2 rounded-md">
+                  <div class="text-sm font-medium text-blue-700">
+                    {{ teamsData[0]?.name || "Team 1" }}
+                  </div>
+                  <div class="text-xl font-bold text-blue-800">
+                    {{ serverInfo.metrics?.players?.teams?.[1] || 0 }}
+                  </div>
                 </div>
+                <div class="bg-red-50 p-2 rounded-md">
+                  <div class="text-sm font-medium text-red-700">
+                    {{ teamsData[1]?.name || "Team 2" }}
+                  </div>
+                  <div class="text-xl font-bold text-red-800">
+                    {{ serverInfo.metrics?.players?.teams?.[2] || 0 }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <!-- Connected Players Card -->
+        <Card>
+          <CardHeader>
+            <CardTitle>Connected Players</CardTitle>
+            <CardDescription>Currently online players</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div
+              v-if="loadingTeams && connectedPlayers.length === 0"
+              class="text-center py-4"
+            >
+              <div
+                class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
+              ></div>
+              <p class="text-sm">Loading players...</p>
+            </div>
+            <div v-else-if="errorTeams" class="text-red-500 text-sm py-2">
+              {{ errorTeams }}
+            </div>
+            <div
+              v-else-if="connectedPlayers.length === 0"
+              class="text-center py-4"
+            >
+              <p class="text-sm text-muted-foreground">No players connected</p>
+            </div>
+            <Table v-else>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Squad</TableHead>
+                  <TableHead>Team</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow
+                  v-for="player in connectedPlayers.slice(0, 5)"
+                  :key="player.steam_id"
+                >
+                  <TableCell>
+                    <div class="flex items-center">
+                      <span
+                        v-if="player.isSquadLeader"
+                        class="mr-1 text-yellow-500"
+                        >★</span
+                      >
+                      {{ player.name }}
+                    </div>
+                  </TableCell>
+                  <TableCell>{{ player.squad }}</TableCell>
+                  <TableCell>{{ player.team }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        <!-- Teams & Squads Card -->
+        <Card>
+          <CardHeader>
+            <CardTitle>Teams & Squads</CardTitle>
+            <CardDescription
+              >Team balance and squad distribution</CardDescription
+            >
+          </CardHeader>
+          <CardContent>
+            <div
+              v-if="loadingTeams && teamsData.length === 0"
+              class="text-center py-4"
+            >
+              <div
+                class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
+              ></div>
+              <p class="text-sm">Loading teams data...</p>
+            </div>
+            <div v-else-if="errorTeams" class="text-red-500 text-sm py-2">
+              {{ errorTeams }}
+            </div>
+            <div v-else-if="teamsData.length === 0" class="text-center py-4">
+              <p class="text-sm text-muted-foreground">
+                No teams data available
+              </p>
+            </div>
+            <div v-else class="space-y-4">
+              <div>
+                <h3 class="text-sm font-medium mb-2">Team Balance</h3>
                 <div
-                  v-else-if="connectedPlayers.length === 0"
-                  class="text-center py-4"
+                  class="flex h-4 mb-2 bg-gray-200 rounded-full overflow-hidden"
                 >
-                  <p class="text-sm text-muted-foreground">
-                    No players connected
-                  </p>
+                  <template v-if="teamsData.length >= 2">
+                    <div
+                      class="h-full bg-blue-500 transition-all duration-300"
+                      :style="`width: ${Math.max(
+                        5,
+                        ((serverInfo.metrics?.players?.teams?.[
+                          teamsData[0]?.id
+                        ] || 0) /
+                          Math.max(1, serverInfo.metrics?.players?.max || 64)) *
+                          100
+                      )}%`"
+                    ></div>
+                    <div
+                      class="h-full bg-red-500 transition-all duration-300"
+                      :style="`width: ${Math.max(
+                        5,
+                        ((serverInfo.metrics?.players?.teams?.[
+                          teamsData[1]?.id
+                        ] || 0) /
+                          Math.max(1, serverInfo.metrics?.players?.max || 64)) *
+                          100
+                      )}%`"
+                    ></div>
+                  </template>
+                  <template v-else>
+                    <div class="h-full bg-blue-500 w-1/2"></div>
+                    <div class="h-full bg-red-500 w-1/2"></div>
+                  </template>
                 </div>
-                <Table v-else>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Squad</TableHead>
-                      <TableHead>Team</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow
-                      v-for="player in connectedPlayers.slice(0, 5)"
-                      :key="player.steam_id"
+                <div class="flex justify-between text-xs">
+                  <span v-for="team in teamsData" :key="team.id">
+                    {{ team.name }}:
+                    {{ serverInfo.metrics?.players?.teams?.[team.id] || 0 }}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <h3 class="text-sm font-medium mb-2">Squad Distribution</h3>
+                <div class="space-y-2">
+                  <div v-for="team in teamsData" :key="team.id">
+                    <h4 class="text-xs font-medium mb-1">
+                      {{ team.name }}
+                    </h4>
+                    <div
+                      v-for="squad in team.squads"
+                      :key="squad.id"
+                      class="mb-2"
                     >
-                      <TableCell>
-                        <div class="flex items-center">
-                          <span
-                            v-if="player.isSquadLeader"
-                            class="mr-1 text-yellow-500"
-                            >★</span
-                          >
-                          {{ player.name }}
-                        </div>
-                      </TableCell>
-                      <TableCell>{{ player.squad }}</TableCell>
-                      <TableCell>{{ player.team }}</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </CardContent>
-              <CardFooter>
-                <NuxtLink
-                  :to="`/servers/${serverId}/connected-players`"
-                  class="w-full"
-                >
-                  <Button variant="outline" size="sm" class="w-full">
-                    View All Connected Players
-                  </Button>
-                </NuxtLink>
-              </CardFooter>
-            </Card>
-
-            <!-- Teams & Squads Card -->
-            <Card>
-              <CardHeader>
-                <CardTitle>Teams & Squads</CardTitle>
-                <CardDescription
-                  >Team balance and squad distribution</CardDescription
-                >
-              </CardHeader>
-              <CardContent>
-                <div
-                  v-if="loadingTeams && teamsData.length === 0"
-                  class="text-center py-4"
-                >
-                  <div
-                    class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
-                  ></div>
-                  <p class="text-sm">Loading teams data...</p>
-                </div>
-                <div v-else-if="errorTeams" class="text-red-500 text-sm py-2">
-                  {{ errorTeams }}
-                </div>
-                <div
-                  v-else-if="teamsData.length === 0"
-                  class="text-center py-4"
-                >
-                  <p class="text-sm text-muted-foreground">
-                    No teams data available
-                  </p>
-                </div>
-                <div v-else class="space-y-4">
-                  <div>
-                    <h3 class="text-sm font-medium mb-2">Team Balance</h3>
-                    <div class="flex h-4 mb-2 bg-gray-200 rounded-full overflow-hidden">
-                      <template v-if="teamsData.length >= 2">
-                        <div
-                          class="h-full bg-blue-500 transition-all duration-300"
-                          :style="`width: ${Math.max(5, ((serverInfo.metrics?.players?.teams?.[teamsData[0]?.id] || 0) / Math.max(1, serverInfo.metrics?.players?.max || 64)) * 100)}%`"
-                        ></div>
-                        <div
-                          class="h-full bg-red-500 transition-all duration-300"
-                          :style="`width: ${Math.max(5, ((serverInfo.metrics?.players?.teams?.[teamsData[1]?.id] || 0) / Math.max(1, serverInfo.metrics?.players?.max || 64)) * 100)}%`"
-                        ></div>
-                      </template>
-                      <template v-else>
-                        <div class="h-full bg-blue-500 w-1/2"></div>
-                        <div class="h-full bg-red-500 w-1/2"></div>
-                      </template>
-                    </div>
-                    <div class="flex justify-between text-xs">
-                      <span v-for="team in teamsData" :key="team.id">
-                        {{ team.name }}:
-                        {{ serverInfo.metrics?.players?.teams?.[team.id] || 0 }}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 class="text-sm font-medium mb-2">Squad Distribution</h3>
-                    <div class="space-y-2">
-                      <div v-for="team in teamsData" :key="team.id">
-                        <h4 class="text-xs font-medium mb-1">
-                          {{ team.name }}
-                        </h4>
-                        <div
-                          v-for="squad in team.squads"
-                          :key="squad.id"
-                          class="mb-2"
-                        >
-                          <div class="flex justify-between text-xs mb-1">
-                            <span>{{ squad.name }}</span>
-                            <span>{{ squad.players.length }} / 9</span>
-                          </div>
-                          <Progress :modelValue="Math.min(100, Math.round((squad.players.length / 9) * 100))" class="h-2" />
-                        </div>
+                      <div class="flex justify-between text-xs mb-1">
+                        <span>{{ squad.name }}</span>
+                        <span>{{ squad.players.length }} / 9</span>
                       </div>
+                      <Progress
+                        :modelValue="
+                          Math.min(
+                            100,
+                            Math.round((squad.players.length / 9) * 100)
+                          )
+                        "
+                        class="h-2"
+                      />
                     </div>
                   </div>
                 </div>
-              </CardContent>
-              <CardFooter>
-                <NuxtLink
-                  :to="`/servers/${serverId}/teams-and-squads`"
-                  class="w-full"
-                >
-                  <Button variant="outline" size="sm" class="w-full">
-                    Manage Teams & Squads
-                  </Button>
-                </NuxtLink>
-              </CardFooter>
-            </Card>
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter>
+            <NuxtLink
+              :to="`/servers/${serverId}/teams-and-squads`"
+              class="w-full"
+            >
+              <Button variant="outline" size="sm" class="w-full">
+                Manage Teams & Squads
+              </Button>
+            </NuxtLink>
+          </CardFooter>
+        </Card>
+      </div>
+
+            <!-- Quick Actions -->
+      <Card class="mb-4">
+        <CardHeader>
+          <CardTitle>Quick Actions</CardTitle>
+          <CardDescription>Common server management tasks</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <NuxtLink :to="`/servers/${serverId}/console`" class="w-full">
+              <Button
+                variant="outline"
+                class="w-full h-full flex flex-col items-center justify-center p-4"
+              >
+                <div class="text-xl mb-2">💻</div>
+                <div class="text-sm">Console</div>
+              </Button>
+            </NuxtLink>
+            <NuxtLink
+              :to="`/servers/${serverId}/banned-players`"
+              class="w-full"
+            >
+              <Button
+                variant="outline"
+                class="w-full h-full flex flex-col items-center justify-center p-4"
+              >
+                <div class="text-xl mb-2">🚫</div>
+                <div class="text-sm">Bans</div>
+              </Button>
+            </NuxtLink>
+            <NuxtLink
+              :to="`/servers/${serverId}/users-and-roles`"
+              class="w-full"
+            >
+              <Button
+                variant="outline"
+                class="w-full h-full flex flex-col items-center justify-center p-4"
+              >
+                <div class="text-xl mb-2">👥</div>
+                <div class="text-sm">Users & Roles</div>
+              </Button>
+            </NuxtLink>
+            <NuxtLink :to="`/servers/${serverId}/audit-logs`" class="w-full">
+              <Button
+                variant="outline"
+                class="w-full h-full flex flex-col items-center justify-center p-4"
+              >
+                <div class="text-xl mb-2">📋</div>
+                <div class="text-sm">Audit Logs</div>
+              </Button>
+            </NuxtLink>
           </div>
-        </TabsContent>
-      </Tabs>
+        </CardContent>
+      </Card>
     </div>
 
     <!-- Map Change Dialog -->
