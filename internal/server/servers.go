@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
@@ -578,4 +579,82 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &server.Id, &user.Id, "server:update", auditData)
 
 	responses.Success(c, "Server updated successfully", &gin.H{"server": server})
+}
+
+// ServerLogwatcherRestart handles restarting the log watcher connection for a server
+func (s *Server) ServerLogwatcherRestart(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if server has log watcher configuration
+	if server.LogSourceType == nil || server.LogFilePath == nil {
+		responses.BadRequest(c, "Server does not have log watcher configuration", &gin.H{"error": "No log configuration found"})
+		return
+	}
+
+	// First disconnect from the server's log watcher
+	log.Info().Str("server_id", serverId.String()).Msg("Forcing log watcher connection disconnect")
+	err = s.Dependencies.LogwatcherManager.DisconnectFromServer(serverId)
+	if err != nil && err.Error() != "server log connection not found" && err.Error() != "server log connection already disconnected" {
+		responses.BadRequest(c, "Failed to disconnect from log watcher", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Then reconnect to the log watcher with current configuration
+	log.Info().Str("server_id", serverId.String()).Msg("Reconnecting to log watcher")
+	
+	config := logwatcher_manager.LogSourceConfig{
+		Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
+		FilePath:      *server.LogFilePath,
+		ReadFromStart: false, // Default value
+	}
+
+	if server.LogHost != nil {
+		config.Host = *server.LogHost
+	}
+	if server.LogPort != nil {
+		config.Port = *server.LogPort
+	}
+	if server.LogUsername != nil {
+		config.Username = *server.LogUsername
+	}
+	if server.LogPassword != nil {
+		config.Password = *server.LogPassword
+	}
+	if server.LogPollFrequency != nil {
+		config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
+	}
+	if server.LogReadFromStart != nil {
+		config.ReadFromStart = *server.LogReadFromStart
+	}
+
+	err = s.Dependencies.LogwatcherManager.ConnectToServer(serverId, config)
+	if err != nil {
+		responses.BadRequest(c, "Failed to reconnect to log watcher", &gin.H{"error": err.Error()})
+		return
+	}
+
+	log.Info().Str("server_id", serverId.String()).Msg("Log watcher connection restarted")
+
+	// Create audit log for the action
+	auditData := map[string]interface{}{
+		"serverId": serverId.String(),
+		"logType":  *server.LogSourceType,
+		"logPath":  *server.LogFilePath,
+	}
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:logwatcher:restart", auditData)
+
+	responses.Success(c, "Log watcher restarted successfully", nil)
 }
