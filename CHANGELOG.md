@@ -8,6 +8,7 @@
 
 ### 📈 Enhancement
 
+- refactor: attempt to improve locking logic in DisconnectFromServer method [[#79](https://github.com/Codycody31/squad-aegis/pull/79)]
 - refactor: server feed now shows player disconnects in connection history [[#77](https://github.com/Codycody31/squad-aegis/pull/77)]
 - refactor(ui): Remove Connected Players in favor of Teams & Squads [[#76](https://github.com/Codycody31/squad-aegis/pull/76)]
 
