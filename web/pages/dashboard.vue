@@ -50,7 +50,7 @@ const fetchServers = async () => {
         stats.value.totalServers = servers.value.length;
 
         // Fetch additional stats for each server
-        await fetchAllServerStats();
+        fetchAllServerStats();
     }
     loading.value = false;
 };
@@ -122,7 +122,7 @@ const fetchAllServerStats = async () => {
     stats.value.totalBans = totalBans;
 };
 
-await fetchServers();
+fetchServers();
 </script>
 
 <template>

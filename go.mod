@@ -27,6 +27,7 @@ require (
 	github.com/samber/oops v1.19.0
 	github.com/uptrace/go-clickhouse v0.3.1
 	github.com/valkey-io/valkey-go v1.0.64
+	github.com/yuin/gopher-lua v1.1.1
 	golang.org/x/crypto v0.40.0
 	golang.org/x/sync v0.16.0
 )
@@ -74,7 +75,6 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
-	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/otel v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
@@ -89,4 +89,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/SquadGO/squad-rcon-go/v2 => github.com/codycody31/squad-rcon-go/v2 v2.0.0-20250907170838-0c94ae8e8245
+replace github.com/SquadGO/squad-rcon-go/v2 v2.0.5 => github.com/codycody31/squad-rcon-go/v2 v2.0.0-20250926194427-83529202149a
