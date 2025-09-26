@@ -1089,15 +1089,6 @@ func (p *SquadLeaderWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerNa
 		"group_name":  groupName,
 		"notes":       notes,
 	})
-
-	// Also broadcast a server-wide message about the new squad leader whitelist member
-	broadcastMessage := fmt.Sprintf("⭐ %s has earned squad leader whitelist status! Thank you for your leadership!", playerName)
-	if err := p.apis.RconAPI.Broadcast(broadcastMessage); err != nil {
-		p.apis.LogAPI.Error("Failed to broadcast squad leader whitelist achievement", err, map[string]interface{}{
-			"steam_id":    steamID,
-			"player_name": playerName,
-		})
-	}
 }
 
 // removePlayerAsTemporaryAdmin removes a player as a temporary admin via direct database operations
