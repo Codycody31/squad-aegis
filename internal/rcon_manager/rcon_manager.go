@@ -426,16 +426,20 @@ func (m *RconManager) monitorConnection(serverID uuid.UUID, conn *ServerConnecti
 
 // DisconnectFromServer disconnects from an RCON server
 func (m *RconManager) DisconnectFromServer(serverID uuid.UUID, force bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	if !force {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+	}
 
 	conn, exists := m.connections[serverID]
 	if !exists {
 		return errors.New("server not connected")
 	}
 
-	conn.mu.Lock()
-	defer conn.mu.Unlock()
+	if !force {
+		conn.mu.Lock()
+		defer conn.mu.Unlock()
+	}
 
 	// Close the connection
 	conn.Rcon.Close()
