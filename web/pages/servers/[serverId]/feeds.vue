@@ -32,10 +32,15 @@
       <Card v-if="connecting" class="mb-4 border-blue-200 bg-blue-50">
         <CardContent class="p-4">
           <div class="flex items-center space-x-2">
-            <Icon name="mdi:loading" class="h-4 w-4 animate-spin text-blue-600" />
+            <Icon
+              name="mdi:loading"
+              class="h-4 w-4 animate-spin text-blue-600"
+            />
             <div>
               <p class="font-medium text-blue-900">Connecting</p>
-              <p class="text-sm text-blue-700">Establishing connection to live feeds...</p>
+              <p class="text-sm text-blue-700">
+                Establishing connection to live feeds...
+              </p>
             </div>
           </div>
         </CardContent>
@@ -129,14 +134,28 @@
               @scroll="(e) => handleScroll(e, 'chat')"
               class="max-h-96 overflow-y-auto border rounded-lg"
             >
-              <div v-if="loadingOlder && activeTab === 'chat'" class="p-2 text-center bg-blue-50 border-b">
-                <Icon name="mdi:loading" class="h-4 w-4 animate-spin inline mr-2" />
+              <div
+                v-if="loadingOlder && activeTab === 'chat'"
+                class="p-2 text-center bg-blue-50 border-b"
+              >
+                <Icon
+                  name="mdi:loading"
+                  class="h-4 w-4 animate-spin inline mr-2"
+                />
                 Loading older messages...
               </div>
-              <div v-if="chatMessages.length === 0" class="p-8 text-center text-muted-foreground">
-                <Icon name="mdi:message-text-outline" class="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <div
+                v-if="chatMessages.length === 0"
+                class="p-8 text-center text-muted-foreground"
+              >
+                <Icon
+                  name="mdi:message-text-outline"
+                  class="h-12 w-12 mx-auto mb-4 opacity-50"
+                />
                 <p>No chat messages yet</p>
-                <p class="text-sm">Messages will appear here when players chat</p>
+                <p class="text-sm">
+                  Messages will appear here when players chat
+                </p>
               </div>
               <div v-else class="space-y-1 p-4">
                 <div
@@ -152,15 +171,22 @@
                   </div>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center space-x-2">
-                      <p class="font-medium text-sm">{{ message.data.player_name }}</p>
-                      <Badge :variant="getChatTypeBadge(message.data.chat_type)" class="text-xs">
+                      <p class="font-medium text-sm">
+                        {{ message.data.player_name }}
+                      </p>
+                      <Badge
+                        :variant="getChatTypeBadge(message.data.chat_type)"
+                        class="text-xs"
+                      >
                         {{ message.data.chat_type }}
                       </Badge>
                       <span class="text-xs text-muted-foreground">
                         {{ formatTimestamp(message.timestamp) }}
                       </span>
                     </div>
-                    <p class="text-sm text-foreground mt-1">{{ message.data.message }}</p>
+                    <p class="text-sm text-foreground mt-1">
+                      {{ message.data.message }}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -185,12 +211,24 @@
               @scroll="(e) => handleScroll(e, 'connections')"
               class="max-h-96 overflow-y-auto border rounded-lg"
             >
-              <div v-if="loadingOlder && activeTab === 'connections'" class="p-2 text-center bg-blue-50 border-b">
-                <Icon name="mdi:loading" class="h-4 w-4 animate-spin inline mr-2" />
+              <div
+                v-if="loadingOlder && activeTab === 'connections'"
+                class="p-2 text-center bg-blue-50 border-b"
+              >
+                <Icon
+                  name="mdi:loading"
+                  class="h-4 w-4 animate-spin inline mr-2"
+                />
                 Loading older connections...
               </div>
-              <div v-if="connections.length === 0" class="p-8 text-center text-muted-foreground">
-                <Icon name="mdi:account-multiple-outline" class="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <div
+                v-if="connections.length === 0"
+                class="p-8 text-center text-muted-foreground"
+              >
+                <Icon
+                  name="mdi:account-multiple-outline"
+                  class="h-12 w-12 mx-auto mb-4 opacity-50"
+                />
                 <p>No connection events yet</p>
                 <p class="text-sm">Player connections will appear here</p>
               </div>
@@ -202,18 +240,39 @@
                 >
                   <div class="flex-shrink-0">
                     <Icon
-                      :name="connection.data.action === 'connected' ? 'mdi:account-plus' : 'mdi:account-check'"
-                      :class="connection.data.action === 'connected' ? 'text-green-500' : 'text-blue-500'"
+                      v-if="connection.data.action === 'connected' || connection.data.action === 'joined'"
+                      :name="
+                        connection.data.action === 'connected'
+                          ? 'mdi:account-plus'
+                          : 'mdi:account-check'
+                      "
+                      :class="
+                        connection.data.action === 'connected'
+                          ? 'text-green-500'
+                          : 'text-blue-500'
+                      "
                       class="h-5 w-5"
+                    />
+                    <Icon
+                      v-if="connection.data.action === 'disconnected'"
+                      name="mdi:account-remove"
+                      class="h-5 w-5 text-red-500"
                     />
                   </div>
                   <div class="flex-1">
                     <div class="flex items-center space-x-2">
                       <p class="font-medium text-sm">
-                        {{ connection.data.player_suffix || connection.data.player_controller }}
+                        {{
+                          connection.data.player_suffix ||
+                          connection.data.player_controller
+                        }}
                       </p>
                       <Badge
-                        :variant="connection.data.action === 'connected' ? 'default' : 'secondary'"
+                        :variant="
+                          connection.data.action === 'connected'
+                            ? 'default'
+                            : 'secondary'
+                        "
                         class="text-xs"
                       >
                         {{ connection.data.action }}
@@ -223,7 +282,7 @@
                       </span>
                     </div>
                     <p class="text-xs text-muted-foreground mt-1">
-                      IP: {{ connection.data.ip_address || 'Unknown' }}
+                      IP: {{ connection.data.ip_address || "Unknown" }}
                     </p>
                   </div>
                 </div>
@@ -238,7 +297,11 @@
         <div class="flex items-center justify-between">
           <h3 class="text-lg font-semibold">Teamkills</h3>
           <div class="flex items-center space-x-2">
-            <Button variant="outline" size="sm" @click="scrollToBottom('teamkills')">
+            <Button
+              variant="outline"
+              size="sm"
+              @click="scrollToBottom('teamkills')"
+            >
               <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
               Bottom
             </Button>
@@ -255,12 +318,24 @@
               @scroll="(e) => handleScroll(e, 'teamkills')"
               class="max-h-96 overflow-y-auto border rounded-lg"
             >
-              <div v-if="loadingOlder && activeTab === 'teamkills'" class="p-2 text-center bg-blue-50 border-b">
-                <Icon name="mdi:loading" class="h-4 w-4 animate-spin inline mr-2" />
+              <div
+                v-if="loadingOlder && activeTab === 'teamkills'"
+                class="p-2 text-center bg-blue-50 border-b"
+              >
+                <Icon
+                  name="mdi:loading"
+                  class="h-4 w-4 animate-spin inline mr-2"
+                />
                 Loading older teamkills...
               </div>
-              <div v-if="teamkills.length === 0" class="p-8 text-center text-muted-foreground">
-                <Icon name="mdi:skull-outline" class="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <div
+                v-if="teamkills.length === 0"
+                class="p-8 text-center text-muted-foreground"
+              >
+                <Icon
+                  name="mdi:skull-outline"
+                  class="h-12 w-12 mx-auto mb-4 opacity-50"
+                />
                 <p>No teamkills yet</p>
                 <p class="text-sm">Teamkill events will appear here</p>
               </div>
@@ -276,13 +351,16 @@
                   <div class="flex-1">
                     <div class="flex items-center space-x-2">
                       <p class="font-medium text-sm text-red-600">
-                        {{ teamkill.data.attacker_name }} → {{ teamkill.data.victim_name }}
+                        {{ teamkill.data.attacker_name }} →
+                        {{ teamkill.data.victim_name }}
                       </p>
                       <span class="text-xs text-muted-foreground">
                         {{ formatTimestamp(teamkill.timestamp) }}
                       </span>
                     </div>
-                    <div class="flex items-center space-x-4 mt-1 text-xs text-muted-foreground">
+                    <div
+                      class="flex items-center space-x-4 mt-1 text-xs text-muted-foreground"
+                    >
                       <span>Weapon: {{ teamkill.data.weapon }}</span>
                       <span>Damage: {{ teamkill.data.damage }}</span>
                     </div>
@@ -367,7 +445,11 @@ const loadInitialHistoricalData = async () => {
 };
 
 // Load historical data for a specific feed type
-const loadHistoricalData = async (type: string, limit: number = 50, before?: string) => {
+const loadHistoricalData = async (
+  type: string,
+  limit: number = 50,
+  before?: string
+) => {
   try {
     let url = `/api/servers/${serverId}/feeds/history?type=${type}&limit=${limit}`;
     if (before) {
@@ -376,12 +458,14 @@ const loadHistoricalData = async (type: string, limit: number = 50, before?: str
 
     const response = await $fetch(url, {
       headers: {
-        Authorization: `Bearer ${useCookie(useRuntimeConfig().public.sessionCookieName as string).value}`,
+        Authorization: `Bearer ${
+          useCookie(useRuntimeConfig().public.sessionCookieName as string).value
+        }`,
       },
     });
 
     const newEvents = (response as any).data.events || [];
-    
+
     if (newEvents.length > 0) {
       if (type === "chat") {
         if (before) {
@@ -456,8 +540,9 @@ const handleScroll = async (event: Event, feedType: string) => {
       // Maintain scroll position
       await nextTick();
       const newScrollHeight = container.scrollHeight;
-      container.scrollTop = scrollTop + (newScrollHeight - previousScrollHeight);
-      
+      container.scrollTop =
+        scrollTop + (newScrollHeight - previousScrollHeight);
+
       loadingOlder.value = false;
     }
   }
@@ -483,10 +568,10 @@ const connectToFeeds = async () => {
 
     // Convert HTTP/HTTPS URL to WebSocket URL
     const backendUrl = window.location.origin;
-    const wsProtocol = backendUrl.startsWith('https') ? 'wss' : 'ws';
-    const baseUrl = backendUrl.replace(/^https?:\/\//, '');
+    const wsProtocol = backendUrl.startsWith("https") ? "wss" : "ws";
+    const baseUrl = backendUrl.replace(/^https?:\/\//, "");
     const url = `${wsProtocol}://${baseUrl}/api/servers/${serverId}/feeds?types=chat&types=connections&types=teamkills&token=${token}`;
-    
+
     websocket = new WebSocket(url);
 
     websocket.onopen = () => {
@@ -508,9 +593,10 @@ const connectToFeeds = async () => {
       console.log("WebSocket connection closed:", event);
       isConnected.value = false;
       connecting.value = false;
-      
+
       // Retry connection after 5 seconds if not manually disconnected
-      if (event.code !== 1000) { // 1000 is normal closure
+      if (event.code !== 1000) {
+        // 1000 is normal closure
         error.value = "Connection to live feeds was lost";
         setTimeout(() => {
           if (!isConnected.value) {
@@ -526,7 +612,6 @@ const connectToFeeds = async () => {
       isConnected.value = false;
       connecting.value = false;
     };
-
   } catch (err: any) {
     error.value = err.message || "Failed to connect to live feeds";
     connecting.value = false;
@@ -630,13 +715,13 @@ const refreshFeeds = async () => {
   try {
     // Clear existing data
     clearAllFeeds();
-    
+
     // Disconnect and reconnect websocket
     disconnectFromFeeds();
-    
+
     // Reload historical data
     await loadInitialHistoricalData();
-    
+
     // Reconnect websocket
     await connectToFeeds();
   } finally {
@@ -697,7 +782,7 @@ onMounted(async () => {
   try {
     // Load historical data first
     await loadInitialHistoricalData();
-    
+
     // Then connect to live feeds
     await connectToFeeds();
   } finally {

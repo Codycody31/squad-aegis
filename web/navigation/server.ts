@@ -8,10 +8,10 @@ export default [
     },
   },
   {
-    title: "Connected Players",
-    icon: "mdi:account-multiple",
+    title: "Teams & Squads",
+    icon: "mdi:flag-variant",
     to: {
-      name: "servers-serverId-connected-players",
+      name: "servers-serverId-teams-and-squads",
     },
   },
   {
@@ -35,13 +35,6 @@ export default [
       name: "servers-serverId-users-and-roles",
     },
     permissions: ["super_admin"],
-  },
-  {
-    title: "Teams & Squads",
-    icon: "mdi:flag-variant",
-    to: {
-      name: "servers-serverId-teams-and-squads",
-    },
   },
   {
     title: "Console",
