@@ -67,6 +67,7 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 			eventTypes = append(eventTypes,
 				event_manager.EventTypeLogPlayerConnected,
 				event_manager.EventTypeLogJoinSucceeded,
+				event_manager.EventTypeLogPlayerDisconnected,
 			)
 		case "teamkills":
 			eventTypes = append(eventTypes, event_manager.EventTypeLogPlayerDied)
@@ -443,8 +444,19 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 					eos
 				FROM squad_aegis.server_join_succeeded_events 
 				WHERE server_id = ? AND event_time < ?
+				UNION ALL
+				SELECT 
+					chain_id as id,
+					event_time,
+					'disconnected' as action,
+					player_suffix as player_controller,
+					ip,
+					steam,
+					eos
+				FROM squad_aegis.server_player_disconnected_events 
+				WHERE server_id = ? AND event_time < ?
 			) ORDER BY event_time DESC LIMIT ?`
-		args = []interface{}{serverId, *beforeTime, serverId, *beforeTime, limit}
+		args = []interface{}{serverId, *beforeTime, serverId, *beforeTime, serverId, *beforeTime, limit}
 	} else {
 		query = `
 			SELECT * FROM (
@@ -469,8 +481,19 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 					eos
 				FROM squad_aegis.server_join_succeeded_events 
 				WHERE server_id = ?
+				UNION ALL
+				SELECT 
+					chain_id as id,
+					event_time,
+					'disconnected' as action,
+					player_suffix as player_controller,
+					ip,
+					steam,
+					eos
+				FROM squad_aegis.server_player_disconnected_events 
+				WHERE server_id = ?
 			) ORDER BY event_time DESC LIMIT ?`
-		args = []interface{}{serverId, serverId, limit}
+		args = []interface{}{serverId, serverId, serverId, limit}
 	}
 
 	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, args...)
