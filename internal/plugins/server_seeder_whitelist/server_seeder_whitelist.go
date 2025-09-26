@@ -933,15 +933,6 @@ func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerN
 		"group_name":  groupName,
 		"notes":       notes,
 	})
-
-	// Also broadcast a server-wide message about the new seeder whitelist member
-	broadcastMessage := fmt.Sprintf("🌱 %s has earned seeder whitelist status! Thank you for helping populate the server!", playerName)
-	if err := p.apis.RconAPI.Broadcast(broadcastMessage); err != nil {
-		p.apis.LogAPI.Error("Failed to broadcast seeder whitelist achievement", err, map[string]interface{}{
-			"steam_id":    steamID,
-			"player_name": playerName,
-		})
-	}
 }
 
 // removePlayerAsTemporaryAdmin removes a player as a temporary admin via direct database operations
