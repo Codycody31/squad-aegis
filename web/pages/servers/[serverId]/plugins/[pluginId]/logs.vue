@@ -11,6 +11,14 @@ import {
 } from "~/components/ui/select";
 import { Checkbox } from "~/components/ui/checkbox";
 import { toast } from "~/components/ui/toast";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "~/components/ui/dialog";
 import { useAuthStore } from "~/stores/auth";
 import {
     ArrowLeft,
@@ -24,12 +32,12 @@ import {
     ChevronRight as ChevronRightIcon,
     Clock,
     Hash,
-    Database,
     AlertCircle,
     Info,
     AlertTriangle,
     Bug,
     ArrowDown,
+    Trash2,
 } from "lucide-vue-next";
 
 definePageMeta({
@@ -469,6 +477,8 @@ const goBack = () => {
     router.push(`/servers/${serverId}/plugins`);
 };
 
+// Load plugin data
+
 onMounted(async () => {
     loading.value = true;
     try {
@@ -568,6 +578,7 @@ onUnmounted(() => {
                             <ArrowDown class="w-4 h-4 mr-2" />
                             Latest
                         </Button>
+
                         <Button
                             variant="outline"
                             size="sm"

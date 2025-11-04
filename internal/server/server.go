@@ -257,6 +257,10 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 					pluginGroup.DELETE("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginDelete)
 					pluginGroup.GET("/:pluginId/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogs)
 					pluginGroup.GET("/:pluginId/metrics", server.ServerPluginMetrics)
+					pluginGroup.GET("/:pluginId/data", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataGet)
+					pluginGroup.POST("/:pluginId/data", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataSet)
+					pluginGroup.DELETE("/:pluginId/data", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataClear)
+					pluginGroup.DELETE("/:pluginId/data/:key", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataDelete)
 				}
 
 				// Server Rules
