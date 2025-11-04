@@ -61,6 +61,8 @@ import {
     Clock,
     Check,
     ChevronsUpDown,
+    Database,
+    X,
 } from "lucide-vue-next";
 
 definePageMeta({
@@ -80,6 +82,12 @@ const showAddDialog = ref(false);
 const showConfigDialog = ref(false);
 const currentPlugin = ref<any>(null);
 const pluginConfig = ref<Record<string, any>>({});
+const showDataDialog = ref(false);
+const pluginData = ref<any[]>([]);
+const loadingPluginData = ref(false);
+const editingDataItem = ref<any>(null);
+const editingDataValue = ref("");
+const showEditDialog = ref(false);
 
 // Combobox state
 const pluginSearchQuery = ref("");
@@ -498,7 +506,197 @@ const getInputType = (field: any) => {
     }
 };
 
-// Array bool helper functions
+// Load plugin data
+const loadPluginData = async (plugin: any) => {
+    currentPlugin.value = plugin;
+    loadingPluginData.value = true;
+    showDataDialog.value = true;
+
+    try {
+        const response = await $fetch(
+            `/api/servers/${serverId}/plugins/${plugin.id}/data`,
+            {
+                headers: {
+                    Authorization: `Bearer ${authStore.token}`,
+                },
+            },
+        );
+        pluginData.value = (response as any).data.data || [];
+    } catch (error: any) {
+        console.error("Failed to load plugin data:", error);
+        toast({
+            title: "Error",
+            description: error.data?.message || "Failed to load plugin data",
+            variant: "destructive",
+        });
+        pluginData.value = [];
+    } finally {
+        loadingPluginData.value = false;
+    }
+};
+
+// Clear plugin data
+const clearPluginData = async (plugin: any) => {
+    if (
+        !confirm(
+            `Are you sure you want to clear all plugin data for "${plugin.plugin_name}"? This action cannot be undone.`,
+        )
+    ) {
+        return;
+    }
+
+    try {
+        const response = await $fetch(
+            `/api/servers/${serverId}/plugins/${plugin.id}/data`,
+            {
+                method: "DELETE",
+                headers: {
+                    Authorization: `Bearer ${authStore.token}`,
+                },
+            },
+        );
+
+        toast({
+            title: "Success",
+            description: `Cleared ${(response as any).data.rows_deleted || 0} plugin data entries`,
+        });
+
+        // Reload plugin data if dialog is open
+        if (showDataDialog.value && currentPlugin.value?.id === plugin.id) {
+            await loadPluginData(plugin);
+        }
+    } catch (error: any) {
+        console.error("Failed to clear plugin data:", error);
+        toast({
+            title: "Error",
+            description: error.data?.message || "Failed to clear plugin data",
+            variant: "destructive",
+        });
+    }
+};
+
+// Helper function to check if a value is valid JSON
+const isJSON = (value: string) => {
+    try {
+        JSON.parse(value);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+// Helper function to format JSON for display
+const formatJSON = (value: string) => {
+    try {
+        const parsed = JSON.parse(value);
+        return JSON.stringify(parsed, null, 2);
+    } catch {
+        return value;
+    }
+};
+
+// Edit a data item
+const editDataItem = (item: any) => {
+    editingDataItem.value = item;
+    editingDataValue.value = item.value;
+    showEditDialog.value = true;
+};
+
+// Save edited data item
+const saveDataItem = async () => {
+    if (!editingDataItem.value) return;
+
+    // Validate JSON if it looks like JSON
+    const trimmedValue = editingDataValue.value.trim();
+    if (
+        (trimmedValue.startsWith("{") || trimmedValue.startsWith("[")) &&
+        !isJSON(editingDataValue.value)
+    ) {
+        toast({
+            title: "Invalid JSON",
+            description:
+                "The value appears to be JSON but is not valid. Please fix the JSON syntax or remove the braces/brackets.",
+            variant: "destructive",
+        });
+        return;
+    }
+
+    try {
+        const response = await $fetch(
+            `/api/servers/${serverId}/plugins/${currentPlugin.value.id}/data`,
+            {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${authStore.token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    key: editingDataItem.value.key,
+                    value: editingDataValue.value,
+                }),
+            },
+        );
+
+        toast({
+            title: "Success",
+            description: "Plugin data updated successfully",
+        });
+
+        showEditDialog.value = false;
+        editingDataItem.value = null;
+        editingDataValue.value = "";
+
+        // Reload plugin data
+        await loadPluginData(currentPlugin.value);
+    } catch (error: any) {
+        console.error("Failed to update plugin data:", error);
+        toast({
+            title: "Error",
+            description: error.data?.message || "Failed to update plugin data",
+            variant: "destructive",
+        });
+    }
+};
+
+// Delete a data item
+const deleteDataItem = async (item: any) => {
+    if (
+        !confirm(
+            `Are you sure you want to delete the plugin data item "${item.key}"? This action cannot be undone.`,
+        )
+    ) {
+        return;
+    }
+
+    try {
+        await $fetch(
+            `/api/servers/${serverId}/plugins/${currentPlugin.value.id}/data/${encodeURIComponent(item.key)}`,
+            {
+                method: "DELETE",
+                headers: {
+                    Authorization: `Bearer ${authStore.token}`,
+                },
+            },
+        );
+
+        toast({
+            title: "Success",
+            description: `Deleted plugin data item "${item.key}"`,
+        });
+
+        // Reload plugin data
+        await loadPluginData(currentPlugin.value);
+    } catch (error: any) {
+        console.error("Failed to delete plugin data:", error);
+        toast({
+            title: "Error",
+            description: error.data?.message || "Failed to delete plugin data",
+            variant: "destructive",
+        });
+    }
+};
+
+// Array bool helper functions</parameter>
 const updateArrayBool = (
     fieldName: string,
     index: number,
@@ -1297,6 +1495,15 @@ onMounted(async () => {
                                             <FileText class="w-4 h-4" />
                                         </Button>
                                         <Button
+                                            variant="outline"
+                                            size="sm"
+                                            @click="loadPluginData(plugin)"
+                                            class="hidden sm:inline-flex"
+                                            title="View Plugin Data"
+                                        >
+                                            <Database class="w-4 h-4" />
+                                        </Button>
+                                        <Button
                                             variant="destructive"
                                             size="sm"
                                             @click="deletePlugin(plugin)"
@@ -1685,6 +1892,221 @@ onMounted(async () => {
                     <Button @click="savePluginConfig"
                         >Save Configuration</Button
                     >
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Plugin Data Dialog -->
+        <Dialog v-model:open="showDataDialog">
+            <DialogContent class="sm:max-w-4xl max-h-[90vh] flex flex-col">
+                <DialogHeader>
+                    <DialogTitle>
+                        Plugin Data: {{ currentPlugin?.plugin_name }}
+                    </DialogTitle>
+                    <DialogDescription>
+                        View and manage plugin data for this plugin instance.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div
+                    v-if="loadingPluginData"
+                    class="flex items-center justify-center py-8"
+                >
+                    <div
+                        class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                    ></div>
+                </div>
+
+                <div
+                    v-else-if="pluginData.length === 0"
+                    class="text-center py-8"
+                >
+                    <Database
+                        class="w-16 h-16 mx-auto mb-4 text-muted-foreground"
+                    />
+                    <p class="text-muted-foreground">
+                        No plugin data stored for this plugin instance.
+                    </p>
+                </div>
+
+                <div v-else class="space-y-4 overflow-y-auto flex-1 pr-2">
+                    <div class="flex justify-between items-center">
+                        <p class="text-sm text-muted-foreground">
+                            {{ pluginData.length }} data entries
+                        </p>
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            @click="clearPluginData(currentPlugin)"
+                        >
+                            <Trash2 class="w-4 h-4 mr-2" />
+                            Clear All Data
+                        </Button>
+                    </div>
+
+                    <div class="space-y-2">
+                        <div
+                            v-for="(item, index) in pluginData"
+                            :key="index"
+                            class="border rounded-lg p-4 space-y-2"
+                        >
+                            <div class="flex justify-between items-start gap-4">
+                                <div class="flex-1 min-w-0">
+                                    <div
+                                        class="font-medium text-sm mb-2 flex items-center gap-2"
+                                    >
+                                        {{ item.key }}
+                                        <Badge
+                                            v-if="isJSON(item.value)"
+                                            variant="outline"
+                                            class="text-xs"
+                                        >
+                                            JSON
+                                        </Badge>
+                                    </div>
+
+                                    <!-- JSON Value Display -->
+                                    <div
+                                        v-if="isJSON(item.value)"
+                                        class="space-y-2"
+                                    >
+                                        <div
+                                            class="text-xs text-muted-foreground font-mono bg-muted p-3 rounded max-h-60 overflow-auto"
+                                        >
+                                            <pre
+                                                class="whitespace-pre-wrap break-words"
+                                                >{{
+                                                    formatJSON(item.value)
+                                                }}</pre
+                                            >
+                                        </div>
+                                    </div>
+
+                                    <!-- Plain Text Value Display -->
+                                    <div
+                                        v-else
+                                        class="text-sm text-muted-foreground font-mono bg-muted p-2 rounded break-all"
+                                    >
+                                        {{ item.value }}
+                                    </div>
+                                </div>
+
+                                <div class="flex gap-2 flex-shrink-0">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        @click="editDataItem(item)"
+                                        title="Edit"
+                                    >
+                                        <Settings class="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        @click="deleteDataItem(item)"
+                                        title="Delete"
+                                    >
+                                        <Trash2 class="w-4 h-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                            <div
+                                class="flex gap-4 text-xs text-muted-foreground"
+                            >
+                                <span>
+                                    Created:
+                                    {{
+                                        new Date(
+                                            item.created_at,
+                                        ).toLocaleString()
+                                    }}
+                                </span>
+                                <span>
+                                    Updated:
+                                    {{
+                                        new Date(
+                                            item.updated_at,
+                                        ).toLocaleString()
+                                    }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <DialogFooter class="flex-shrink-0 pt-4">
+                    <Button variant="outline" @click="showDataDialog = false">
+                        Close
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Edit Data Item Dialog -->
+        <Dialog v-model:open="showEditDialog">
+            <DialogContent class="sm:max-w-3xl max-h-[90vh] flex flex-col">
+                <DialogHeader>
+                    <DialogTitle>
+                        Edit Plugin Data: {{ editingDataItem?.key }}
+                    </DialogTitle>
+                    <DialogDescription>
+                        Edit the value for this plugin data item. JSON values
+                        will be validated.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div class="space-y-4 overflow-y-auto flex-1 pr-2">
+                    <div class="space-y-2">
+                        <Label for="data-key">Key (read-only)</Label>
+                        <Input
+                            id="data-key"
+                            :value="editingDataItem?.key"
+                            disabled
+                            class="font-mono"
+                        />
+                    </div>
+
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <Label for="data-value">Value</Label>
+                            <Badge
+                                v-if="
+                                    editingDataValue &&
+                                    (editingDataValue.trim().startsWith('{') ||
+                                        editingDataValue.trim().startsWith('['))
+                                "
+                                :variant="
+                                    isJSON(editingDataValue)
+                                        ? 'default'
+                                        : 'destructive'
+                                "
+                                class="text-xs"
+                            >
+                                {{
+                                    isJSON(editingDataValue)
+                                        ? "Valid JSON"
+                                        : "Invalid JSON"
+                                }}
+                            </Badge>
+                        </div>
+                        <Textarea
+                            id="data-value"
+                            v-model="editingDataValue"
+                            placeholder="Enter value (can be plain text or JSON)"
+                            class="font-mono text-sm min-h-[300px]"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                            You can enter plain text or JSON. JSON values will
+                            be automatically validated.
+                        </p>
+                    </div>
+                </div>
+
+                <DialogFooter class="flex-shrink-0 pt-4">
+                    <Button variant="outline" @click="showEditDialog = false">
+                        Cancel
+                    </Button>
+                    <Button @click="saveDataItem"> Save Changes </Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
