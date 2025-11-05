@@ -1,129 +1,45 @@
-# xyd-js Documentation Starter
+# docs-v2
 
-Click on `Use this template` to copy the xyd-js documentation starter kit. This starter kit contains examples including:
+This is a Next.js application generated with
+[Create Fumadocs](https://github.com/fuma-nama/fumadocs).
 
-- Guide pages with modern markdown
-- Navigation and sidebar configuration
-- Customizations and theming
-- Use of popular components and icons
-- API Reference pages with OpenAPI integration
-
-## About xyd-js
-
-**xyd** is a modern, batteries-included documentation engine that redefines the documentation experience by making it intuitive, flexible, and enjoyable. Built for developers who want to create beautiful documentation quickly.
-
-## Features
-
-- ⚡ **Fast Development** - Hot reload with instant preview
-- 🎨 **Modern Design** - Beautiful, responsive documentation sites
-- 📚 **Rich Content** - Support for markdown, code blocks, and interactive components
-- 🔗 **API Integration** - Built-in OpenAPI/Swagger documentation support
-- 🚀 **Easy Deployment** - Static site generation for any hosting platform
-- 🎯 **Developer Friendly** - Simple CLI and configuration
-
-## Quick Start
-
-### Prerequisites
-
-Make sure you have Node.js installed on your system.
-
-### Installation
-
-Install the xyd-js CLI globally:
+Run development server:
 
 ```bash
-bun add -g xyd-js
+npm run dev
+# or
+pnpm dev
+# or
+yarn dev
 ```
 
-### Development
+Open http://localhost:3000 with your browser to see the result.
 
-Run the development server at the root of your documentation (where `docs.json` is located):
+## Explore
 
-```bash
-xyd
-```
+In the project, you can see:
 
-This will start a local development server with hot reload enabled. Your documentation will be available at `http://localhost:5175` (or the next available port).
+- `lib/source.ts`: Code for content source adapter, [`loader()`](https://fumadocs.dev/docs/headless/source-api) provides the interface to access your content.
+- `lib/layout.shared.tsx`: Shared options for layouts, optional but preferred to keep.
 
-### Building for Production
+| Route                     | Description                                            |
+| ------------------------- | ------------------------------------------------------ |
+| `app/(home)`              | The route group for your landing page and other pages. |
+| `app/docs`                | The documentation layout and pages.                    |
+| `app/api/search/route.ts` | The Route Handler for search.                          |
 
-Generate static files for deployment:
+### Fumadocs MDX
 
-```bash
-xyd build
-```
+A `source.config.ts` config file has been included, you can customise different options like frontmatter schema.
 
-This produces static files within `.xyd/build/client` which you can deploy to any static hosting platform.
+Read the [Introduction](https://fumadocs.dev/docs/mdx) for further details.
 
-## Project Structure
+## Learn More
 
-```
-starter/
-├── docs.json              # Main configuration file
-├── openapi.json           # OpenAPI specification
-├── docs/                 # Documentation pages
-├── api-reference/        # API reference pages
-├── public/              # Static assets
-```
+To learn more about Next.js and Fumadocs, take a look at the following
+resources:
 
-## Configuration
-
-The main configuration file `docs.json` controls:
-
-- **Theme**: Customize colors, logos, and branding
-- **Navigation**: Header and sidebar structure
-- **API Reference**: OpenAPI integration settings
-- **Banner**: Custom announcements and notifications
-
-## Deployment
-
-Since xyd-js generates static files, you can deploy to any static hosting platform:
-
-- **Vercel**: Connect your repository and deploy
-- **GitHub Pages**: Push to a `gh-pages` branch
-- **AWS S3**: Upload the `.xyd/build/client` directory
-- **Any CDN**: Serve the static files from your preferred provider
-
-To learn more, check out our [Deploy Samples](https://github.com/xyd-js/deploy-samples).
-
-## Customization
-
-### Adding Pages
-
-Create new markdown files in the `docs/` directory and update the navigation in `docs.json`.
-
-### Styling
-
-Customize the theme by modifying the `theme` section in `docs.json`:
-
-```json
-{
-  "theme": {
-    "name": "picasso",
-    "logo": {
-      "light": "/public/assets/logo.svg",
-      "dark": "/public/assets/logo-dark.svg"
-    }
-  }
-}
-```
-
-### API Documentation
-
-Add your OpenAPI specification to `openapi.json` and configure the API reference in `docs.json`.
-
-## Troubleshooting
-
-- **Dev server won't start**: Run `xyd install` to reinstall dependencies
-- **Page loads as 404**: Make sure you're running the command in a folder with `docs.json`
-- **Build fails**: Check that all referenced files exist and are properly formatted
-- **Styling issues**: Verify that your theme configuration in `docs.json` is valid
-
-## Contributing
-
-Found a bug or have a feature request? Please open an issue or submit a pull request to help improve xyd-js.
-
-## License
-
-This starter kit is open source and available under the MIT License.
-
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js
+  features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- [Fumadocs](https://fumadocs.dev) - learn about Fumadocs

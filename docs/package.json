@@ -1,13 +1,38 @@
 {
-  "name": "starter",
+  "name": "docs-v2",
   "version": "0.0.0",
-  "dependencies": {
-    "@xyd-js/cli": "0.1.0-xyd.197"
-  },
+  "private": true,
   "scripts": {
-    "build": "xyd build"
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
+    "postinstall": "fumadocs-mdx",
+    "lint": "biome check",
+    "format": "biome format --write"
   },
-  "engines": {
-    "node": "22"
+  "dependencies": {
+    "@orama/orama": "^3.1.16",
+    "class-variance-authority": "^0.7.1",
+    "fumadocs-core": "16.0.7",
+    "fumadocs-mdx": "13.0.5",
+    "fumadocs-ui": "16.0.7",
+    "lucide-react": "^0.548.0",
+    "mermaid": "^11.12.1",
+    "next": "16.0.1",
+    "next-themes": "^0.4.6",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.16",
+    "@types/mdx": "^2.0.13",
+    "@types/node": "^24.9.2",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.16",
+    "typescript": "^5.9.3",
+    "@biomejs/biome": "^2.3.2"
   }
 }
