@@ -1,8 +1,6 @@
 ---
-title: "Overview"
+title: "Basic Concepts"
 ---
-
-# Overview
 
 ## What are Workflows?
 
