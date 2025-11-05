@@ -39,9 +39,10 @@ type Struct struct {
 		Database int    `default:"0"`
 	}
 	Log struct {
-		Level   string `default:"info"`
-		ShowGin bool   `default:"false"`
-		File    string `default:""`
+		Level          string `default:"info"`
+		ShowGin        bool   `default:"false"`
+		ShowPluginLogs bool   `default:"true"`
+		File           string `default:""`
 	}
 	Debug struct {
 		Pretty  bool `default:"true"`
