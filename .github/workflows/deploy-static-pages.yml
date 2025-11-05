@@ -38,16 +38,18 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Install dependencies
+        working-directory: docs
+        run: bun install --frozen-lockfile
       - name: Build static content
         working-directory: docs
-        run: bunx xyd-js build
+        run: bun run build
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload the built Vocs site
-          path: 'docs/.xyd/build/client'
+          path: 'docs/out'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
