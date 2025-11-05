@@ -696,6 +696,27 @@ const deleteDataItem = async (item: any) => {
     }
 };
 
+// Helper function to normalize field names for display
+const normalizeFieldName = (fieldName: string): string => {
+    // Replace underscores with spaces
+    let normalized = fieldName.replace(/_/g, ' ');
+    
+    // Handle camelCase by inserting space before capital letters
+    normalized = normalized.replace(/([a-z])([A-Z])/g, '$1 $2');
+    
+    // Capitalize first letter of each word
+    normalized = normalized.replace(/\b\w/g, (char) => char.toUpperCase());
+    
+    // Handle common acronyms
+    const acronyms = ['Id', 'Ip', 'Url', 'Api', 'Fob', 'Hab', 'Tk', 'Eos', 'Rcon', 'Ui', 'Db'];
+    acronyms.forEach(acronym => {
+        const regex = new RegExp(`\\b${acronym}\\b`, 'gi');
+        normalized = normalized.replace(regex, acronym.toUpperCase());
+    });
+    
+    return normalized;
+};
+
 // Array bool helper functions</parameter>
 const updateArrayBool = (
     fieldName: string,
@@ -928,7 +949,7 @@ onMounted(async () => {
                                     class="space-y-2"
                                 >
                                     <Label :for="`config-${field.name}`">
-                                        {{ field.name }}
+                                        {{ normalizeFieldName(field.name) }}
                                         <span
                                             v-if="field.required"
                                             class="text-red-500"
@@ -989,7 +1010,7 @@ onMounted(async () => {
                                             "
                                         />
                                         <Label :for="`config-${field.name}`">{{
-                                            field.name
+                                            normalizeFieldName(field.name)
                                         }}</Label>
                                     </div>
 
@@ -1100,7 +1121,7 @@ onMounted(async () => {
                                                         )
                                                 "
                                             />
-                                            <Label>Item {{ index + 1 }}</Label>
+                                            <Label>{{ normalizeFieldName(field.name) }} {{ index + 1 }}</Label>
                                             <Button
                                                 variant="outline"
                                                 size="sm"
@@ -1131,7 +1152,7 @@ onMounted(async () => {
                                         class="space-y-4 p-4 border rounded-lg"
                                     >
                                         <h5 class="font-medium">
-                                            {{ field.name }} Configuration
+                                            {{ normalizeFieldName(field.name) }} Configuration
                                         </h5>
                                         <div
                                             v-for="nestedField in field.nested ||
@@ -1142,7 +1163,7 @@ onMounted(async () => {
                                             <Label
                                                 :for="`config-${field.name}-${nestedField.name}`"
                                             >
-                                                {{ nestedField.name }}
+                                                {{ normalizeFieldName(nestedField.name) }}
                                                 <span
                                                     v-if="nestedField.required"
                                                     class="text-red-500"
@@ -1234,7 +1255,7 @@ onMounted(async () => {
                                                 <Label
                                                     :for="`config-${field.name}-${nestedField.name}`"
                                                     >{{
-                                                        nestedField.name
+                                                        normalizeFieldName(nestedField.name)
                                                     }}</Label
                                                 >
                                             </div>
@@ -1257,7 +1278,7 @@ onMounted(async () => {
                                                 class="flex justify-between items-center"
                                             >
                                                 <h6 class="font-medium">
-                                                    {{ field.name }} Item
+                                                    {{ normalizeFieldName(field.name) }} Item
                                                     {{ index + 1 }}
                                                 </h6>
                                                 <Button
@@ -1283,7 +1304,7 @@ onMounted(async () => {
                                                 <Label
                                                     :for="`config-${field.name}-${index}-${nestedField.name}`"
                                                 >
-                                                    {{ nestedField.name }}
+                                                    {{ normalizeFieldName(nestedField.name) }}
                                                     <span
                                                         v-if="
                                                             nestedField.required
@@ -1338,12 +1359,12 @@ onMounted(async () => {
                                                                 ] = checked)
                                                         "
                                                     />
-                                                    <Label
-                                                        :for="`config-${field.name}-${index}-${nestedField.name}`"
-                                                        >{{
-                                                            nestedField.name
-                                                        }}</Label
-                                                    >
+                                                        <Label
+                                                            :for="`config-${field.name}-${index}-${nestedField.name}`"
+                                                            >{{
+                                                                normalizeFieldName(nestedField.name)
+                                                            }}</Label
+                                                        >
                                                 </div>
                                             </div>
                                         </div>
@@ -1357,7 +1378,7 @@ onMounted(async () => {
                                                 )
                                             "
                                         >
-                                            Add {{ field.name }} Item
+                                            Add {{ normalizeFieldName(field.name) }} Item
                                         </Button>
                                     </div>
                                 </div>
@@ -1550,7 +1571,7 @@ onMounted(async () => {
                         class="space-y-2"
                     >
                         <Label :for="`edit-config-${field.name}`">
-                            {{ field.name }}
+                            {{ normalizeFieldName(field.name) }}
                             <span v-if="field.required" class="text-red-500"
                                 >*</span
                             >
@@ -1594,7 +1615,7 @@ onMounted(async () => {
                                 "
                             />
                             <Label :for="`edit-config-${field.name}`">{{
-                                field.name
+                                normalizeFieldName(field.name)
                             }}</Label>
                         </div>
 
@@ -1688,7 +1709,7 @@ onMounted(async () => {
                                             )
                                     "
                                 />
-                                <Label>Item {{ index + 1 }}</Label>
+                                <Label>{{ normalizeFieldName(field.name) }} {{ index + 1 }}</Label>
                                 <Button
                                     variant="outline"
                                     size="sm"
@@ -1714,7 +1735,7 @@ onMounted(async () => {
                             class="space-y-4 p-4 border rounded-lg"
                         >
                             <h5 class="font-medium">
-                                {{ field.name }} Configuration
+                                {{ normalizeFieldName(field.name) }} Configuration
                             </h5>
                             <div
                                 v-for="nestedField in field.nested || []"
@@ -1724,7 +1745,7 @@ onMounted(async () => {
                                 <Label
                                     :for="`edit-config-${field.name}-${nestedField.name}`"
                                 >
-                                    {{ nestedField.name }}
+                                    {{ normalizeFieldName(nestedField.name) }}
                                     <span
                                         v-if="nestedField.required"
                                         class="text-red-500"
@@ -1785,7 +1806,7 @@ onMounted(async () => {
                                     />
                                     <Label
                                         :for="`edit-config-${field.name}-${nestedField.name}`"
-                                        >{{ nestedField.name }}</Label
+                                        >{{ normalizeFieldName(nestedField.name) }}</Label
                                     >
                                 </div>
                             </div>
@@ -1805,7 +1826,7 @@ onMounted(async () => {
                             >
                                 <div class="flex justify-between items-center">
                                     <h6 class="font-medium">
-                                        {{ field.name }} Item {{ index + 1 }}
+                                        {{ normalizeFieldName(field.name) }} Item {{ index + 1 }}
                                     </h6>
                                     <Button
                                         variant="outline"
@@ -1829,7 +1850,7 @@ onMounted(async () => {
                                     <Label
                                         :for="`edit-config-${field.name}-${index}-${nestedField.name}`"
                                     >
-                                        {{ nestedField.name }}
+                                        {{ normalizeFieldName(nestedField.name) }}
                                         <span
                                             v-if="nestedField.required"
                                             class="text-red-500"
@@ -1864,7 +1885,7 @@ onMounted(async () => {
                                         />
                                         <Label
                                             :for="`edit-config-${field.name}-${index}-${nestedField.name}`"
-                                            >{{ nestedField.name }}</Label
+                                            >{{ normalizeFieldName(nestedField.name) }}</Label
                                         >
                                     </div>
                                 </div>
@@ -1879,7 +1900,7 @@ onMounted(async () => {
                                     )
                                 "
                             >
-                                Add {{ field.name }} Item
+                                Add {{ normalizeFieldName(field.name) }} Item
                             </Button>
                         </div>
                     </div>
