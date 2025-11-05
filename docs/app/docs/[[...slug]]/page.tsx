@@ -31,7 +31,6 @@ export default async function Page(props: PageProps<"/docs/[[...slug]]">) {
       full={page.data.full}
       tableOfContent={{ style: "clerk" }}
       lastUpdate={new Date(time ?? new Date())}
-      breadcrumb={{ enabled: true, includeRoot: true, includePage: true }}
     >
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>

@@ -75,34 +75,30 @@ export default function HomePage() {
           <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
         </div>
         
-        <div className="mt-auto text-landing-foreground mb-[max(100px,min(9vw,150px))] p-6 col-start-1 row-start-1 relative z-10 md:p-12">
+        <div className="mt-auto mb-[max(100px,min(9vw,150px))] p-6 col-start-1 row-start-1 relative z-10 md:p-12">
           <div className="max-w-4xl">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-fd-card border border-border text-sm font-medium mb-6">
-              <Shield className="w-4 h-4 text-fd-primary" />
-              <span>Comprehensive Squad Server Control Panel</span>
-            </div>
-            
-            <h1 className="text-4xl mt-12 mb-6 leading-tighter font-bold md:text-5xl lg:text-6xl">
-              Squad Aegis
-              <br />
-              <span className="text-fd-primary">Your Shield</span>
-            </h1>
-            
-            <p className="text-xl text-muted-foreground mb-8 leading-relaxed max-w-2xl">
-              A comprehensive control panel designed for efficient administration of Squad game servers. 
-              Manage multiple servers through an intuitive web interface.
-            </p>
-            
-            <div className="flex flex-col items-start gap-4 md:flex-row md:items-center">
-              <Link href="/docs/installation" className={cn(buttonVariants())}>
-                Getting Started
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-              <Link href="/docs" className={cn(buttonVariants({ variant: 'secondary' }))}>
-                <FileText className="w-4 h-4" />
-                Documentation
-              </Link>
-              <p className="text-sm text-muted-foreground">the Squad server management tool you love.</p>
+            <div className={cn(cardVariants({ className: 'p-8 md:p-10 bg-fd-card/40 backdrop-blur-sm' }))}>              
+              <h1 className="text-4xl mt-4 mb-6 leading-tighter font-bold md:text-5xl lg:text-6xl">
+                Squad Aegis
+                <br />
+                <span className="text-fd-primary">Your Shield</span>
+              </h1>
+              
+              <p className="text-xl text-muted-foreground mb-8 leading-relaxed max-w-2xl">
+                A comprehensive control panel designed for efficient administration of Squad game servers. 
+                Manage multiple servers through an intuitive web interface.
+              </p>
+              
+              <div className="flex flex-col items-start gap-4 md:flex-row md:items-center">
+                <Link href="/docs/installation" className={cn(buttonVariants())}>
+                  Getting Started
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+                <Link href="/docs" className={cn(buttonVariants({ variant: 'secondary' }))}>
+                  <FileText className="w-4 h-4" />
+                  Documentation
+                </Link>
+              </div>
             </div>
           </div>
         </div>
