@@ -24,6 +24,7 @@
 
 ### 📚 Documentation
 
+- docs: update title and content structure in docs [[#89](https://github.com/Codycody31/squad-aegis/pull/89)]
 - docs: v2 via fumadocs [[#88](https://github.com/Codycody31/squad-aegis/pull/88)]
 
 ### Misc
