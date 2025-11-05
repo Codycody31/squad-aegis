@@ -90,8 +90,8 @@ const fetchAllServerStats = async () => {
             },
         );
 
-        if (bansData.value?.data?.bannedPlayers) {
-            totalBans += bansData.value.data.bannedPlayers.length;
+        if (bansData.value?.data?.bans) {
+            totalBans += bansData.value.data.bans.length;
         }
 
         // Fetch server status
