@@ -8,6 +8,7 @@
 
 ### 📈 Enhancement
 
+- refactor: improve text export formatting with indentation logic [[#87](https://github.com/Codycody31/squad-aegis/pull/87)]
 - feat: enhance UI with player action menus on feeds [[#86](https://github.com/Codycody31/squad-aegis/pull/86)]
 - refactor: Migrate from Apache License 2.0 -> Elastic License 2.0 [[#84](https://github.com/Codycody31/squad-aegis/pull/84)]
 - feat: edit/delete plugin data [[#83](https://github.com/Codycody31/squad-aegis/pull/83)]
