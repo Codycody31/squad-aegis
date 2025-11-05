@@ -761,34 +761,34 @@ const exportAsJson = () => {
 const generateTextExport = (): string => {
   let text = '';
   
-  const processRule = (rule: ServerRule, number: string): void => {
-    // Main rule title
-    text += `${number}. ${rule.title}\n`;
+  const processRule = (rule: ServerRule, number: string, depth: number = 0): void => {
+    // Calculate indentation based on depth (4 spaces per level)
+    const indent = '    '.repeat(depth);
     
-    // Add description for main rule if it exists
+    // Rule title with proper indentation
+    text += `${indent}${number}. ${rule.title}\n`;
+    
+    // Add description for rule if it exists (with extra indentation)
     if (rule.description && rule.description.trim()) {
-      text += `    * ${rule.description}\n`;
+      text += `${indent}    * ${rule.description}\n`;
     }
     
-    // Process sub-rules with proper indentation
-    if (rule.sub_rules) {
+    // Recursively process sub-rules with proper numbering and indentation
+    if (rule.sub_rules && rule.sub_rules.length > 0) {
       rule.sub_rules.forEach((subRule, index) => {
         const subNumber = `${number}.${index + 1}`;
-        text += `    ${subNumber}. ${subRule.title}\n`;
-        
-        // Add description with asterisk if it exists
-        if (subRule.description && subRule.description.trim()) {
-          text += `        * ${subRule.description}\n`;
-        }
+        processRule(subRule, subNumber, depth + 1);
       });
     }
     
-    // Add empty line after each main rule section
-    text += '\n';
+    // Add empty line after each top-level rule section (depth 0)
+    if (depth === 0) {
+      text += '\n';
+    }
   };
   
   rules.value.forEach((rule, index) => {
-    processRule(rule, `${index + 1}`);
+    processRule(rule, `${index + 1}`, 0);
   });
   
   return text.trim();
