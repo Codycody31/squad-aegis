@@ -22,6 +22,10 @@
 - fix: remove unnecessary await for fetch functions in Vue + bump squad-rcon-go [[#81](https://github.com/Codycody31/squad-aegis/pull/81)]
 - fix: log watcher restart endpoint missing [[#78](https://github.com/Codycody31/squad-aegis/pull/78)]
 
+### 📚 Documentation
+
+- docs: v2 via fumadocs [[#88](https://github.com/Codycody31/squad-aegis/pull/88)]
+
 ### Misc
 
 - ci: drop broken registry [[#85](https://github.com/Codycody31/squad-aegis/pull/85)]
