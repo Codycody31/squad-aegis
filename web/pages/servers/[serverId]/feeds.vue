@@ -1,6 +1,6 @@
 <template>
-  <div class="p-6 space-y-6">
-    <div class="flex items-center justify-between">
+  <div class="flex flex-col h-[calc(100vh-8rem)] p-6">
+    <div class="flex items-center justify-between mb-4 flex-shrink-0">
       <div>
         <h1 class="text-3xl font-bold tracking-tight">Live Feeds</h1>
         <p class="text-muted-foreground">
@@ -28,7 +28,7 @@
     </div>
 
     <!-- Connection Status -->
-    <div v-if="connecting || error" class="mb-4">
+    <div v-if="connecting || error" class="mb-4 flex-shrink-0">
       <Card v-if="connecting" class="mb-4 border-blue-200 bg-blue-50">
         <CardContent class="p-4">
           <div class="flex items-center space-x-2">
@@ -58,46 +58,9 @@
       </Card>
     </div>
 
-    <!-- Feed Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <Card>
-        <CardContent class="p-4">
-          <div class="flex items-center space-x-2">
-            <Icon name="mdi:message-text" class="h-6 w-6 text-blue-500" />
-            <div>
-              <p class="text-sm text-muted-foreground">Chat Messages</p>
-              <p class="text-2xl font-bold">{{ chatCount }}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent class="p-4">
-          <div class="flex items-center space-x-2">
-            <Icon name="mdi:account-multiple" class="h-6 w-6 text-green-500" />
-            <div>
-              <p class="text-sm text-muted-foreground">Connections</p>
-              <p class="text-2xl font-bold">{{ connectionsCount }}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent class="p-4">
-          <div class="flex items-center space-x-2">
-            <Icon name="mdi:skull" class="h-6 w-6 text-red-500" />
-            <div>
-              <p class="text-sm text-muted-foreground">Teamkills</p>
-              <p class="text-2xl font-bold">{{ teamkillsCount }}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-
     <!-- Tabs -->
-    <Tabs v-model="activeTab" class="w-full">
-      <TabsList class="grid w-full grid-cols-3">
+    <Tabs v-model="activeTab" class="w-full flex flex-col flex-1 min-h-0">
+      <TabsList class="grid w-full grid-cols-3 flex-shrink-0 mb-2">
         <TabsTrigger value="chat" class="relative">
           <Icon name="mdi:message-text" class="h-4 w-4 mr-2" />
           Chat Messages
@@ -128,26 +91,27 @@
       </TabsList>
 
       <!-- Chat Feed -->
-      <TabsContent value="chat" class="space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-semibold">Chat Messages</h3>
-          <div class="flex items-center space-x-2">
-            <Button variant="outline" size="sm" @click="scrollToBottom('chat')">
-              <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
-              Bottom
-            </Button>
-            <Button variant="outline" size="sm" @click="clearFeed('chat')">
-              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-              Clear
-            </Button>
+      <TabsContent value="chat" class="mt-0 flex-1 min-h-0">
+        <div class="flex flex-col h-full space-y-4">
+          <div class="flex items-center justify-between flex-shrink-0">
+            <h3 class="text-lg font-semibold">Chat Messages</h3>
+            <div class="flex items-center space-x-2">
+              <Button variant="outline" size="sm" @click="scrollToBottom('chat')">
+                <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
+                Bottom
+              </Button>
+              <Button variant="outline" size="sm" @click="clearFeed('chat')">
+                <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
+                Clear
+              </Button>
+            </div>
           </div>
-        </div>
-        <Card>
-          <CardContent class="p-0">
+          <Card class="flex-1 flex flex-col min-h-0">
+          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
             <div
               ref="chatContainer"
               @scroll="(e) => handleScroll(e, 'chat')"
-              class="max-h-96 overflow-y-auto border rounded-lg"
+              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'chat'"
@@ -220,23 +184,25 @@
             </div>
           </CardContent>
         </Card>
+        </div>
       </TabsContent>
 
       <!-- Connections Feed -->
-      <TabsContent value="connections" class="space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-semibold">Player Connections</h3>
-          <Button variant="outline" size="sm" @click="clearFeed('connections')">
-            <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-            Clear
-          </Button>
-        </div>
-        <Card>
-          <CardContent class="p-0">
+      <TabsContent value="connections" class="mt-0 flex-1 min-h-0">
+        <div class="flex flex-col h-full space-y-4">
+          <div class="flex items-center justify-between flex-shrink-0">
+            <h3 class="text-lg font-semibold">Player Connections</h3>
+            <Button variant="outline" size="sm" @click="clearFeed('connections')">
+              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
+              Clear
+            </Button>
+          </div>
+          <Card class="flex-1 flex flex-col min-h-0">
+          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
             <div
               ref="connectionsContainer"
               @scroll="(e) => handleScroll(e, 'connections')"
-              class="max-h-96 overflow-y-auto border rounded-lg"
+              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'connections'"
@@ -333,33 +299,35 @@
             </div>
           </CardContent>
         </Card>
+        </div>
       </TabsContent>
 
       <!-- Teamkills Feed -->
-      <TabsContent value="teamkills" class="space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-semibold">Teamkills</h3>
-          <div class="flex items-center space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
-              @click="scrollToBottom('teamkills')"
-            >
-              <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
-              Bottom
-            </Button>
-            <Button variant="outline" size="sm" @click="clearFeed('teamkills')">
-              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-              Clear
-            </Button>
+      <TabsContent value="teamkills" class="mt-0 flex-1 min-h-0">
+        <div class="flex flex-col h-full space-y-4">
+          <div class="flex items-center justify-between flex-shrink-0">
+            <h3 class="text-lg font-semibold">Teamkills</h3>
+            <div class="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                @click="scrollToBottom('teamkills')"
+              >
+                <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
+                Bottom
+              </Button>
+              <Button variant="outline" size="sm" @click="clearFeed('teamkills')">
+                <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
+                Clear
+              </Button>
+            </div>
           </div>
-        </div>
-        <Card>
-          <CardContent class="p-0">
+          <Card class="flex-1 flex flex-col min-h-0">
+          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
             <div
               ref="teamkillsContainer"
               @scroll="(e) => handleScroll(e, 'teamkills')"
-              class="max-h-96 overflow-y-auto border rounded-lg"
+              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'teamkills'"
@@ -428,6 +396,7 @@
             </div>
           </CardContent>
         </Card>
+        </div>
       </TabsContent>
     </Tabs>
   </div>
