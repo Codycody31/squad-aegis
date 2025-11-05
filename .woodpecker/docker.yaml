@@ -1,7 +1,5 @@
 variables:
   - &golang_image "docker.io/golang:1.24"
-  - &node_image "docker.io/node:18-alpine"
-  - &xgo_image "docker.io/techknowlogick/xgo:go-1.24.x"
   - &buildx_plugin "docker.io/woodpeckerci/plugin-docker-buildx:5.2.1"
   - &platforms_release "linux/amd64"
   - &platforms_preview "linux/amd64"
@@ -13,12 +11,7 @@ variables:
         username: insidiousfiddler
         password:
           from_secret: docker_password
-      - registry: registry.vmgware.dev
-        username: "robot-insidiousfiddler+woodpecker-ci"
-        password:
-          from_secret: harbor_password
-  - &publish_repos "insidiousfiddler/squad-aegis,registry.vmgware.dev/insidiousfiddler/squad-aegis"
-  - &publish_repos_logwatcher "insidiousfiddler/squad-aegis-logwatcher,registry.vmgware.dev/insidiousfiddler/squad-aegis-logwatcher"
+  - &publish_repos "insidiousfiddler/squad-aegis"
   - path: &when_path
       - "web/**"
       # go source code
