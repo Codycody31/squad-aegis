@@ -14,6 +14,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
@@ -817,7 +818,9 @@ func (api *logAPI) Info(message string, fields map[string]interface{}) {
 		logger = logger.Interface(key, value)
 	}
 
-	logger.Msg(message)
+	if config.Config.Log.ShowPluginLogs {
+		logger.Msg(message)
+	}
 
 	// Also write to ClickHouse
 	api.writeToClickHouse("info", message, nil, fields)
@@ -832,7 +835,9 @@ func (api *logAPI) Warn(message string, fields map[string]interface{}) {
 		logger = logger.Interface(key, value)
 	}
 
-	logger.Msg(message)
+	if config.Config.Log.ShowPluginLogs {
+		logger.Msg(message)
+	}
 
 	// Also write to ClickHouse
 	api.writeToClickHouse("warn", message, nil, fields)
@@ -851,7 +856,9 @@ func (api *logAPI) Error(message string, err error, fields map[string]interface{
 		logger = logger.Interface(key, value)
 	}
 
-	logger.Msg(message)
+	if config.Config.Log.ShowPluginLogs {
+		logger.Msg(message)
+	}
 
 	// Also write to ClickHouse
 	var errorMsg *string
@@ -871,7 +878,9 @@ func (api *logAPI) Debug(message string, fields map[string]interface{}) {
 		logger = logger.Interface(key, value)
 	}
 
-	logger.Msg(message)
+	if config.Config.Log.ShowPluginLogs {
+		logger.Msg(message)
+	}
 
 	// Also write to ClickHouse
 	api.writeToClickHouse("debug", message, nil, fields)

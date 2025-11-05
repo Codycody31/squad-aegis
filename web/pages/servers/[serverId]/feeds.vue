@@ -1,6 +1,6 @@
 <template>
-  <div class="p-6 space-y-6">
-    <div class="flex items-center justify-between">
+  <div class="flex flex-col h-[calc(100vh-8rem)] p-6">
+    <div class="flex items-center justify-between mb-4 flex-shrink-0">
       <div>
         <h1 class="text-3xl font-bold tracking-tight">Live Feeds</h1>
         <p class="text-muted-foreground">
@@ -28,7 +28,7 @@
     </div>
 
     <!-- Connection Status -->
-    <div v-if="connecting || error" class="mb-4">
+    <div v-if="connecting || error" class="mb-4 flex-shrink-0">
       <Card v-if="connecting" class="mb-4 border-blue-200 bg-blue-50">
         <CardContent class="p-4">
           <div class="flex items-center space-x-2">
@@ -58,81 +58,60 @@
       </Card>
     </div>
 
-    <!-- Feed Stats -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <Card>
-        <CardContent class="p-4">
-          <div class="flex items-center space-x-2">
-            <Icon name="mdi:message-text" class="h-6 w-6 text-blue-500" />
-            <div>
-              <p class="text-sm text-muted-foreground">Chat Messages</p>
-              <p class="text-2xl font-bold">{{ chatCount }}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent class="p-4">
-          <div class="flex items-center space-x-2">
-            <Icon name="mdi:account-multiple" class="h-6 w-6 text-green-500" />
-            <div>
-              <p class="text-sm text-muted-foreground">Connections</p>
-              <p class="text-2xl font-bold">{{ connectionsCount }}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent class="p-4">
-          <div class="flex items-center space-x-2">
-            <Icon name="mdi:skull" class="h-6 w-6 text-red-500" />
-            <div>
-              <p class="text-sm text-muted-foreground">Teamkills</p>
-              <p class="text-2xl font-bold">{{ teamkillsCount }}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-
     <!-- Tabs -->
-    <Tabs v-model="activeTab" class="w-full">
-      <TabsList class="grid w-full grid-cols-3">
-        <TabsTrigger value="chat">
+    <Tabs v-model="activeTab" class="w-full flex flex-col flex-1 min-h-0">
+      <TabsList class="grid w-full grid-cols-3 flex-shrink-0 mb-2">
+        <TabsTrigger value="chat" class="relative">
           <Icon name="mdi:message-text" class="h-4 w-4 mr-2" />
           Chat Messages
+          <span
+            v-if="hasUnread.chat"
+            class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
+            title="New messages available"
+          ></span>
         </TabsTrigger>
-        <TabsTrigger value="connections">
+        <TabsTrigger value="connections" class="relative">
           <Icon name="mdi:account-multiple" class="h-4 w-4 mr-2" />
           Player Connections
+          <span
+            v-if="hasUnread.connections"
+            class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
+            title="New connections available"
+          ></span>
         </TabsTrigger>
-        <TabsTrigger value="teamkills">
+        <TabsTrigger value="teamkills" class="relative">
           <Icon name="mdi:skull" class="h-4 w-4 mr-2" />
           Teamkills
+          <span
+            v-if="hasUnread.teamkills"
+            class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
+            title="New teamkills available"
+          ></span>
         </TabsTrigger>
       </TabsList>
 
       <!-- Chat Feed -->
-      <TabsContent value="chat" class="space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-semibold">Chat Messages</h3>
-          <div class="flex items-center space-x-2">
-            <Button variant="outline" size="sm" @click="scrollToBottom('chat')">
-              <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
-              Bottom
-            </Button>
-            <Button variant="outline" size="sm" @click="clearFeed('chat')">
-              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-              Clear
-            </Button>
+      <TabsContent value="chat" class="mt-0 flex-1 min-h-0">
+        <div class="flex flex-col h-full space-y-4">
+          <div class="flex items-center justify-between flex-shrink-0">
+            <h3 class="text-lg font-semibold">Chat Messages</h3>
+            <div class="flex items-center space-x-2">
+              <Button variant="outline" size="sm" @click="scrollToBottom('chat')">
+                <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
+                Bottom
+              </Button>
+              <Button variant="outline" size="sm" @click="clearFeed('chat')">
+                <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
+                Clear
+              </Button>
+            </div>
           </div>
-        </div>
-        <Card>
-          <CardContent class="p-0">
+          <Card class="flex-1 flex flex-col min-h-0">
+          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
             <div
               ref="chatContainer"
               @scroll="(e) => handleScroll(e, 'chat')"
-              class="max-h-96 overflow-y-auto border rounded-lg"
+              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'chat'"
@@ -184,32 +163,46 @@
                         {{ formatTimestamp(message.timestamp) }}
                       </span>
                     </div>
-                    <p class="text-sm text-foreground mt-1">
-                      {{ message.data.message }}
-                    </p>
+                    <div class="flex items-center justify-between mt-1">
+                      <p class="text-sm text-foreground flex-1">
+                        {{ message.data.message }}
+                      </p>
+                      <PlayerActionMenu
+                        v-if="message.data.steam_id || message.data.eos_id"
+                        :player="createPlayerFromFeedData(message.data, message.data.player_name)"
+                        :serverId="serverId"
+                        @warn="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'warn')"
+                        @move="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'move')"
+                        @kick="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'kick')"
+                        @ban="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'ban')"
+                        @remove-from-squad="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'remove-from-squad')"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
+        </div>
       </TabsContent>
 
       <!-- Connections Feed -->
-      <TabsContent value="connections" class="space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-semibold">Player Connections</h3>
-          <Button variant="outline" size="sm" @click="clearFeed('connections')">
-            <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-            Clear
-          </Button>
-        </div>
-        <Card>
-          <CardContent class="p-0">
+      <TabsContent value="connections" class="mt-0 flex-1 min-h-0">
+        <div class="flex flex-col h-full space-y-4">
+          <div class="flex items-center justify-between flex-shrink-0">
+            <h3 class="text-lg font-semibold">Player Connections</h3>
+            <Button variant="outline" size="sm" @click="clearFeed('connections')">
+              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
+              Clear
+            </Button>
+          </div>
+          <Card class="flex-1 flex flex-col min-h-0">
+          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
             <div
               ref="connectionsContainer"
               @scroll="(e) => handleScroll(e, 'connections')"
-              class="max-h-96 overflow-y-auto border rounded-lg"
+              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'connections'"
@@ -281,42 +274,60 @@
                         {{ formatTimestamp(connection.timestamp) }}
                       </span>
                     </div>
-                    <p class="text-xs text-muted-foreground mt-1">
-                      IP: {{ connection.data.ip_address || "Unknown" }}
-                    </p>
+                    <div class="flex items-center justify-between mt-1">
+                      <p class="text-xs text-muted-foreground">
+                        IP: {{ connection.data.ip_address || "Unknown" }}
+                      </p>
+                      <PlayerActionMenu
+                        v-if="connection.data.steam_id || connection.data.eos_id"
+                        :player="createPlayerFromFeedData(
+                          connection.data,
+                          connection.data.player_suffix || connection.data.player_controller,
+                          connection.data.action === 'disconnected'
+                        )"
+                        :serverId="serverId"
+                        @warn="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'warn')"
+                        @move="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'move')"
+                        @kick="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'kick')"
+                        @ban="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'ban')"
+                        @remove-from-squad="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'remove-from-squad')"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
+        </div>
       </TabsContent>
 
       <!-- Teamkills Feed -->
-      <TabsContent value="teamkills" class="space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-semibold">Teamkills</h3>
-          <div class="flex items-center space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
-              @click="scrollToBottom('teamkills')"
-            >
-              <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
-              Bottom
-            </Button>
-            <Button variant="outline" size="sm" @click="clearFeed('teamkills')">
-              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-              Clear
-            </Button>
+      <TabsContent value="teamkills" class="mt-0 flex-1 min-h-0">
+        <div class="flex flex-col h-full space-y-4">
+          <div class="flex items-center justify-between flex-shrink-0">
+            <h3 class="text-lg font-semibold">Teamkills</h3>
+            <div class="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                @click="scrollToBottom('teamkills')"
+              >
+                <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
+                Bottom
+              </Button>
+              <Button variant="outline" size="sm" @click="clearFeed('teamkills')">
+                <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
+                Clear
+              </Button>
+            </div>
           </div>
-        </div>
-        <Card>
-          <CardContent class="p-0">
+          <Card class="flex-1 flex flex-col min-h-0">
+          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
             <div
               ref="teamkillsContainer"
               @scroll="(e) => handleScroll(e, 'teamkills')"
-              class="max-h-96 overflow-y-auto border rounded-lg"
+              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'teamkills'"
@@ -359,10 +370,25 @@
                       </span>
                     </div>
                     <div
-                      class="flex items-center space-x-4 mt-1 text-xs text-muted-foreground"
+                      class="flex items-center justify-between mt-1"
                     >
-                      <span>Weapon: {{ teamkill.data.weapon }}</span>
-                      <span>Damage: {{ teamkill.data.damage }}</span>
+                      <div class="flex items-center space-x-4 text-xs text-muted-foreground">
+                        <span>Weapon: {{ teamkill.data.weapon }}</span>
+                        <span>Damage: {{ teamkill.data.damage }}</span>
+                      </div>
+                      <div class="flex items-center space-x-2">
+                        <PlayerActionMenu
+                          v-if="teamkill.data.attacker_steam || teamkill.data.attacker_eos"
+                          :player="createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name)"
+                          :serverId="serverId"
+                          @warn="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'warn')"
+                          @move="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'move')"
+                          @kick="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'kick')"
+                          @ban="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'ban')"
+                          @remove-from-squad="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'remove-from-squad')"
+                        />
+                        <span class="text-xs text-muted-foreground">Attacker</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -370,17 +396,96 @@
             </div>
           </CardContent>
         </Card>
+        </div>
       </TabsContent>
     </Tabs>
   </div>
+
+  <!-- Action Dialog -->
+  <Dialog v-model:open="showActionDialog">
+    <DialogContent class="sm:max-w-[425px]">
+      <DialogHeader>
+        <DialogTitle>{{ getActionTitle() }}</DialogTitle>
+        <DialogDescription>
+          <template v-if="actionType === 'kick'">
+            Kick this player from the server. They will be able to rejoin.
+          </template>
+          <template v-else-if="actionType === 'ban'">
+            Ban this player from the server for a specified duration.
+          </template>
+          <template v-else-if="actionType === 'warn'">
+            Send a warning message to this player.
+          </template>
+          <template v-else-if="actionType === 'move'">
+            Force this player to switch to another team.
+          </template>
+          <template v-else-if="actionType === 'remove-from-squad'">
+            Remove this player from their squad.
+          </template>
+        </DialogDescription>
+      </DialogHeader>
+
+      <div class="grid gap-4 py-4">
+        <div v-if="actionType === 'ban'" class="grid grid-cols-4 items-center gap-4">
+          <label for="duration" class="text-right col-span-1">Duration</label>
+          <Input id="duration" v-model="actionDuration" placeholder="7" class="col-span-3" type="number" />
+          <div class="col-span-1"></div>
+          <div class="text-xs text-muted-foreground col-span-3">
+            Ban duration in days. Use 0 for a permanent ban.
+          </div>
+        </div>
+
+        <div v-if="actionType !== 'move' && actionType !== 'remove-from-squad'" class="grid grid-cols-4 items-center gap-4">
+          <label for="reason" class="text-right col-span-1">
+            {{ actionType === 'warn' ? 'Message' : 'Reason' }}
+          </label>
+          <Textarea id="reason" v-model="actionReason"
+            :placeholder="actionType === 'warn' ? 'Warning message' : 'Reason for action'" class="col-span-3"
+            rows="3" />
+        </div>
+
+        <div v-if="actionType === 'remove-from-squad'" class="text-sm text-muted-foreground">
+          Are you sure you want to remove {{ selectedPlayer?.name }} from their squad?
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" @click="closeActionDialog">Cancel</Button>
+        <Button :variant="actionType === 'warn' || actionType === 'move' ? 'default' : 'destructive'"
+          @click="executePlayerAction" :disabled="isActionLoading">
+          <span v-if="isActionLoading" class="mr-2">
+            <Icon name="mdi:loading" class="h-4 w-4 animate-spin" />
+          </span>
+          <template v-if="actionType === 'kick'">Kick Player</template>
+          <template v-else-if="actionType === 'ban'">Ban Player</template>
+          <template v-else-if="actionType === 'warn'">Send Warning</template>
+          <template v-else-if="actionType === 'move'">Move Player</template>
+          <template v-else-if="actionType === 'remove-from-squad'">Remove from Squad</template>
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from "vue";
+import { ref, onMounted, onUnmounted, nextTick, computed, watch } from "vue";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Badge } from "~/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/components/ui/dialog";
+import { Textarea } from "~/components/ui/textarea";
+import { Input } from "~/components/ui/input";
+import { useToast } from "~/components/ui/toast";
+import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
+import type { Player } from "~/types";
 import { Icon } from "#components";
 
 definePageMeta({
@@ -389,6 +494,7 @@ definePageMeta({
 
 const route = useRoute();
 const serverId = route.params.serverId as string;
+const { toast } = useToast();
 
 // Reactive state
 const activeTab = ref("chat");
@@ -424,8 +530,27 @@ const chatCount = computed(() => chatMessages.value.length);
 const connectionsCount = computed(() => connections.value.length);
 const teamkillsCount = computed(() => teamkills.value.length);
 
-// Scroll tracking
-const isAtBottom = ref(true);
+// Scroll tracking per feed type
+const isAtBottom = ref({
+  chat: true,
+  connections: true,
+  teamkills: true,
+});
+
+// Unread notifications per feed type
+const hasUnread = ref({
+  chat: false,
+  connections: false,
+  teamkills: false,
+});
+
+// Action dialog state
+const showActionDialog = ref(false);
+const actionType = ref<'kick' | 'ban' | 'warn' | 'move' | 'remove-from-squad' | null>(null);
+const selectedPlayer = ref<Player | null>(null);
+const actionReason = ref("");
+const actionDuration = ref(1); // For ban duration
+const isActionLoading = ref(false);
 
 // Load initial historical data
 const loadInitialHistoricalData = async () => {
@@ -435,12 +560,16 @@ const loadInitialHistoricalData = async () => {
     loadHistoricalData("teamkills", 50),
   ]);
 
-  // Scroll to bottom initially
+  // Scroll to bottom initially and clear any unread notifications
   await nextTick();
   setTimeout(() => {
     scrollToBottom("chat");
     scrollToBottom("connections");
     scrollToBottom("teamkills");
+    // Clear unread notifications on initial load
+    hasUnread.value.chat = false;
+    hasUnread.value.connections = false;
+    hasUnread.value.teamkills = false;
   }, 100);
 };
 
@@ -512,8 +641,14 @@ const handleScroll = async (event: Event, feedType: string) => {
   const scrollHeight = container.scrollHeight;
   const clientHeight = container.clientHeight;
 
-  // Check if user is at the bottom
-  isAtBottom.value = scrollHeight - scrollTop - clientHeight < 100;
+  // Check if user is at the bottom for this feed type
+  const atBottom = scrollHeight - scrollTop - clientHeight < 100;
+  isAtBottom.value[feedType as keyof typeof isAtBottom.value] = atBottom;
+
+  // Clear unread notification if user scrolls to bottom
+  if (atBottom) {
+    hasUnread.value[feedType as keyof typeof hasUnread.value] = false;
+  }
 
   // Load older data when scrolling near the top
   if (scrollTop < 200 && !loadingOlder.value) {
@@ -654,7 +789,11 @@ const handleFeedEvent = (event: any) => {
       if (chatMessages.value.length > maxEvents) {
         chatMessages.value = chatMessages.value.slice(-maxEvents);
       }
-      if (isAtBottom.value) {
+      // Set unread notification if user is not at bottom or not viewing this tab
+      if (!isAtBottom.value.chat || activeTab.value !== "chat") {
+        hasUnread.value.chat = true;
+      }
+      if (isAtBottom.value.chat && activeTab.value === "chat") {
         nextTick(() => scrollToBottom("chat"));
       }
       break;
@@ -664,7 +803,11 @@ const handleFeedEvent = (event: any) => {
       if (connections.value.length > maxEvents) {
         connections.value = connections.value.slice(-maxEvents);
       }
-      if (isAtBottom.value) {
+      // Set unread notification if user is not at bottom or not viewing this tab
+      if (!isAtBottom.value.connections || activeTab.value !== "connections") {
+        hasUnread.value.connections = true;
+      }
+      if (isAtBottom.value.connections && activeTab.value === "connections") {
         nextTick(() => scrollToBottom("connections"));
       }
       break;
@@ -674,7 +817,11 @@ const handleFeedEvent = (event: any) => {
       if (teamkills.value.length > maxEvents) {
         teamkills.value = teamkills.value.slice(-maxEvents);
       }
-      if (isAtBottom.value) {
+      // Set unread notification if user is not at bottom or not viewing this tab
+      if (!isAtBottom.value.teamkills || activeTab.value !== "teamkills") {
+        hasUnread.value.teamkills = true;
+      }
+      if (isAtBottom.value.teamkills && activeTab.value === "teamkills") {
         nextTick(() => scrollToBottom("teamkills"));
       }
       break;
@@ -688,16 +835,19 @@ const clearFeed = (feedType: string) => {
       chatMessages.value = [];
       oldestChatTime.value = null;
       hasMoreChat.value = true;
+      hasUnread.value.chat = false;
       break;
     case "connections":
       connections.value = [];
       oldestConnectionTime.value = null;
       hasMoreConnections.value = true;
+      hasUnread.value.connections = false;
       break;
     case "teamkills":
       teamkills.value = [];
       oldestTeamkillTime.value = null;
       hasMoreTeamkills.value = true;
+      hasUnread.value.teamkills = false;
       break;
   }
 };
@@ -738,7 +888,9 @@ const scrollToBottom = (feedType: string) => {
 
   if (container) {
     container.scrollTop = container.scrollHeight;
-    isAtBottom.value = true;
+    isAtBottom.value[feedType as keyof typeof isAtBottom.value] = true;
+    // Clear unread notification when scrolling to bottom
+    hasUnread.value[feedType as keyof typeof hasUnread.value] = false;
   }
 };
 
@@ -775,6 +927,180 @@ const getChatTypeBadge = (chatType: string) => {
       return "secondary";
   }
 };
+
+// Helper function to convert feed event data to Player object
+const createPlayerFromFeedData = (data: any, name: string, isDisconnected: boolean = false): Player => {
+  // Extract steam_id - handle both string and number formats
+  const steamId = data.steam_id || data.steamId || data.attacker_steam;
+  const steamIdString = steamId ? String(steamId) : "";
+  
+  // Extract eos_id
+  const eosId = data.eos_id || data.eosId || data.attacker_eos || "";
+  
+  return {
+    playerId: 0, // Not available in feed data
+    eosId: eosId,
+    steam_id: steamIdString,
+    name: name,
+    teamId: 0, // Not available in feed data
+    squadId: 0, // Not available in feed data
+    isSquadLeader: false, // Not available in feed data
+    role: "", // Not available in feed data
+    sinceDisconnect: isDisconnected ? "disconnected" : "", // Empty string means connected
+  };
+};
+
+// Action dialog functions
+function openActionDialog(player: Player, action: 'kick' | 'ban' | 'warn' | 'move' | 'remove-from-squad') {
+  selectedPlayer.value = player;
+  actionType.value = action;
+  actionReason.value = "";
+  actionDuration.value = action === 'ban' ? 1 : 0;
+  showActionDialog.value = true;
+}
+
+function closeActionDialog() {
+  showActionDialog.value = false;
+  selectedPlayer.value = null;
+  actionType.value = null;
+  actionReason.value = "";
+  actionDuration.value = 0;
+}
+
+function getActionTitle() {
+  if (!actionType.value || !selectedPlayer.value) return "";
+  
+  const actionMap = {
+    kick: "Kick",
+    ban: "Ban",
+    warn: "Warn",
+    move: "Move",
+    "remove-from-squad": "Remove from Squad",
+  } as const;
+  return `${actionMap[actionType.value]} ${selectedPlayer.value.name}`;
+}
+
+async function executePlayerAction() {
+  if (!actionType.value || !selectedPlayer.value) return;
+
+  isActionLoading.value = true;
+  const runtimeConfig = useRuntimeConfig();
+  const cookieToken = useCookie(
+    runtimeConfig.public.sessionCookieName as string
+  );
+  const token = cookieToken.value;
+
+  if (!token) {
+    toast({
+      title: "Authentication Error",
+      description: "You must be logged in to perform this action",
+      variant: "destructive",
+    });
+    isActionLoading.value = false;
+    closeActionDialog();
+    return;
+  }
+
+  try {
+    let endpoint = "";
+    let payload: any = {};
+
+    switch (actionType.value) {
+      case 'kick':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/kick-player`;
+        payload = {
+          steam_id: selectedPlayer.value.steam_id,
+          reason: actionReason.value,
+        };
+        break;
+      case 'ban':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`;
+        payload = {
+          steam_id: selectedPlayer.value.steam_id,
+          reason: actionReason.value,
+          duration: actionDuration.value,
+        };
+        break;
+      case 'warn':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/warn-player`;
+        payload = {
+          steam_id: selectedPlayer.value.steam_id,
+          message: actionReason.value,
+        };
+        break;
+      case 'move':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/move-player`;
+        payload = {
+          steam_id: selectedPlayer.value.steam_id,
+        };
+        break;
+      case 'remove-from-squad':
+        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
+        payload = {
+          command: `AdminRemovePlayerFromSquadById ${selectedPlayer.value.playerId}`,
+        };
+        break;
+    }
+
+    const { data, error: fetchError } = await useFetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (fetchError.value) {
+      throw new Error(fetchError.value.message || `Failed to ${actionType.value}`);
+    }
+
+    let successMessage = `Player ${selectedPlayer.value.name} has been `;
+    if (actionType.value === 'move') {
+      successMessage += 'moved';
+    } else if (actionType.value === 'ban') {
+      successMessage += 'banned';
+      if (actionDuration.value) {
+        const days = actionDuration.value;
+        successMessage += ` for ${days} ${days === 1 ? 'day' : 'days'}`;
+      } else {
+        successMessage += ' permanently';
+      }
+    } else if (actionType.value === 'remove-from-squad') {
+      successMessage += 'removed from squad';
+    } else {
+      successMessage += actionType.value + 'ed';
+    }
+
+    toast({
+      title: "Success",
+      description: successMessage,
+      variant: "default",
+    });
+  } catch (err: any) {
+    console.error(err);
+    toast({
+      title: "Error",
+      description: err.message || `Failed to ${actionType.value}`,
+      variant: "destructive",
+    });
+  } finally {
+    isActionLoading.value = false;
+    closeActionDialog();
+  }
+}
+
+// Watch for tab changes and scroll to bottom
+watch(activeTab, async (newTab) => {
+  // Wait for DOM to update before scrolling
+  await nextTick();
+  // Add a small delay to ensure the tab content is fully rendered
+  setTimeout(() => {
+    scrollToBottom(newTab);
+    // Clear unread notification when switching to a tab (scrollToBottom already clears it, but ensure it's cleared)
+    hasUnread.value[newTab as keyof typeof hasUnread.value] = false;
+  }, 50);
+});
 
 // Lifecycle
 onMounted(async () => {
