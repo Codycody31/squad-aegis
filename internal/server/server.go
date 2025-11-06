@@ -241,6 +241,15 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.POST("/rcon/warn-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconWarnPlayer)
 				serverGroup.POST("/rcon/move-player", server.AuthHasAnyServerPermission("forceteamchange"), server.ServerRconMovePlayer)
 
+				// Player action endpoints with rule violation support
+				playerActionGroup := serverGroup.Group("/rcon/player")
+				{
+					playerActionGroup.GET("/escalation-suggestion", server.ServerRconPlayerEscalationSuggestion)
+					playerActionGroup.POST("/kick", server.AuthHasAnyServerPermission("kick"), server.ServerRconPlayerKick)
+					playerActionGroup.POST("/ban", server.AuthHasAnyServerPermission("ban"), server.ServerRconPlayerBan)
+					playerActionGroup.POST("/warn", server.AuthHasAnyServerPermission("kick"), server.ServerRconPlayerWarn)
+				}
+
 				// Server info endpoints
 				serverGroup.GET("/rcon/server-info", server.ServerRconServerInfo)
 

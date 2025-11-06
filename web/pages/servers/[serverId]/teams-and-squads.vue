@@ -15,7 +15,6 @@ import {
 import { useToast } from "~/components/ui/toast";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
 import type { Player } from "~/types";
-import { Textarea } from "~/components/ui/textarea";
 import { Progress } from "~/components/ui/progress";
 import { Switch } from "~/components/ui/switch";
 import { Label } from "~/components/ui/label";
@@ -33,15 +32,10 @@ const searchQuery = ref("");
 const isAutoRefreshEnabled = ref(true);
 const lastUpdated = ref<number | null>(null);
 
-// Action dialog state (unified with connected players)
-const showActionDialog = ref(false);
-const actionType = ref<'kick' | 'ban' | 'warn' | 'move' | 'remove-from-squad' | 'disband-squad' | null>(null);
-const selectedPlayer = ref<Player | null>(null);
+// Action dialog state for disband squad (this can't be done through PlayerActionMenu)
+const showDisbandDialog = ref(false);
 const selectedSquad = ref<Squad | null>(null);
-const actionReason = ref("");
-const actionDuration = ref(1); // For ban duration
-const targetTeamId = ref<number | null>(null); // For move action
-const isActionLoading = ref(false);
+const isDisbandLoading = ref(false);
 
 interface Squad {
   id: number;
@@ -240,55 +234,20 @@ function refreshData() {
   fetchTeamsData();
 }
 
-function openActionDialog(player: Player, action: 'kick' | 'ban' | 'warn' | 'move' | 'remove-from-squad') {
-  selectedPlayer.value = player;
-  actionType.value = action;
-  actionReason.value = "";
-  actionDuration.value = action === 'ban' ? 1 : 0;
-  showActionDialog.value = true;
-}
-
 function openDisbandSquadDialog(squad: Squad) {
   selectedSquad.value = squad;
-  actionType.value = 'disband-squad';
-  actionReason.value = "";
-  showActionDialog.value = true;
+  showDisbandDialog.value = true;
 }
 
-function closeActionDialog() {
-  showActionDialog.value = false;
-  selectedPlayer.value = null;
+function closeDisbandDialog() {
+  showDisbandDialog.value = false;
   selectedSquad.value = null;
-  actionType.value = null;
-  actionReason.value = "";
-  actionDuration.value = 0;
-  targetTeamId.value = null;
 }
 
-function getActionTitle() {
-  if (!actionType.value) return "";
-  
-  if (actionType.value === 'disband-squad') {
-    return `Disband Squad ${selectedSquad.value?.id}: ${selectedSquad.value?.name}`;
-  }
-  
-  if (!selectedPlayer.value) return "";
-  
-  const actionMap = {
-    kick: "Kick",
-    ban: "Ban",
-    warn: "Warn",
-    move: "Move",
-    "remove-from-squad": "Remove from Squad",
-  } as const;
-  return `${actionMap[actionType.value]} ${selectedPlayer.value.name}`;
-}
+async function executeDisbandSquad() {
+  if (!selectedSquad.value) return;
 
-async function executePlayerAction() {
-  if (!actionType.value) return;
-  if (actionType.value !== 'disband-squad' && !selectedPlayer.value) return;
-
-  isActionLoading.value = true;
+  isDisbandLoading.value = true;
   const runtimeConfig = useRuntimeConfig();
   const cookieToken = useCookie(
     runtimeConfig.public.sessionCookieName as string
@@ -301,57 +260,16 @@ async function executePlayerAction() {
       description: "You must be logged in to perform this action",
       variant: "destructive",
     });
-    isActionLoading.value = false;
-    closeActionDialog();
+    isDisbandLoading.value = false;
+    closeDisbandDialog();
     return;
   }
 
   try {
-    let endpoint = "";
-    let payload: any = {};
-
-    switch (actionType.value) {
-      case 'kick':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/kick-player`;
-        payload = {
-          steam_id: selectedPlayer.value!.steam_id,
-          reason: actionReason.value,
-        };
-        break;
-      case 'ban':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`;
-        payload = {
-          steam_id: selectedPlayer.value!.steam_id,
-          reason: actionReason.value,
-          duration: actionDuration.value,
-        };
-        break;
-      case 'warn':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/warn-player`;
-        payload = {
-          steam_id: selectedPlayer.value!.steam_id,
-          message: actionReason.value,
-        };
-        break;
-      case 'move':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/move-player`;
-        payload = {
-          steam_id: selectedPlayer.value!.steam_id,
-        };
-        break;
-      case 'remove-from-squad':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
-        payload = {
-          command: `AdminRemovePlayerFromSquadById ${selectedPlayer.value!.playerId}`,
-        };
-        break;
-      case 'disband-squad':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
-        payload = {
-          command: `AdminDisbandSquad ${selectedSquad.value!.teamId} ${selectedSquad.value!.id}`,
-        };
-        break;
-    }
+    const endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
+    const payload = {
+      command: `AdminDisbandSquad ${selectedSquad.value.teamId} ${selectedSquad.value.id}`,
+    };
 
     const { data, error: fetchError } = await useFetch(endpoint, {
       method: "POST",
@@ -363,34 +281,12 @@ async function executePlayerAction() {
     });
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || `Failed to ${actionType.value}`);
-    }
-
-    let successMessage = "";
-    if (actionType.value === 'disband-squad') {
-      successMessage = `Squad ${selectedSquad.value?.id}: ${selectedSquad.value?.name} has been disbanded`;
-    } else {
-      successMessage = `Player ${selectedPlayer.value!.name} has been `;
-      if (actionType.value === 'move') {
-        successMessage += 'moved';
-      } else if (actionType.value === 'ban') {
-        successMessage += 'banned';
-        if (actionDuration.value) {
-          const days = actionDuration.value;
-          successMessage += ` for ${days} ${days === 1 ? 'day' : 'days'}`;
-        } else {
-          successMessage += ' permanently';
-        }
-      } else if (actionType.value === 'remove-from-squad') {
-        successMessage += 'removed from squad';
-      } else {
-        successMessage += actionType.value + 'ed';
-      }
+      throw new Error(fetchError.value.message || "Failed to disband squad");
     }
 
     toast({
       title: "Success",
-      description: successMessage,
+      description: `Squad ${selectedSquad.value.id}: ${selectedSquad.value.name} has been disbanded`,
       variant: "default",
     });
 
@@ -400,12 +296,12 @@ async function executePlayerAction() {
     console.error(err);
     toast({
       title: "Error",
-      description: err.message || `Failed to ${actionType.value}`,
+      description: err.message || "Failed to disband squad",
       variant: "destructive",
     });
   } finally {
-    isActionLoading.value = false;
-    closeActionDialog();
+    isDisbandLoading.value = false;
+    closeDisbandDialog();
   }
 }
 </script>
@@ -522,9 +418,7 @@ async function executePlayerAction() {
                           </td>
                           <td class="py-1 text-right">
                             <PlayerActionMenu :player="player" :serverId="serverId as string"
-                              @warn="openActionDialog(player, 'warn')" @move="openActionDialog(player, 'move')"
-                              @kick="openActionDialog(player, 'kick')" @ban="openActionDialog(player, 'ban')"
-                              @remove-from-squad="openActionDialog(player, 'remove-from-squad')" />
+                              @action-completed="refreshData" />
                           </td>
                         </tr>
                         <tr v-if="squad.players.length === 0">
@@ -556,11 +450,7 @@ async function executePlayerAction() {
                       </div>
                       <div>
                         <PlayerActionMenu :player="player" :serverId="serverId as string"
-                          @warn="openActionDialog(player, 'warn')"
-                          @move="openActionDialog(player, 'move')"
-                          @kick="openActionDialog(player, 'kick')"
-                          @ban="openActionDialog(player, 'ban')"
-                          @remove-from-squad="openActionDialog(player, 'remove-from-squad')" />
+                          @action-completed="refreshData" />
                       </div>
                     </div>
                   </div>
@@ -573,74 +463,29 @@ async function executePlayerAction() {
     </div>
   </div>
 
-  <!-- Unified Action Dialog -->
-  <Dialog v-model:open="showActionDialog">
+  <!-- Disband Squad Dialog (kept separate as it's squad-specific) -->
+  <Dialog v-model:open="showDisbandDialog">
     <DialogContent class="sm:max-w-[425px]">
       <DialogHeader>
-        <DialogTitle>{{ getActionTitle() }}</DialogTitle>
+        <DialogTitle>Disband Squad {{ selectedSquad?.id }}: {{ selectedSquad?.name }}</DialogTitle>
         <DialogDescription>
-          <template v-if="actionType === 'kick'">
-            Kick this player from the server. They will be able to rejoin.
-          </template>
-          <template v-else-if="actionType === 'ban'">
-            Ban this player from the server for a specified duration.
-          </template>
-          <template v-else-if="actionType === 'warn'">
-            Send a warning message to this player.
-          </template>
-          <template v-else-if="actionType === 'move'">
-            Force this player to switch to another team.
-          </template>
-          <template v-else-if="actionType === 'remove-from-squad'">
-            Remove this player from their squad.
-          </template>
-          <template v-else-if="actionType === 'disband-squad'">
-            Disband this squad and remove all players from it. This action cannot be undone.
-          </template>
+          Disband this squad and remove all players from it. This action cannot be undone.
         </DialogDescription>
       </DialogHeader>
 
       <div class="grid gap-4 py-4">
-        <div v-if="actionType === 'ban'" class="grid grid-cols-4 items-center gap-4">
-          <label for="duration" class="text-right col-span-1">Duration</label>
-          <Input id="duration" v-model="actionDuration" placeholder="7" class="col-span-3" type="number" />
-          <div class="col-span-1"></div>
-          <div class="text-xs text-muted-foreground col-span-3">
-            Ban duration in days. Use 0 for a permanent ban.
-          </div>
-        </div>
-
-        <div v-if="actionType !== 'move' && actionType !== 'remove-from-squad' && actionType !== 'disband-squad'" class="grid grid-cols-4 items-center gap-4">
-          <label for="reason" class="text-right col-span-1">
-            {{ actionType === 'warn' ? 'Message' : 'Reason' }}
-          </label>
-          <Textarea id="reason" v-model="actionReason"
-            :placeholder="actionType === 'warn' ? 'Warning message' : 'Reason for action'" class="col-span-3"
-            rows="3" />
-        </div>
-
-        <div v-if="actionType === 'remove-from-squad'" class="text-sm text-muted-foreground">
-          Are you sure you want to remove {{ selectedPlayer?.name }} from their squad?
-        </div>
-
-        <div v-if="actionType === 'disband-squad'" class="text-sm text-muted-foreground">
+        <div class="text-sm text-muted-foreground">
           Are you sure you want to disband Squad {{ selectedSquad?.id }}: {{ selectedSquad?.name }}? All {{ selectedSquad?.players.length }} players will be removed from the squad.
         </div>
       </div>
 
       <DialogFooter>
-        <Button variant="outline" @click="closeActionDialog">Cancel</Button>
-        <Button :variant="actionType === 'warn' || actionType === 'move' ? 'default' : 'destructive'"
-          @click="executePlayerAction" :disabled="isActionLoading">
-          <span v-if="isActionLoading" class="mr-2">
+        <Button variant="outline" @click="closeDisbandDialog">Cancel</Button>
+        <Button variant="destructive" @click="executeDisbandSquad" :disabled="isDisbandLoading">
+          <span v-if="isDisbandLoading" class="mr-2">
             <Icon name="lucide:loader-2" class="h-4 w-4 animate-spin" />
           </span>
-          <template v-if="actionType === 'kick'">Kick Player</template>
-          <template v-else-if="actionType === 'ban'">Ban Player</template>
-          <template v-else-if="actionType === 'warn'">Send Warning</template>
-          <template v-else-if="actionType === 'move'">Move Player</template>
-          <template v-else-if="actionType === 'remove-from-squad'">Remove from Squad</template>
-          <template v-else-if="actionType === 'disband-squad'">Disband Squad</template>
+          Disband Squad
         </Button>
       </DialogFooter>
     </DialogContent>

@@ -21,14 +21,14 @@ type ServerRule struct {
 }
 
 type ServerRuleAction struct {
-	ID              uuid.UUID `json:"id"`
-	RuleID          uuid.UUID `json:"rule_id"`
-	ViolationCount  int       `json:"violation_count"`
-	ActionType      string    `json:"action_type"` // WARN, KICK, BAN
-	DurationMinutes *int      `json:"duration_minutes,omitempty"`
-	Message         string    `json:"message"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	RuleID         uuid.UUID `json:"rule_id"`
+	ViolationCount int       `json:"violation_count"`
+	ActionType     string    `json:"action_type"` // WARN, KICK, BAN
+	Duration       *int      `json:"duration,omitempty"` // Duration in days, 0 for permanent
+	Message        string    `json:"message"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type PlayerRuleViolation struct {

@@ -8,8 +8,8 @@ interface ServerRuleAction {
   rule_id: string;
   violation_count: number;
   action_type: 'WARN' | 'KICK' | 'BAN';
-  duration_days?: number;
-  duration_minutes?: number;
+  duration?: number; // Duration in days (from backend)
+  duration_days?: number; // Duration in days (for frontend use)
   message?: string;
   created_at: string;
   updated_at: string;
