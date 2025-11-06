@@ -1184,9 +1184,7 @@ function exportWorkflow() {
                                         "
                                         class="text-sm text-muted-foreground"
                                     >
-                                        {{
-                                            trigger.conditions.length
-                                        }}
+                                        {{ trigger.conditions.length }}
                                         condition(s)
                                     </p>
                                 </div>
@@ -1673,9 +1671,7 @@ function exportWorkflow() {
                         >Cancel</Button
                     >
                     <Button @click="saveTrigger">
-                        {{
-                            editingTriggerIndex >= 0 ? "Update" : "Add"
-                        }}
+                        {{ editingTriggerIndex >= 0 ? "Update" : "Add" }}
                         Trigger
                     </Button>
                 </DialogFooter>
@@ -1879,143 +1875,6 @@ function exportWorkflow() {
                                                 automaticLayout: true,
                                             }"
                                         />
-                                    </div>
-                                    <div
-                                        class="bg-muted p-3 rounded-md text-xs"
-                                    >
-                                        <p class="font-medium mb-2">
-                                            Available Lua Functions:
-                                        </p>
-                                        <div class="grid grid-cols-2 gap-2">
-                                            <div>
-                                                <p
-                                                    class="font-medium text-green-600"
-                                                >
-                                                    Logging:
-                                                </p>
-                                                <ul
-                                                    class="space-y-1 text-muted-foreground"
-                                                >
-                                                    <li>
-                                                        <code
-                                                            >log(message)</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code
-                                                            >log_debug(message)</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code
-                                                            >log_warn(message)</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code
-                                                            >log_error(message)</code
-                                                        >
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                            <div>
-                                                <p
-                                                    class="font-medium text-blue-600"
-                                                >
-                                                    Variables:
-                                                </p>
-                                                <ul
-                                                    class="space-y-1 text-muted-foreground"
-                                                >
-                                                    <li>
-                                                        <code
-                                                            >set_variable(name,
-                                                            value)</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code
-                                                            >get_variable(name)</code
-                                                        >
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                            <div>
-                                                <p
-                                                    class="font-medium text-purple-600"
-                                                >
-                                                    Utilities:
-                                                </p>
-                                                <ul
-                                                    class="space-y-1 text-muted-foreground"
-                                                >
-                                                    <li>
-                                                        <code
-                                                            >json_encode(table)</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code
-                                                            >json_decode(string)</code
-                                                        >
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                            <div>
-                                                <p
-                                                    class="font-medium text-orange-600"
-                                                >
-                                                    Workflow Data:
-                                                </p>
-                                                <ul
-                                                    class="space-y-1 text-muted-foreground"
-                                                >
-                                                    <li>
-                                                        <code
-                                                            >workflow.trigger_event</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code
-                                                            >workflow.metadata</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code
-                                                            >workflow.variables</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code
-                                                            >workflow.step_results</code
-                                                        >
-                                                    </li>
-                                                    <li>
-                                                        <code>result</code> -
-                                                        Output table
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                        <div
-                                            class="mt-3 p-2 bg-background rounded border"
-                                        >
-                                            <p class="font-medium mb-1">
-                                                Example Usage:
-                                            </p>
-                                            <pre
-                                                class="text-xs text-muted-foreground"
-                                            ><code>-- Access trigger event data
-local player = workflow.trigger_event.player_name
-log("Processing: " .. (player or "unknown"))
-
--- Set a workflow variable
-set_variable("last_player", player)
-
--- Store results
-result.success = true
-result.message = "Processed " .. player</code></pre>
-                                        </div>
                                     </div>
                                 </div>
 
