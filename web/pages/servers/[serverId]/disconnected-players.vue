@@ -4,21 +4,6 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogFooter, 
-  DialogHeader, 
-  DialogTitle 
-} from "~/components/ui/dialog";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
-} from "~/components/ui/dropdown-menu";
-import { Textarea } from "~/components/ui/textarea";
 import { useToast } from "~/components/ui/toast";
 import type { Player } from "~/types";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
@@ -34,14 +19,6 @@ const disconnectedPlayers = ref<Player[]>([]);
 const refreshInterval = ref<NodeJS.Timeout | null>(null);
 const searchQuery = ref("");
 const copiedId = ref<string | null>(null);
-
-// Action dialog state
-const showActionDialog = ref(false);
-const actionType = ref<'ban' | null>(null);
-const selectedPlayer = ref<Player | null>(null);
-const actionReason = ref("");
-const actionDuration = ref("1"); // Default to 1 day
-const isActionLoading = ref(false);
 
 interface PlayersResponse {
   data: {
@@ -122,6 +99,11 @@ async function fetchDisconnectedPlayers() {
   }
 }
 
+// Refresh data after action
+function refreshAfterAction() {
+  fetchDisconnectedPlayers();
+}
+
 // Format disconnect time to be more readable
 function formatDisconnectTime(timeStr: string): string {
   // If already in a readable format, return as is
@@ -174,118 +156,6 @@ function refreshData() {
   fetchDisconnectedPlayers();
 }
 
-// Function to copy text to clipboard
-function copyToClipboard(text: string) {
-  if (process.client) {
-    navigator.clipboard.writeText(text)
-      .then(() => {
-        copiedId.value = text;
-        setTimeout(() => {
-          copiedId.value = null;
-        }, 2000);
-      })
-      .catch((err) => {
-        console.error("Failed to copy text: ", err);
-      });
-  }
-}
-
-// Open action dialog
-function openActionDialog(player: Player, action: 'ban') {
-  selectedPlayer.value = player;
-  actionType.value = action;
-  actionReason.value = "";
-  actionDuration.value = "1"; // Default to 1 day
-  showActionDialog.value = true;
-}
-
-// Close action dialog
-function closeActionDialog() {
-  showActionDialog.value = false;
-  selectedPlayer.value = null;
-  actionType.value = null;
-  actionReason.value = "";
-  actionDuration.value = "1";
-}
-
-// Get action title
-function getActionTitle() {
-  if (!actionType.value || !selectedPlayer.value) return "";
-  
-  return `Ban ${selectedPlayer.value.name}`;
-}
-
-// Execute player action
-async function executePlayerAction() {
-  if (!actionType.value || !selectedPlayer.value) return;
-  
-  isActionLoading.value = true;
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-  const token = cookieToken.value;
-  
-  if (!token) {
-    toast({
-      title: "Authentication Error",
-      description: "You must be logged in to perform this action",
-      variant: "destructive"
-    });
-    isActionLoading.value = false;
-    closeActionDialog();
-    return;
-  }
-  
-  try {
-    const endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`;
-    const payload = {
-      steam_id: selectedPlayer.value.steam_id,
-      reason: actionReason.value,
-      duration: parseInt(actionDuration.value) || 0
-    };
-    
-    const { data, error: fetchError } = await useFetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-    
-    if (fetchError.value) {
-      throw new Error(fetchError.value.message || `Failed to ban player`);
-    }
-    
-    // Show success message
-    let successMessage = `Player ${selectedPlayer.value.name} has been banned`;
-    if (actionDuration.value && parseInt(actionDuration.value) > 0) {
-      const days = parseInt(actionDuration.value);
-      successMessage += ` for ${days} ${days === 1 ? 'day' : 'days'}`;
-    } else {
-      successMessage += ' permanently';
-    }
-    
-    toast({
-      title: "Success",
-      description: successMessage,
-      variant: "default"
-    });
-    
-    // Refresh player list
-    fetchDisconnectedPlayers();
-    
-  } catch (err: any) {
-    console.error(err);
-    toast({
-      title: "Error",
-      description: err.message || `Failed to ban player`,
-      variant: "destructive"
-    });
-  } finally {
-    isActionLoading.value = false;
-    closeActionDialog();
-  }
-}
 </script>
 
 <template>
@@ -359,7 +229,7 @@ async function executePlayerAction() {
                   </span>
                 </TableCell>
                 <TableCell class="text-right">
-                  <PlayerActionMenu :player="player" :serverId="serverId as string" @ban="openActionDialog(player, 'ban')" />
+                  <PlayerActionMenu :player="player" :serverId="serverId as string" @action-completed="refreshAfterAction" />
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -385,58 +255,6 @@ async function executePlayerAction() {
       </CardContent>
     </Card>
   </div>
-
-  <Dialog v-model:open="showActionDialog">
-    <DialogContent class="sm:max-w-[425px]">
-      <DialogHeader>
-        <DialogTitle>{{ getActionTitle() }}</DialogTitle>
-        <DialogDescription>
-          Ban this player from the server for a specified duration.
-        </DialogDescription>
-      </DialogHeader>
-      
-      <div class="grid gap-4 py-4">
-        <div class="grid grid-cols-4 items-center gap-4">
-          <label for="duration" class="text-right col-span-1">Duration</label>
-          <Input
-            id="duration"
-            v-model="actionDuration"
-            placeholder="7"
-            class="col-span-3"
-          />
-          <div class="col-span-1"></div>
-          <div class="text-xs text-muted-foreground col-span-3">
-            Ban duration in days. Use 0 for a permanent ban.
-          </div>
-        </div>
-        
-        <div class="grid grid-cols-4 items-center gap-4">
-          <label for="reason" class="text-right col-span-1">Reason</label>
-          <Textarea
-            id="reason"
-            v-model="actionReason"
-            placeholder="Reason for ban"
-            class="col-span-3"
-            rows="3"
-          />
-        </div>
-      </div>
-      
-      <DialogFooter>
-        <Button variant="outline" @click="closeActionDialog">Cancel</Button>
-        <Button 
-          variant="destructive" 
-          @click="executePlayerAction"
-          :disabled="isActionLoading"
-        >
-          <span v-if="isActionLoading" class="mr-2">
-            <Icon name="lucide:loader-2" class="h-4 w-4 animate-spin" />
-          </span>
-          Ban Player
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
 </template>
 
 <style scoped>
