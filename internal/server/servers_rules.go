@@ -49,7 +49,7 @@ func (s *Server) listServerRules(c *gin.Context) {
 
 	var actions []models.ServerRuleAction
 	if len(ruleIDs) > 0 {
-		query := `SELECT id, rule_id, violation_count, action_type, duration_minutes, message, created_at, updated_at FROM server_rule_actions WHERE rule_id = ANY($1)`
+		query := `SELECT id, rule_id, violation_count, action_type, duration, message, created_at, updated_at FROM server_rule_actions WHERE rule_id = ANY($1)`
 		actionRows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), query, pq.Array(ruleIDs))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load rule actions"})
@@ -59,7 +59,7 @@ func (s *Server) listServerRules(c *gin.Context) {
 
 		for actionRows.Next() {
 			var action models.ServerRuleAction
-			if err := actionRows.Scan(&action.ID, &action.RuleID, &action.ViolationCount, &action.ActionType, &action.DurationMinutes, &action.Message, &action.CreatedAt, &action.UpdatedAt); err != nil {
+			if err := actionRows.Scan(&action.ID, &action.RuleID, &action.ViolationCount, &action.ActionType, &action.Duration, &action.Message, &action.CreatedAt, &action.UpdatedAt); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan rule action"})
 				return
 			}
@@ -308,10 +308,22 @@ func (s *Server) bulkUpdateServerRules(c *gin.Context) {
 						action.ActionType = actionType
 					}
 
-					// Handle duration_minutes
-					if durationMinutes, ok := actionMap["duration_minutes"].(float64); ok {
-						durationMins := int(durationMinutes)
-						action.DurationMinutes = &durationMins
+					// Handle duration (support both duration_days and duration for backward compatibility)
+					// Frontend sends duration_days, but we also check duration in case it's sent
+					var durationDays *int
+					if durationDaysVal, ok := actionMap["duration_days"].(float64); ok {
+						d := int(durationDaysVal)
+						durationDays = &d
+					} else if durationVal, ok := actionMap["duration"].(float64); ok {
+						d := int(durationVal)
+						durationDays = &d
+					} else if durationMinutesVal, ok := actionMap["duration_minutes"].(float64); ok {
+						// Legacy: convert minutes to days (assuming it was stored incorrectly)
+						d := int(durationMinutesVal) / (24 * 60)
+						durationDays = &d
+					}
+					if durationDays != nil {
+						action.Duration = durationDays
 					}
 
 					// Handle message
@@ -450,14 +462,14 @@ func (s *Server) bulkUpdateServerRules(c *gin.Context) {
 				action.RuleID = resultRule.ID // Ensure correct rule ID
 
 				actionQuery := `INSERT INTO server_rule_actions 
-					(rule_id, violation_count, action_type, duration_minutes, message) 
+					(rule_id, violation_count, action_type, duration, message) 
 					VALUES ($1, $2, $3, $4, $5) 
 					RETURNING id, created_at, updated_at`
 
 				var resultAction models.ServerRuleAction
 				err = tx.QueryRowContext(c.Request.Context(), actionQuery,
 					action.RuleID, action.ViolationCount, action.ActionType,
-					action.DurationMinutes, action.Message).
+					action.Duration, action.Message).
 					Scan(&resultAction.ID, &resultAction.CreatedAt, &resultAction.UpdatedAt)
 
 				if err != nil {
@@ -469,7 +481,7 @@ func (s *Server) bulkUpdateServerRules(c *gin.Context) {
 				resultAction.RuleID = action.RuleID
 				resultAction.ViolationCount = action.ViolationCount
 				resultAction.ActionType = action.ActionType
-				resultAction.DurationMinutes = action.DurationMinutes
+				resultAction.Duration = action.Duration
 				resultAction.Message = action.Message
 
 				resultActions = append(resultActions, resultAction)

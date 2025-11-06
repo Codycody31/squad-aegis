@@ -1,8 +1,12 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -26,6 +30,28 @@ type WarnPlayerRequest struct {
 
 type MovePlayerRequest struct {
 	SteamId string `json:"steam_id" binding:"required"`
+}
+
+// Request structs for player actions with rule support
+type PlayerActionRequest struct {
+	SteamId string  `json:"steam_id" binding:"required"`
+	RuleId  *string `json:"rule_id"`
+}
+
+type PlayerKickRequest struct {
+	PlayerActionRequest
+	Reason string `json:"reason"`
+}
+
+type PlayerBanRequest struct {
+	PlayerActionRequest
+	Reason   string `json:"reason" binding:"required"`
+	Duration int    `json:"duration"` // Duration in minutes, 0 for permanent
+}
+
+type PlayerWarnRequest struct {
+	PlayerActionRequest
+	Message string `json:"message" binding:"required"`
 }
 
 // RconCommandList handles the listing of all commands that can be executed by the server
@@ -368,4 +394,432 @@ func (s *Server) ServerRconForceRestart(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:force_restart", map[string]interface{}{})
 
 	responses.Success(c, "RCON connection restarted successfully", nil)
+}
+
+// logRuleViolation logs a rule violation to ClickHouse if rule_id is provided
+func (s *Server) logRuleViolation(ctx context.Context, serverId uuid.UUID, steamId string, ruleId *string, adminUserId *uuid.UUID, actionType string) error {
+	if ruleId == nil || *ruleId == "" {
+		return nil // No rule ID, skip logging
+	}
+
+	ruleUUID, err := uuid.Parse(*ruleId)
+	if err != nil {
+		log.Warn().Err(err).Str("rule_id", *ruleId).Msg("Invalid rule ID format, skipping violation log")
+		return nil // Don't fail the action if rule ID is invalid
+	}
+
+	// Parse steam ID to uint64
+	steamIdInt, err := strconv.ParseInt(steamId, 10, 64)
+	if err != nil {
+		log.Warn().Err(err).Str("steam_id", steamId).Msg("Invalid steam ID format, skipping violation log")
+		return nil // Don't fail the action if steam ID is invalid
+	}
+
+	query := `
+		INSERT INTO squad_aegis.player_rule_violations 
+		(violation_id, server_id, player_steam_id, rule_id, admin_user_id, action_type, created_at, ingested_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	violationId := uuid.New()
+	now := time.Now()
+
+	err = s.Dependencies.Clickhouse.Exec(ctx, query,
+		violationId,
+		serverId,
+		uint64(steamIdInt),
+		&ruleUUID, // Nullable(UUID) - pass pointer
+		adminUserId,
+		actionType,
+		now,
+		time.Now(),
+	)
+
+	if err != nil {
+		log.Error().Err(err).
+			Str("server_id", serverId.String()).
+			Str("steam_id", steamId).
+			Str("rule_id", *ruleId).
+			Str("action_type", actionType).
+			Msg("Failed to log rule violation to ClickHouse")
+		return err
+	}
+
+	log.Info().
+		Str("server_id", serverId.String()).
+		Str("steam_id", steamId).
+		Str("rule_id", *ruleId).
+		Str("action_type", actionType).
+		Msg("Logged rule violation to ClickHouse")
+
+	return nil
+}
+
+// ServerRconPlayerKick handles kicking a player via RCON with optional rule violation logging
+func (s *Server) ServerRconPlayerKick(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	var request PlayerKickRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
+
+	// Format the kick command
+	kickCommand := "AdminKick " + request.SteamId
+	if request.Reason != "" {
+		kickCommand += " " + request.Reason
+	}
+
+	// Execute kick command
+	response, err := r.ExecuteRaw(kickCommand)
+	if err != nil {
+		responses.BadRequest(c, "Failed to kick player", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Log rule violation to ClickHouse if rule_id is provided
+	if request.RuleId != nil && *request.RuleId != "" {
+		s.logRuleViolation(c.Request.Context(), serverId, request.SteamId, request.RuleId, &user.Id, "KICK")
+	}
+
+	// Create detailed audit log
+	auditData := map[string]interface{}{
+		"steamId": request.SteamId,
+		"reason":  request.Reason,
+	}
+	if request.RuleId != nil && *request.RuleId != "" {
+		auditData["ruleId"] = *request.RuleId
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:player:kick", auditData)
+
+	responses.Success(c, "Player kicked successfully", &gin.H{"response": response})
+}
+
+// ServerRconPlayerBan handles banning a player via RCON with optional rule violation logging
+func (s *Server) ServerRconPlayerBan(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	var request PlayerBanRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	if request.Reason == "" {
+		responses.BadRequest(c, "Ban reason is required", &gin.H{"error": "Ban reason is required"})
+		return
+	}
+
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
+
+	// Calculate duration in days for RCON command (minimum 1 day)
+	durationDays := request.Duration / (24 * 60) // Convert minutes to days
+	if durationDays < 1 && request.Duration > 0 {
+		durationDays = 1
+	}
+
+	// Format the ban command
+	banCommand := fmt.Sprintf("AdminBan %s", request.SteamId)
+	if request.Duration > 0 {
+		banCommand += fmt.Sprintf(" %dd", durationDays)
+	}
+	banCommand += " " + request.Reason
+
+	// Execute ban command
+	response, err := r.ExecuteRaw(banCommand)
+	if err != nil {
+		responses.BadRequest(c, "Failed to ban player", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Log rule violation to ClickHouse if rule_id is provided
+	if request.RuleId != nil && *request.RuleId != "" {
+		s.logRuleViolation(c.Request.Context(), serverId, request.SteamId, request.RuleId, &user.Id, "BAN")
+	}
+
+	// Create detailed audit log
+	auditData := map[string]interface{}{
+		"steamId":  request.SteamId,
+		"reason":   request.Reason,
+		"duration": request.Duration,
+	}
+	if request.RuleId != nil && *request.RuleId != "" {
+		auditData["ruleId"] = *request.RuleId
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:player:ban", auditData)
+
+	responses.Success(c, "Player banned successfully", &gin.H{"response": response})
+}
+
+// ServerRconPlayerWarn handles warning a player via RCON with optional rule violation logging
+func (s *Server) ServerRconPlayerWarn(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	var request PlayerWarnRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
+	response, err := r.ExecuteRaw("AdminWarn " + request.SteamId + " " + request.Message)
+	if err != nil {
+		responses.BadRequest(c, "Failed to warn player", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Log rule violation to ClickHouse if rule_id is provided
+	if request.RuleId != nil && *request.RuleId != "" {
+		s.logRuleViolation(c.Request.Context(), serverId, request.SteamId, request.RuleId, &user.Id, "WARN")
+	}
+
+	// Create detailed audit log
+	auditData := map[string]interface{}{
+		"steamId": request.SteamId,
+		"message": request.Message,
+	}
+	if request.RuleId != nil && *request.RuleId != "" {
+		auditData["ruleId"] = *request.RuleId
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:player:warn", auditData)
+
+	responses.Success(c, "Player warned successfully", &gin.H{"response": response})
+}
+
+// RuleEscalationSuggestion represents a suggested escalation action
+type RuleEscalationSuggestion struct {
+	SuggestedAction   string  `json:"suggested_action"`   // WARN, KICK, BAN
+	SuggestedDuration *int    `json:"suggested_duration"` // Duration in minutes for bans
+	SuggestedMessage  string  `json:"suggested_message"`
+	ViolationCount    int     `json:"violation_count"`
+	RuleTitle         string  `json:"rule_title"`
+	RuleDescription   string  `json:"rule_description"`
+	RuleId            *string `json:"rule_id"` // Rule ID for generating reason in UI
+}
+
+// calculateRuleNumber calculates the hierarchical rule number (e.g., "1.2.3") for a given rule
+func calculateRuleNumber(ctx context.Context, db *sql.DB, ruleId uuid.UUID, serverId uuid.UUID) string {
+	type ruleNode struct {
+		id           uuid.UUID
+		parentId     sql.NullString
+		displayOrder int
+	}
+
+	// Build the hierarchy path from root to target rule
+	path := []ruleNode{}
+	currentRuleId := ruleId
+
+	for {
+		var node ruleNode
+		var parentId sql.NullString
+		query := `SELECT id, parent_id, display_order FROM server_rules WHERE id = $1 AND server_id = $2`
+		err := db.QueryRowContext(ctx, query, currentRuleId, serverId).Scan(&node.id, &parentId, &node.displayOrder)
+		if err != nil {
+			break
+		}
+
+		node.parentId = parentId
+		path = append([]ruleNode{node}, path...) // Prepend to build path from root to target
+
+		if !parentId.Valid {
+			break // Reached root
+		}
+
+		currentRuleId, err = uuid.Parse(parentId.String)
+		if err != nil {
+			break
+		}
+	}
+
+	// Calculate number by traversing down the path
+	var parts []string
+	for i, node := range path {
+		if i == 0 {
+			// Root level - find its position among root rules
+			query := `SELECT COUNT(*) FROM server_rules WHERE server_id = $1 AND parent_id IS NULL AND display_order < $2`
+			var position int
+			err := db.QueryRowContext(ctx, query, serverId, node.displayOrder).Scan(&position)
+			if err != nil {
+				return ""
+			}
+			parts = append(parts, strconv.Itoa(position+1))
+		} else {
+			// Child level - find its position among siblings
+			parentId := path[i-1].id
+			query := `SELECT COUNT(*) FROM server_rules WHERE server_id = $1 AND parent_id = $2 AND display_order < $3`
+			var position int
+			err := db.QueryRowContext(ctx, query, serverId, parentId, node.displayOrder).Scan(&position)
+			if err != nil {
+				return ""
+			}
+			parts = append(parts, strconv.Itoa(position+1))
+		}
+	}
+
+	return strings.Join(parts, ".")
+}
+
+// formatDuration formats the duration in days to a human-readable string
+func formatDuration(durationDays sql.NullInt64) string {
+	if !durationDays.Valid {
+		return "perm"
+	}
+
+	days := int(durationDays.Int64)
+	if days == 0 {
+		return "perm"
+	}
+
+	if days == 1 {
+		return "1 day"
+	}
+
+	return fmt.Sprintf("%d days", days)
+}
+
+// ServerRconPlayerEscalationSuggestion checks what action should be taken for a player based on rule violations
+func (s *Server) ServerRconPlayerEscalationSuggestion(c *gin.Context) {
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	steamId := c.Query("steam_id")
+	ruleIdStr := c.Query("rule_id")
+
+	if steamId == "" {
+		responses.BadRequest(c, "Steam ID is required", &gin.H{"error": "steam_id parameter is required"})
+		return
+	}
+
+	// Parse steam ID to uint64 for ClickHouse query
+	steamIdInt, err := strconv.ParseInt(steamId, 10, 64)
+	if err != nil {
+		responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
+		return
+	}
+
+	suggestion := RuleEscalationSuggestion{
+		ViolationCount: 0,
+	}
+
+	// If rule_id is provided, check violation count for that specific rule
+	if ruleIdStr != "" {
+		ruleId, err := uuid.Parse(ruleIdStr)
+		if err != nil {
+			responses.BadRequest(c, "Invalid rule ID format", &gin.H{"error": err.Error()})
+			return
+		}
+
+		// Get violation count from ClickHouse for this player and rule
+		query := `
+			SELECT count(*) as violation_count
+			FROM squad_aegis.player_rule_violations
+			WHERE server_id = ? AND player_steam_id = ? AND rule_id = ?
+		`
+
+		var violationCount uint64
+		err = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, serverId, uint64(steamIdInt), ruleId.String()).Scan(&violationCount)
+		if err != nil {
+			if err != sql.ErrNoRows {
+				log.Warn().Err(err).Msg("Failed to query violation count, continuing without escalation suggestion")
+			}
+		} else {
+			suggestion.ViolationCount = int(violationCount)
+		}
+
+		// Get rule details and calculate rule number
+		ruleQuery := `
+			SELECT id, parent_id, display_order, title, description
+			FROM server_rules
+			WHERE id = $1 AND server_id = $2
+		`
+		var ruleTitle, ruleDescription string
+		var ruleDisplayOrder int
+		var ruleParentId sql.NullString
+		var queriedRuleId uuid.UUID
+		nextViolationCount := suggestion.ViolationCount
+		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), ruleQuery, ruleId, serverId).Scan(
+			&queriedRuleId, &ruleParentId, &ruleDisplayOrder, &ruleTitle, &ruleDescription)
+		if err == nil {
+			suggestion.RuleTitle = ruleTitle
+			suggestion.RuleDescription = ruleDescription
+			ruleIdString := queriedRuleId.String()
+			suggestion.RuleId = &ruleIdString
+
+			// Calculate rule number by traversing up the hierarchy
+			ruleNumber := calculateRuleNumber(c.Request.Context(), s.Dependencies.DB, queriedRuleId, serverId)
+
+			// Get the action based on violation count (current count)
+			actionQuery := `
+				SELECT action_type, duration, message
+				FROM server_rule_actions
+				WHERE rule_id = $1 AND violation_count <= $2
+				ORDER BY violation_count DESC
+				LIMIT 1
+			`
+			var actionType string
+			var durationDays sql.NullInt64
+			var actionMessage string
+			err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), actionQuery, queriedRuleId, nextViolationCount).Scan(&actionType, &durationDays, &actionMessage)
+			if err == nil {
+				suggestion.SuggestedAction = actionType
+				if durationDays.Valid {
+					durationDaysInt := int(durationDays.Int64)
+					suggestion.SuggestedDuration = &durationDaysInt
+				}
+
+				// Generate message in new format: #1.2.3 | Rule Title | { 1 day/3 days/perm}
+				if actionMessage != "" {
+					// If custom message exists, use it as-is
+					suggestion.SuggestedMessage = actionMessage
+				} else {
+					// Otherwise, generate the formatted message
+					var durationStr string
+					if actionType == "BAN" {
+						durationStr = formatDuration(durationDays)
+					} else {
+						durationStr = "N/A"
+					}
+					suggestion.SuggestedMessage = fmt.Sprintf("%s | %s | %s", ruleNumber, ruleTitle, durationStr)
+				}
+			} else if err != sql.ErrNoRows {
+				log.Warn().Err(err).Msg("Failed to query rule actions")
+			}
+		}
+
+		// Update violation_count to show what it will be after this action is submitted
+		suggestion.ViolationCount = nextViolationCount
+	}
+
+	responses.Success(c, "Escalation suggestion fetched successfully", &gin.H{"suggestion": suggestion})
 }

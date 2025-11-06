@@ -171,11 +171,7 @@
                         v-if="message.data.steam_id || message.data.eos_id"
                         :player="createPlayerFromFeedData(message.data, message.data.player_name)"
                         :serverId="serverId"
-                        @warn="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'warn')"
-                        @move="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'move')"
-                        @kick="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'kick')"
-                        @ban="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'ban')"
-                        @remove-from-squad="openActionDialog(createPlayerFromFeedData(message.data, message.data.player_name), 'remove-from-squad')"
+                        @action-completed="refreshFeeds"
                       />
                     </div>
                   </div>
@@ -286,11 +282,7 @@
                           connection.data.action === 'disconnected'
                         )"
                         :serverId="serverId"
-                        @warn="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'warn')"
-                        @move="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'move')"
-                        @kick="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'kick')"
-                        @ban="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'ban')"
-                        @remove-from-squad="openActionDialog(createPlayerFromFeedData(connection.data, connection.data.player_suffix || connection.data.player_controller, connection.data.action === 'disconnected'), 'remove-from-squad')"
+                        @action-completed="refreshFeeds"
                       />
                     </div>
                   </div>
@@ -381,11 +373,7 @@
                           v-if="teamkill.data.attacker_steam || teamkill.data.attacker_eos"
                           :player="createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name)"
                           :serverId="serverId"
-                          @warn="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'warn')"
-                          @move="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'move')"
-                          @kick="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'kick')"
-                          @ban="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'ban')"
-                          @remove-from-squad="openActionDialog(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name), 'remove-from-squad')"
+                          @action-completed="refreshFeeds"
                         />
                         <span class="text-xs text-muted-foreground">Attacker</span>
                       </div>
@@ -400,71 +388,6 @@
       </TabsContent>
     </Tabs>
   </div>
-
-  <!-- Action Dialog -->
-  <Dialog v-model:open="showActionDialog">
-    <DialogContent class="sm:max-w-[425px]">
-      <DialogHeader>
-        <DialogTitle>{{ getActionTitle() }}</DialogTitle>
-        <DialogDescription>
-          <template v-if="actionType === 'kick'">
-            Kick this player from the server. They will be able to rejoin.
-          </template>
-          <template v-else-if="actionType === 'ban'">
-            Ban this player from the server for a specified duration.
-          </template>
-          <template v-else-if="actionType === 'warn'">
-            Send a warning message to this player.
-          </template>
-          <template v-else-if="actionType === 'move'">
-            Force this player to switch to another team.
-          </template>
-          <template v-else-if="actionType === 'remove-from-squad'">
-            Remove this player from their squad.
-          </template>
-        </DialogDescription>
-      </DialogHeader>
-
-      <div class="grid gap-4 py-4">
-        <div v-if="actionType === 'ban'" class="grid grid-cols-4 items-center gap-4">
-          <label for="duration" class="text-right col-span-1">Duration</label>
-          <Input id="duration" v-model="actionDuration" placeholder="7" class="col-span-3" type="number" />
-          <div class="col-span-1"></div>
-          <div class="text-xs text-muted-foreground col-span-3">
-            Ban duration in days. Use 0 for a permanent ban.
-          </div>
-        </div>
-
-        <div v-if="actionType !== 'move' && actionType !== 'remove-from-squad'" class="grid grid-cols-4 items-center gap-4">
-          <label for="reason" class="text-right col-span-1">
-            {{ actionType === 'warn' ? 'Message' : 'Reason' }}
-          </label>
-          <Textarea id="reason" v-model="actionReason"
-            :placeholder="actionType === 'warn' ? 'Warning message' : 'Reason for action'" class="col-span-3"
-            rows="3" />
-        </div>
-
-        <div v-if="actionType === 'remove-from-squad'" class="text-sm text-muted-foreground">
-          Are you sure you want to remove {{ selectedPlayer?.name }} from their squad?
-        </div>
-      </div>
-
-      <DialogFooter>
-        <Button variant="outline" @click="closeActionDialog">Cancel</Button>
-        <Button :variant="actionType === 'warn' || actionType === 'move' ? 'default' : 'destructive'"
-          @click="executePlayerAction" :disabled="isActionLoading">
-          <span v-if="isActionLoading" class="mr-2">
-            <Icon name="mdi:loading" class="h-4 w-4 animate-spin" />
-          </span>
-          <template v-if="actionType === 'kick'">Kick Player</template>
-          <template v-else-if="actionType === 'ban'">Ban Player</template>
-          <template v-else-if="actionType === 'warn'">Send Warning</template>
-          <template v-else-if="actionType === 'move'">Move Player</template>
-          <template v-else-if="actionType === 'remove-from-squad'">Remove from Squad</template>
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
 </template>
 
 <script setup lang="ts">
@@ -473,16 +396,6 @@ import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Badge } from "~/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "~/components/ui/dialog";
-import { Textarea } from "~/components/ui/textarea";
-import { Input } from "~/components/ui/input";
 import { useToast } from "~/components/ui/toast";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
 import type { Player } from "~/types";
@@ -544,13 +457,6 @@ const hasUnread = ref({
   teamkills: false,
 });
 
-// Action dialog state
-const showActionDialog = ref(false);
-const actionType = ref<'kick' | 'ban' | 'warn' | 'move' | 'remove-from-squad' | null>(null);
-const selectedPlayer = ref<Player | null>(null);
-const actionReason = ref("");
-const actionDuration = ref(1); // For ban duration
-const isActionLoading = ref(false);
 
 // Load initial historical data
 const loadInitialHistoricalData = async () => {
@@ -950,145 +856,6 @@ const createPlayerFromFeedData = (data: any, name: string, isDisconnected: boole
   };
 };
 
-// Action dialog functions
-function openActionDialog(player: Player, action: 'kick' | 'ban' | 'warn' | 'move' | 'remove-from-squad') {
-  selectedPlayer.value = player;
-  actionType.value = action;
-  actionReason.value = "";
-  actionDuration.value = action === 'ban' ? 1 : 0;
-  showActionDialog.value = true;
-}
-
-function closeActionDialog() {
-  showActionDialog.value = false;
-  selectedPlayer.value = null;
-  actionType.value = null;
-  actionReason.value = "";
-  actionDuration.value = 0;
-}
-
-function getActionTitle() {
-  if (!actionType.value || !selectedPlayer.value) return "";
-  
-  const actionMap = {
-    kick: "Kick",
-    ban: "Ban",
-    warn: "Warn",
-    move: "Move",
-    "remove-from-squad": "Remove from Squad",
-  } as const;
-  return `${actionMap[actionType.value]} ${selectedPlayer.value.name}`;
-}
-
-async function executePlayerAction() {
-  if (!actionType.value || !selectedPlayer.value) return;
-
-  isActionLoading.value = true;
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    toast({
-      title: "Authentication Error",
-      description: "You must be logged in to perform this action",
-      variant: "destructive",
-    });
-    isActionLoading.value = false;
-    closeActionDialog();
-    return;
-  }
-
-  try {
-    let endpoint = "";
-    let payload: any = {};
-
-    switch (actionType.value) {
-      case 'kick':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/kick-player`;
-        payload = {
-          steam_id: selectedPlayer.value.steam_id,
-          reason: actionReason.value,
-        };
-        break;
-      case 'ban':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`;
-        payload = {
-          steam_id: selectedPlayer.value.steam_id,
-          reason: actionReason.value,
-          duration: actionDuration.value,
-        };
-        break;
-      case 'warn':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/warn-player`;
-        payload = {
-          steam_id: selectedPlayer.value.steam_id,
-          message: actionReason.value,
-        };
-        break;
-      case 'move':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/move-player`;
-        payload = {
-          steam_id: selectedPlayer.value.steam_id,
-        };
-        break;
-      case 'remove-from-squad':
-        endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
-        payload = {
-          command: `AdminRemovePlayerFromSquadById ${selectedPlayer.value.playerId}`,
-        };
-        break;
-    }
-
-    const { data, error: fetchError } = await useFetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (fetchError.value) {
-      throw new Error(fetchError.value.message || `Failed to ${actionType.value}`);
-    }
-
-    let successMessage = `Player ${selectedPlayer.value.name} has been `;
-    if (actionType.value === 'move') {
-      successMessage += 'moved';
-    } else if (actionType.value === 'ban') {
-      successMessage += 'banned';
-      if (actionDuration.value) {
-        const days = actionDuration.value;
-        successMessage += ` for ${days} ${days === 1 ? 'day' : 'days'}`;
-      } else {
-        successMessage += ' permanently';
-      }
-    } else if (actionType.value === 'remove-from-squad') {
-      successMessage += 'removed from squad';
-    } else {
-      successMessage += actionType.value + 'ed';
-    }
-
-    toast({
-      title: "Success",
-      description: successMessage,
-      variant: "default",
-    });
-  } catch (err: any) {
-    console.error(err);
-    toast({
-      title: "Error",
-      description: err.message || `Failed to ${actionType.value}`,
-      variant: "destructive",
-    });
-  } finally {
-    isActionLoading.value = false;
-    closeActionDialog();
-  }
-}
 
 // Watch for tab changes and scroll to bottom
 watch(activeTab, async (newTab) => {

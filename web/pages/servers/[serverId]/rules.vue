@@ -11,8 +11,8 @@ interface ServerRuleAction {
   rule_id: string;
   violation_count: number;
   action_type: 'WARN' | 'KICK' | 'BAN';
-  duration_minutes?: number;
-  duration_days?: number;
+  duration?: number; // Duration in days (from backend)
+  duration_days?: number; // Duration in days (for frontend use)
   message?: string;
   created_at: string;
   updated_at: string;
@@ -78,7 +78,34 @@ async function fetchRules() {
     }
 
     if (data.value) {
-      rules.value = data.value;
+      // Map duration from backend to duration_days for frontend use
+      const mapDurationToDays = (rulesArray: ServerRule[]): ServerRule[] => {
+        return rulesArray.map(rule => {
+          const mappedRule = { ...rule };
+          
+          // Map actions duration (from backend duration to frontend duration_days)
+          if (mappedRule.actions) {
+            mappedRule.actions = mappedRule.actions.map(action => {
+              const mappedAction = { ...action };
+              if (mappedAction.duration !== undefined && mappedAction.duration !== null) {
+                mappedAction.duration_days = mappedAction.duration;
+              }
+              // Remove duration field after mapping to avoid confusion
+              delete mappedAction.duration;
+              return mappedAction;
+            });
+          }
+          
+          // Recursively map sub_rules
+          if (mappedRule.sub_rules && mappedRule.sub_rules.length > 0) {
+            mappedRule.sub_rules = mapDurationToDays(mappedRule.sub_rules);
+          }
+          
+          return mappedRule;
+        });
+      };
+      
+      rules.value = mapDurationToDays(data.value);
       annotateNumbers();
     }
   } catch (err: any) {
@@ -672,16 +699,36 @@ function flattenRules(rulesArray: ServerRule[]): ServerRule[] {
   let result: ServerRule[] = [];
 
   for (const rule of rulesArray) {
+    // Transform actions: map duration_days to duration_days for backend
+    const transformedActions = rule.actions ? rule.actions.map(action => {
+      const transformedAction: any = {
+        ...action,
+      };
+      // Map duration_days to duration_days for backend (backend expects duration_days key)
+      if (transformedAction.duration_days !== undefined) {
+        transformedAction.duration_days = transformedAction.duration_days;
+        // Remove duration if it exists (keep duration_days)
+        delete transformedAction.duration;
+      } else if (transformedAction.duration !== undefined) {
+        // Fallback: use duration if duration_days doesn't exist
+        transformedAction.duration_days = transformedAction.duration;
+        delete transformedAction.duration;
+      }
+      return transformedAction;
+    }) : undefined;
+
     // Add the main rule
-    result.push({
+    const transformedRule: any = {
       ...rule,
+      actions: transformedActions,
       // Remove sub_rules as it will be processed separately
       sub_rules: undefined
-    });
+    };
+    result.push(transformedRule);
 
-    // If there are sub-rules, add them too
+    // If there are sub-rules, add them too (recursively)
     if (rule.sub_rules && rule.sub_rules.length > 0) {
-      result = [...result, ...rule.sub_rules];
+      result = [...result, ...flattenRules(rule.sub_rules)];
     }
   }
 
