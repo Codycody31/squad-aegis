@@ -4,7 +4,7 @@
 
 ### ❤️ Thanks to all contributors! ❤️
 
-@Codycody31
+@Codycody31, @Insidious Fiddler
 
 ### 📈 Enhancement
 
@@ -31,6 +31,7 @@
 
 ### Misc
 
+- refactor: drop lua examples in favor of docs ([12ba679](https://github.com/Codycody31/squad-aegis/commit/12ba679c73c52de33495520d349230e2c9d0d7ec))
 - ci: drop broken registry [[#85](https://github.com/Codycody31/squad-aegis/pull/85)]
 - chore: remove health check logic and methods [[#80](https://github.com/Codycody31/squad-aegis/pull/80)]
 - ci(release-config): add option to skip commits without PRs [[#75](https://github.com/Codycody31/squad-aegis/pull/75)]
