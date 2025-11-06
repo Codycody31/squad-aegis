@@ -1059,8 +1059,6 @@ func (wm *WorkflowManager) executeStep(context *models.WorkflowExecutionContext,
 		return wm.executeVariableStep(context, step)
 	case models.StepTypeDelay:
 		return wm.executeDelayStep(context, step)
-	case models.StepTypeLua:
-		return wm.executeLuaStep(context, step)
 	default:
 		return fmt.Errorf("unsupported step type: %s", step.Type)
 	}
@@ -2901,35 +2899,6 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 			Str("execution_id", workflowContext.ExecutionID.String()).
 			Str("message", message).
 			Msg("LUA script broadcasting message")
-
-		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
-		if err != nil {
-			L.Push(lua.LBool(false))
-			L.Push(lua.LString(err.Error()))
-			return 2
-		}
-
-		L.Push(lua.LBool(true))
-		L.Push(lua.LString(response))
-		return 2 // Return success boolean and response
-	}))
-
-	// rcon_chat_message function - send chat message to specific player
-	L.SetGlobal("rcon_chat_message", L.NewFunction(func(L *lua.LState) int {
-		playerId := L.CheckString(1)
-		message := L.CheckString(2)
-
-		// Replace variables
-		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-
-		command := fmt.Sprintf("AdminChatMessage \"%s\" %s", playerId, message)
-
-		log.Info().
-			Str("execution_id", workflowContext.ExecutionID.String()).
-			Str("player_id", playerId).
-			Str("message", message).
-			Msg("LUA script sending chat message to player")
 
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
