@@ -193,7 +193,7 @@ Sends a webhook notification with workflow and event data.
 The webhook automatically includes:
 
 - `workflow_id` - Current workflow ID
-- `execution_id` - Current execution ID  
+- `execution_id` - Current execution ID
 - `server_id` - Server ID
 - `trigger_event` - Full trigger event data
 - `variables` - Current workflow variables
@@ -307,7 +307,7 @@ Executes a custom Lua script with full access to workflow data.
 - **Logging**: `log(message)`, `log_debug(message)`, `log_warn(message)`, `log_error(message)`
 - **Variables**: `set_variable(name, value)`, `get_variable(name)`
 - **Utilities**: `json_encode(table)`, `json_decode(string)`, `safe_get(table, key, default)`, `to_string(value, default)`
-- **RCON Commands**: `rcon_execute(command)`, `rcon_kick(player_id, reason)`, `rcon_ban(player_id, duration, reason)`, `rcon_warn(player_id, message)`, `rcon_broadcast(message)`, `rcon_chat_message(player_id, message)`
+- **RCON Commands**: `rcon_execute(command)`, `rcon_kick(player_id, reason)`, `rcon_ban(player_id, duration, reason)`, `rcon_warn(player_id, message)`, `rcon_broadcast(message)`
 - **Workflow Data**: `workflow.trigger_event`, `workflow.metadata`, `workflow.variables`, `workflow.step_results`
 - **Results**: `result` table to store step output
 

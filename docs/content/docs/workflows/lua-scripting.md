@@ -213,26 +213,6 @@ else
 end
 ```
 
-#### `rcon_chat_message(player_id, message)`
-
-Sends a private chat message to a specific player.
-
-**Parameters:**
-
-- `player_id` (string): Player's Steam ID or name
-- `message` (string): Chat message
-
-**Returns:** `success, response`
-
-```lua
-local success, response = rcon_chat_message(player_steam_id, "Welcome to our server!")
-if success then
-    log("Chat message sent to player")
-else
-    log_error("Failed to send chat message: " .. response)
-end
-```
-
 ## Workflow Data Access
 
 ### `workflow.trigger_event`
@@ -315,123 +295,6 @@ local message = "Hello " .. player_name
 local message = "Hello " .. to_string(workflow.trigger_event.player_name, "Unknown")
 ```
 
-### Player Warning System
-
-```lua
--- Get player info
-local steam_id = safe_get(workflow.trigger_event, "steam_id", "")
-if steam_id == "" then
-    log_error("No Steam ID available")
-    return
-end
-
--- Track warnings per player
-local warning_key = "warnings_" .. steam_id
-local current_warnings = get_variable(warning_key) or 0
-current_warnings = current_warnings + 1
-set_variable(warning_key, current_warnings)
-
--- Take action based on warning count
-if current_warnings >= 3 then
-    local success, response = rcon_kick(steam_id, "Too many warnings")
-    if success then
-        log("Player kicked after " .. current_warnings .. " warnings")
-        -- Reset warning count
-        set_variable(warning_key, 0)
-    else
-        log_error("Failed to kick player: " .. response)
-    end
-else
-    local success, response = rcon_warn(steam_id, "Warning " .. current_warnings .. "/3: Please follow server rules")
-    if success then
-        log("Warning " .. current_warnings .. " sent to player")
-    end
-end
-
--- Store results
-result.warning_count = current_warnings
-result.action_taken = current_warnings >= 3 and "kick" or "warn"
-```
-
-### Dynamic Server Management
-
-```lua
--- Get current server state
-local player_count = safe_get(workflow.trigger_event, "player_count", 0)
-local current_hour = tonumber(os.date("%H"))
-
--- Define peak hours
-local peak_hours = {19, 20, 21, 22, 23}
-local is_peak_time = false
-
-for _, hour in ipairs(peak_hours) do
-    if hour == current_hour then
-        is_peak_time = true
-        break
-    end
-end
-
--- Dynamic messaging based on conditions
-if is_peak_time and player_count > 70 then
-    rcon_broadcast("Server is busy! Consider joining our secondary server.")
-elseif not is_peak_time and player_count < 20 then
-    rcon_broadcast("Join us for some fun gameplay! Invite your friends!")
-end
-
--- Store analysis results
-result.is_peak_time = is_peak_time
-result.player_count = player_count
-result.server_status = player_count > 70 and "full" or player_count > 40 and "busy" or "quiet"
-```
-
-### Teamkill Analysis
-
-```lua
--- Get teamkill data
-local damage = safe_get(workflow.trigger_event, "damage", 0)
-local attacker_name = safe_get(workflow.trigger_event, "attacker_name", "Unknown")
-local victim_name = safe_get(workflow.trigger_event, "victim_name", "Unknown")
-local weapon = safe_get(workflow.trigger_event, "weapon", "Unknown")
-
--- Analyze severity
-local severity = "low"
-local action = "warn"
-
-if damage >= 90 then
-    severity = "critical"
-    action = "kick"
-elseif damage >= 60 then
-    severity = "high"
-    action = "warn"
-elseif damage >= 30 then
-    severity = "medium"
-    action = "warn"
-end
-
--- Log the incident
-log_warn(string.format("Teamkill: %s -> %s (%d damage, %s, severity: %s)", 
-    attacker_name, victim_name, damage, weapon, severity))
-
--- Take appropriate action
-local attacker_steam = safe_get(workflow.trigger_event, "attacker_steam", "")
-if attacker_steam ~= "" then
-    if action == "kick" then
-        local success, response = rcon_kick(attacker_steam, "High damage teamkill")
-        log("Kicked player for high damage teamkill: " .. tostring(success))
-    else
-        local success, response = rcon_warn(attacker_steam, 
-            "Teamkilling is against server rules. Damage: " .. damage)
-        log("Warned player for teamkill: " .. tostring(success))
-    end
-end
-
--- Store results for other steps
-result.damage = damage
-result.severity = severity
-result.action_taken = action
-result.weapon_used = weapon
-```
-
 ### Chat Command Processing
 
 ```lua
@@ -451,27 +314,19 @@ command = command:lower()
 
 -- Handle different commands
 if command == "help" then
-    local help_text = "Available commands: !help, !rules, !discord, !time"
-    rcon_chat_message(steam_id, help_text)
-    log("Help command used by " .. player_name)
-    
+    local help_text = "Available commands: !help, !rules, !discord, !admin"
+    rcon_warn(steam_id, help_text)
+
 elseif command == "rules" then
-    local rules = "1. No teamkilling 2. Follow squad leader 3. Communicate 4. Have fun!"
-    rcon_chat_message(steam_id, rules)
-    log("Rules command used by " .. player_name)
-    
+    local rules = "Check rules by pressing enter and selecting server rules!"
+    rcon_warn(steam_id, rules)
+
 elseif command == "discord" then
-    local discord_link = "Join our Discord: https://discord.gg/example"
-    rcon_chat_message(steam_id, discord_link)
-    log("Discord command used by " .. player_name)
-    
-elseif command == "time" then
-    local server_time = os.date("%H:%M UTC")
-    rcon_chat_message(steam_id, "Server time: " .. server_time)
-    log("Time command used by " .. player_name)
-    
+    local discord_link = "Join our Discord: discord.gg/readytobreach"
+    rcon_warn(steam_id, discord_link)
+
 else
-    rcon_chat_message(steam_id, "Unknown command. Type !help for available commands.")
+    rcon_warn(steam_id, "Unknown command. Type !help for available commands.")
 end
 
 -- Track command usage
