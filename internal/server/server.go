@@ -295,7 +295,6 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 						workflowGroup.GET("", server.ServerWorkflowGet)
 						workflowGroup.PUT("", server.ServerWorkflowUpdate)
 						workflowGroup.DELETE("", server.ServerWorkflowDelete)
-						workflowGroup.POST("/execute", server.ServerWorkflowExecute)
 						workflowGroup.GET("/executions", server.ServerWorkflowExecutions)
 
 						// Workflow execution details and logs
