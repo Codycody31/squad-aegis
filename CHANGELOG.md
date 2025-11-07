@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feat: implement conditional step management in workflow [[#94](https://github.com/Codycody31/squad-aegis/pull/94)]
 - feat: add file upload feature for importing workflow JSON [[#93](https://github.com/Codycody31/squad-aegis/pull/93)]
 
 ### 📈 Enhancement
