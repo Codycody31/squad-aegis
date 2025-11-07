@@ -6,6 +6,10 @@
 
 @Codycody31, @Insidious Fiddler
 
+### ✨ Features
+
+- feat: add file upload feature for importing workflow JSON [[#93](https://github.com/Codycody31/squad-aegis/pull/93)]
+
 ### 📈 Enhancement
 
 - refactor: update/improve player actions & rules UI [[#90](https://github.com/Codycody31/squad-aegis/pull/90)]
