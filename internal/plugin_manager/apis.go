@@ -612,9 +612,6 @@ func (api *rconAPI) KickPlayer(playerID string, reason string) error {
 func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Duration) error {
 	// Convert duration to days for Squad's ban system
 	durationDays := int(duration.Hours() / 24)
-	if durationDays < 1 {
-		durationDays = 1 // Minimum 1 day
-	}
 
 	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", playerID, durationDays, reason)
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
@@ -640,8 +637,8 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 		return fmt.Errorf("invalid Steam ID format: %w", err)
 	}
 
-	// Convert duration to minutes for database storage
-	durationMinutes := int(duration.Minutes())
+	// Convert duration to days for database storage
+	durationDays := int(duration.Hours() / 24)
 
 	// Insert ban into database
 	// We use NULL for admin_id since this is a plugin-initiated ban, not a specific user
@@ -652,13 +649,13 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 	`
 
 	_, err = api.db.Exec(query,
-		uuid.New(),      // id
-		api.serverID,    // server_id
-		steamID,         // steam_id
-		reason,          // reason
-		durationMinutes, // duration in minutes
-		now,             // created_at
-		now,             // updated_at
+		uuid.New(),   // id
+		api.serverID, // server_id
+		steamID,      // steam_id
+		reason,       // reason
+		durationDays, // duration in days
+		now,          // created_at
+		now,          // updated_at
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert ban into database: %w", err)

@@ -211,7 +211,7 @@ func GetServerActiveBans(ctx context.Context, database db.Executor, serverId uui
 			-- Permanent bans or non-expired temporary bans
 			sb.duration = 0 
 			OR 
-			sb.created_at + (sb.duration || ' minutes')::interval > NOW()
+			sb.created_at + (sb.duration || ' days')::interval > NOW()
 		)
 		ORDER BY sb.steam_id, sb.created_at DESC
 	`
