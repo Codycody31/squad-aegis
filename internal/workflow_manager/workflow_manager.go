@@ -642,6 +642,21 @@ func (wm *WorkflowManager) executeWorkflowSteps(context *models.WorkflowExecutio
 			continue
 		}
 
+		// Check if this step should be skipped because it's managed by a condition step
+		if context.Metadata != nil {
+			if skippedSteps, ok := context.Metadata["skipped_steps"].(map[string]bool); ok {
+				if skippedSteps[step.ID] {
+					log.Debug().
+						Str("execution_id", context.ExecutionID.String()).
+						Str("step_id", step.ID).
+						Str("step_name", step.Name).
+						Msg("Skipping step - managed by condition branch")
+					summary.SkippedSteps++
+					continue
+				}
+			}
+		}
+
 		context.CurrentStep = step.ID
 		stepStartTime := time.Now()
 
@@ -1725,46 +1740,156 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 		"conditions":       conditions,
 	}
 
+	// Get true_steps and false_steps from config (new format)
+	var trueSteps []string
+	var falseSteps []string
+
+	if trueStepsInterface, ok := step.Config["true_steps"]; ok {
+		if trueStepsArray, ok := trueStepsInterface.([]interface{}); ok {
+			for _, stepName := range trueStepsArray {
+				if stepStr, ok := stepName.(string); ok {
+					trueSteps = append(trueSteps, stepStr)
+				}
+			}
+		}
+	}
+
+	if falseStepsInterface, ok := step.Config["false_steps"]; ok {
+		if falseStepsArray, ok := falseStepsInterface.([]interface{}); ok {
+			for _, stepName := range falseStepsArray {
+				if stepStr, ok := stepName.(string); ok {
+					falseSteps = append(falseSteps, stepStr)
+				}
+			}
+		}
+	}
+
+	// Mark all conditional steps as "to be skipped" in the execution context
+	// This prevents the sequential loop from executing them
+	if context.Metadata == nil {
+		context.Metadata = make(map[string]interface{})
+	}
+	if context.Metadata["skipped_steps"] == nil {
+		context.Metadata["skipped_steps"] = make(map[string]bool)
+	}
+	skippedSteps := context.Metadata["skipped_steps"].(map[string]bool)
+
+	// Find step IDs by name and mark them for skipping
+	stepNameToID := make(map[string]string)
+	for _, workflowStep := range workflow.Definition.Steps {
+		stepNameToID[workflowStep.Name] = workflowStep.ID
+	}
+
+	// Mark all true_steps and false_steps as "managed by condition"
+	// so the main loop won't execute them sequentially
+	for _, stepName := range trueSteps {
+		if stepID, ok := stepNameToID[stepName]; ok {
+			skippedSteps[stepID] = true
+		}
+	}
+	for _, stepName := range falseSteps {
+		if stepID, ok := stepNameToID[stepName]; ok {
+			skippedSteps[stepID] = true
+		}
+	}
+
 	// Handle the condition result
 	if result {
-		// Condition passed - execute next steps if defined
-		if len(step.NextSteps) > 0 {
+		// Condition passed
+		var stepsToExecute []string
+
+		// Use true_steps if available (new format), otherwise fall back to NextSteps
+		if len(trueSteps) > 0 {
+			stepsToExecute = trueSteps
+		} else if len(step.NextSteps) > 0 {
+			stepsToExecute = step.NextSteps
+		}
+
+		if len(stepsToExecute) > 0 {
 			log.Debug().
 				Str("execution_id", context.ExecutionID.String()).
 				Str("step_id", step.ID).
-				Strs("next_steps", step.NextSteps).
-				Msg("Condition passed, executing next steps")
+				Strs("steps_to_execute", stepsToExecute).
+				Msg("Condition passed, executing true branch steps")
 
-			// Execute each next step
-			for _, nextStepID := range step.NextSteps {
-				err := wm.executeSpecificStep(context, workflow, nextStepID)
+			// Execute each step by name
+			for _, stepName := range stepsToExecute {
+				// Find step by name
+				stepID, ok := stepNameToID[stepName]
+				if !ok {
+					log.Warn().
+						Str("execution_id", context.ExecutionID.String()).
+						Str("step_name", stepName).
+						Msg("Step name not found in workflow")
+					continue
+				}
+
+				err := wm.executeSpecificStep(context, workflow, stepID)
 				if err != nil {
 					log.Error().
 						Err(err).
 						Str("execution_id", context.ExecutionID.String()).
 						Str("step_id", step.ID).
-						Str("next_step_id", nextStepID).
-						Msg("Failed to execute next step")
+						Str("branch_step_name", stepName).
+						Msg("Failed to execute true branch step")
 
 					// Check if we should fail or continue
 					continueOnError, _ := step.Config["continue_on_next_step_error"].(bool)
 					if !continueOnError {
-						return fmt.Errorf("next step %s failed: %w", nextStepID, err)
+						return fmt.Errorf("true branch step %s failed: %w", stepName, err)
 					}
 				}
 			}
 		}
 	} else {
-		// Condition failed
-		log.Debug().
-			Str("execution_id", context.ExecutionID.String()).
-			Str("step_id", step.ID).
-			Msg("Condition failed")
+		// Condition failed - execute false_steps if defined
+		if len(falseSteps) > 0 {
+			log.Debug().
+				Str("execution_id", context.ExecutionID.String()).
+				Str("step_id", step.ID).
+				Strs("steps_to_execute", falseSteps).
+				Msg("Condition failed, executing false branch steps")
 
-		// Check if we should skip or fail
-		skipOnFalse, _ := step.Config["skip_on_false"].(bool)
-		if !skipOnFalse {
-			return fmt.Errorf("condition step failed: conditions evaluated to false")
+			// Execute each false branch step
+			for _, stepName := range falseSteps {
+				// Find step by name
+				stepID, ok := stepNameToID[stepName]
+				if !ok {
+					log.Warn().
+						Str("execution_id", context.ExecutionID.String()).
+						Str("step_name", stepName).
+						Msg("Step name not found in workflow")
+					continue
+				}
+
+				err := wm.executeSpecificStep(context, workflow, stepID)
+				if err != nil {
+					log.Error().
+						Err(err).
+						Str("execution_id", context.ExecutionID.String()).
+						Str("step_id", step.ID).
+						Str("branch_step_name", stepName).
+						Msg("Failed to execute false branch step")
+
+					// Check if we should fail or continue
+					continueOnError, _ := step.Config["continue_on_next_step_error"].(bool)
+					if !continueOnError {
+						return fmt.Errorf("false branch step %s failed: %w", stepName, err)
+					}
+				}
+			}
+		} else {
+			// No false_steps defined, check legacy behavior
+			log.Debug().
+				Str("execution_id", context.ExecutionID.String()).
+				Str("step_id", step.ID).
+				Msg("Condition failed, no false branch steps defined")
+
+			// Check if we should skip or fail
+			skipOnFalse, _ := step.Config["skip_on_false"].(bool)
+			if !skipOnFalse {
+				return fmt.Errorf("condition step failed: conditions evaluated to false")
+			}
 		}
 	}
 
