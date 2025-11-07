@@ -14,6 +14,7 @@ import {
     ExternalLink,
     CirclePlay,
     BookText,
+    Upload,
 } from "lucide-vue-next";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -121,9 +122,14 @@ const error = ref<string | null>(null);
 const showCreateDialog = ref<boolean>(false);
 const showEditDialog = ref<boolean>(false);
 const showExecutionDialog = ref<boolean>(false);
+const showImportDialog = ref<boolean>(false);
 const isCreating = ref<boolean>(false);
 const isUpdating = ref<boolean>(false);
 const isExecuting = ref<boolean>(false);
+const isImporting = ref<boolean>(false);
+const importJsonText = ref<string>("");
+const importError = ref<string>("");
+const importFile = ref<File | null>(null);
 
 // Form state
 const newWorkflow = ref({
@@ -430,52 +436,6 @@ async function deleteWorkflow(workflowId: string) {
     }
 }
 
-// Execute workflow manually
-async function executeWorkflow(workflowId: string) {
-    if (!confirm("Are you sure you want to execute this workflow manually?")) {
-        return;
-    }
-
-    isExecuting.value = true;
-    const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    try {
-        await $fetch(
-            `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}/execute`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                    trigger_event: {
-                        manual_trigger: true,
-                    },
-                    variables: {},
-                }),
-            },
-        );
-
-        toast({
-            title: "Success",
-            description: "Workflow execution initiated",
-        });
-    } catch (err: any) {
-        toast({
-            title: "Error",
-            description: err.data?.error || "Failed to execute workflow",
-            variant: "destructive",
-        });
-    } finally {
-        isExecuting.value = false;
-    }
-}
-
 // Fetch workflow executions
 async function fetchExecutions(workflowId: string) {
     const runtimeConfig = useRuntimeConfig();
@@ -539,6 +499,109 @@ function resetForm() {
     };
 }
 
+function openImportDialog() {
+    importJsonText.value = "";
+    importError.value = "";
+    importFile.value = null;
+    showImportDialog.value = true;
+}
+
+function closeImportDialog() {
+    showImportDialog.value = false;
+    importJsonText.value = "";
+    importError.value = "";
+    importFile.value = null;
+}
+
+function handleFileUpload(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target.files?.[0];
+
+    if (!file) return;
+
+    importFile.value = file;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const content = e.target?.result as string;
+        importJsonText.value = content;
+    };
+    reader.readAsText(file);
+}
+
+async function importWorkflow() {
+    importError.value = "";
+    isImporting.value = true;
+
+    if (!importJsonText.value.trim()) {
+        importError.value = "Please provide JSON content";
+        isImporting.value = false;
+        return;
+    }
+
+    try {
+        const parsed = JSON.parse(importJsonText.value);
+
+        // Validate required structure
+        if (!parsed.version) {
+            importError.value = "Missing required field: version";
+            isImporting.value = false;
+            return;
+        }
+
+        if (!Array.isArray(parsed.triggers)) {
+            importError.value = "Missing or invalid triggers array";
+            isImporting.value = false;
+            return;
+        }
+
+        if (!Array.isArray(parsed.steps)) {
+            importError.value = "Missing or invalid steps array";
+            isImporting.value = false;
+            return;
+        }
+
+        // Set the imported definition to newWorkflow
+        newWorkflow.value.definition = {
+            version: parsed.version,
+            triggers: parsed.triggers || [],
+            variables: parsed.variables || {},
+            steps: parsed.steps || [],
+            error_handling: parsed.error_handling || {
+                default_action: "stop",
+                max_retries: 3,
+                retry_delay_ms: 1000,
+            },
+        };
+
+        // If name/description are provided in the import, use them
+        if (parsed.name) newWorkflow.value.name = parsed.name;
+        if (parsed.description)
+            newWorkflow.value.description = parsed.description;
+        if (typeof parsed.enabled === "boolean")
+            newWorkflow.value.enabled = parsed.enabled;
+
+        closeImportDialog();
+        showCreateDialog.value = true;
+
+        toast({
+            title: "Workflow Imported",
+            description:
+                "Workflow has been imported successfully. Review and create it.",
+        });
+    } catch (error) {
+        if (error instanceof SyntaxError) {
+            importError.value = `Invalid JSON: ${error.message}`;
+        } else {
+            importError.value = `Import error: ${
+                error instanceof Error ? error.message : "Unknown error"
+            }`;
+        }
+    } finally {
+        isImporting.value = false;
+    }
+}
+
 // Format date for display
 function formatDate(dateString: string) {
     return new Date(dateString).toLocaleString();
@@ -594,13 +657,23 @@ definePageMeta({
                     Automate server actions with event-driven workflows
                 </p>
             </div>
-            <Button
-                @click="showCreateDialog = true"
-                class="flex items-center gap-2"
-            >
-                <Plus class="w-4 h-4" />
-                Create Workflow
-            </Button>
+            <div class="flex items-center gap-2">
+                <Button
+                    @click="openImportDialog"
+                    variant="outline"
+                    class="flex items-center gap-2"
+                >
+                    <Upload class="w-4 h-4" />
+                    Import Workflow
+                </Button>
+                <Button
+                    @click="showCreateDialog = true"
+                    class="flex items-center gap-2"
+                >
+                    <Plus class="w-4 h-4" />
+                    Create Workflow
+                </Button>
+            </div>
         </div>
 
         <!-- Statistics Cards -->
@@ -745,16 +818,6 @@ definePageMeta({
                                             <BookText class="w-4 h-4" />
                                         </Button>
                                         <Button
-                                            @click="
-                                                executeWorkflow(workflow.id)
-                                            "
-                                            variant="ghost"
-                                            size="sm"
-                                            :disabled="isExecuting"
-                                        >
-                                            <CirclePlay class="w-4 h-4" />
-                                        </Button>
-                                        <Button
                                             @click="toggleWorkflow(workflow)"
                                             variant="ghost"
                                             size="sm"
@@ -865,6 +928,94 @@ definePageMeta({
             </DialogContent>
         </Dialog>
 
+        <!-- Import Workflow Dialog -->
+        <Dialog v-model:open="showImportDialog">
+            <DialogContent class="max-w-3xl max-h-[80vh]">
+                <DialogHeader>
+                    <DialogTitle>Import Workflow</DialogTitle>
+                    <DialogDescription>
+                        Import a workflow from a JSON file or paste JSON
+                        directly
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div class="space-y-4">
+                    <!-- File Upload Section -->
+                    <div class="space-y-2">
+                        <Label for="workflow-file">Upload JSON File</Label>
+                        <div class="flex items-center gap-2">
+                            <Input
+                                id="workflow-file"
+                                type="file"
+                                accept=".json,application/json"
+                                @change="handleFileUpload"
+                                class="cursor-pointer"
+                            />
+                        </div>
+                        <p class="text-xs text-muted-foreground">
+                            Select a JSON file containing workflow configuration
+                        </p>
+                    </div>
+
+                    <div class="relative">
+                        <div class="absolute inset-0 flex items-center">
+                            <span class="w-full border-t" />
+                        </div>
+                        <div
+                            class="relative flex justify-center text-xs uppercase"
+                        >
+                            <span
+                                class="bg-background px-2 text-muted-foreground"
+                            >
+                                Or paste JSON
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Text Input Section -->
+                    <div class="space-y-2">
+                        <Label>Workflow JSON</Label>
+                        <Textarea
+                            v-model="importJsonText"
+                            placeholder="Paste your workflow JSON here..."
+                            rows="15"
+                            class="font-mono text-sm"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                            Ensure the JSON includes version, triggers, steps,
+                            and variables fields
+                        </p>
+                    </div>
+
+                    <!-- Error Display -->
+                    <div
+                        v-if="importError"
+                        class="p-3 bg-destructive/10 border border-destructive/20 rounded-md"
+                    >
+                        <p class="text-sm text-destructive font-medium">
+                            Import Error:
+                        </p>
+                        <p class="text-sm text-destructive">
+                            {{ importError }}
+                        </p>
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" @click="closeImportDialog">
+                        Cancel
+                    </Button>
+                    <Button
+                        @click="importWorkflow"
+                        :disabled="!importJsonText.trim() || isImporting"
+                    >
+                        {{ isImporting ? "Importing..." : "Import Workflow" }}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Workflow Executions Dialog -->
         <!-- Edit Workflow Dialog -->
         <Dialog v-model:open="showEditDialog">
             <DialogContent
