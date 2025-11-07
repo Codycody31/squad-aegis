@@ -116,6 +116,7 @@ const selectedVariable = ref<{ key: string; value: any; type: string } | null>(
 );
 const importJsonText = ref("");
 const importError = ref("");
+const importFile = ref<File | null>(null);
 const editingTriggerIndex = ref(-1);
 const editingStepIndex = ref(-1);
 const editingVariableKey = ref("");
@@ -132,6 +133,12 @@ watch(
             }
             if (!selectedStep.value.config.logic) {
                 selectedStep.value.config.logic = "AND";
+            }
+            if (!selectedStep.value.config.true_steps) {
+                selectedStep.value.config.true_steps = [];
+            }
+            if (!selectedStep.value.config.false_steps) {
+                selectedStep.value.config.false_steps = [];
             }
         } else if (newType === "variable") {
             if (!selectedStep.value.config.operation) {
@@ -181,6 +188,29 @@ const errorActions = [
 const definition = computed({
     get: () => props.modelValue,
     set: (value: WorkflowDefinition) => emit("update:modelValue", value),
+});
+
+// Computed property for available steps (for step selection in conditions)
+const availableSteps = computed(() => {
+    if (!selectedStep.value) return [];
+
+    return definition.value.steps
+        .filter((step) => step.id !== selectedStep.value?.id)
+        .map((step) => ({
+            value: step.name,
+            label: `${step.name} (${step.type})`,
+        }));
+});
+
+// Computed property for error handling with safe defaults
+const errorHandling = computed(() => {
+    return (
+        definition.value.error_handling || {
+            default_action: "stop",
+            max_retries: 3,
+            retry_delay_ms: 1000,
+        }
+    );
 });
 
 // Helper function to check if a field should be shown based on step config
@@ -357,6 +387,16 @@ function openStepDialog(step?: WorkflowStep, index?: number) {
         !selectedStep.value.config.logic
     ) {
         selectedStep.value.config.logic = "AND";
+    }
+
+    // Initialize true_steps and false_steps arrays for condition steps
+    if (selectedStep.value.type === "condition") {
+        if (!selectedStep.value.config.true_steps) {
+            selectedStep.value.config.true_steps = [];
+        }
+        if (!selectedStep.value.config.false_steps) {
+            selectedStep.value.config.false_steps = [];
+        }
     }
 
     // Initialize default operation for variable steps
@@ -865,18 +905,18 @@ result.player = player_name`,
             },
             {
                 key: "true_steps",
-                label: "Steps if True (comma-separated step names)",
-                type: "text",
+                label: "Steps if True",
+                type: "multi_select",
                 required: false,
-                placeholder: "e.g. send_warning, log_event",
+                options: availableSteps.value,
                 description: "Steps to execute if condition is true",
             },
             {
                 key: "false_steps",
-                label: "Steps if False (comma-separated step names)",
-                type: "text",
+                label: "Steps if False",
+                type: "multi_select",
                 required: false,
-                placeholder: "e.g. send_kick, ban_player",
+                options: availableSteps.value,
                 description: "Steps to execute if condition is false",
             },
         ];
@@ -988,6 +1028,7 @@ result.player = player_name`,
 function openImportDialog() {
     importJsonText.value = "";
     importError.value = "";
+    importFile.value = null;
     showImportDialog.value = true;
 }
 
@@ -995,6 +1036,23 @@ function closeImportDialog() {
     showImportDialog.value = false;
     importJsonText.value = "";
     importError.value = "";
+    importFile.value = null;
+}
+
+function handleFileUpload(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target.files?.[0];
+
+    if (!file) return;
+
+    importFile.value = file;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const content = e.target?.result as string;
+        importJsonText.value = content;
+    };
+    reader.readAsText(file);
 }
 
 function validateAndImportWorkflow() {
@@ -1463,11 +1521,8 @@ function exportWorkflow() {
                             <div class="space-y-2">
                                 <Label>Default Action on Error</Label>
                                 <Select
-                                    :value="
-                                        definition.error_handling
-                                            ?.default_action
-                                    "
-                                    @update:value="
+                                    :modelValue="errorHandling.default_action"
+                                    @update:modelValue="
                                         updateErrorHandling(
                                             'default_action',
                                             $event,
@@ -1491,13 +1546,11 @@ function exportWorkflow() {
                             <div class="space-y-2">
                                 <Label>Max Retries</Label>
                                 <Input
-                                    :value="
-                                        definition.error_handling?.max_retries
-                                    "
-                                    @input="
+                                    :modelValue="errorHandling.max_retries"
+                                    @update:modelValue="
                                         updateErrorHandling(
                                             'max_retries',
-                                            parseInt($event.target.value),
+                                            parseInt($event as string),
                                         )
                                     "
                                     type="number"
@@ -1509,13 +1562,11 @@ function exportWorkflow() {
                         <div class="space-y-2">
                             <Label>Retry Delay (milliseconds)</Label>
                             <Input
-                                :value="
-                                    definition.error_handling?.retry_delay_ms
-                                "
-                                @input="
+                                :modelValue="errorHandling.retry_delay_ms"
+                                @update:modelValue="
                                     updateErrorHandling(
                                         'retry_delay_ms',
-                                        parseInt($event.target.value),
+                                        parseInt($event as string),
                                     )
                                 "
                                 type="number"
@@ -1903,6 +1954,107 @@ function exportWorkflow() {
                                 </Select>
 
                                 <!-- Conditions Array -->
+                                <div v-else-if="field.type === 'multi_select'">
+                                    <div class="space-y-2">
+                                        <div
+                                            v-if="
+                                                selectedStep &&
+                                                selectedStep.config[
+                                                    field.key
+                                                ] &&
+                                                selectedStep.config[field.key]
+                                                    .length > 0
+                                            "
+                                            class="flex flex-wrap gap-2 mb-2"
+                                        >
+                                            <Badge
+                                                v-for="(
+                                                    item, idx
+                                                ) in selectedStep.config[
+                                                    field.key
+                                                ]"
+                                                :key="idx"
+                                                variant="secondary"
+                                                class="flex items-center gap-1"
+                                            >
+                                                {{ item }}
+                                                <button
+                                                    @click="
+                                                        selectedStep &&
+                                                        selectedStep.config[
+                                                            field.key
+                                                        ].splice(idx, 1)
+                                                    "
+                                                    class="ml-1 hover:text-destructive"
+                                                >
+                                                    <Trash2 class="w-3 h-3" />
+                                                </button>
+                                            </Badge>
+                                        </div>
+                                        <Select
+                                            :modelValue="undefined"
+                                            @update:modelValue="
+                                                (value: any) => {
+                                                    if (!selectedStep || !value)
+                                                        return;
+                                                    if (
+                                                        !selectedStep.config[
+                                                            field.key
+                                                        ]
+                                                    ) {
+                                                        selectedStep.config[
+                                                            field.key
+                                                        ] = [];
+                                                    }
+                                                    if (
+                                                        !selectedStep.config[
+                                                            field.key
+                                                        ].includes(value)
+                                                    ) {
+                                                        selectedStep.config[
+                                                            field.key
+                                                        ].push(value);
+                                                    }
+                                                }
+                                            "
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue
+                                                    placeholder="Select step to add..."
+                                                />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem
+                                                    v-if="
+                                                        !(field as any)
+                                                            .options ||
+                                                        (field as any).options
+                                                            .length === 0
+                                                    "
+                                                    value=""
+                                                    disabled
+                                                >
+                                                    No steps available
+                                                </SelectItem>
+                                                <SelectItem
+                                                    v-for="option in (
+                                                        field as any
+                                                    ).options"
+                                                    :key="option.value"
+                                                    :value="option.value"
+                                                >
+                                                    {{ option.label }}
+                                                </SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <p
+                                            v-if="(field as any).description"
+                                            class="text-xs text-muted-foreground"
+                                        >
+                                            {{ (field as any).description }}
+                                        </p>
+                                    </div>
+                                </div>
                                 <div
                                     v-else-if="
                                         field.type === 'conditions_array'
@@ -2262,18 +2414,52 @@ function exportWorkflow() {
                 <DialogHeader>
                     <DialogTitle>Import Workflow from JSON</DialogTitle>
                     <DialogDescription>
-                        Paste your workflow JSON below. This will replace the
-                        current workflow configuration.
+                        Import a workflow from a JSON file or paste JSON
+                        directly. This will replace the current workflow
+                        configuration.
                     </DialogDescription>
                 </DialogHeader>
 
                 <div class="space-y-4">
+                    <!-- File Upload Section -->
+                    <div class="space-y-2">
+                        <Label for="workflow-file-editor"
+                            >Upload JSON File</Label
+                        >
+                        <Input
+                            id="workflow-file-editor"
+                            type="file"
+                            accept=".json,application/json"
+                            @change="handleFileUpload"
+                            class="cursor-pointer"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                            Select a JSON file containing workflow configuration
+                        </p>
+                    </div>
+
+                    <div class="relative">
+                        <div class="absolute inset-0 flex items-center">
+                            <span class="w-full border-t" />
+                        </div>
+                        <div
+                            class="relative flex justify-center text-xs uppercase"
+                        >
+                            <span
+                                class="bg-background px-2 text-muted-foreground"
+                            >
+                                Or paste JSON
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Text Input Section -->
                     <div class="space-y-2">
                         <Label>Workflow JSON</Label>
                         <Textarea
                             v-model="importJsonText"
                             placeholder="Paste your workflow JSON here..."
-                            rows="20"
+                            rows="15"
                             class="font-mono text-sm"
                         />
                         <p class="text-xs text-muted-foreground">
@@ -2292,46 +2478,6 @@ function exportWorkflow() {
                         <p class="text-sm text-destructive">
                             {{ importError }}
                         </p>
-                    </div>
-
-                    <div class="bg-muted p-3 rounded-md">
-                        <p class="text-sm font-medium mb-2">
-                            📋 Expected JSON Structure:
-                        </p>
-                        <pre
-                            class="text-xs text-muted-foreground overflow-x-auto"
-                        ><code>{
-  "version": "1.0",
-  "triggers": [
-    {
-      "id": "trigger-id",
-      "name": "Trigger Name",
-      "event_type": "player_connected",
-      "conditions": [],
-      "enabled": true
-    }
-  ],
-  "variables": {
-    "variable_name": "value"
-  },
-  "steps": [
-    {
-      "id": "step-id",
-      "name": "Step Name",
-      "type": "action",
-      "enabled": true,
-      "config": {
-        "action_type": "admin_broadcast",
-        "message": "Welcome!"
-      }
-    }
-  ],
-  "error_handling": {
-    "default_action": "stop",
-    "max_retries": 3,
-    "retry_delay_ms": 1000
-  }
-}</code></pre>
                     </div>
                 </div>
 
