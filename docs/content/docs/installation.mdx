@@ -5,8 +5,6 @@ title: Installation Guide
 This guide will walk you through installing and configuring **Squad Aegis**, the comprehensive control panel for Squad game server administration.
 It includes both a quick "run with Docker Compose" path and a more detailed manual build process.
 
----
-
 ## Prerequisites
 
 Before installing Squad Aegis, ensure you have:
@@ -17,16 +15,12 @@ Before installing Squad Aegis, ensure you have:
 - At least **10GB available storage**
 - Basic knowledge of Docker and command-line operations
 
----
-
 ## 1. Clone the Repository
 
 ```bash
 git clone https://github.com/Codycody31/squad-aegis.git
 cd squad-aegis
-````
-
----
+```
 
 ## 2. Configure Environment Variables
 
@@ -77,8 +71,6 @@ DEBUG_NO_COLOR=false
 
 ⚠️ **Important Security Note:** Always change the default `INITIAL_ADMIN_PASSWORD` and database credentials before deployment.
 
----
-
 ## 3. Running with Docker Compose
 
 You have two options depending on your needs:
@@ -93,10 +85,10 @@ docker compose up -d
 
 This will start the following containers:
 
-* **PostgreSQL 14** – main application database
-* **ClickHouse 25.3** – analytics database
-* **Valkey 8.1.3** – caching / key-value store
-* **Squad Aegis Server** – main application
+- **PostgreSQL 14** – main application database
+- **ClickHouse 25.3** – analytics database
+- **Valkey 8.1.3** – caching / key-value store
+- **Squad Aegis Server** – main application
 
 ### Option B: Development stack
 
@@ -107,8 +99,6 @@ docker compose -f docker-compose.dev.yml up -d
 ```
 
 Just make sure to update the `.env` file and swap out the database connection settings.
-
----
 
 ## 4. (Optional) Build the Application Yourself
 
@@ -140,8 +130,6 @@ Then edit `docker-compose.yml` to use:
 image: squad-aegis:latest
 ```
 
----
-
 ## 5. Database Migration
 
 The application automatically runs database migrations on startup.
@@ -150,8 +138,6 @@ Check migration status:
 ```bash
 docker compose logs -f squad-aegis
 ```
-
----
 
 ## 6. Verify and Access the Application
 
@@ -173,10 +159,8 @@ Then open your browser:
 
 Log in with:
 
-* **Username:** `admin`
-* **Password:** the one you set in `.env`
-
----
+- **Username:** `admin`
+- **Password:** the one you set in `.env`
 
 ## 7. Stopping & Restarting
 
@@ -192,18 +176,14 @@ To restart:
 docker compose up -d
 ```
 
----
-
 ## 8. Data Persistence
 
 The following named volumes persist data between container restarts:
 
-* `database` – PostgreSQL data
-* `clickhouse` – ClickHouse data
-* `valkey` – Valkey data
-* `data` – Squad Aegis config
-
----
+- `database` – PostgreSQL data
+- `clickhouse` – ClickHouse data
+- `valkey` – Valkey data
+- `data` – Squad Aegis config
 
 ## 9. Post-Installation Steps
 
@@ -212,26 +192,21 @@ The following named volumes persist data between container restarts:
 3. **Set Up Users** with appropriate permissions
 4. **Configure Plugins** as needed
 
----
-
 ## Troubleshooting
 
 ### Common Issues
 
 1. **Port Already in Use**
-
-   * Change `APP_PORT` in `.env`
-   * Update the port mapping in `docker-compose.yml`
+   - Change `APP_PORT` in `.env`
+   - Update the port mapping in `docker-compose.yml`
 
 2. **Database Connection Errors**
-
-   * Verify the database container is running
-   * Check connection parameters in `.env`
-   * Ensure user permissions are correct
+   - Verify the database container is running
+   - Check connection parameters in `.env`
+   - Ensure user permissions are correct
 
 3. **Permission Issues**
-
-   * Verify Docker volume permissions
+   - Verify Docker volume permissions
 
 ### Viewing Logs
 
@@ -246,10 +221,8 @@ docker compose logs squad-aegis
 docker compose logs -f squad-aegis
 ```
 
----
-
 ## Support
 
-* [Issue Tracker](https://github.com/Codycody31/squad-aegis/issues)
-* Project documentation
-* Contact the dev team via GitHub
+- [Issue Tracker](https://github.com/Codycody31/squad-aegis/issues)
+- Project documentation
+- Contact the dev team via GitHub

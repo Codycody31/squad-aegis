@@ -59,6 +59,21 @@ Triggered when a player sends a chat message.
 - `steam_id` - Player's Steam ID
 - `eos_id` - Player's Epic Online Services ID
 
+#### Player Join Succeeded (`LOG_JOIN_SUCCEEDED`)
+
+Triggered when a player successfully joins the server (after initial connection).
+
+**Available Fields:**
+
+- `time` - Timestamp of the event
+- `chain_id` - Unique event chain identifier
+- `player_suffix` - Player name suffix/display name
+- `ip_address` - Player's IP address (optional)
+- `steam_id` - Player's Steam ID (optional)
+- `eos_id` - Player's Epic Online Services ID (optional)
+
+**Note:** This event fires after `LOG_PLAYER_CONNECTED` and provides additional player information including the player suffix. The `steam_id` and `eos_id` fields may not always be available depending on the player's authentication state.
+
 #### Player Disconnected (`LOG_PLAYER_DISCONNECTED`)
 
 **Available Fields:**

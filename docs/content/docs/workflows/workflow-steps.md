@@ -327,11 +327,23 @@ Executes a custom Lua script with full access to workflow data.
 
 ### Condition Steps
 
-Condition steps evaluate expressions and can branch the workflow execution.
+Condition steps evaluate expressions and branch the workflow execution based on the result. They support multiple conditions with AND/OR logic operators and can execute different sets of steps depending on whether the conditions pass or fail.
+
+**Key Features:**
+
+- **Branching Logic**: Execute different steps based on condition results (true vs false)
+- **Multiple Conditions**: Combine multiple conditions using AND or OR logic
+- **UI-Based Configuration**: Select steps for each branch using dropdown menus
+- **Automatic Skip Management**: Steps in conditional branches are automatically excluded from sequential execution
+
+**Important:** Steps specified in true/false branches will ONLY execute when called by the condition, preventing both branches from running.
 
 **Configuration:**
 
 - Conditions are configured through the UI with field, operator, and value selections
+- Multiple conditions can be combined using AND or OR logic
+- True and false branches are specified by selecting steps from a dropdown (not by sequential order)
+- Steps in branches are automatically skipped during sequential workflow execution
 
 ### Variable Steps
 
@@ -361,15 +373,6 @@ Delay steps pause workflow execution for a specified duration.
   }
 }
 ```
-
-### Lua Steps
-
-Lua steps are similar to Lua Script actions but are designed for more complex logic and branching.
-
-**Configuration:**
-
-- `script` (required) - Lua script code
-- `timeout_seconds` (optional) - Maximum execution time
 
 ## Variable Replacement
 
@@ -696,11 +699,25 @@ Execute custom Lua scripts for complex logic and data manipulation.
 
 ## Condition Steps (`condition`)
 
-*Note: Condition steps are a planned feature for future releases.*
+Condition steps evaluate runtime conditions and branch workflow execution. They prevent steps from executing sequentially by managing which steps run based on the condition result.
 
-Condition steps will allow branching workflow execution based on runtime conditions.
+### How Condition Branching Works
 
-### Planned Condition Step Structure
+**Important:** Steps specified in `true_steps` or `false_steps` will **only** execute when called by the condition step, not when encountered in the sequential workflow order. This prevents both branches from executing.
+
+For example, if your workflow has this order:
+1. Check Player Status (condition)
+2. Welcome Player (true branch)
+3. Kick Player (false branch)
+4. Log Action
+
+The condition step will:
+- If TRUE: Execute "Welcome Player" → Skip "Kick Player" in sequence → Execute "Log Action"
+- If FALSE: Execute "Kick Player" → Skip "Welcome Player" in sequence → Execute "Log Action"
+
+Only ONE branch executes per condition, never both.
+
+### Basic Condition Step
 
 ```json
 {
@@ -708,16 +725,169 @@ Condition steps will allow branching workflow execution based on runtime conditi
   "type": "condition",
   "enabled": true,
   "config": {
-    "condition": {
-      "field": "trigger_event.player_count",
-      "operator": "greater_than",
-      "value": 50
-    },
+    "logic": "AND",
+    "conditions": [
+      {
+        "field": "trigger_event.player_count",
+        "operator": "greater_than",
+        "value": 50,
+        "type": "number"
+      }
+    ],
     "true_steps": ["high-pop-action"],
     "false_steps": ["low-pop-action"]
   }
 }
 ```
+
+### Multiple Conditions with AND Logic
+
+```json
+{
+  "name": "Check VIP Player",
+  "type": "condition",
+  "enabled": true,
+  "config": {
+    "logic": "AND",
+    "conditions": [
+      {
+        "field": "trigger_event.player.vip_level",
+        "operator": "greater_than",
+        "value": 0,
+        "type": "number"
+      },
+      {
+        "field": "trigger_event.player.banned",
+        "operator": "equals",
+        "value": false,
+        "type": "boolean"
+      }
+    ],
+    "true_steps": ["send-vip-welcome", "grant-vip-perks"],
+    "false_steps": ["send-normal-welcome"]
+  }
+}
+```
+
+### Multiple Conditions with OR Logic
+
+```json
+{
+  "name": "Check Suspicious Activity",
+  "type": "condition",
+  "enabled": true,
+  "config": {
+    "logic": "OR",
+    "conditions": [
+      {
+        "field": "trigger_event.kills_per_minute",
+        "operator": "greater_than",
+        "value": 10,
+        "type": "number"
+      },
+      {
+        "field": "trigger_event.headshot_ratio",
+        "operator": "greater_than",
+        "value": 0.8,
+        "type": "number"
+      }
+    ],
+    "true_steps": ["flag-for-review", "notify-admins"],
+    "false_steps": []
+  }
+}
+```
+
+### Available Condition Operators
+
+- `equals` - Exact match
+- `not_equals` - Not equal to
+- `greater_than` - Numeric greater than
+- `less_than` - Numeric less than
+- `greater_than_or_equal` - Numeric greater than or equal
+- `less_than_or_equal` - Numeric less than or equal
+- `contains` - String contains substring
+- `not_contains` - String does not contain substring
+- `starts_with` - String starts with
+- `ends_with` - String ends with
+- `in` - Value in array
+- `not_in` - Value not in array
+- `is_null` - Value is null
+- `is_not_null` - Value is not null
+- `regex_match` - Matches regular expression
+
+### Configuration Fields
+
+- **`logic`** (string): Combination operator for multiple conditions
+  - `"AND"` - All conditions must be true (default)
+  - `"OR"` - At least one condition must be true
+
+- **`conditions`** (array): List of conditions to evaluate
+  - Each condition has:
+    - `field` (string): Path to the field to evaluate (e.g., `trigger_event.player_name`)
+    - `operator` (string): Comparison operator
+    - `value` (any): Value to compare against
+    - `type` (string): Data type (`string`, `number`, `boolean`, `array`, `object`)
+
+- **`true_steps`** (array): Step names to execute if conditions pass
+  - Use the step selector in the UI to add steps
+  - Steps will only execute if the condition is true
+  - Steps in this list are automatically skipped in sequential execution
+
+- **`false_steps`** (array): Step names to execute if conditions fail
+  - Use the step selector in the UI to add steps
+  - Steps will only execute if the condition is false
+  - Steps in this list are automatically skipped in sequential execution
+
+- **`continue_on_next_step_error`** (boolean): Whether to continue if a branch step fails
+  - Default: `false` (stop on error)
+
+### Complete Example: Player Whitelist Check
+
+```json
+{
+  "name": "Check Player Whitelist",
+  "type": "condition",
+  "enabled": true,
+  "config": {
+    "logic": "AND",
+    "conditions": [
+      {
+        "field": "trigger_event.player.steam_id",
+        "operator": "in",
+        "value": ["76561198012345678", "76561198087654321"],
+        "type": "array"
+      },
+      {
+        "field": "trigger_event.player.banned",
+        "operator": "equals",
+        "value": false,
+        "type": "boolean"
+      }
+    ],
+    "true_steps": [
+      "log-whitelist-join",
+      "send-welcome-message",
+      "grant-permissions"
+    ],
+    "false_steps": [
+      "log-non-whitelist-join",
+      "kick-player"
+    ],
+    "continue_on_next_step_error": false
+  }
+}
+```
+
+### Best Practices for Condition Steps
+
+1. **Name steps clearly**: Use descriptive names that indicate their purpose in the workflow
+2. **Use step selector**: Always use the UI dropdown to select steps - don't type step names manually
+3. **One branch per condition**: A step should only appear in either `true_steps` OR `false_steps`, not both
+4. **Handle both branches**: Consider what should happen in both true and false scenarios
+5. **Test thoroughly**: Test both branches to ensure correct behavior
+6. **Avoid circular references**: Don't create condition loops that reference each other
+7. **Keep branches simple**: If branches become complex, consider breaking into multiple workflows
 
 ## Error Handling
 

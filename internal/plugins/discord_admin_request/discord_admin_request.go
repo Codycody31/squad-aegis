@@ -55,7 +55,7 @@ func Define() plugin_manager.PluginDefinition {
 					Description: "A list of chat names to ignore.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeArrayString,
-					Default:     []interface{}{"ChatSquad"},
+					Default:     []interface{}{"ChatSquad", "ChatAdmin"},
 				},
 				{
 					Name:        "ping_groups",

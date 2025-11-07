@@ -46,42 +46,50 @@ Fields can be accessed using dot notation for nested data:
 
 **Goal**: Respond to players typing "!help" with server information
 
-**Trigger:** Player types "!help" in any chat  
+**Trigger:** Player types "!help" in any chat
 **Action:** Broadcast help message
 
 ```json
 {
-  "name": "Help Command Response",
-  "description": "Responds to !help command with server information",
-  "definition": {
-    "version": "1.0",
-    "triggers": [
-      {
-        "id": "help-trigger",
-        "name": "Help Command",
-        "event_type": "RCON_CHAT_MESSAGE",
-        "conditions": [
-          {
-            "field": "message",
-            "operator": "contains",
-            "value": "!help"
-          }
-        ],
-        "enabled": true
-      }
-    ],
-    "steps": [
-      {
-        "id": "broadcast-help",
-        "name": "Broadcast Help",
-        "type": "action",
-        "enabled": true,
-        "config": {
-          "action_type": "rcon_command",
-          "command": "AdminBroadcast Welcome ${trigger_event.player_name}! Visit our Discord for help: discord.gg/example"
+  "version": "1.0",
+  "triggers": [
+    {
+      "id": "c58f5356-d59e-4334-ad55-50500588b906",
+      "name": "help-trigger",
+      "event_type": "RCON_CHAT_MESSAGE",
+      "conditions": [
+        {
+          "field": "message",
+          "operator": "starts_with",
+          "value": "!help",
+          "type": "string"
         }
+      ],
+      "enabled": true
+    }
+  ],
+  "variables": {},
+  "steps": [
+    {
+      "id": "0b5bb151-b091-4a22-943e-11ec8e8abbaf",
+      "name": "broadcast-help",
+      "type": "action",
+      "enabled": true,
+      "config": {
+        "action_type": "rcon_command",
+        "command": "AdminBroadcast Welcome ${trigger_event.player_name}! Visit our Discord for help: discord.gg/example"
+      },
+      "on_error": {
+        "action": "stop",
+        "max_retries": 3,
+        "retry_delay_ms": 1000
       }
-    ]
+    }
+  ],
+  "error_handling": {
+    "default_action": "stop",
+    "max_retries": 3,
+    "retry_delay_ms": 1000
   }
 }
 ```
@@ -97,58 +105,72 @@ Fields can be accessed using dot notation for nested data:
 
 **Goal**: Handle commands that should only work in admin chat
 
-**Trigger:** Admin types command in admin chat  
+**Trigger:** Admin types command in admin chat
 **Action:** Execute admin command and log it
 
 ```json
 {
-  "name": "Admin Command Handler",
-  "description": "Handles admin commands in admin chat",
-  "definition": {
-    "version": "1.0",
-    "triggers": [
-      {
-        "id": "admin-command",
-        "name": "Admin Command",
-        "event_type": "RCON_CHAT_MESSAGE",
-        "conditions": [
-          {
-            "field": "chat_type",
-            "operator": "equals",
-            "value": "ChatAdmin"
-          },
-          {
-            "field": "message",
-            "operator": "starts_with",
-            "value": "!admin"
-          }
-        ],
-        "enabled": true
-      }
-    ],
-    "steps": [
-      {
-        "id": "log-admin-command",
-        "name": "Log Admin Command",
-        "type": "action",
-        "enabled": true,
-        "config": {
-          "action_type": "log_message",
-          "message": "Admin ${trigger_event.player_name} executed: ${trigger_event.message}",
-          "level": "info"
+  "version": "1.0",
+  "triggers": [
+    {
+      "id": "2ddef5ab-c3dd-4285-8980-fd8dcfa760ba",
+      "name": "admin-command",
+      "event_type": "RCON_CHAT_MESSAGE",
+      "conditions": [
+        {
+          "field": "chat_type",
+          "operator": "equals",
+          "value": "ChatAdmin",
+          "type": "string"
+        },
+        {
+          "field": "message",
+          "operator": "starts_with",
+          "value": "!admin",
+          "type": "string"
         }
+      ],
+      "enabled": true
+    }
+  ],
+  "variables": {},
+  "steps": [
+    {
+      "id": "c040d259-8ea1-4fe9-94ce-2c9059f81415",
+      "name": "log-admin-command",
+      "type": "action",
+      "enabled": true,
+      "config": {
+        "action_type": "log_message",
+        "level": "info",
+        "message": "Admin ${trigger_event.player_name} executed: ${trigger_event.message}"
       },
-      {
-        "id": "broadcast-admin-response",
-        "name": "Acknowledge Admin Command",
-        "type": "action",
-        "enabled": true,
-        "config": {
-          "action_type": "rcon_command",
-          "command": "AdminBroadcast Admin command executed by ${trigger_event.player_name}"
-        }
+      "on_error": {
+        "action": "stop",
+        "max_retries": 3,
+        "retry_delay_ms": 1000
       }
-    ]
+    },
+    {
+      "id": "43f7d438-bf9f-46e0-a5ed-4f01ca5c3cc2",
+      "name": "broadcast-admin-response",
+      "type": "action",
+      "enabled": true,
+      "config": {
+        "action_type": "rcon_command",
+        "command": "AdminBroadcast Admin command executed by ${trigger_event.player_name}"
+      },
+      "on_error": {
+        "action": "stop",
+        "max_retries": 3,
+        "retry_delay_ms": 1000
+      }
+    }
+  ],
+  "error_handling": {
+    "default_action": "stop",
+    "max_retries": 3,
+    "retry_delay_ms": 1000
   }
 }
 ```
@@ -158,136 +180,6 @@ Fields can be accessed using dot notation for nested data:
 - **Multiple Conditions**: Both chat type must be `ChatAdmin` AND message must start with "!admin"
 - **Multiple Steps**: First logs the command, then broadcasts acknowledgment
 - **Security**: Ensures only admin chat commands are processed
-
-### Example 3: Teamkill Detection and Warning
-
-**Goal**: Automatically warn players who teamkill
-
-**Trigger:** Player teamkills another player  
-**Action:** Warn the teamkiller and log the incident
-
-```json
-{
-  "name": "Teamkill Warning System",
-  "description": "Warns players who commit teamkills",
-  "definition": {
-    "version": "1.0",
-    "triggers": [
-      {
-        "id": "teamkill-trigger",
-        "name": "Teamkill Detection",
-        "event_type": "LOG_PLAYER_DIED",
-        "conditions": [
-          {
-            "field": "teamkill",
-            "operator": "equals",
-            "value": true
-          }
-        ],
-        "enabled": true
-      }
-    ],
-    "variables": {
-      "teamkill_count": 0
-    },
-    "steps": [
-      {
-        "id": "increment-counter",
-        "name": "Increment Teamkill Counter",
-        "type": "variable",
-        "enabled": true,
-        "config": {
-          "action_type": "set_variable",
-          "variable_name": "teamkill_count",
-          "variable_value": "${variables.teamkill_count + 1}"
-        }
-      },
-      {
-        "id": "warn-teamkiller",
-        "name": "Warn Teamkiller",
-        "type": "action",
-        "enabled": true,
-        "config": {
-          "action_type": "rcon_command",
-          "command": "AdminWarn ${trigger_event.attacker_steam} Teamkilling is not allowed! This is warning ${variables.teamkill_count}"
-        }
-      },
-      {
-        "id": "log-teamkill",
-        "name": "Log Teamkill",
-        "type": "action",
-        "enabled": true,
-        "config": {
-          "action_type": "log_message",
-          "message": "Teamkill: ${trigger_event.attacker_name} killed ${trigger_event.victim_name} with ${trigger_event.weapon}",
-          "level": "warn"
-        }
-      }
-    ]
-  }
-}
-```
-
-**Key Components:**
-
-- **Death Event**: Listens for `LOG_PLAYER_DIED` events
-- **Teamkill Filter**: Only processes when `teamkill` is true
-- **Variable Tracking**: Counts teamkills across workflow executions
-- **Multiple Actions**: Increments counter, warns player, and logs incident
-
-### Example 4: Player Welcome System
-
-**Goal**: Welcome new players when they join
-
-**Trigger:** Player connects to server  
-**Action:** Welcome them with a delayed message
-
-```json
-{
-  "name": "Player Welcome System",
-  "description": "Welcomes new players when they join",
-  "definition": {
-    "version": "1.0",
-    "triggers": [
-      {
-        "id": "player-join",
-        "name": "Player Connected",
-        "event_type": "LOG_PLAYER_CONNECTED",
-        "conditions": [],
-        "enabled": true
-      }
-    ],
-    "steps": [
-      {
-        "id": "wait-for-load",
-        "name": "Wait for Player to Load",
-        "type": "delay",
-        "enabled": true,
-        "config": {
-          "delay_ms": 10000
-        }
-      },
-      {
-        "id": "welcome-message",
-        "name": "Send Welcome Message",
-        "type": "action",
-        "enabled": true,
-        "config": {
-          "action_type": "rcon_command",
-          "command": "AdminWarn ${trigger_event.steam_id} Welcome to our server! Type !help for commands and !rules for server rules."
-        }
-      }
-    ]
-  }
-}
-```
-
-**Key Components:**
-
-- **Connection Event**: Listens for `LOG_PLAYER_CONNECTED` events
-- **No Conditions**: Activates for all player connections
-- **Delay Step**: Waits 10 seconds for the player to fully load
-- **Personal Welcome**: Sends a private message to the connecting player
 
 ## Common Condition Examples
 
@@ -428,3 +320,167 @@ Configure how workflows handle failures and errors.
   }
 }
 ```
+
+## Conditional Branching
+
+Condition steps allow you to create workflows that make decisions based on runtime data. They evaluate conditions and execute different sets of steps depending on whether the conditions are true or false.
+
+### How Condition Steps Work
+
+**Important:** Condition steps prevent sequential execution of conditional branches. When you specify steps in `true_steps` or `false_steps`, those steps will **only** execute when called by the condition - they won't run when encountered in the normal workflow order.
+
+This means:
+- If a condition is TRUE: Only the `true_steps` execute, `false_steps` are skipped
+- If a condition is FALSE: Only the `false_steps` execute, `true_steps` are skipped
+- You never get both branches executing
+
+### Example 3: VIP Player Detection
+
+**Goal**: Give VIP players special treatment when they join
+
+**Trigger:** Player connects to server
+**Action:** Check if they're VIP and respond accordingly
+
+```json
+{
+  "version": "1.0",
+  "triggers": [
+    {
+      "id": "c4f602f5-4f2b-40b5-98e3-494856d7a939",
+      "name": "player-join-succeeded",
+      "event_type": "LOG_JOIN_SUCCEEDED",
+      "enabled": true
+    }
+  ],
+  "variables": {},
+  "steps": [
+    {
+      "id": "2f76a8f1-c8a5-45c3-9b45-a952337eb5cb",
+      "name": "wait",
+      "type": "delay",
+      "enabled": true,
+      "config": {
+        "delay_ms": 30000
+      },
+      "on_error": {
+        "action": "stop",
+        "max_retries": 3,
+        "retry_delay_ms": 1000
+      }
+    },
+    {
+      "id": "34f1b9fc-ce43-4086-b6c2-941d2ae27a6e",
+      "name": "check-vip-status",
+      "type": "condition",
+      "enabled": true,
+      "config": {
+        "conditions": [
+          {
+            "field": "trigger_event.steam_id",
+            "operator": "equals",
+            "type": "string",
+            "value": "76561199047801300"
+          }
+        ],
+        "false_steps": [
+          "normal-welcome"
+        ],
+        "logic": "OR",
+        "true_steps": [
+          "vip-welcome"
+        ]
+      },
+      "on_error": {
+        "action": "stop",
+        "max_retries": 3,
+        "retry_delay_ms": 1000
+      }
+    },
+    {
+      "id": "67ead654-faea-4997-85c4-98e67aeff0df",
+      "name": "vip-welcome",
+      "type": "action",
+      "enabled": true,
+      "config": {
+        "action_type": "admin_broadcast",
+        "message": "Welcome VIP ${trigger_event.player_suffix}! Thank you for your support!"
+      },
+      "on_error": {
+        "action": "stop",
+        "max_retries": 3,
+        "retry_delay_ms": 1000
+      }
+    },
+    {
+      "id": "d5c48428-18f0-4542-89fb-9ffa58e59931",
+      "name": "normal-welcome",
+      "type": "action",
+      "enabled": true,
+      "config": {
+        "action_type": "warn_player",
+        "message": "Welcome ${trigger_event.player_suffix}! Type !vip to learn about VIP benefits.",
+        "player_id": "${trigger_event.steam_id}"
+      },
+      "on_error": {
+        "action": "stop",
+        "max_retries": 3,
+        "retry_delay_ms": 1000
+      }
+    },
+    {
+      "id": "0fc7e804-e205-4599-a0be-b1db5f285d31",
+      "name": "log-player-join",
+      "type": "action",
+      "enabled": true,
+      "config": {
+        "action_type": "log_message",
+        "level": "info",
+        "message": "Player ${trigger_event.player_suffix} connected"
+      },
+      "on_error": {
+        "action": "stop",
+        "max_retries": 3,
+        "retry_delay_ms": 1000
+      }
+    }
+  ],
+  "error_handling": {
+    "default_action": "stop",
+    "max_retries": 3,
+    "retry_delay_ms": 1000
+  }
+}
+```
+
+**Execution Flow:**
+
+1. Player connects (trigger activates)
+2. "Check VIP Status" condition evaluates
+3. **If VIP (true):**
+   - Executes "vip-welcome" (broadcasts VIP message)
+   - Skips "normal-welcome" in sequential flow
+   - Executes "Log Player Join"
+4. **If Not VIP (false):**
+   - Skips "vip-welcome" in sequential flow
+   - Executes "normal-welcome" (broadcasts normal message)
+   - Executes "Log Player Join"
+
+### Configuring Condition Steps in the UI
+
+When creating a condition step in the Squad Aegis UI:
+
+1. **Set Step Type**: Select "Condition" as the step type
+2. **Configure Logic**: Choose AND or OR for multiple conditions
+3. **Add Conditions**: Use the condition builder to add evaluation rules
+4. **Select True Branch Steps**: Use the dropdown to select which steps execute if conditions pass
+5. **Select False Branch Steps**: Use the dropdown to select which steps execute if conditions fail
+6. **Test Both Branches**: Always test workflows to ensure both paths work correctly
+
+### Best Practices for Conditional Workflows
+
+1. **Name Steps Clearly**: Use descriptive names that indicate the step's purpose
+2. **Use the Step Selector**: Always use the UI dropdown - never manually type step names
+3. **One Branch Per Step**: Don't put the same step in both true and false branches
+4. **Handle Both Outcomes**: Consider what should happen in both true and false scenarios
+5. **Keep Branches Simple**: If logic becomes complex, split into multiple workflows
+6. **Test Thoroughly**: Test both the true and false paths before deploying
