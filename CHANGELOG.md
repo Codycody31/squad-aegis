@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.1) - 2025-11-08
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### 🐛 Bug Fixes
+
+- fix: update paths for web output in Dockerfile and embed [[#100](https://github.com/Codycody31/squad-aegis/pull/100)]
+
 ## [0.3.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.0) - 2025-11-08
 
 ### ❤️ Thanks to all contributors! ❤️
