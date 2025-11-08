@@ -24,7 +24,7 @@ import (
 	"net/http"
 )
 
-//go:embed .output/public
+//go:embed all:.output/public
 var webFiles embed.FS
 
 func HTTPFS() (http.FileSystem, error) {
