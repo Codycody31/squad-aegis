@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	"go.codycody31.dev/squad-aegis/internal/player_tracker_manager"
 	valkeyClient "go.codycody31.dev/squad-aegis/internal/valkey"
 )
 
@@ -31,26 +32,28 @@ type ServerLogConnection struct {
 
 // LogwatcherManager manages log connections to multiple servers
 type LogwatcherManager struct {
-	connections  map[uuid.UUID]*ServerLogConnection
-	eventManager *event_manager.EventManager
-	parsers      []LogParser
-	valkeyClient *valkeyClient.Client
-	mu           sync.RWMutex
-	ctx          context.Context
-	cancel       context.CancelFunc
+	connections          map[uuid.UUID]*ServerLogConnection
+	eventManager         *event_manager.EventManager
+	parsers              []LogParser
+	valkeyClient         *valkeyClient.Client
+	playerTrackerManager *player_tracker_manager.PlayerTrackerManager
+	mu                   sync.RWMutex
+	ctx                  context.Context
+	cancel               context.CancelFunc
 }
 
 // NewLogwatcherManager creates a new logwatcher manager
-func NewLogwatcherManager(ctx context.Context, eventManager *event_manager.EventManager, valkeyClient *valkeyClient.Client) *LogwatcherManager {
+func NewLogwatcherManager(ctx context.Context, eventManager *event_manager.EventManager, valkeyClient *valkeyClient.Client, playerTrackerManager *player_tracker_manager.PlayerTrackerManager) *LogwatcherManager {
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &LogwatcherManager{
-		connections:  make(map[uuid.UUID]*ServerLogConnection),
-		eventManager: eventManager,
-		parsers:      GetOptimizedLogParsers(), // Use the unified parsers
-		valkeyClient: valkeyClient,
-		ctx:          ctx,
-		cancel:       cancel,
+		connections:          make(map[uuid.UUID]*ServerLogConnection),
+		eventManager:         eventManager,
+		parsers:              GetOptimizedLogParsers(), // Use the unified parsers
+		valkeyClient:         valkeyClient,
+		playerTrackerManager: playerTrackerManager,
+		ctx:                  ctx,
+		cancel:               cancel,
 	}
 }
 
@@ -294,7 +297,13 @@ func (m *LogwatcherManager) watchLogs(ctx context.Context, serverID uuid.UUID, c
 			conn.mu.Unlock()
 
 			// Process the log line for events
-			ProcessLogForEventsWithMetrics(logLine, serverID, m.parsers, m.eventManager, conn.EventStore, conn.Metrics)
+			// For now, pass nil as playerTracker since we don't have per-server player tracking yet
+			tracker, exists := m.playerTrackerManager.GetTracker(serverID)
+			if exists {
+				ProcessLogForEventsWithMetrics(logLine, serverID, m.parsers, m.eventManager, conn.EventStore, tracker, conn.Metrics)
+			} else {
+				ProcessLogForEventsWithMetrics(logLine, serverID, m.parsers, m.eventManager, conn.EventStore, nil, conn.Metrics)
+			}
 		}
 	}
 }

@@ -242,9 +242,6 @@ func (i *EventIngester) ingestEventType(eventType event_manager.EventType, event
 	case event_manager.EventTypeLogGameEventUnified:
 		return i.ingestGameEventUnified(events)
 	default:
-		log.Debug().
-			Str("eventType", string(eventType)).
-			Msg("Unhandled event type for ClickHouse ingestion")
 		return nil
 	}
 }
@@ -411,17 +408,19 @@ func (i *EventIngester) ingestPlayerDamaged(events []*IngestEvent) error {
 	}
 
 	query := `INSERT INTO squad_aegis.server_player_damaged_events 
-		(event_time, server_id, chain_id, victim_name, damage, attacker_name, attacker_controller, weapon, attacker_eos, attacker_steam, ingested_at) VALUES`
+		(event_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_controller, weapon, teamkill, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*11)
+	args := make([]interface{}, 0, len(events)*18)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, victimName, attackerName, attackerController, weapon, attackerEOS, attackerSteam string
+		var victimEOS, victimSteam, victimTeam, victimSquad, attackerTeam, attackerSquad string
 		var damage float32
+		var teamkill uint8
 
 		if damagedData, ok := event.Data.(*event_manager.LogPlayerDamagedData); ok {
 			chainID = damagedData.ChainID
@@ -432,6 +431,23 @@ func (i *EventIngester) ingestPlayerDamaged(events []*IngestEvent) error {
 			attackerEOS = damagedData.AttackerEOS
 			attackerSteam = damagedData.AttackerSteam
 			damage = parseFloat32(damagedData.Damage)
+			if damagedData.Teamkill {
+				teamkill = 1
+			}
+
+			// Extract victim details from PlayerInfo
+			if damagedData.Victim != nil {
+				victimEOS = damagedData.Victim.EOSID
+				victimSteam = damagedData.Victim.SteamID
+				victimTeam = damagedData.Victim.TeamID
+				victimSquad = damagedData.Victim.SquadID
+			}
+
+			// Extract attacker details from PlayerInfo
+			if damagedData.Attacker != nil {
+				attackerTeam = damagedData.Attacker.TeamID
+				attackerSquad = damagedData.Attacker.SquadID
+			}
 		}
 
 		args = append(args,
@@ -439,12 +455,19 @@ func (i *EventIngester) ingestPlayerDamaged(events []*IngestEvent) error {
 			event.ServerID,
 			chainID,
 			victimName,
+			victimEOS,
+			victimSteam,
+			victimTeam,
+			victimSquad,
 			damage,
 			attackerName,
-			attackerController,
-			weapon,
 			attackerEOS,
 			attackerSteam,
+			attackerTeam,
+			attackerSquad,
+			attackerController,
+			weapon,
+			teamkill,
 			time.Now(),
 		)
 	}
@@ -459,16 +482,17 @@ func (i *EventIngester) ingestPlayerDied(events []*IngestEvent) error {
 	}
 
 	query := `INSERT INTO squad_aegis.server_player_died_events 
-		(event_time, wound_time, server_id, chain_id, victim_name, damage, attacker_player_controller, weapon, attacker_eos, attacker_steam, teamkill, ingested_at) VALUES`
+		(event_time, wound_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_player_controller, weapon, teamkill, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*12)
+	args := make([]interface{}, 0, len(events)*19)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, victimName, attackerPlayerController, weapon, attackerEOS, attackerSteam, woundTimeStr string
+		var victimEOS, victimSteam, victimTeam, victimSquad, attackerName, attackerTeam, attackerSquad string
 		var damage float32
 		var teamkill uint8
 		var woundTimePtr *time.Time
@@ -484,6 +508,21 @@ func (i *EventIngester) ingestPlayerDied(events []*IngestEvent) error {
 			damage = parseFloat32(diedData.Damage)
 			if diedData.Teamkill {
 				teamkill = 1
+			}
+
+			// Extract victim details from PlayerInfo
+			if diedData.Victim != nil {
+				victimEOS = diedData.Victim.EOSID
+				victimSteam = diedData.Victim.SteamID
+				victimTeam = diedData.Victim.TeamID
+				victimSquad = diedData.Victim.SquadID
+			}
+
+			// Extract attacker details from PlayerInfo
+			if diedData.Attacker != nil {
+				attackerName = diedData.Attacker.PlayerSuffix
+				attackerTeam = diedData.Attacker.TeamID
+				attackerSquad = diedData.Attacker.SquadID
 			}
 		}
 
@@ -501,11 +540,18 @@ func (i *EventIngester) ingestPlayerDied(events []*IngestEvent) error {
 			event.ServerID,
 			chainID,
 			victimName,
+			victimEOS,
+			victimSteam,
+			victimTeam,
+			victimSquad,
 			damage,
-			attackerPlayerController,
-			weapon,
+			attackerName,
 			attackerEOS,
 			attackerSteam,
+			attackerTeam,
+			attackerSquad,
+			attackerPlayerController,
+			weapon,
 			teamkill,
 			time.Now(),
 		)
@@ -521,16 +567,17 @@ func (i *EventIngester) ingestPlayerWounded(events []*IngestEvent) error {
 	}
 
 	query := `INSERT INTO squad_aegis.server_player_wounded_events 
-		(event_time, server_id, chain_id, victim_name, damage, attacker_player_controller, weapon, attacker_eos, attacker_steam, teamkill, ingested_at) VALUES`
+		(event_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_player_controller, weapon, teamkill, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*11)
+	args := make([]interface{}, 0, len(events)*18)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, victimName, attackerPlayerController, weapon, attackerEOS, attackerSteam string
+		var victimEOS, victimSteam, victimTeam, victimSquad, attackerName, attackerTeam, attackerSquad string
 		var damage float32
 		var teamkill uint8
 
@@ -545,6 +592,21 @@ func (i *EventIngester) ingestPlayerWounded(events []*IngestEvent) error {
 			if woundedData.Teamkill {
 				teamkill = 1
 			}
+
+			// Extract victim details from PlayerInfo
+			if woundedData.Victim != nil {
+				victimEOS = woundedData.Victim.EOSID
+				victimSteam = woundedData.Victim.SteamID
+				victimTeam = woundedData.Victim.TeamID
+				victimSquad = woundedData.Victim.SquadID
+			}
+
+			// Extract attacker details from PlayerInfo
+			if woundedData.Attacker != nil {
+				attackerName = woundedData.Attacker.PlayerSuffix
+				attackerTeam = woundedData.Attacker.TeamID
+				attackerSquad = woundedData.Attacker.SquadID
+			}
 		}
 
 		args = append(args,
@@ -552,11 +614,18 @@ func (i *EventIngester) ingestPlayerWounded(events []*IngestEvent) error {
 			event.ServerID,
 			chainID,
 			victimName,
+			victimEOS,
+			victimSteam,
+			victimTeam,
+			victimSquad,
 			damage,
-			attackerPlayerController,
-			weapon,
+			attackerName,
 			attackerEOS,
 			attackerSteam,
+			attackerTeam,
+			attackerSquad,
+			attackerPlayerController,
+			weapon,
 			teamkill,
 			time.Now(),
 		)
@@ -572,16 +641,18 @@ func (i *EventIngester) ingestPlayerRevived(events []*IngestEvent) error {
 	}
 
 	query := `INSERT INTO squad_aegis.server_player_revived_events 
-		(event_time, server_id, chain_id, reviver_name, victim_name, reviver_eos, reviver_steam, victim_eos, victim_steam, ingested_at) VALUES`
+		(event_time, server_id, chain_id, reviver_name, reviver_eos, reviver_steam, reviver_team, reviver_squad, victim_name, victim_eos, victim_steam, victim_team, victim_squad, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*10)
+	args := make([]interface{}, 0, len(events)*14)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, reviverName, victimName, reviverEOS, reviverSteam, victimEOS, victimSteam string
+		var reviverTeam, reviverSquad, victimTeam, victimSquad string
+
 		if revivedData, ok := event.Data.(*event_manager.LogPlayerRevivedData); ok {
 			chainID = revivedData.ChainID
 			reviverName = revivedData.ReviverName
@@ -590,6 +661,18 @@ func (i *EventIngester) ingestPlayerRevived(events []*IngestEvent) error {
 			reviverSteam = revivedData.ReviverSteam
 			victimEOS = revivedData.VictimEOS
 			victimSteam = revivedData.VictimSteam
+
+			// Extract reviver details from PlayerInfo
+			if revivedData.Reviver != nil {
+				reviverTeam = revivedData.Reviver.TeamID
+				reviverSquad = revivedData.Reviver.SquadID
+			}
+
+			// Extract victim details from PlayerInfo
+			if revivedData.Victim != nil {
+				victimTeam = revivedData.Victim.TeamID
+				victimSquad = revivedData.Victim.SquadID
+			}
 		}
 
 		args = append(args,
@@ -597,11 +680,15 @@ func (i *EventIngester) ingestPlayerRevived(events []*IngestEvent) error {
 			event.ServerID,
 			chainID,
 			reviverName,
-			victimName,
 			reviverEOS,
 			reviverSteam,
+			reviverTeam,
+			reviverSquad,
+			victimName,
 			victimEOS,
 			victimSteam,
+			victimTeam,
+			victimSquad,
 			time.Now(),
 		)
 	}
