@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.3.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.0) - 2025-11-08
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31, @Insidious Fiddler
+
+### ✨ Features
+
+- feat: teamkill tracking + more advanced player tracking [[#98](https://github.com/Codycody31/squad-aegis/pull/98)]
+- feat(players): add player profile data structures and API endpoint [[#96](https://github.com/Codycody31/squad-aegis/pull/96)]
+- feat: implement conditional step management in workflow [[#95](https://github.com/Codycody31/squad-aegis/pull/95)]
+- feat: implement conditional step management in workflow [[#94](https://github.com/Codycody31/squad-aegis/pull/94)]
+- feat: add file upload feature for importing workflow JSON [[#93](https://github.com/Codycody31/squad-aegis/pull/93)]
+- feat: enhance UI with player action menus on feeds [[#86](https://github.com/Codycody31/squad-aegis/pull/86)]
+- feat: edit/delete plugin data [[#83](https://github.com/Codycody31/squad-aegis/pull/83)]
+
+### 📈 Enhancement
+
+- refactor: update/improve player actions & rules UI [[#90](https://github.com/Codycody31/squad-aegis/pull/90)]
+- refactor: improve text export formatting with indentation logic [[#87](https://github.com/Codycody31/squad-aegis/pull/87)]
+- refactor: Migrate from Apache License 2.0 -> Elastic License 2.0 [[#84](https://github.com/Codycody31/squad-aegis/pull/84)]
+- refactor: attempt to improve locking logic in DisconnectFromServer method [[#79](https://github.com/Codycody31/squad-aegis/pull/79)]
+- refactor: server feed now shows player disconnects in connection history [[#77](https://github.com/Codycody31/squad-aegis/pull/77)]
+- refactor(ui): Remove Connected Players in favor of Teams & Squads [[#76](https://github.com/Codycody31/squad-aegis/pull/76)]
+
+### 🐛 Bug Fixes
+
+- fix: rules are unable to be deleted [[#97](https://github.com/Codycody31/squad-aegis/pull/97)]
+- fix: change ban duration from minutes to days [[#92](https://github.com/Codycody31/squad-aegis/pull/92)]
+- fix(docs): remove outdated Lua scripting examples and commands [[#91](https://github.com/Codycody31/squad-aegis/pull/91)]
+- refactor: remove broadcast messages for whitelist achievements [[#82](https://github.com/Codycody31/squad-aegis/pull/82)]
+- fix: remove unnecessary await for fetch functions in Vue + bump squad-rcon-go [[#81](https://github.com/Codycody31/squad-aegis/pull/81)]
+- fix: log watcher restart endpoint missing [[#78](https://github.com/Codycody31/squad-aegis/pull/78)]
+
+### 📚 Documentation
+
+- docs: add Elastic License 2.0 documentation and entry [[#99](https://github.com/Codycody31/squad-aegis/pull/99)]
+- docs: update title and content structure in docs [[#89](https://github.com/Codycody31/squad-aegis/pull/89)]
+- docs: v2 via fumadocs [[#88](https://github.com/Codycody31/squad-aegis/pull/88)]
+
+### Misc
+
+- ci(docker): attempt to clean up docker image and fix build issues ([a70f320](https://github.com/Codycody31/squad-aegis/commit/a70f3204aadb5b17193d18d704796714533248d0))
+- chore: assets/_nuxt -> assets/nuxt ([c6d0711](https://github.com/Codycody31/squad-aegis/commit/c6d0711c4f22657fc2c75b32442ff26815a927da))
+- chore: move nuxt to assets/_nuxt ([ed52a92](https://github.com/Codycody31/squad-aegis/commit/ed52a920cc529ba819a3a4f49cc9a36129879221))
+- refactor: drop lua examples in favor of docs ([12ba679](https://github.com/Codycody31/squad-aegis/commit/12ba679c73c52de33495520d349230e2c9d0d7ec))
+- ci: drop broken registry [[#85](https://github.com/Codycody31/squad-aegis/pull/85)]
+- chore: remove health check logic and methods [[#80](https://github.com/Codycody31/squad-aegis/pull/80)]
+- ci(release-config): add option to skip commits without PRs [[#75](https://github.com/Codycody31/squad-aegis/pull/75)]
+- chore: update release-helper image version [[#73](https://github.com/Codycody31/squad-aegis/pull/73)]
+
 ## [0.2.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.2.0) - 2025-09-17
 
 ### ❤️ Thanks to all contributors! ❤️
