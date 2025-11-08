@@ -13,14 +13,14 @@
 - feat: implement conditional step management in workflow [[#95](https://github.com/Codycody31/squad-aegis/pull/95)]
 - feat: implement conditional step management in workflow [[#94](https://github.com/Codycody31/squad-aegis/pull/94)]
 - feat: add file upload feature for importing workflow JSON [[#93](https://github.com/Codycody31/squad-aegis/pull/93)]
+- feat: enhance UI with player action menus on feeds [[#86](https://github.com/Codycody31/squad-aegis/pull/86)]
+- feat: edit/delete plugin data [[#83](https://github.com/Codycody31/squad-aegis/pull/83)]
 
 ### 📈 Enhancement
 
 - refactor: update/improve player actions & rules UI [[#90](https://github.com/Codycody31/squad-aegis/pull/90)]
 - refactor: improve text export formatting with indentation logic [[#87](https://github.com/Codycody31/squad-aegis/pull/87)]
-- feat: enhance UI with player action menus on feeds [[#86](https://github.com/Codycody31/squad-aegis/pull/86)]
 - refactor: Migrate from Apache License 2.0 -> Elastic License 2.0 [[#84](https://github.com/Codycody31/squad-aegis/pull/84)]
-- feat: edit/delete plugin data [[#83](https://github.com/Codycody31/squad-aegis/pull/83)]
 - refactor: attempt to improve locking logic in DisconnectFromServer method [[#79](https://github.com/Codycody31/squad-aegis/pull/79)]
 - refactor: server feed now shows player disconnects in connection history [[#77](https://github.com/Codycody31/squad-aegis/pull/77)]
 - refactor(ui): Remove Connected Players in favor of Teams & Squads [[#76](https://github.com/Codycody31/squad-aegis/pull/76)]
@@ -36,6 +36,7 @@
 
 ### 📚 Documentation
 
+- docs: add Elastic License 2.0 documentation and entry [[#99](https://github.com/Codycody31/squad-aegis/pull/99)]
 - docs: update title and content structure in docs [[#89](https://github.com/Codycody31/squad-aegis/pull/89)]
 - docs: v2 via fumadocs [[#88](https://github.com/Codycody31/squad-aegis/pull/88)]
 
