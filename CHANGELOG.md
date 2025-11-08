@@ -42,6 +42,7 @@
 
 ### Misc
 
+- ci(docker): attempt to clean up docker image and fix build issues ([a70f320](https://github.com/Codycody31/squad-aegis/commit/a70f3204aadb5b17193d18d704796714533248d0))
 - chore: assets/_nuxt -> assets/nuxt ([c6d0711](https://github.com/Codycody31/squad-aegis/commit/c6d0711c4f22657fc2c75b32442ff26815a927da))
 - chore: move nuxt to assets/_nuxt ([ed52a92](https://github.com/Codycody31/squad-aegis/commit/ed52a920cc529ba819a3a4f49cc9a36129879221))
 - refactor: drop lua examples in favor of docs ([12ba679](https://github.com/Codycody31/squad-aegis/commit/12ba679c73c52de33495520d349230e2c9d0d7ec))
