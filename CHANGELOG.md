@@ -26,6 +26,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix: rules are unable to be deleted [[#97](https://github.com/Codycody31/squad-aegis/pull/97)]
 - fix: change ban duration from minutes to days [[#92](https://github.com/Codycody31/squad-aegis/pull/92)]
 - fix(docs): remove outdated Lua scripting examples and commands [[#91](https://github.com/Codycody31/squad-aegis/pull/91)]
 - refactor: remove broadcast messages for whitelist achievements [[#82](https://github.com/Codycody31/squad-aegis/pull/82)]
