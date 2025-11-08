@@ -339,6 +339,16 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			connectorsGroup.DELETE("/:connectorId", server.ConnectorDelete)
 		}
 
+		// Player profiles
+		playersGroup := apiGroup.Group("/players")
+		{
+			playersGroup.Use(server.AuthSession)
+
+			playersGroup.GET("", server.PlayersList)
+			playersGroup.GET("/stats", server.PlayersStats)
+			playersGroup.GET("/:playerId", server.PlayerGet)
+		}
+
 		// Public Routes for the server
 		apiGroup.GET("/servers/:serverId/admins/cfg", server.ServerAdminsCfg)
 		apiGroup.GET("/servers/:serverId/bans/cfg", server.ServerBansCfgEnhanced)
