@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feat: teamkill tracking + more advanced player tracking [[#98](https://github.com/Codycody31/squad-aegis/pull/98)]
 - feat(players): add player profile data structures and API endpoint [[#96](https://github.com/Codycody31/squad-aegis/pull/96)]
 - feat: implement conditional step management in workflow [[#95](https://github.com/Codycody31/squad-aegis/pull/95)]
 - feat: implement conditional step management in workflow [[#94](https://github.com/Codycody31/squad-aegis/pull/94)]
