@@ -289,7 +289,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			any(attacker_name) as player_name,
 			sum(kills) as total_kills,
 			sum(deaths) as total_deaths,
-			if(sum(deaths) > 0, sum(kills) / sum(deaths), sum(kills)) as kd_ratio
+			if(sum(deaths) > 0, sum(kills) / sum(deaths), toFloat64(sum(kills))) as kd_ratio
 		FROM player_stats
 		WHERE attacker_steam != '' OR attacker_eos != ''
 		GROUP BY attacker_steam, attacker_eos

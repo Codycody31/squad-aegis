@@ -40,6 +40,17 @@ const (
 	EventTypeLogTickRate           EventType = "LOG_TICK_RATE"
 	EventTypeLogGameEventUnified   EventType = "LOG_GAME_EVENT_UNIFIED"
 
+	// Player Tracker Events
+	EventTypePlayerListUpdated  EventType = "PLAYER_LIST_UPDATED"
+	EventTypePlayerTeamChanged  EventType = "PLAYER_TEAM_CHANGED"
+	EventTypePlayerSquadChanged EventType = "PLAYER_SQUAD_CHANGED"
+	EventTypeSquadCreated       EventType = "SQUAD_CREATED"
+	EventTypeSquadDisbanded     EventType = "SQUAD_DISBANDED"
+	EventTypePlayerConnected    EventType = "PLAYER_CONNECTED"
+	EventTypePlayerDisconnected EventType = "PLAYER_DISCONNECTED"
+	EventTypeEnhancedTeamkill   EventType = "ENHANCED_TEAMKILL"
+	EventTypePlayerStatsUpdated EventType = "PLAYER_STATS_UPDATED"
+
 	// Plugin Events
 	EventTypePluginCustom EventType = "PLUGIN_CUSTOM"
 )
@@ -303,4 +314,16 @@ func (et EventType) IsRconEvent() bool {
 // IsLogEvent checks if the event type is a log event
 func (et EventType) IsLogEvent() bool {
 	return !et.IsRconEvent()
+}
+
+// IsPlayerTrackerEvent checks if the event type is a player tracker event
+func (et EventType) IsPlayerTrackerEvent() bool {
+	switch et {
+	case EventTypePlayerListUpdated, EventTypePlayerTeamChanged, EventTypePlayerSquadChanged,
+		EventTypeSquadCreated, EventTypeSquadDisbanded, EventTypePlayerConnected,
+		EventTypePlayerDisconnected, EventTypeEnhancedTeamkill, EventTypePlayerStatsUpdated:
+		return true
+	default:
+		return false
+	}
 }

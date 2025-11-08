@@ -9,6 +9,7 @@ type PlayerInfo struct {
 	PlayerSuffix     string `json:"playerSuffix,omitempty"`
 	Controller       string `json:"controller,omitempty"`
 	TeamID           string `json:"teamID,omitempty"`
+	SquadID          string `json:"squadID,omitempty"`
 }
 
 // RoundWinnerInfo represents round winner information in events
