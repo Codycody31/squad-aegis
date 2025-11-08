@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.0) - 2025-11-07
+## [0.3.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.0) - 2025-11-08
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feat(players): add player profile data structures and API endpoint [[#96](https://github.com/Codycody31/squad-aegis/pull/96)]
 - feat: implement conditional step management in workflow [[#95](https://github.com/Codycody31/squad-aegis/pull/95)]
 - feat: implement conditional step management in workflow [[#94](https://github.com/Codycody31/squad-aegis/pull/94)]
 - feat: add file upload feature for importing workflow JSON [[#93](https://github.com/Codycody31/squad-aegis/pull/93)]
