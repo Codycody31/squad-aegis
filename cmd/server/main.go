@@ -23,6 +23,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/player_tracker_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_registry"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
@@ -188,8 +189,12 @@ func run(ctx context.Context) error {
 	rconManager := rcon_manager.NewRconManager(ctx, eventManager)
 	defer rconManager.Shutdown()
 
+	// Create player tracker manager
+	playerTrackerManager := player_tracker_manager.NewPlayerTrackerManager(ctx, rconManager, eventManager, valkeyClient)
+	defer playerTrackerManager.Shutdown()
+
 	// Create logwatcher manager
-	logwatcherManager := logwatcher_manager.NewLogwatcherManager(ctx, eventManager, valkeyClient)
+	logwatcherManager := logwatcher_manager.NewLogwatcherManager(ctx, eventManager, valkeyClient, playerTrackerManager)
 	defer logwatcherManager.Shutdown()
 
 	// Create plugin manager
@@ -254,6 +259,7 @@ func run(ctx context.Context) error {
 	// Connect to all servers
 	rconManager.ConnectToAllServers(ctx, database)
 	logwatcherManager.ConnectToAllServers(ctx, database)
+	playerTrackerManager.ConnectToAllServers(ctx, database)
 
 	// Initialize services
 	waitingGroup := errgroup.Group{}

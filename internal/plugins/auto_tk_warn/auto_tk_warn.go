@@ -143,11 +143,11 @@ func (p *AutoTKWarnPlugin) Stop() error {
 
 // HandleEvent processes an event if the plugin is subscribed to it
 func (p *AutoTKWarnPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
-	if event.Type != "LOG_TEAMKILL" {
-		return nil // Not interested in this event
+	if event.Data.(*event_manager.LogPlayerDiedData).Teamkill {
+		return p.handleTeamkill(event)
 	}
 
-	return p.handleTeamkill(event)
+	return nil
 }
 
 // GetStatus returns the current plugin status

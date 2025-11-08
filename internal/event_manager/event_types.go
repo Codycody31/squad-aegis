@@ -126,8 +126,14 @@ type LogPlayerDamagedData struct {
 	Time               string      `json:"time"`
 	ChainID            string      `json:"chain_id"`
 	VictimName         string      `json:"victim_name,omitempty"`
+	VictimEOS          string      `json:"victim_eos,omitempty"`
+	VictimSteam        string      `json:"victim_steam,omitempty"`
+	VictimTeam         string      `json:"victim_team,omitempty"`
+	VictimSquad        string      `json:"victim_squad,omitempty"`
 	Damage             string      `json:"damage"`
 	AttackerName       string      `json:"attacker_name,omitempty"`
+	AttackerTeam       string      `json:"attacker_team,omitempty"`
+	AttackerSquad      string      `json:"attacker_squad,omitempty"`
 	AttackerController string      `json:"attacker_controller"`
 	Weapon             string      `json:"weapon"`
 	AttackerEOS        string      `json:"attacker_eos,omitempty"`
@@ -145,7 +151,14 @@ type LogPlayerDiedData struct {
 	WoundTime                string      `json:"wound_time,omitempty"`
 	ChainID                  string      `json:"chain_id"`
 	VictimName               string      `json:"victim_name,omitempty"`
+	VictimEOS                string      `json:"victim_eos,omitempty"`
+	VictimSteam              string      `json:"victim_steam,omitempty"`
+	VictimTeam               string      `json:"victim_team,omitempty"`
+	VictimSquad              string      `json:"victim_squad,omitempty"`
 	Damage                   string      `json:"damage"`
+	AttackerName             string      `json:"attacker_name,omitempty"`
+	AttackerTeam             string      `json:"attacker_team,omitempty"`
+	AttackerSquad            string      `json:"attacker_squad,omitempty"`
 	AttackerPlayerController string      `json:"attacker_player_controller"`
 	Weapon                   string      `json:"weapon"`
 	AttackerEOS              string      `json:"attacker_eos,omitempty"`
@@ -162,7 +175,14 @@ type LogPlayerWoundedData struct {
 	Time                     string      `json:"time"`
 	ChainID                  string      `json:"chain_id"`
 	VictimName               string      `json:"victim_name,omitempty"`
+	VictimEOS                string      `json:"victim_eos,omitempty"`
+	VictimSteam              string      `json:"victim_steam,omitempty"`
+	VictimTeam               string      `json:"victim_team,omitempty"`
+	VictimSquad              string      `json:"victim_squad,omitempty"`
 	Damage                   string      `json:"damage"`
+	AttackerName             string      `json:"attacker_name,omitempty"`
+	AttackerTeam             string      `json:"attacker_team,omitempty"`
+	AttackerSquad            string      `json:"attacker_squad,omitempty"`
 	AttackerPlayerController string      `json:"attacker_player_controller"`
 	Weapon                   string      `json:"weapon"`
 	AttackerEOS              string      `json:"attacker_eos,omitempty"`
@@ -176,14 +196,20 @@ func (d LogPlayerWoundedData) GetEventType() EventType { return EventTypeLogPlay
 
 // LogPlayerRevivedData represents log player revived event data
 type LogPlayerRevivedData struct {
-	Time         string `json:"time"`
-	ChainID      string `json:"chain_id"`
-	ReviverName  string `json:"reviver_name"`
-	VictimName   string `json:"victim_name"`
-	ReviverEOS   string `json:"reviver_eos,omitempty"`
-	ReviverSteam string `json:"reviver_steam,omitempty"`
-	VictimEOS    string `json:"victim_eos,omitempty"`
-	VictimSteam  string `json:"victim_steam,omitempty"`
+	Time         string      `json:"time"`
+	ChainID      string      `json:"chain_id"`
+	ReviverName  string      `json:"reviver_name"`
+	ReviverEOS   string      `json:"reviver_eos,omitempty"`
+	ReviverSteam string      `json:"reviver_steam,omitempty"`
+	ReviverTeam  string      `json:"reviver_team,omitempty"`
+	ReviverSquad string      `json:"reviver_squad,omitempty"`
+	VictimName   string      `json:"victim_name"`
+	VictimEOS    string      `json:"victim_eos,omitempty"`
+	VictimSteam  string      `json:"victim_steam,omitempty"`
+	VictimTeam   string      `json:"victim_team,omitempty"`
+	VictimSquad  string      `json:"victim_squad,omitempty"`
+	Reviver      *PlayerInfo `json:"reviver,omitempty"`
+	Victim       *PlayerInfo `json:"victim,omitempty"`
 }
 
 func (d LogPlayerRevivedData) GetEventType() EventType { return EventTypeLogPlayerRevived }
