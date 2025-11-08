@@ -47,6 +47,7 @@ const hasUnsavedChanges = ref<boolean>(false);
 const isSaving = ref<boolean>(false);
 const previewCollapsed = ref<boolean>(true);
 const rulesCollapsed = ref<boolean>(false);
+const deletedRuleIds = ref<string[]>([]); // Track deleted rule IDs
 
 // fetch rules
 async function fetchRules() {
@@ -107,6 +108,8 @@ async function fetchRules() {
       
       rules.value = mapDurationToDays(data.value);
       annotateNumbers();
+      // Clear deleted rule IDs after successful fetch
+      deletedRuleIds.value = [];
     }
   } catch (err: any) {
     error.value = err.message || "Error fetching rules";
@@ -178,11 +181,15 @@ const handleFileImport = (event: Event) => {
             created_at: rule.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString()
           }));
+          // Clear deleted IDs since import is a fresh start
+          deletedRuleIds.value = [];
           hasUnsavedChanges.value = true;
         }
       } else if (file.name.endsWith('.txt')) {
         // Import text format
         rules.value = parseTextImport(content);
+        // Clear deleted IDs since import is a fresh start
+        deletedRuleIds.value = [];
         hasUnsavedChanges.value = true;
       }
     } catch (error) {
@@ -284,8 +291,8 @@ const updateRule = (updatedRule: ServerRule) => {
   hasUnsavedChanges.value = true;
 }
 
-const deleteRule = async (ruleId: string) => {
-  // Find the rule to delete
+const deleteRule = (ruleId: string) => {
+  // Find the rule to delete (for toast message)
   let ruleToDelete: ServerRule | null = null;
   const findRule = (rulesList: ServerRule[]): void => {
     for (const rule of rulesList) {
@@ -307,69 +314,43 @@ const deleteRule = async (ruleId: string) => {
     return;
   }
   
-  // Delete from server immediately
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-  const token = cookieToken.value;
+  // Helper to collect all rule IDs including nested sub-rules
+  const collectRuleIds = (rule: ServerRule): string[] => {
+    const ids = [rule.id];
+    if (rule.sub_rules && rule.sub_rules.length > 0) {
+      rule.sub_rules.forEach(subRule => {
+        ids.push(...collectRuleIds(subRule));
+      });
+    }
+    return ids;
+  };
   
-  if (!token) {
-    error.value = "Authentication required";
-    return;
-  }
+  // Add this rule and all its sub-rules to the deletion list
+  const idsToDelete = collectRuleIds(ruleToDelete);
+  deletedRuleIds.value.push(...idsToDelete);
   
-  // Show loading state
-  isSaving.value = true;
-  
-  try {
-    const { error: fetchError } = await useFetch(
-      `${runtimeConfig.public.backendApi}/servers/${serverId}/rules/${ruleId}`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        }
+  // Remove from local state
+  const deleteRecursive = (rulesList: ServerRule[]): ServerRule[] => {
+    return rulesList.filter(rule => {
+      if (rule.id === ruleId) {
+        return false;
       }
-    );
-    
-    if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to delete rule");
-    }
-    
-    // Now remove from local state
-    const deleteRecursive = (rulesList: ServerRule[]): ServerRule[] => {
-      return rulesList.filter(rule => {
-        if (rule.id === ruleId) {
-          return false;
-        }
-        if (rule.sub_rules && rule.sub_rules.length > 0) {
-          rule.sub_rules = deleteRecursive(rule.sub_rules);
-        }
-        return true;
-      });
-    };
-    
-    rules.value = deleteRecursive(rules.value);
-    
-    // Show success toast
-    if (ruleToDelete && typeof ruleToDelete === 'object') {
-      toast({
-        title: "Rule Deleted",
-        description: `${(ruleToDelete as ServerRule).title} has been deleted`,
-        variant: "default",
-      });
-    }
-    
-  } catch (err: any) {
-    const errorMsg = err.message || "Error deleting rule";
-    error.value = errorMsg;
-    toast({
-      title: "Error",
-      description: errorMsg,
-      variant: "destructive",
+      if (rule.sub_rules && rule.sub_rules.length > 0) {
+        rule.sub_rules = deleteRecursive(rule.sub_rules);
+      }
+      return true;
     });
-  } finally {
-    isSaving.value = false;
-  }
+  };
+  
+  rules.value = deleteRecursive(rules.value);
+  hasUnsavedChanges.value = true;
+  
+  // Show info toast
+  toast({
+    title: "Rule Marked for Deletion",
+    description: `${ruleToDelete.title} will be deleted when you save`,
+    variant: "default",
+  });
 }
 
 const addSubRule = (parentId: string) => {
@@ -570,76 +551,9 @@ const normalizeDisplayOrders = () => {
   annotateNumbers();
 }
 
-async function saveRule(rule: ServerRule) {
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-  const token = cookieToken.value;
-  if (!token) {
-    error.value = "Authentication required";
-    return;
-  }
-
-  try {
-    let url = `${runtimeConfig.public.backendApi}/servers/${serverId}/rules`;
-    if (rule.id) {
-      url += `/${rule.id}`;
-    }
-
-    const { error: fetchError } = await useFetch(
-      url,
-      {
-        method: rule.id ? "PUT" : "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: {
-          parent_id: rule.parent_id,
-          display_order: rule.display_order,
-          title: rule.title,
-          description: rule.description
-        },
-      }
-    );
-    
-    if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to save rule");
-    }
-  } catch (err: any) {
-    error.value = err.message || "Error saving rule";
-  }
-}
-
-async function deleteServerRule(ruleId: string) {
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-  const token = cookieToken.value;
-  if (!token) {
-    error.value = "Authentication required";
-    return;
-  }
-
-  try {
-    const { error: fetchError } = await useFetch(
-      `${runtimeConfig.public.backendApi}/servers/${serverId}/rules/${ruleId}`,
-      {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-    
-    if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to delete rule");
-    }
-  } catch (err: any) {
-    error.value = err.message || "Error deleting rule";
-  }
-}
-
 // Save all rules at once using the bulk update endpoint
 async function saveAllRules() {
-  if (!hasUnsavedChanges.value) {
+  if (!hasUnsavedChanges.value && deletedRuleIds.value.length === 0) {
     return; // No changes to save
   }
 
@@ -668,7 +582,10 @@ async function saveAllRules() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: flatRules
+        body: {
+          rules: flatRules,
+          deleted_rule_ids: deletedRuleIds.value
+        }
       }
     );
 
@@ -733,52 +650,6 @@ function flattenRules(rulesArray: ServerRule[]): ServerRule[] {
   }
 
   return result;
-}
-
-async function saveRuleOrder() {
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-  const token = cookieToken.value;
-  if (!token) return;
-
-  // flatten rules with their new order
-  const queue: { rule: ServerRule; parent_id: string | null; order: number }[] = [];
-  rules.value.forEach((r, idx) => {
-    queue.push({ rule: r, parent_id: null, order: idx });
-    if (r.sub_rules) {
-      r.sub_rules.forEach((sr, sidx) => {
-      queue.push({ rule: sr, parent_id: r.id, order: sidx });
-    });
-    }
-  });
-
-  try {
-    await Promise.all(
-      queue.map(async ({ rule, parent_id, order }) => {
-        const { error: fetchError } = await useFetch(
-          `${runtimeConfig.public.backendApi}/servers/${serverId}/rules/${rule.id}`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            body: {
-              parent_id,
-              display_order: order,
-              title: rule.title,
-              description: rule.description,
-            },
-          }
-        );
-        if (fetchError.value) {
-          console.error("Failed updating rule", rule.id);
-        }
-      })
-    );
-    fetchRules();
-  } catch (e) {
-    console.error(e);
-  }
 }
 
 const exportAsText = () => {
@@ -908,8 +779,8 @@ onUnmounted(() => {
           <!-- Save Button -->
           <Button
             @click="saveAllRules"
-            :disabled="isSaving || !hasUnsavedChanges"
-            :variant="hasUnsavedChanges ? 'default' : 'outline'"
+            :disabled="isSaving || (!hasUnsavedChanges && deletedRuleIds.length === 0)"
+            :variant="(hasUnsavedChanges || deletedRuleIds.length > 0) ? 'default' : 'outline'"
             size="sm"
             class="flex items-center"
           >
