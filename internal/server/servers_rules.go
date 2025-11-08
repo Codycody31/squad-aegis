@@ -234,12 +234,19 @@ func (s *Server) bulkUpdateServerRules(c *gin.Context) {
 		return
 	}
 
-	// Use a more flexible JSON binding to handle extra fields
-	var requestData []map[string]interface{}
-	if err := c.ShouldBindJSON(&requestData); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule data format: " + err.Error()})
+	// Parse the request body which now includes rules and deleted_rule_ids
+	var bulkRequest struct {
+		Rules          []map[string]interface{} `json:"rules"`
+		DeletedRuleIDs []string                 `json:"deleted_rule_ids"`
+	}
+
+	if err := c.ShouldBindJSON(&bulkRequest); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request data format: " + err.Error()})
 		return
 	}
+
+	requestData := bulkRequest.Rules
+	deletedRuleIDs := bulkRequest.DeletedRuleIDs
 
 	// Convert the flexible data into our model, ignoring extra fields
 	var requestRules []models.ServerRule
@@ -341,18 +348,33 @@ func (s *Server) bulkUpdateServerRules(c *gin.Context) {
 		requestRules = append(requestRules, rule)
 	}
 
-	if len(requestRules) == 0 {
-		c.JSON(http.StatusOK, []models.ServerRule{})
-		return
-	}
-
-	// Start a transaction
+	// Start a transaction (even if only deleting rules)
 	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
 		return
 	}
 	defer tx.Rollback() // Will be a no-op if tx.Commit() is called
+
+	// Handle deletions first
+	if len(deletedRuleIDs) > 0 {
+		for _, ruleIDStr := range deletedRuleIDs {
+			ruleID, err := uuid.Parse(ruleIDStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID in deleted_rule_ids: " + err.Error()})
+				return
+			}
+
+			// Delete the rule (cascade will handle actions and sub-rules if configured)
+			_, err = tx.ExecContext(c.Request.Context(),
+				"DELETE FROM server_rules WHERE id = $1 AND server_id = $2",
+				ruleID, serverID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete rule: " + err.Error()})
+				return
+			}
+		}
+	}
 
 	// Process all rules
 	var updatedRules []*models.ServerRule

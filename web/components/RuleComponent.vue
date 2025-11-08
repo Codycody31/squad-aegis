@@ -81,17 +81,8 @@ const updateChild = (updatedChild: ServerRule) => {
 }
 
 const deleteChild = (childId: string) => {
-  if (!localRule.value.sub_rules) return;
-  
-  const updatedSubRules = localRule.value.sub_rules.filter(subRule => subRule.id !== childId);
-  
-  localRule.value = { 
-    ...localRule.value, 
-    sub_rules: updatedSubRules,
-    updated_at: new Date().toISOString()
-  };
-  
-  emitUpdate();
+  // Emit delete event to parent so it can be tracked in deletedRuleIds
+  emit('delete', childId);
 }
 
 const addChildSubRule = (childId: string) => {
