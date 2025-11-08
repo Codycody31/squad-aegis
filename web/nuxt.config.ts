@@ -5,7 +5,7 @@ export default defineNuxtConfig({
   ssr: false,
 
   app: {
-    buildAssetsDir: "assets/_nuxt",
+    buildAssetsDir: "assets/nuxt",
     head: {
       meta: [
         {
