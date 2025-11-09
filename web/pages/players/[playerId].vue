@@ -351,7 +351,7 @@ onMounted(() => {
               <CardTitle>Recent Activity</CardTitle>
             </CardHeader>
             <CardContent>
-              <div v-if="player.recent_activity.length > 0" class="space-y-2">
+              <div v-if="player.recent_activity?.length > 0" class="space-y-2">
                 <div
                   v-for="(activity, index) in player.recent_activity"
                   :key="index"

@@ -315,9 +315,11 @@ onMounted(() => {
                   <TableCell class="text-right">{{ player.kills }}</TableCell>
                   <TableCell class="text-right">{{ player.deaths }}</TableCell>
                   <TableCell class="text-right">
-                    <Button size="sm" variant="ghost" @click.stop="viewPlayerProfile(player)">
+                    <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
+                      <Button size="sm" variant="ghost">
                       View
                     </Button>
+                    </RouterLink>
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -353,9 +355,11 @@ onMounted(() => {
                   <TableCell class="font-medium">{{ player.player_name }}</TableCell>
                   <TableCell class="text-right font-bold text-destructive">{{ player.teamkills }}</TableCell>
                   <TableCell class="text-right">
-                    <Button size="sm" variant="ghost" @click.stop="viewPlayerProfile(player)">
+                    <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
+                      <Button size="sm" variant="ghost">
                       View
                     </Button>
+                    </RouterLink>
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -396,9 +400,11 @@ onMounted(() => {
                   <TableCell class="font-medium">{{ player.player_name }}</TableCell>
                   <TableCell class="text-right font-bold text-green-500">{{ player.revives }}</TableCell>
                   <TableCell class="text-right">
-                    <Button size="sm" variant="ghost" @click.stop="viewPlayerProfile(player)">
+                    <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
+                      <Button size="sm" variant="ghost">
                       View
                     </Button>
+                    </RouterLink>
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -435,9 +441,11 @@ onMounted(() => {
                     <div class="text-xs text-muted-foreground">{{ formatDate(player.last_seen) }}</div>
                   </TableCell>
                   <TableCell class="text-right">
-                    <Button size="sm" variant="ghost" @click.stop="viewPlayerProfile(player)">
+                    <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
+                      <Button size="sm" variant="ghost">
                       View
                     </Button>
+                    </RouterLink>
                   </TableCell>
                 </TableRow>
               </TableBody>
