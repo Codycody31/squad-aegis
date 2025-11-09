@@ -472,6 +472,12 @@ function copyToClipboard(text: string) {
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end">
+      <RouterLink :to="'/players/' + player.steam_id || player.eosId" as-child>
+        <DropdownMenuItem>
+          <Icon name="lucide:user" class="mr-2 h-4 w-4 text-blue-500" />
+          <span>View Player Profile</span>
+        </DropdownMenuItem>
+      </RouterLink>
       <DropdownMenuItem @click="copyToClipboard(player.steam_id)">
         <Icon name="lucide:copy" class="mr-2 h-4 w-4 text-yellow-500" />
         <span>Copy Steam ID</span>
