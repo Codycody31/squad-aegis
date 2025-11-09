@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-09
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### 📈 Enhancement
+
+- refactor: add player profile link and fetch name if empty for players… [[#102](https://github.com/Codycody31/squad-aegis/pull/102)]
+
 ## [0.3.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.1) - 2025-11-08
 
 ### ❤️ Thanks to all contributors! ❤️
