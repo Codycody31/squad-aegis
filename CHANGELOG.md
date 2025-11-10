@@ -18,6 +18,10 @@
 
 - fix(feeds): teamkill feed not showing attacker name [[#105](https://github.com/Codycody31/squad-aegis/pull/105)]
 
+### 📦️ Dependency
+
+- chore(deps): update fumadocs and tailwind dependencies to latest vers… [[#106](https://github.com/Codycody31/squad-aegis/pull/106)]
+
 ## [0.3.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.1) - 2025-11-08
 
 ### ❤️ Thanks to all contributors! ❤️
