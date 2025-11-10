@@ -219,9 +219,16 @@ func (s *Server) formatEventForFeed(event event_manager.Event, feedTypes []strin
 				return nil
 			}
 			feedEvent.Type = "teamkill"
+
+			// Use Steam ID as fallback if attacker name is empty
+			attackerName := diedData.AttackerName
+			if attackerName == "" && diedData.AttackerSteam != "" {
+				attackerName = diedData.AttackerSteam
+			}
+
 			feedEvent.Data = map[string]interface{}{
 				"victim_name":    diedData.VictimName,
-				"attacker_name":  extractPlayerName(diedData.AttackerPlayerController),
+				"attacker_name":  attackerName,
 				"attacker_steam": diedData.AttackerSteam,
 				"attacker_eos":   diedData.AttackerEOS,
 				"weapon":         diedData.Weapon,
@@ -332,15 +339,6 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
-}
-
-func extractPlayerName(playerController string) string {
-	// Extract player name from controller string like "BP_PlayerController_C /Game/Maps/..."
-	// This is a simplified extraction - you might need to adjust based on actual data format
-	if len(playerController) > 20 {
-		return playerController[:20] + "..."
-	}
-	return playerController
 }
 
 // getHistoricalChatMessagesWithPagination retrieves chat message history with pagination
@@ -558,7 +556,7 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 			chain_id,
 			event_time,
 			victim_name,
-			attacker_player_controller,
+			attacker_name,
 			attacker_steam,
 			attacker_eos,
 			weapon,
@@ -587,20 +585,25 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 		var chainId string
 		var eventTime time.Time
 		var victimName string
-		var attackerController string
+		var attackerName string
 		var attackerSteam, attackerEos *string
 		var weapon string
 		var damage float32
 
-		err := rows.Scan(&chainId, &eventTime, &victimName, &attackerController, &attackerSteam, &attackerEos, &weapon, &damage)
+		err := rows.Scan(&chainId, &eventTime, &victimName, &attackerName, &attackerSteam, &attackerEos, &weapon, &damage)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to scan teamkill row")
 			continue
 		}
 
+		// Use Steam ID as fallback if attacker name is empty
+		if attackerName == "" && attackerSteam != nil && *attackerSteam != "" {
+			attackerName = *attackerSteam
+		}
+
 		data := map[string]interface{}{
 			"victim_name":   victimName,
-			"attacker_name": extractPlayerName(attackerController),
+			"attacker_name": attackerName,
 			"weapon":        weapon,
 			"damage":        damage,
 		}
