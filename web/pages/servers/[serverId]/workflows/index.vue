@@ -1076,6 +1076,8 @@ definePageMeta({
                         :step-types="stepTypes"
                         :action-types="actionTypes"
                         :workflow-id="selectedWorkflow.id"
+                        :workflow-name="selectedWorkflow.name"
+                        :workflow-description="selectedWorkflow.description"
                         :server-id="serverId"
                     />
                 </div>
