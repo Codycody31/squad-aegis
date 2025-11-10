@@ -1,10 +1,14 @@
 # Changelog
 
-## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-09
+## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-10
 
 ### ❤️ Thanks to all contributors! ❤️
 
 @Codycody31
+
+### ✨ Features
+
+- feat(workflow): workflow conditions can have nested steps [[#104](https://github.com/Codycody31/squad-aegis/pull/104)]
 
 ### 📈 Enhancement
 
