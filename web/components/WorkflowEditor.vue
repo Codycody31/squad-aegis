@@ -109,11 +109,18 @@ const showTriggerDialog = ref(false);
 const showStepDialog = ref(false);
 const showVariableDialog = ref(false);
 const showImportDialog = ref(false);
+const showNestedStepDialog = ref(false);
 const selectedTrigger = ref<WorkflowTrigger | null>(null);
 const selectedStep = ref<WorkflowStep | null>(null);
 const selectedVariable = ref<{ key: string; value: any; type: string } | null>(
     null,
 );
+const selectedNestedStep = ref<WorkflowStep | null>(null);
+const editingNestedStepContext = ref<{
+    fieldKey: string;
+    index: number;
+    parentStep: WorkflowStep | null;
+} | null>(null);
 const importJsonText = ref("");
 const importError = ref("");
 const importFile = ref<File | null>(null);
@@ -906,7 +913,7 @@ result.player = player_name`,
             {
                 key: "true_steps",
                 label: "Steps if True",
-                type: "multi_select",
+                type: "nested_steps",
                 required: false,
                 options: availableSteps.value,
                 description: "Steps to execute if condition is true",
@@ -914,7 +921,7 @@ result.player = player_name`,
             {
                 key: "false_steps",
                 label: "Steps if False",
-                type: "multi_select",
+                type: "nested_steps",
                 required: false,
                 options: availableSteps.value,
                 description: "Steps to execute if condition is false",
@@ -1141,6 +1148,93 @@ function exportWorkflow() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+}
+
+// Nested step management functions
+function addNestedStep(fieldKey: string) {
+    if (!selectedStep.value) return;
+
+    // Initialize the array if it doesn't exist
+    if (!selectedStep.value.config[fieldKey]) {
+        selectedStep.value.config[fieldKey] = [];
+    }
+
+    // Create a new inline step with default values
+    const newStep = {
+        id: generateId(),
+        name: "",
+        type: "action",
+        enabled: true,
+        config: {},
+    };
+
+    selectedStep.value.config[fieldKey].push(newStep);
+}
+
+function removeNestedStep(fieldKey: string, index: number) {
+    if (!selectedStep.value || !selectedStep.value.config[fieldKey]) return;
+    selectedStep.value.config[fieldKey].splice(index, 1);
+}
+
+function addStepReference(fieldKey: string, stepName: string) {
+    if (!selectedStep.value || !stepName) return;
+
+    // Initialize the array if it doesn't exist
+    if (!selectedStep.value.config[fieldKey]) {
+        selectedStep.value.config[fieldKey] = [];
+    }
+
+    // Add the step name as a reference (string)
+    if (!selectedStep.value.config[fieldKey].includes(stepName)) {
+        selectedStep.value.config[fieldKey].push(stepName);
+    }
+}
+
+function editNestedStep(fieldKey: string, index: number) {
+    if (!selectedStep.value || !selectedStep.value.config[fieldKey]) return;
+    
+    const nestedStep = selectedStep.value.config[fieldKey][index];
+    
+    // Store the editing context
+    editingNestedStepContext.value = {
+        fieldKey,
+        index,
+        parentStep: selectedStep.value,
+    };
+    
+    // Create a copy of the nested step for editing
+    selectedNestedStep.value = JSON.parse(JSON.stringify(nestedStep));
+    
+    // Ensure required fields exist
+    if (!selectedNestedStep.value.config) {
+        selectedNestedStep.value.config = {};
+    }
+    
+    // Initialize default values based on type
+    if (selectedNestedStep.value.type === "action" && !selectedNestedStep.value.config.action_type) {
+        selectedNestedStep.value.config.action_type = "";
+    }
+    
+    showNestedStepDialog.value = true;
+}
+
+function saveNestedStep() {
+    if (!selectedNestedStep.value || !editingNestedStepContext.value) return;
+    
+    const { fieldKey, index, parentStep } = editingNestedStepContext.value;
+    
+    if (!parentStep || !parentStep.config[fieldKey]) return;
+    
+    // Update the nested step in the parent's config
+    parentStep.config[fieldKey][index] = { ...selectedNestedStep.value };
+    
+    closeNestedStepDialog();
+}
+
+function closeNestedStepDialog() {
+    showNestedStepDialog.value = false;
+    selectedNestedStep.value = null;
+    editingNestedStepContext.value = null;
 }
 </script>
 
@@ -2163,6 +2257,150 @@ function exportWorkflow() {
                                         </Card>
                                     </div>
                                 </div>
+                                
+                                <!-- Nested Steps Editor -->
+                                <div
+                                    v-else-if="field.type === 'nested_steps'"
+                                    class="space-y-3"
+                                >
+                                    <div class="border rounded-lg p-4 bg-muted/30">
+                                        <div class="flex justify-between items-center mb-3">
+                                            <div>
+                                                <Label class="text-sm font-medium">{{ field.label }}</Label>
+                                                <p class="text-xs text-muted-foreground mt-1">
+                                                    {{ field.description }}
+                                                </p>
+                                            </div>
+                                            <Button
+                                                @click="addNestedStep(field.key)"
+                                                variant="outline"
+                                                size="sm"
+                                            >
+                                                <Plus class="w-4 h-4 mr-2" />
+                                                Add Inline Step
+                                            </Button>
+                                        </div>
+
+                                        <!-- Initialize array if not exists -->
+                                        <template v-if="!selectedStep.config[field.key]">
+                                            {{ selectedStep.config[field.key] = [] }}
+                                        </template>
+
+                                        <!-- Show nested steps -->
+                                        <div
+                                            v-if="selectedStep.config[field.key].length === 0"
+                                            class="text-center py-6 text-muted-foreground text-sm"
+                                        >
+                                            <Play class="w-12 h-12 mx-auto mb-2 opacity-25" />
+                                            <p>No inline steps defined</p>
+                                            <p class="text-xs mt-1">Add steps or reference existing ones</p>
+                                        </div>
+
+                                        <div v-else class="space-y-2">
+                                            <Card
+                                                v-for="(nestedStep, idx) in selectedStep.config[field.key]"
+                                                :key="idx"
+                                                class="p-3 bg-background"
+                                            >
+                                                <!-- Check if it's a string reference or inline step -->
+                                                <div v-if="typeof nestedStep === 'string'" class="flex items-center gap-2">
+                                                    <Badge variant="outline" class="flex-1">
+                                                        <GitBranch class="w-3 h-3 mr-1" />
+                                                        Reference: {{ nestedStep }}
+                                                    </Badge>
+                                                    <Button
+                                                        @click="removeNestedStep(field.key, idx)"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                    >
+                                                        <Trash2 class="w-4 h-4" />
+                                                    </Button>
+                                                </div>
+                                                
+                                                <!-- Inline step -->
+                                                <div v-else class="space-y-2">
+                                                    <div class="flex items-center justify-between">
+                                                        <div class="flex items-center gap-2 flex-1">
+                                                            <component
+                                                                :is="getStepIcon(nestedStep.type || 'action')"
+                                                                class="w-4 h-4 text-primary"
+                                                            />
+                                                            <Input
+                                                                v-model="nestedStep.name"
+                                                                placeholder="Step name"
+                                                                class="text-sm h-8"
+                                                            />
+                                                            <Select v-model="nestedStep.type" class="w-32">
+                                                                <SelectTrigger class="h-8 text-sm">
+                                                                    <SelectValue />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem
+                                                                        v-for="st in stepTypes.filter(t => t.value !== 'condition')"
+                                                                        :key="st.value"
+                                                                        :value="st.value"
+                                                                    >
+                                                                        {{ st.label }}
+                                                                    </SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <div class="flex gap-1">
+                                                            <Button
+                                                                @click="editNestedStep(field.key, idx)"
+                                                                variant="ghost"
+                                                                size="sm"
+                                                            >
+                                                                <Settings class="w-4 h-4" />
+                                                            </Button>
+                                                            <Button
+                                                                @click="removeNestedStep(field.key, idx)"
+                                                                variant="ghost"
+                                                                size="sm"
+                                                            >
+                                                                <Trash2 class="w-4 h-4" />
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- Quick config preview -->
+                                                    <div v-if="nestedStep.type === 'action' && nestedStep.config?.action_type" class="text-xs text-muted-foreground ml-6">
+                                                        Action: {{ actionTypes.find(at => at.value === nestedStep.config.action_type)?.label || nestedStep.config.action_type }}
+                                                    </div>
+                                                </div>
+                                            </Card>
+                                        </div>
+
+                                        <!-- Option to add reference to existing step -->
+                                        <div class="mt-3 pt-3 border-t">
+                                            <Label class="text-xs text-muted-foreground mb-2 block">Or reference existing step:</Label>
+                                            <Select
+                                                :modelValue="undefined"
+                                                @update:modelValue="(value) => addStepReference(field.key, value)"
+                                            >
+                                                <SelectTrigger class="h-8 text-sm">
+                                                    <SelectValue placeholder="Select step to reference..." />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem
+                                                        v-if="!(field as any).options || (field as any).options.length === 0"
+                                                        value=""
+                                                        disabled
+                                                    >
+                                                        No steps available
+                                                    </SelectItem>
+                                                    <SelectItem
+                                                        v-for="option in (field as any).options"
+                                                        :key="option.value"
+                                                        :value="option.value"
+                                                    >
+                                                        {{ option.label }}
+                                                    </SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2403,6 +2641,194 @@ function exportWorkflow() {
                         :disabled="!selectedVariable.key.trim()"
                     >
                         {{ editingVariableKey ? "Update" : "Add" }} Variable
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Nested Step Dialog -->
+        <Dialog v-model:open="showNestedStepDialog">
+            <DialogContent
+                v-if="selectedNestedStep"
+                class="max-w-2xl max-h-[80vh] overflow-y-auto"
+            >
+                <DialogHeader>
+                    <DialogTitle>Edit Nested Step</DialogTitle>
+                    <DialogDescription>
+                        Configure this inline step within the condition branch
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-2">
+                            <Label>Name</Label>
+                            <Input
+                                v-model="selectedNestedStep.name"
+                                placeholder="Enter step name"
+                            />
+                        </div>
+                        <div class="space-y-2">
+                            <Label>Type</Label>
+                            <Select v-model="selectedNestedStep.type">
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem
+                                        v-for="stepType in stepTypes.filter(t => t.value !== 'condition')"
+                                        :key="stepType.value"
+                                        :value="stepType.value"
+                                    >
+                                        <div>
+                                            <div class="font-medium">
+                                                {{ stepType.label }}
+                                            </div>
+                                            <div
+                                                class="text-sm text-muted-foreground"
+                                            >
+                                                {{ stepType.description }}
+                                            </div>
+                                        </div>
+                                    </SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+
+                    <!-- Action Type Selection (for action steps) -->
+                    <div
+                        v-if="selectedNestedStep.type === 'action'"
+                        class="space-y-2"
+                    >
+                        <Label>Action Type</Label>
+                        <Select v-model="selectedNestedStep.config.action_type">
+                            <SelectTrigger>
+                                <SelectValue placeholder="Select action type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem
+                                    v-for="actionType in actionTypes"
+                                    :key="actionType.value"
+                                    :value="actionType.value"
+                                >
+                                    <div>
+                                        <div class="font-medium">
+                                            {{ actionType.label }}
+                                        </div>
+                                        <div
+                                            class="text-sm text-muted-foreground"
+                                        >
+                                            {{ actionType.description }}
+                                        </div>
+                                    </div>
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <!-- Dynamic Configuration Fields -->
+                    <div
+                        v-if="
+                            selectedNestedStep.config.action_type ||
+                            selectedNestedStep.type !== 'action'
+                        "
+                        class="space-y-4"
+                    >
+                        <Separator />
+                        <div class="space-y-3">
+                            <Label class="text-base">Configuration</Label>
+                            <div
+                                v-for="field in getConfigFields(
+                                    selectedNestedStep.type,
+                                    selectedNestedStep.config.action_type,
+                                )"
+                                :key="field.key"
+                                v-show="
+                                    shouldShowField(field, selectedNestedStep.config)
+                                "
+                                class="space-y-2"
+                            >
+                                <div class="flex flex-col space-y-1">
+                                    <Label
+                                        >{{ field.label }}
+                                        <span
+                                            v-if="field.required"
+                                            class="text-red-500"
+                                            >*</span
+                                        ></Label
+                                    >
+                                    <p
+                                        v-if="(field as any).description"
+                                        class="text-xs text-muted-foreground"
+                                    >
+                                        {{ (field as any).description }}
+                                    </p>
+                                </div>
+
+                                <!-- Text Input -->
+                                <Input
+                                    v-if="field.type === 'text'"
+                                    v-model="selectedNestedStep.config[field.key]"
+                                    :placeholder="(field as any).placeholder"
+                                    :required="field.required"
+                                />
+
+                                <!-- Number Input -->
+                                <Input
+                                    v-else-if="field.type === 'number'"
+                                    v-model.number="
+                                        selectedNestedStep.config[field.key]
+                                    "
+                                    type="number"
+                                    :placeholder="(field as any).placeholder"
+                                    :required="field.required"
+                                />
+
+                                <!-- Textarea -->
+                                <Textarea
+                                    v-else-if="field.type === 'textarea'"
+                                    v-model="selectedNestedStep.config[field.key]"
+                                    :rows="(field as any).rows || 3"
+                                    :placeholder="(field as any).placeholder"
+                                    :required="field.required"
+                                    class="font-mono text-sm"
+                                />
+
+                                <!-- Select -->
+                                <Select
+                                    v-else-if="field.type === 'select'"
+                                    v-model="selectedNestedStep.config[field.key]"
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue
+                                            :placeholder="
+                                                (field as any).placeholder
+                                            "
+                                        />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem
+                                            v-for="option in (field as any)
+                                                .options"
+                                            :key="option"
+                                            :value="option"
+                                        >
+                                            {{ option }}
+                                        </SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" @click="closeNestedStepDialog"
+                        >Cancel</Button
+                    >
+                    <Button @click="saveNestedStep">
+                        Save Nested Step
                     </Button>
                 </DialogFooter>
             </DialogContent>
