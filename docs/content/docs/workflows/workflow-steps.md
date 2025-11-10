@@ -333,7 +333,10 @@ Condition steps evaluate expressions and branch the workflow execution based on 
 
 - **Branching Logic**: Execute different steps based on condition results (true vs false)
 - **Multiple Conditions**: Combine multiple conditions using AND or OR logic
-- **UI-Based Configuration**: Select steps for each branch using dropdown menus
+- **Inline Nested Steps**: Define steps directly within condition branches without creating root-level steps
+- **Step References**: Reference existing root-level steps in condition branches
+- **Visual Branch Indicators**: Clear visual distinction between true and false branches
+- **Step Reordering**: Reorder nested steps within branches using up/down arrows
 - **Automatic Skip Management**: Steps in conditional branches are automatically excluded from sequential execution
 
 **Important:** Steps specified in true/false branches will ONLY execute when called by the condition, preventing both branches from running.
@@ -342,8 +345,126 @@ Condition steps evaluate expressions and branch the workflow execution based on 
 
 - Conditions are configured through the UI with field, operator, and value selections
 - Multiple conditions can be combined using AND or OR logic
-- True and false branches are specified by selecting steps from a dropdown (not by sequential order)
+- True and false branches can contain:
+  - **Inline Steps**: Steps defined directly within the condition branch
+  - **Step References**: References to existing root-level steps by name
 - Steps in branches are automatically skipped during sequential workflow execution
+
+#### Inline Nested Steps
+
+You can define steps directly within condition branches without creating them at the root level. This keeps your workflow cleaner and makes conditional logic more intuitive.
+
+**Benefits of Inline Steps:**
+- Steps are scoped to their condition branch
+- No need to create root-level steps that are only used conditionally
+- Easier to understand workflow flow
+- Can be reordered within their branch
+- Full configuration support (all step types except nested conditions)
+
+**Example with Inline Steps:**
+
+```json
+{
+  "name": "Check Player VIP Status",
+  "type": "condition",
+  "enabled": true,
+  "config": {
+    "logic": "AND",
+    "conditions": [
+      {
+        "field": "trigger_event.steam_id",
+        "operator": "equals",
+        "value": "76561199047801300",
+        "type": "string"
+      }
+    ],
+    "true_steps": [
+      {
+        "id": "inline-vip-broadcast",
+        "name": "VIP Welcome Broadcast",
+        "type": "action",
+        "enabled": true,
+        "config": {
+          "action_type": "admin_broadcast",
+          "message": "Welcome VIP ${trigger_event.player_name}!"
+        }
+      },
+      {
+        "id": "inline-vip-log",
+        "name": "Log VIP Join",
+        "type": "action",
+        "enabled": true,
+        "config": {
+          "action_type": "log_message",
+          "level": "info",
+          "message": "VIP player ${trigger_event.player_name} joined"
+        }
+      }
+    ],
+    "false_steps": [
+      {
+        "id": "inline-normal-welcome",
+        "name": "Normal Welcome",
+        "type": "action",
+        "enabled": true,
+        "config": {
+          "action_type": "admin_broadcast",
+          "message": "Welcome ${trigger_event.player_name}!"
+        }
+      }
+    ]
+  }
+}
+```
+
+**Mixed Approach (Inline + References):**
+
+You can mix inline steps with references to root-level steps:
+
+```json
+{
+  "name": "Check Player Status",
+  "type": "condition",
+  "enabled": true,
+  "config": {
+    "logic": "AND",
+    "conditions": [
+      {
+        "field": "trigger_event.teamkill",
+        "operator": "equals",
+        "value": true,
+        "type": "boolean"
+      }
+    ],
+    "true_steps": [
+      {
+        "id": "inline-warn",
+        "name": "Warn Teamkiller",
+        "type": "action",
+        "enabled": true,
+        "config": {
+          "action_type": "warn_player",
+          "player_id": "${trigger_event.steam_id}",
+          "message": "Teamkilling is against server rules!"
+        }
+      },
+      "log-teamkill-incident"  // Reference to root-level step
+    ],
+    "false_steps": [
+      "log-normal-death"  // Reference to root-level step
+    ]
+  }
+}
+```
+
+**Visual Branch Indicators:**
+
+In the workflow editor, condition steps display:
+- ✓ **Green badge** for true branch steps
+- ✕ **Red badge** for false branch steps
+- Step counts for each branch
+- Clear visual hierarchy with indentation
+- Hover controls for reordering nested steps
 
 ### Variable Steps
 
@@ -829,15 +950,21 @@ Only ONE branch executes per condition, never both.
     - `value` (any): Value to compare against
     - `type` (string): Data type (`string`, `number`, `boolean`, `array`, `object`)
 
-- **`true_steps`** (array): Step names to execute if conditions pass
-  - Use the step selector in the UI to add steps
+- **`true_steps`** (array): Steps to execute if conditions pass
+  - Can contain step name strings (references) or full step objects (inline steps)
+  - Use "Add Inline Step" button to create steps directly in the branch
+  - Use step selector dropdown to reference existing root-level steps
   - Steps will only execute if the condition is true
   - Steps in this list are automatically skipped in sequential execution
+  - Can be reordered using up/down arrows (hover over steps to see controls)
 
-- **`false_steps`** (array): Step names to execute if conditions fail
-  - Use the step selector in the UI to add steps
+- **`false_steps`** (array): Steps to execute if conditions fail
+  - Can contain step name strings (references) or full step objects (inline steps)
+  - Use "Add Inline Step" button to create steps directly in the branch
+  - Use step selector dropdown to reference existing root-level steps
   - Steps will only execute if the condition is false
   - Steps in this list are automatically skipped in sequential execution
+  - Can be reordered using up/down arrows (hover over steps to see controls)
 
 - **`continue_on_next_step_error`** (boolean): Whether to continue if a branch step fails
   - Default: `false` (stop on error)
@@ -882,12 +1009,15 @@ Only ONE branch executes per condition, never both.
 ### Best Practices for Condition Steps
 
 1. **Name steps clearly**: Use descriptive names that indicate their purpose in the workflow
-2. **Use step selector**: Always use the UI dropdown to select steps - don't type step names manually
-3. **One branch per condition**: A step should only appear in either `true_steps` OR `false_steps`, not both
-4. **Handle both branches**: Consider what should happen in both true and false scenarios
-5. **Test thoroughly**: Test both branches to ensure correct behavior
-6. **Avoid circular references**: Don't create condition loops that reference each other
-7. **Keep branches simple**: If branches become complex, consider breaking into multiple workflows
+2. **Prefer inline steps for branch-specific logic**: Use inline nested steps for actions that only make sense within a specific branch
+3. **Use references for shared steps**: Reference root-level steps when the same action is needed in multiple places
+4. **One branch per condition**: A step should only appear in either `true_steps` OR `false_steps`, not both
+5. **Handle both branches**: Consider what should happen in both true and false scenarios
+6. **Reorder steps logically**: Use the reorder controls to ensure steps execute in the correct order within branches
+7. **Test thoroughly**: Test both branches to ensure correct behavior
+8. **Avoid circular references**: Don't create condition loops that reference each other
+9. **Keep branches simple**: If branches become complex, consider breaking into multiple workflows
+10. **Visual indicators**: Use the visual branch indicators in the editor to quickly understand workflow flow
 
 ## Error Handling
 

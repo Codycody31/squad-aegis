@@ -15,6 +15,8 @@ A workflow consists of:
 - **Triggers**: Define what events will start the workflow
 - **Conditions**: Optional filters to determine if the workflow should run
 - **Steps**: The actions to execute when triggered
+  - **Root-level Steps**: Steps defined at the workflow level
+  - **Nested Steps**: Steps defined inline within condition branches
 - **Variables**: Data storage for workflow execution
 - **Error Handling**: How to handle failures
 
