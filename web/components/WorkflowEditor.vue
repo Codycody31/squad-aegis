@@ -67,6 +67,8 @@ interface WorkflowStep {
 }
 
 interface WorkflowDefinition {
+    name?: string;
+    description?: string;
     version: string;
     triggers: WorkflowTrigger[];
     variables: Record<string, any>;
@@ -97,6 +99,8 @@ const props = defineProps<{
     stepTypes: StepType[];
     actionTypes: ActionType[];
     workflowId?: string;
+    workflowName?: string;
+    workflowDescription?: string;
     serverId?: string;
 }>();
 
@@ -110,6 +114,7 @@ const showStepDialog = ref(false);
 const showVariableDialog = ref(false);
 const showImportDialog = ref(false);
 const showNestedStepDialog = ref(false);
+const showJsonEditorDialog = ref(false);
 const selectedTrigger = ref<WorkflowTrigger | null>(null);
 const selectedStep = ref<WorkflowStep | null>(null);
 const selectedVariable = ref<{ key: string; value: any; type: string } | null>(
@@ -124,6 +129,8 @@ const editingNestedStepContext = ref<{
 const importJsonText = ref("");
 const importError = ref("");
 const importFile = ref<File | null>(null);
+const jsonEditorText = ref("");
+const jsonEditorError = ref("");
 const editingTriggerIndex = ref(-1);
 const editingStepIndex = ref(-1);
 const editingVariableKey = ref("");
@@ -1115,6 +1122,8 @@ function validateAndImportWorkflow() {
 
         // Create the new workflow definition
         const newDefinition: WorkflowDefinition = {
+            name: parsed.name,
+            description: parsed.description,
             version: parsed.version,
             triggers: validatedTriggers,
             variables: parsed.variables || {},
@@ -1138,16 +1147,108 @@ function validateAndImportWorkflow() {
 }
 
 function exportWorkflow() {
-    const jsonString = JSON.stringify(definition.value, null, 2);
+    const exportData = { ...definition.value, name: props.workflowName, description: props.workflowDescription };
+    const jsonString = JSON.stringify(exportData, null, 2);
     const blob = new Blob([jsonString], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `workflow-${props.workflowId || "export"}.json`;
+    link.download = `workflow-${exportData.name || props.workflowId || "export"}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+}
+
+// JSON Editor functions
+function openJsonEditorDialog() {
+    const exportData = { ...definition.value, name: props.workflowName, description: props.workflowDescription };
+    jsonEditorText.value = JSON.stringify(exportData, null, 2);
+    jsonEditorError.value = "";
+    showJsonEditorDialog.value = true;
+}
+
+function closeJsonEditorDialog() {
+    showJsonEditorDialog.value = false;
+    jsonEditorText.value = "";
+    jsonEditorError.value = "";
+}
+
+function validateAndSaveJsonEdit() {
+    jsonEditorError.value = "";
+
+    if (!jsonEditorText.value.trim()) {
+        jsonEditorError.value = "Please enter JSON content";
+        return;
+    }
+
+    try {
+        const parsed = JSON.parse(jsonEditorText.value);
+
+        // Validate required structure
+        if (!parsed.version) {
+            jsonEditorError.value = "Missing required field: version";
+            return;
+        }
+
+        if (!Array.isArray(parsed.triggers)) {
+            jsonEditorError.value = "Missing or invalid triggers array";
+            return;
+        }
+
+        if (!Array.isArray(parsed.steps)) {
+            jsonEditorError.value = "Missing or invalid steps array";
+            return;
+        }
+
+        // Ensure all triggers have required fields and generate IDs if missing
+        const validatedTriggers = parsed.triggers.map((trigger: any) => ({
+            id: trigger.id || generateId(),
+            name: trigger.name || "",
+            event_type: trigger.event_type || "",
+            conditions: trigger.conditions || [],
+            enabled: trigger.enabled !== false, // default to true
+        }));
+
+        // Ensure all steps have required fields and generate IDs if missing
+        const validatedSteps = parsed.steps.map((step: any) => ({
+            id: step.id || generateId(),
+            name: step.name || "",
+            type: step.type || "action",
+            enabled: step.enabled !== false, // default to true
+            config: step.config || {},
+            on_error: step.on_error || {
+                action: "stop",
+                max_retries: 3,
+                retry_delay_ms: 1000,
+            },
+            next_steps: step.next_steps || [],
+        }));
+
+        // Create the new workflow definition
+        const newDefinition: WorkflowDefinition = {
+            name: parsed.name,
+            description: parsed.description,
+            version: parsed.version,
+            triggers: validatedTriggers,
+            variables: parsed.variables || {},
+            steps: validatedSteps,
+            error_handling: parsed.error_handling || {},
+        };
+
+        // Update the workflow
+        definition.value = newDefinition;
+
+        closeJsonEditorDialog();
+    } catch (error) {
+        if (error instanceof SyntaxError) {
+            jsonEditorError.value = `Invalid JSON: ${error.message}`;
+        } else {
+            jsonEditorError.value = `Validation error: ${
+                error instanceof Error ? error.message : "Unknown error"
+            }`;
+        }
+    }
 }
 
 // Nested step management functions
@@ -1262,6 +1363,10 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
     <div class="space-y-6">
         <!-- Import/Export Controls -->
         <div class="flex justify-end gap-2">
+            <Button @click="openJsonEditorDialog" variant="outline" size="sm">
+                <Code class="w-4 h-4 mr-2" />
+                Edit JSON
+            </Button>
             <Button @click="exportWorkflow" variant="outline" size="sm">
                 <FileJson class="w-4 h-4 mr-2" />
                 Export JSON
@@ -3079,7 +3184,7 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
                         />
                         <p class="text-xs text-muted-foreground">
                             Ensure the JSON includes version, triggers, steps,
-                            and variables fields
+                            and variables fields. Name and description are optional.
                         </p>
                     </div>
 
@@ -3105,6 +3210,67 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
                         :disabled="!importJsonText.trim()"
                     >
                         Import Workflow
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- JSON Editor Dialog -->
+        <Dialog v-model:open="showJsonEditorDialog">
+            <DialogContent class="max-w-4xl max-h-[85vh] flex flex-col">
+                <DialogHeader>
+                    <DialogTitle>Edit Workflow JSON</DialogTitle>
+                    <DialogDescription>
+                        Directly edit the workflow configuration as JSON. Changes will be validated before saving.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div class="flex-1 overflow-hidden space-y-4">
+                    <div class="h-[500px] border rounded-md overflow-hidden">
+                        <CodeEditor
+                            v-model:value="jsonEditorText"
+                            language="json"
+                            theme="vs-dark"
+                            :options="{
+                                fontSize: 14,
+                                minimap: { enabled: true },
+                                automaticLayout: true,
+                                formatOnPaste: true,
+                                formatOnType: true,
+                            }"
+                        />
+                    </div>
+
+                    <div
+                        v-if="jsonEditorError"
+                        class="p-3 bg-destructive/10 border border-destructive/20 rounded-md"
+                    >
+                        <p class="text-sm text-destructive font-medium">
+                            Validation Error:
+                        </p>
+                        <p class="text-sm text-destructive">
+                            {{ jsonEditorError }}
+                        </p>
+                    </div>
+
+                    <div class="bg-muted/50 p-3 rounded-md">
+                        <p class="text-xs text-muted-foreground">
+                            <strong>Tip:</strong> The JSON must include <code class="text-xs">version</code>, <code class="text-xs">triggers</code> (array), 
+                            <code class="text-xs">steps</code> (array), and <code class="text-xs">variables</code> (object) fields. 
+                            The <code class="text-xs">name</code> and <code class="text-xs">description</code> fields are optional and will be synced with the database.
+                        </p>
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" @click="closeJsonEditorDialog"
+                        >Cancel</Button
+                    >
+                    <Button
+                        @click="validateAndSaveJsonEdit"
+                        :disabled="!jsonEditorText.trim()"
+                    >
+                        Save Changes
                     </Button>
                 </DialogFooter>
             </DialogContent>
