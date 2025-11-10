@@ -636,17 +636,17 @@ function copyToClipboard(text: string) {
             actionType === 'ban' ||
             actionType === 'warn')
         "
-        class="gap-4 p-3 bg-blue-50 border border-blue-200 rounded-lg"
+        class="gap-4 p-3 bg-muted border rounded-lg"
       >
         <div class="col-span-4">
           <div class="flex items-start space-x-2">
             <Icon
               name="mdi:information"
-              class="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0"
+              class="h-5 w-5 text-primary mt-0.5 flex-shrink-0"
             />
             <div class="flex-1">
               <div class="flex items-center justify-between">
-                <p class="text-sm font-medium text-blue-900">
+                <p class="text-sm font-medium">
                   Escalation Suggestion
                 </p>
                 <Button
@@ -663,7 +663,7 @@ function copyToClipboard(text: string) {
                   Switch to {{ escalationSuggestion.suggested_action }}
                 </Button>
               </div>
-              <p class="text-xs text-blue-700 mt-1">
+              <p class="text-xs text-muted-foreground mt-1">
                 This player has violated this rule
                 <strong>{{ escalationSuggestion.violation_count }}</strong>
                 time(s).
