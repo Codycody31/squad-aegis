@@ -77,6 +77,25 @@
             >
               Trigger: {{ getTriggerDescription(execution.trigger_data) }}
             </div>
+
+            <!-- Show step counts if available -->
+            <div
+              v-if="execution.completed_steps || execution.failed_steps"
+              class="flex gap-3 text-xs text-muted-foreground"
+            >
+              <span v-if="execution.completed_steps" class="flex items-center gap-1">
+                <CheckCircle class="h-3 w-3 text-green-600" />
+                {{ execution.completed_steps }} completed
+              </span>
+              <span v-if="execution.failed_steps" class="flex items-center gap-1">
+                <XCircle class="h-3 w-3 text-red-600" />
+                {{ execution.failed_steps }} failed
+              </span>
+              <span v-if="execution.skipped_steps" class="flex items-center gap-1">
+                <Clock class="h-3 w-3 text-gray-600" />
+                {{ execution.skipped_steps }} skipped
+              </span>
+            </div>
           </div>
 
           <div class="flex items-center gap-2">
@@ -142,11 +161,16 @@ import { Badge } from "@/components/ui/badge";
 interface WorkflowExecution {
   id: string;
   workflow_id: string;
+  execution_id: string;
   status: string;
   started_at: string;
   completed_at?: string;
   trigger_data?: any;
   error?: string;
+  completed_steps?: number;
+  failed_steps?: number;
+  skipped_steps?: number;
+  total_steps?: number;
 }
 
 interface ApiResponse<T = any> {

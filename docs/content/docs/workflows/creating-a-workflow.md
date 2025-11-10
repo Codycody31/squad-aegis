@@ -334,12 +334,14 @@ This means:
 - If a condition is FALSE: Only the `false_steps` execute, `true_steps` are skipped
 - You never get both branches executing
 
-### Example 3: VIP Player Detection
+### Example 3: VIP Player Detection (with Nested Steps)
 
-**Goal**: Give VIP players special treatment when they join
+**Goal**: Give VIP players special treatment when they join using inline nested steps
 
 **Trigger:** Player connects to server
 **Action:** Check if they're VIP and respond accordingly
+
+This example demonstrates using **inline nested steps** directly within condition branches:
 
 ```json
 {
@@ -382,44 +384,43 @@ This means:
             "value": "76561199047801300"
           }
         ],
-        "false_steps": [
-          "normal-welcome"
-        ],
-        "logic": "OR",
+        "logic": "AND",
         "true_steps": [
-          "vip-welcome"
+          {
+            "id": "inline-vip-broadcast",
+            "name": "VIP Welcome Broadcast",
+            "type": "action",
+            "enabled": true,
+            "config": {
+              "action_type": "admin_broadcast",
+              "message": "Welcome VIP ${trigger_event.player_suffix}! Thank you for your support!"
+            }
+          },
+          {
+            "id": "inline-vip-discord",
+            "name": "Notify Discord VIP Join",
+            "type": "action",
+            "enabled": true,
+            "config": {
+              "action_type": "discord_message",
+              "webhook_url": "https://discord.com/api/webhooks/...",
+              "message": "🎉 VIP player **${trigger_event.player_suffix}** joined the server!"
+            }
+          }
+        ],
+        "false_steps": [
+          {
+            "id": "inline-normal-welcome",
+            "name": "Normal Welcome",
+            "type": "action",
+            "enabled": true,
+            "config": {
+              "action_type": "warn_player",
+              "message": "Welcome ${trigger_event.player_suffix}! Type !vip to learn about VIP benefits.",
+              "player_id": "${trigger_event.steam_id}"
+            }
+          }
         ]
-      },
-      "on_error": {
-        "action": "stop",
-        "max_retries": 3,
-        "retry_delay_ms": 1000
-      }
-    },
-    {
-      "id": "67ead654-faea-4997-85c4-98e67aeff0df",
-      "name": "vip-welcome",
-      "type": "action",
-      "enabled": true,
-      "config": {
-        "action_type": "admin_broadcast",
-        "message": "Welcome VIP ${trigger_event.player_suffix}! Thank you for your support!"
-      },
-      "on_error": {
-        "action": "stop",
-        "max_retries": 3,
-        "retry_delay_ms": 1000
-      }
-    },
-    {
-      "id": "d5c48428-18f0-4542-89fb-9ffa58e59931",
-      "name": "normal-welcome",
-      "type": "action",
-      "enabled": true,
-      "config": {
-        "action_type": "warn_player",
-        "message": "Welcome ${trigger_event.player_suffix}! Type !vip to learn about VIP benefits.",
-        "player_id": "${trigger_event.steam_id}"
       },
       "on_error": {
         "action": "stop",
@@ -452,18 +453,27 @@ This means:
 }
 ```
 
+**Key Features:**
+
+- **Inline Steps**: VIP-specific steps are defined directly in the `true_steps` array
+- **Cleaner Structure**: No need for root-level steps that are only used conditionally
+- **Visual Clarity**: The editor shows ✓ for true branch (2 steps) and ✕ for false branch (1 step)
+- **Execution Flow**: Steps execute in order within their branch, then workflow continues sequentially
+
 **Execution Flow:**
 
 1. Player connects (trigger activates)
-2. "Check VIP Status" condition evaluates
-3. **If VIP (true):**
-   - Executes "vip-welcome" (broadcasts VIP message)
-   - Skips "normal-welcome" in sequential flow
-   - Executes "Log Player Join"
-4. **If Not VIP (false):**
-   - Skips "vip-welcome" in sequential flow
-   - Executes "normal-welcome" (broadcasts normal message)
-   - Executes "Log Player Join"
+2. Wait 30 seconds for player to fully load
+3. "Check VIP Status" condition evaluates
+4. **If VIP (true):**
+   - Executes inline "VIP Welcome Broadcast" step
+   - Executes inline "Notify Discord VIP Join" step
+   - Skips "normal-welcome" inline step
+   - Executes "Log Player Join" (continues sequentially)
+5. **If Not VIP (false):**
+   - Skips both VIP inline steps
+   - Executes inline "Normal Welcome" step
+   - Executes "Log Player Join" (continues sequentially)
 
 ### Configuring Condition Steps in the UI
 
@@ -472,15 +482,37 @@ When creating a condition step in the Squad Aegis UI:
 1. **Set Step Type**: Select "Condition" as the step type
 2. **Configure Logic**: Choose AND or OR for multiple conditions
 3. **Add Conditions**: Use the condition builder to add evaluation rules
-4. **Select True Branch Steps**: Use the dropdown to select which steps execute if conditions pass
-5. **Select False Branch Steps**: Use the dropdown to select which steps execute if conditions fail
-6. **Test Both Branches**: Always test workflows to ensure both paths work correctly
+4. **Configure True Branch Steps**:
+   - Click "Add Inline Step" to create steps directly within the true branch
+   - Use the step selector dropdown to reference existing root-level steps
+   - Reorder steps using the up/down arrows (hover over steps to see controls)
+5. **Configure False Branch Steps**:
+   - Click "Add Inline Step" to create steps directly within the false branch
+   - Use the step selector dropdown to reference existing root-level steps
+   - Reorder steps using the up/down arrows (hover over steps to see controls)
+6. **Visual Feedback**: The editor shows visual indicators (✓ for true, ✕ for false) with step counts
+7. **Test Both Branches**: Always test workflows to ensure both paths work correctly
+
+#### Inline Steps vs Step References
+
+**Inline Steps** are best for:
+- Actions that are specific to a single branch
+- Keeping workflows clean and organized
+- Steps that don't need to be reused elsewhere
+
+**Step References** are best for:
+- Steps that are used in multiple places
+- Shared logging or common actions
+- Steps that need to be easily found and modified
 
 ### Best Practices for Conditional Workflows
 
 1. **Name Steps Clearly**: Use descriptive names that indicate the step's purpose
-2. **Use the Step Selector**: Always use the UI dropdown - never manually type step names
-3. **One Branch Per Step**: Don't put the same step in both true and false branches
-4. **Handle Both Outcomes**: Consider what should happen in both true and false scenarios
-5. **Keep Branches Simple**: If logic becomes complex, split into multiple workflows
-6. **Test Thoroughly**: Test both the true and false paths before deploying
+2. **Use Inline Steps for Branch-Specific Actions**: Create inline nested steps for actions that only make sense within a specific branch
+3. **Reference Shared Steps**: Use step references for actions that are needed in multiple places
+4. **Reorder Steps Within Branches**: Use the reorder controls to ensure steps execute in the correct order
+5. **One Branch Per Step**: Don't put the same step in both true and false branches
+6. **Handle Both Outcomes**: Consider what should happen in both true and false scenarios
+7. **Keep Branches Simple**: If logic becomes complex, split into multiple workflows
+8. **Test Thoroughly**: Test both the true and false paths before deploying
+9. **Use Visual Indicators**: The editor's visual branch indicators help you quickly understand workflow flow
