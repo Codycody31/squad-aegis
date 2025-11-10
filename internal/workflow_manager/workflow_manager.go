@@ -1740,15 +1740,30 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 		"conditions":       conditions,
 	}
 
-	// Get true_steps and false_steps from config (new format)
+	// Get true_steps and false_steps from config (supports both inline and reference format)
 	var trueSteps []string
 	var falseSteps []string
+	var trueStepsInline []models.WorkflowStep
+	var falseStepsInline []models.WorkflowStep
 
 	if trueStepsInterface, ok := step.Config["true_steps"]; ok {
 		if trueStepsArray, ok := trueStepsInterface.([]interface{}); ok {
-			for _, stepName := range trueStepsArray {
-				if stepStr, ok := stepName.(string); ok {
+			for _, item := range trueStepsArray {
+				// Check if it's a string reference
+				if stepStr, ok := item.(string); ok {
 					trueSteps = append(trueSteps, stepStr)
+				} else if stepMap, ok := item.(map[string]interface{}); ok {
+					// It's an inline step definition
+					var inlineStep models.WorkflowStep
+					if stepBytes, err := json.Marshal(stepMap); err == nil {
+						if err := json.Unmarshal(stepBytes, &inlineStep); err == nil {
+							// Generate ID if not present
+							if inlineStep.ID == "" {
+								inlineStep.ID = generateId()
+							}
+							trueStepsInline = append(trueStepsInline, inlineStep)
+						}
+					}
 				}
 			}
 		}
@@ -1756,9 +1771,22 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 
 	if falseStepsInterface, ok := step.Config["false_steps"]; ok {
 		if falseStepsArray, ok := falseStepsInterface.([]interface{}); ok {
-			for _, stepName := range falseStepsArray {
-				if stepStr, ok := stepName.(string); ok {
+			for _, item := range falseStepsArray {
+				// Check if it's a string reference
+				if stepStr, ok := item.(string); ok {
 					falseSteps = append(falseSteps, stepStr)
+				} else if stepMap, ok := item.(map[string]interface{}); ok {
+					// It's an inline step definition
+					var inlineStep models.WorkflowStep
+					if stepBytes, err := json.Marshal(stepMap); err == nil {
+						if err := json.Unmarshal(stepBytes, &inlineStep); err == nil {
+							// Generate ID if not present
+							if inlineStep.ID == "" {
+								inlineStep.ID = generateId()
+							}
+							falseStepsInline = append(falseStepsInline, inlineStep)
+						}
+					}
 				}
 			}
 		}
@@ -1795,10 +1823,62 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 
 	// Handle the condition result
 	if result {
-		// Condition passed
-		var stepsToExecute []string
+		// Condition passed - execute true branch
+		
+		// First, execute inline steps if present
+		if len(trueStepsInline) > 0 {
+			log.Debug().
+				Str("execution_id", context.ExecutionID.String()).
+				Str("step_id", step.ID).
+				Int("inline_steps_count", len(trueStepsInline)).
+				Msg("Condition passed, executing inline true branch steps")
 
-		// Use true_steps if available (new format), otherwise fall back to NextSteps
+			for idx, inlineStep := range trueStepsInline {
+				stepCopy := inlineStep
+				stepStartTime := time.Now()
+
+				// Log step start
+				wm.logWorkflowStep(context, workflow, stepCopy.Name, strings.ToUpper(stepCopy.Type), uint32(idx+1), "RUNNING",
+					stepCopy.Config, map[string]interface{}{"branch": "true", "inline": true}, nil, 0)
+
+				err := wm.executeStep(context, &stepCopy, workflow)
+				stepDuration := time.Since(stepStartTime)
+
+				if err != nil {
+					errorMsg := err.Error()
+					wm.logWorkflowStep(context, workflow, stepCopy.Name, strings.ToUpper(stepCopy.Type), uint32(idx+1), "FAILED",
+						stepCopy.Config, map[string]interface{}{"branch": "true", "inline": true}, &errorMsg, uint32(stepDuration.Milliseconds()))
+
+					log.Error().
+						Err(err).
+						Str("execution_id", context.ExecutionID.String()).
+						Str("step_id", step.ID).
+						Str("inline_step_name", stepCopy.Name).
+						Msg("Failed to execute inline true branch step")
+
+					continueOnError, _ := step.Config["continue_on_next_step_error"].(bool)
+					if !continueOnError {
+						return fmt.Errorf("inline true branch step %s failed: %w", stepCopy.Name, err)
+					}
+				} else {
+					// Log step completion
+					stepResult := context.StepResults[stepCopy.ID]
+					stepOutput := map[string]interface{}{"status": "completed", "branch": "true", "inline": true}
+					if stepResult != nil {
+						if resultMap, ok := stepResult.(map[string]interface{}); ok {
+							for k, v := range resultMap {
+								stepOutput[k] = v
+							}
+						}
+					}
+					wm.logWorkflowStep(context, workflow, stepCopy.Name, strings.ToUpper(stepCopy.Type), uint32(idx+1), "COMPLETED",
+						stepCopy.Config, stepOutput, nil, uint32(stepDuration.Milliseconds()))
+				}
+			}
+		}
+
+		// Then, execute referenced steps if present
+		var stepsToExecute []string
 		if len(trueSteps) > 0 {
 			stepsToExecute = trueSteps
 		} else if len(step.NextSteps) > 0 {
@@ -1810,7 +1890,7 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 				Str("execution_id", context.ExecutionID.String()).
 				Str("step_id", step.ID).
 				Strs("steps_to_execute", stepsToExecute).
-				Msg("Condition passed, executing true branch steps")
+				Msg("Condition passed, executing referenced true branch steps")
 
 			// Execute each step by name
 			for _, stepName := range stepsToExecute {
@@ -1842,13 +1922,67 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 			}
 		}
 	} else {
-		// Condition failed - execute false_steps if defined
+		// Condition failed - execute false branch
+		
+		// First, execute inline steps if present
+		if len(falseStepsInline) > 0 {
+			log.Debug().
+				Str("execution_id", context.ExecutionID.String()).
+				Str("step_id", step.ID).
+				Int("inline_steps_count", len(falseStepsInline)).
+				Msg("Condition failed, executing inline false branch steps")
+
+			for idx, inlineStep := range falseStepsInline {
+				stepCopy := inlineStep
+				stepStartTime := time.Now()
+
+				// Log step start
+				wm.logWorkflowStep(context, workflow, stepCopy.Name, strings.ToUpper(stepCopy.Type), uint32(idx+1), "RUNNING",
+					stepCopy.Config, map[string]interface{}{"branch": "false", "inline": true}, nil, 0)
+
+				err := wm.executeStep(context, &stepCopy, workflow)
+				stepDuration := time.Since(stepStartTime)
+
+				if err != nil {
+					errorMsg := err.Error()
+					wm.logWorkflowStep(context, workflow, stepCopy.Name, strings.ToUpper(stepCopy.Type), uint32(idx+1), "FAILED",
+						stepCopy.Config, map[string]interface{}{"branch": "false", "inline": true}, &errorMsg, uint32(stepDuration.Milliseconds()))
+
+					log.Error().
+						Err(err).
+						Str("execution_id", context.ExecutionID.String()).
+						Str("step_id", step.ID).
+						Str("inline_step_name", stepCopy.Name).
+						Msg("Failed to execute inline false branch step")
+
+					continueOnError, _ := step.Config["continue_on_next_step_error"].(bool)
+					if !continueOnError {
+						return fmt.Errorf("inline false branch step %s failed: %w", stepCopy.Name, err)
+					}
+				} else {
+					// Log step completion
+					stepResult := context.StepResults[stepCopy.ID]
+					stepOutput := map[string]interface{}{"status": "completed", "branch": "false", "inline": true}
+					if stepResult != nil {
+						if resultMap, ok := stepResult.(map[string]interface{}); ok {
+							for k, v := range resultMap {
+								stepOutput[k] = v
+							}
+						}
+					}
+					wm.logWorkflowStep(context, workflow, stepCopy.Name, strings.ToUpper(stepCopy.Type), uint32(idx+1), "COMPLETED",
+						stepCopy.Config, stepOutput, nil, uint32(stepDuration.Milliseconds()))
+				}
+			}
+		}
+
+		// Then, execute referenced steps if present
 		if len(falseSteps) > 0 {
 			log.Debug().
 				Str("execution_id", context.ExecutionID.String()).
 				Str("step_id", step.ID).
 				Strs("steps_to_execute", falseSteps).
-				Msg("Condition failed, executing false branch steps")
+				Msg("Condition failed, executing referenced false branch steps")
 
 			// Execute each false branch step
 			for _, stepName := range falseSteps {
@@ -1878,8 +2012,8 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 					}
 				}
 			}
-		} else {
-			// No false_steps defined, check legacy behavior
+		} else if len(falseStepsInline) == 0 {
+			// No false_steps defined at all (neither inline nor referenced), check legacy behavior
 			log.Debug().
 				Str("execution_id", context.ExecutionID.String()).
 				Str("step_id", step.ID).
@@ -3120,4 +3254,9 @@ func (wm *WorkflowManager) extractLuaResults(L *lua.LState, workflowContext *mod
 	}
 
 	return nil
+}
+
+// generateId generates a unique ID for workflow steps
+func generateId() string {
+	return uuid.New().String()
 }
