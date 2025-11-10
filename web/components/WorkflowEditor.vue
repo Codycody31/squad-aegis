@@ -1236,6 +1236,26 @@ function closeNestedStepDialog() {
     selectedNestedStep.value = null;
     editingNestedStepContext.value = null;
 }
+
+// Move nested step up in the array
+function moveNestedStepUp(stepsArray: any[], index: number) {
+    if (index > 0 && stepsArray && Array.isArray(stepsArray)) {
+        [stepsArray[index - 1], stepsArray[index]] = [
+            stepsArray[index],
+            stepsArray[index - 1],
+        ];
+    }
+}
+
+// Move nested step down in the array
+function moveNestedStepDown(stepsArray: any[], index: number) {
+    if (stepsArray && Array.isArray(stepsArray) && index < stepsArray.length - 1) {
+        [stepsArray[index], stepsArray[index + 1]] = [
+            stepsArray[index + 1],
+            stepsArray[index],
+        ];
+    }
+}
 </script>
 
 <template>
@@ -1396,114 +1416,228 @@ function closeNestedStepDialog() {
                 </div>
 
                 <div v-else class="space-y-3">
-                    <Card
-                        v-for="(step, index) in definition.steps"
-                        :key="step.id"
-                        class="relative"
-                    >
-                        <CardHeader class="pb-3">
-                            <div class="flex justify-between items-start">
-                                <div class="flex items-center gap-3">
-                                    <div
-                                        class="flex items-center justify-center w-8 h-8 rounded-full bg-muted"
-                                    >
-                                        <component
-                                            :is="getStepIcon(step.type)"
-                                            class="w-4 h-4"
-                                        />
-                                    </div>
-                                    <div class="flex-1">
-                                        <div class="flex items-center gap-2">
-                                            <CardTitle class="text-base">{{
-                                                step.name || "Unnamed Step"
-                                            }}</CardTitle>
-                                            <Badge
-                                                variant="outline"
-                                                class="text-xs"
-                                            >
-                                                {{
-                                                    stepTypes.find(
-                                                        (st) =>
-                                                            st.value ===
-                                                            step.type,
-                                                    )?.label || step.type
-                                                }}
-                                            </Badge>
-                                            <Badge
-                                                :variant="
-                                                    step.enabled
-                                                        ? 'default'
-                                                        : 'secondary'
-                                                "
-                                            >
-                                                {{
-                                                    step.enabled
-                                                        ? "Active"
-                                                        : "Inactive"
-                                                }}
-                                            </Badge>
-                                        </div>
-                                        <p
-                                            class="text-sm text-muted-foreground mt-1"
+                    <template v-for="(step, index) in definition.steps" :key="step.id">
+                        <Card class="relative">
+                            <CardHeader class="pb-3">
+                                <div class="flex justify-between items-start">
+                                    <div class="flex items-center gap-3 flex-1">
+                                        <div
+                                            class="flex items-center justify-center w-8 h-8 rounded-full bg-muted"
                                         >
-                                            Step {{ index + 1 }} of
-                                            {{ definition.steps.length }}
-                                            <span
-                                                v-if="step.config.action_type"
-                                                class="ml-2"
+                                            <component
+                                                :is="getStepIcon(step.type)"
+                                                class="w-4 h-4"
+                                            />
+                                        </div>
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2">
+                                                <CardTitle class="text-base">{{
+                                                    step.name || "Unnamed Step"
+                                                }}</CardTitle>
+                                                <Badge
+                                                    variant="outline"
+                                                    class="text-xs"
+                                                >
+                                                    {{
+                                                        stepTypes.find(
+                                                            (st) =>
+                                                                st.value ===
+                                                                step.type,
+                                                        )?.label || step.type
+                                                    }}
+                                                </Badge>
+                                                <Badge
+                                                    :variant="
+                                                        step.enabled
+                                                            ? 'default'
+                                                            : 'secondary'
+                                                    "
+                                                >
+                                                    {{
+                                                        step.enabled
+                                                            ? "Active"
+                                                            : "Inactive"
+                                                    }}
+                                                </Badge>
+                                            </div>
+                                            <p
+                                                class="text-sm text-muted-foreground mt-1"
                                             >
-                                                •
-                                                {{
-                                                    actionTypes.find(
-                                                        (at) =>
-                                                            at.value ===
-                                                            step.config
-                                                                .action_type,
-                                                    )?.label ||
-                                                    step.config.action_type
-                                                }}
-                                            </span>
-                                        </p>
+                                                Step {{ index + 1 }} of
+                                                {{ definition.steps.length }}
+                                                <span
+                                                    v-if="step.config.action_type"
+                                                    class="ml-2"
+                                                >
+                                                    •
+                                                    {{
+                                                        actionTypes.find(
+                                                            (at) =>
+                                                                at.value ===
+                                                                step.config
+                                                                    .action_type,
+                                                        )?.label ||
+                                                        step.config.action_type
+                                                    }}
+                                                </span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="flex gap-1">
+                                        <Button
+                                            @click="moveStepUp(index)"
+                                            variant="ghost"
+                                            size="sm"
+                                            :disabled="index === 0"
+                                        >
+                                            ↑
+                                        </Button>
+                                        <Button
+                                            @click="moveStepDown(index)"
+                                            variant="ghost"
+                                            size="sm"
+                                            :disabled="
+                                                index ===
+                                                definition.steps.length - 1
+                                            "
+                                        >
+                                            ↓
+                                        </Button>
+                                        <Button
+                                            @click="openStepDialog(step, index)"
+                                            variant="ghost"
+                                            size="sm"
+                                        >
+                                            <Settings class="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            @click="deleteStep(index)"
+                                            variant="ghost"
+                                            size="sm"
+                                        >
+                                            <Trash2 class="w-4 h-4" />
+                                        </Button>
                                     </div>
                                 </div>
-                                <div class="flex gap-1">
-                                    <Button
-                                        @click="moveStepUp(index)"
-                                        variant="ghost"
-                                        size="sm"
-                                        :disabled="index === 0"
-                                    >
-                                        ↑
-                                    </Button>
-                                    <Button
-                                        @click="moveStepDown(index)"
-                                        variant="ghost"
-                                        size="sm"
-                                        :disabled="
-                                            index ===
-                                            definition.steps.length - 1
-                                        "
-                                    >
-                                        ↓
-                                    </Button>
-                                    <Button
-                                        @click="openStepDialog(step, index)"
-                                        variant="ghost"
-                                        size="sm"
-                                    >
-                                        <Settings class="w-4 h-4" />
-                                    </Button>
-                                    <Button
-                                        @click="deleteStep(index)"
-                                        variant="ghost"
-                                        size="sm"
-                                    >
-                                        <Trash2 class="w-4 h-4" />
-                                    </Button>
+                            </CardHeader>
+
+                            <!-- Show nested steps for condition steps -->
+                            <CardContent v-if="step.type === 'condition'" class="pt-0">
+                                <div class="space-y-3 pl-8 border-l-2 border-border">
+                                    <!-- True Branch -->
+                                    <div v-if="step.config.true_steps && step.config.true_steps.length > 0" class="space-y-2">
+                                        <div class="flex items-center gap-2 text-sm font-medium">
+                                            <Badge variant="default" class="rounded-full w-5 h-5 flex items-center justify-center p-0">
+                                                <span class="text-xs">✓</span>
+                                            </Badge>
+                                            <span>If True ({{ step.config.true_steps.length }} step{{ step.config.true_steps.length !== 1 ? 's' : '' }})</span>
+                                        </div>
+                                        <div class="space-y-1 ml-6">
+                                            <div
+                                                v-for="(nestedStep, idx) in step.config.true_steps"
+                                                :key="idx"
+                                                class="flex items-center gap-2 p-2 rounded-md border bg-card text-card-foreground shadow-sm text-sm hover:bg-accent/50 transition-colors group"
+                                            >
+                                                <component
+                                                    :is="getStepIcon(typeof nestedStep === 'string' ? 'action' : nestedStep.type)"
+                                                    class="w-3 h-3 text-primary"
+                                                />
+                                                <span v-if="typeof nestedStep === 'string'" class="flex-1">
+                                                    {{ nestedStep }}
+                                                    <Badge variant="secondary" class="ml-2 text-xs">Reference</Badge>
+                                                </span>
+                                                <span v-else class="flex-1">
+                                                    {{ nestedStep.name || 'Unnamed' }}
+                                                    <Badge variant="secondary" class="ml-2 text-xs">Inline</Badge>
+                                                    <span v-if="nestedStep.config?.action_type" class="ml-2 text-xs text-muted-foreground">
+                                                        • {{ actionTypes.find(at => at.value === nestedStep.config.action_type)?.label }}
+                                                    </span>
+                                                </span>
+                                                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <Button
+                                                        @click="moveNestedStepUp(step.config.true_steps, idx)"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        class="h-6 w-6 p-0"
+                                                        :disabled="idx === 0"
+                                                    >
+                                                        ↑
+                                                    </Button>
+                                                    <Button
+                                                        @click="moveNestedStepDown(step.config.true_steps, idx)"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        class="h-6 w-6 p-0"
+                                                        :disabled="idx === step.config.true_steps.length - 1"
+                                                    >
+                                                        ↓
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- False Branch -->
+                                    <div v-if="step.config.false_steps && step.config.false_steps.length > 0" class="space-y-2">
+                                        <div class="flex items-center gap-2 text-sm font-medium">
+                                            <Badge variant="destructive" class="rounded-full w-5 h-5 flex items-center justify-center p-0">
+                                                <span class="text-xs">✕</span>
+                                            </Badge>
+                                            <span>If False ({{ step.config.false_steps.length }} step{{ step.config.false_steps.length !== 1 ? 's' : '' }})</span>
+                                        </div>
+                                        <div class="space-y-1 ml-6">
+                                            <div
+                                                v-for="(nestedStep, idx) in step.config.false_steps"
+                                                :key="idx"
+                                                class="flex items-center gap-2 p-2 rounded-md border bg-card text-card-foreground shadow-sm text-sm hover:bg-accent/50 transition-colors group"
+                                            >
+                                                <component
+                                                    :is="getStepIcon(typeof nestedStep === 'string' ? 'action' : nestedStep.type)"
+                                                    class="w-3 h-3 text-primary"
+                                                />
+                                                <span v-if="typeof nestedStep === 'string'" class="flex-1">
+                                                    {{ nestedStep }}
+                                                    <Badge variant="secondary" class="ml-2 text-xs">Reference</Badge>
+                                                </span>
+                                                <span v-else class="flex-1">
+                                                    {{ nestedStep.name || 'Unnamed' }}
+                                                    <Badge variant="secondary" class="ml-2 text-xs">Inline</Badge>
+                                                    <span v-if="nestedStep.config?.action_type" class="ml-2 text-xs text-muted-foreground">
+                                                        • {{ actionTypes.find(at => at.value === nestedStep.config.action_type)?.label }}
+                                                    </span>
+                                                </span>
+                                                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <Button
+                                                        @click="moveNestedStepUp(step.config.false_steps, idx)"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        class="h-6 w-6 p-0"
+                                                        :disabled="idx === 0"
+                                                    >
+                                                        ↑
+                                                    </Button>
+                                                    <Button
+                                                        @click="moveNestedStepDown(step.config.false_steps, idx)"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        class="h-6 w-6 p-0"
+                                                        :disabled="idx === step.config.false_steps.length - 1"
+                                                    >
+                                                        ↓
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- No branches configured -->
+                                    <div v-if="(!step.config.true_steps || step.config.true_steps.length === 0) && (!step.config.false_steps || step.config.false_steps.length === 0)" class="text-sm text-muted-foreground italic py-2">
+                                        No conditional branches configured
+                                    </div>
                                 </div>
-                            </div>
-                        </CardHeader>
-                    </Card>
+                            </CardContent>
+                        </Card>
+                    </template>
                 </div>
             </TabsContent>
 
@@ -2308,13 +2442,31 @@ function closeNestedStepDialog() {
                                                         <GitBranch class="w-3 h-3 mr-1" />
                                                         Reference: {{ nestedStep }}
                                                     </Badge>
-                                                    <Button
-                                                        @click="removeNestedStep(field.key, idx)"
-                                                        variant="ghost"
-                                                        size="sm"
-                                                    >
-                                                        <Trash2 class="w-4 h-4" />
-                                                    </Button>
+                                                    <div class="flex gap-1">
+                                                        <Button
+                                                            @click="moveNestedStepUp(selectedStep.config[field.key], idx)"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            :disabled="idx === 0"
+                                                        >
+                                                            ↑
+                                                        </Button>
+                                                        <Button
+                                                            @click="moveNestedStepDown(selectedStep.config[field.key], idx)"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            :disabled="idx === selectedStep.config[field.key].length - 1"
+                                                        >
+                                                            ↓
+                                                        </Button>
+                                                        <Button
+                                                            @click="removeNestedStep(field.key, idx)"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                        >
+                                                            <Trash2 class="w-4 h-4" />
+                                                        </Button>
+                                                    </div>
                                                 </div>
                                                 
                                                 <!-- Inline step -->
@@ -2346,6 +2498,22 @@ function closeNestedStepDialog() {
                                                             </Select>
                                                         </div>
                                                         <div class="flex gap-1">
+                                                            <Button
+                                                                @click="moveNestedStepUp(selectedStep.config[field.key], idx)"
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                :disabled="idx === 0"
+                                                            >
+                                                                ↑
+                                                            </Button>
+                                                            <Button
+                                                                @click="moveNestedStepDown(selectedStep.config[field.key], idx)"
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                :disabled="idx === selectedStep.config[field.key].length - 1"
+                                                            >
+                                                                ↓
+                                                            </Button>
                                                             <Button
                                                                 @click="editNestedStep(field.key, idx)"
                                                                 variant="ghost"
@@ -2794,6 +2962,27 @@ function closeNestedStepDialog() {
                                     :required="field.required"
                                     class="font-mono text-sm"
                                 />
+
+                                <!-- Lua Script Editor -->
+                                <div
+                                    v-else-if="field.type === 'lua'"
+                                    class="space-y-2"
+                                >
+                                    <div class="h-96 mb-2">
+                                        <CodeEditor
+                                            v-model:value="
+                                                selectedNestedStep.config[field.key]
+                                            "
+                                            language="lua"
+                                            theme="vs-dark"
+                                            :options="{
+                                                fontSize: 14,
+                                                minimap: { enabled: true },
+                                                automaticLayout: true,
+                                            }"
+                                        />
+                                    </div>
+                                </div>
 
                                 <!-- Select -->
                                 <Select
