@@ -1,6 +1,9 @@
 {
-    "pages": [
-        "basic-concepts",
-        "..."
-    ]
+  "pages": [
+    "basic-concepts",
+    "creating-a-workflow",
+    "workflow-steps",
+    "lua-scripting",
+    "kv-store"
+  ]
 }

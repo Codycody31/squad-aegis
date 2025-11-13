@@ -50,7 +50,7 @@ func (wd *WorkflowDatabase) CreateWorkflow(workflow *models.ServerWorkflow) erro
 func (wd *WorkflowDatabase) GetWorkflow(workflowID uuid.UUID) (*models.ServerWorkflow, error) {
 	query := `
 		SELECT id, server_id, name, description, enabled, definition, created_by, created_at, updated_at
-		FROM server_workflows 
+		FROM server_workflows
 		WHERE id = $1
 	`
 
@@ -94,7 +94,7 @@ func (wd *WorkflowDatabase) GetWorkflow(workflowID uuid.UUID) (*models.ServerWor
 func (wd *WorkflowDatabase) GetWorkflowsByServerID(serverID uuid.UUID) ([]models.ServerWorkflow, error) {
 	query := `
 		SELECT id, server_id, name, description, enabled, definition, created_by, created_at, updated_at
-		FROM server_workflows 
+		FROM server_workflows
 		WHERE server_id = $1
 		ORDER BY created_at DESC
 	`
@@ -155,7 +155,7 @@ func (wd *WorkflowDatabase) UpdateWorkflow(workflow *models.ServerWorkflow) erro
 	}
 
 	query := `
-		UPDATE server_workflows 
+		UPDATE server_workflows
 		SET name = $1, description = $2, enabled = $3, definition = $4, updated_at = $5
 		WHERE id = $6
 	`
@@ -209,7 +209,7 @@ func (wd *WorkflowDatabase) CreateWorkflowVariable(variable *models.ServerWorkfl
 func (wd *WorkflowDatabase) GetWorkflowVariable(workflowID uuid.UUID, name string) (*models.ServerWorkflowVariable, error) {
 	query := `
 		SELECT id, workflow_id, name, value, description, created_at, updated_at
-		FROM server_workflow_variables 
+		FROM server_workflow_variables
 		WHERE workflow_id = $1 AND name = $2
 	`
 
@@ -250,7 +250,7 @@ func (wd *WorkflowDatabase) UpdateWorkflowVariable(variable *models.ServerWorkfl
 	}
 
 	query := `
-		UPDATE server_workflow_variables 
+		UPDATE server_workflow_variables
 		SET value = $1, description = $2, updated_at = $3
 		WHERE id = $4
 	`
@@ -270,7 +270,7 @@ func (wd *WorkflowDatabase) DeleteWorkflowVariable(variableID uuid.UUID) error {
 func (wd *WorkflowDatabase) loadWorkflowVariables(workflow *models.ServerWorkflow) error {
 	query := `
 		SELECT id, name, value, description, created_at, updated_at
-		FROM server_workflow_variables 
+		FROM server_workflow_variables
 		WHERE workflow_id = $1
 	`
 
@@ -319,7 +319,7 @@ func (wd *WorkflowDatabase) loadWorkflowVariables(workflow *models.ServerWorkflo
 func (wd *WorkflowDatabase) GetExecutionsByWorkflowID(workflowID uuid.UUID, limit, offset int) ([]models.ServerWorkflowExecution, error) {
 	query := `
 		SELECT id, workflow_id, execution_id, status, started_at, completed_at, error_message
-		FROM server_workflow_executions 
+		FROM server_workflow_executions
 		WHERE workflow_id = $1
 		ORDER BY started_at DESC
 		LIMIT $2 OFFSET $3
@@ -439,7 +439,7 @@ func (wd *WorkflowDatabase) CreateWorkflowExecution(execution *models.ServerWork
 // UpdateWorkflowExecution updates a workflow execution record
 func (wd *WorkflowDatabase) UpdateWorkflowExecution(execution *models.ServerWorkflowExecution) error {
 	query := `
-		UPDATE server_workflow_executions 
+		UPDATE server_workflow_executions
 		SET status = $1, completed_at = $2, error_message = $3
 		WHERE execution_id = $4
 	`
@@ -489,4 +489,148 @@ func (wd *WorkflowDatabase) GetWorkflowExecution(executionID uuid.UUID) (*models
 	}
 
 	return &execution, nil
+}
+
+// KV Store Operations
+
+// GetKVValue retrieves a value from the workflow KV store
+func (wd *WorkflowDatabase) GetKVValue(workflowID uuid.UUID, key string) (interface{}, error) {
+	query := `
+		SELECT value
+		FROM server_workflow_kv_store
+		WHERE workflow_id = $1 AND key = $2
+	`
+
+	var valueJSON []byte
+	err := wd.db.QueryRow(query, workflowID, key).Scan(&valueJSON)
+	if err != nil {
+		return nil, err
+	}
+
+	var value interface{}
+	if err := json.Unmarshal(valueJSON, &value); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal KV value: %w", err)
+	}
+
+	return value, nil
+}
+
+// SetKVValue sets a value in the workflow KV store (creates or updates)
+func (wd *WorkflowDatabase) SetKVValue(workflowID uuid.UUID, key string, value interface{}) error {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("failed to marshal KV value: %w", err)
+	}
+
+	query := `
+		INSERT INTO server_workflow_kv_store (id, workflow_id, key, value, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
+		ON CONFLICT (workflow_id, key)
+		DO UPDATE SET value = $3, updated_at = NOW()
+	`
+
+	_, err = wd.db.Exec(query, workflowID, key, valueJSON)
+	return err
+}
+
+// DeleteKVValue deletes a value from the workflow KV store
+func (wd *WorkflowDatabase) DeleteKVValue(workflowID uuid.UUID, key string) error {
+	query := `DELETE FROM server_workflow_kv_store WHERE workflow_id = $1 AND key = $2`
+	_, err := wd.db.Exec(query, workflowID, key)
+	return err
+}
+
+// KVExists checks if a key exists in the workflow KV store
+func (wd *WorkflowDatabase) KVExists(workflowID uuid.UUID, key string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM server_workflow_kv_store WHERE workflow_id = $1 AND key = $2)`
+
+	var exists bool
+	err := wd.db.QueryRow(query, workflowID, key).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
+// ListKVKeys returns all keys in the workflow KV store
+func (wd *WorkflowDatabase) ListKVKeys(workflowID uuid.UUID) ([]string, error) {
+	query := `
+		SELECT key
+		FROM server_workflow_kv_store
+		WHERE workflow_id = $1
+		ORDER BY key ASC
+	`
+
+	rows, err := wd.db.Query(query, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+
+	return keys, nil
+}
+
+// GetAllKVPairs returns all key-value pairs for a workflow
+func (wd *WorkflowDatabase) GetAllKVPairs(workflowID uuid.UUID) (map[string]interface{}, error) {
+	query := `
+		SELECT key, value
+		FROM server_workflow_kv_store
+		WHERE workflow_id = $1
+		ORDER BY key ASC
+	`
+
+	rows, err := wd.db.Query(query, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	kvPairs := make(map[string]interface{})
+	for rows.Next() {
+		var key string
+		var valueJSON []byte
+
+		if err := rows.Scan(&key, &valueJSON); err != nil {
+			return nil, err
+		}
+
+		var value interface{}
+		if err := json.Unmarshal(valueJSON, &value); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal KV value for key %s: %w", key, err)
+		}
+
+		kvPairs[key] = value
+	}
+
+	return kvPairs, nil
+}
+
+// ClearKVStore removes all key-value pairs for a workflow
+func (wd *WorkflowDatabase) ClearKVStore(workflowID uuid.UUID) error {
+	query := `DELETE FROM server_workflow_kv_store WHERE workflow_id = $1`
+	_, err := wd.db.Exec(query, workflowID)
+	return err
+}
+
+// CountKVPairs returns the number of key-value pairs for a workflow
+func (wd *WorkflowDatabase) CountKVPairs(workflowID uuid.UUID) (int, error) {
+	query := `SELECT COUNT(*) FROM server_workflow_kv_store WHERE workflow_id = $1`
+
+	var count int
+	err := wd.db.QueryRow(query, workflowID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
 }

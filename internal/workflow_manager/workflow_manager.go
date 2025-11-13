@@ -1824,7 +1824,7 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 	// Handle the condition result
 	if result {
 		// Condition passed - execute true branch
-		
+
 		// First, execute inline steps if present
 		if len(trueStepsInline) > 0 {
 			log.Debug().
@@ -1923,7 +1923,7 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 		}
 	} else {
 		// Condition failed - execute false branch
-		
+
 		// First, execute inline steps if present
 		if len(falseStepsInline) > 0 {
 			log.Debug().
@@ -2852,17 +2852,20 @@ func (wm *WorkflowManager) setupLuaEnvironment(L *lua.LState, workflowContext *m
 	}
 	L.SetField(workflowTable, "config", configTable)
 
-	// Set the workflow table as a global
-	L.SetGlobal("workflow", workflowTable)
-
-	// Add utility functions
-	if err := wm.addLuaUtilityFunctions(L, workflowContext, step); err != nil {
+	// Add namespaced utility functions to workflow table
+	if err := wm.addLuaUtilityFunctions(L, workflowTable, workflowContext, step); err != nil {
 		return err
 	}
+
+	// Set the workflow table as a global
+	L.SetGlobal("workflow", workflowTable)
 
 	// Create result table for script to populate
 	resultTable := L.NewTable()
 	L.SetGlobal("result", resultTable)
+
+	// Add backward compatibility helpers (deprecated)
+	wm.addLuaBackwardCompatibilityFunctions(L, workflowContext, step)
 
 	return nil
 }
@@ -2913,38 +2916,35 @@ func (wm *WorkflowManager) logWorkflowMessage(workflowContext *models.WorkflowEx
 	}
 }
 
-// addLuaUtilityFunctions adds utility functions to the LUA environment
-func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext *models.WorkflowExecutionContext, step *models.WorkflowStep) error {
-	// log function (info level)
-	L.SetGlobal("log", L.NewFunction(func(L *lua.LState) int {
+// addLuaUtilityFunctions adds namespaced utility functions to the workflow table
+func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *lua.LTable, workflowContext *models.WorkflowExecutionContext, step *models.WorkflowStep) error {
+	// Create workflow.log namespace
+	logTable := L.NewTable()
+	L.SetField(logTable, "info", L.NewFunction(func(L *lua.LState) int {
 		message := L.CheckString(1)
 		wm.logWorkflowMessage(workflowContext, step, "INFO", message)
 		return 0
 	}))
-
-	// log_debug function
-	L.SetGlobal("log_debug", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(logTable, "debug", L.NewFunction(func(L *lua.LState) int {
 		message := L.CheckString(1)
 		wm.logWorkflowMessage(workflowContext, step, "DEBUG", message)
 		return 0
 	}))
-
-	// log_warn function
-	L.SetGlobal("log_warn", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(logTable, "warn", L.NewFunction(func(L *lua.LState) int {
 		message := L.CheckString(1)
 		wm.logWorkflowMessage(workflowContext, step, "WARN", message)
 		return 0
 	}))
-
-	// log_error function
-	L.SetGlobal("log_error", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(logTable, "error", L.NewFunction(func(L *lua.LState) int {
 		message := L.CheckString(1)
 		wm.logWorkflowMessage(workflowContext, step, "ERROR", message)
 		return 0
 	}))
+	L.SetField(workflowTable, "log", logTable)
 
-	// set_variable function
-	L.SetGlobal("set_variable", L.NewFunction(func(L *lua.LState) int {
+	// Create workflow.variable namespace
+	variableTable := L.NewTable()
+	L.SetField(variableTable, "set", L.NewFunction(func(L *lua.LState) int {
 		name := L.CheckString(1)
 		value := L.Get(2)
 
@@ -2959,20 +2959,50 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 
 		return 0
 	}))
-
-	// get_variable function
-	L.SetGlobal("get_variable", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(variableTable, "get", L.NewFunction(func(L *lua.LState) int {
 		name := L.CheckString(1)
+		defaultValue := L.Get(2) // Optional default value
+
 		if value, exists := workflowContext.Variables[name]; exists {
 			L.Push(wm.convertToLuaValue(L, value))
+		} else if defaultValue != lua.LNil {
+			L.Push(defaultValue)
 		} else {
 			L.Push(lua.LNil)
 		}
 		return 1
 	}))
+	L.SetField(workflowTable, "variable", variableTable)
 
-	// safe_get function - safely get a value from a table, returning default if nil
-	L.SetGlobal("safe_get", L.NewFunction(func(L *lua.LState) int {
+	// Create workflow.json namespace
+	jsonTable := L.NewTable()
+	L.SetField(jsonTable, "encode", L.NewFunction(func(L *lua.LState) int {
+		value := L.Get(1)
+		goValue := wm.convertFromLuaValue(value)
+
+		if jsonBytes, err := json.Marshal(goValue); err == nil {
+			L.Push(lua.LString(string(jsonBytes)))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 1
+	}))
+	L.SetField(jsonTable, "decode", L.NewFunction(func(L *lua.LState) int {
+		jsonStr := L.CheckString(1)
+
+		var result interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
+			L.Push(wm.convertToLuaValue(L, result))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 1
+	}))
+	L.SetField(workflowTable, "json", jsonTable)
+
+	// Create workflow.util namespace
+	utilTable := L.NewTable()
+	L.SetField(utilTable, "safe_get", L.NewFunction(func(L *lua.LState) int {
 		table := L.CheckTable(1)
 		key := L.CheckString(2)
 		defaultValue := L.Get(3) // Optional default value
@@ -2985,9 +3015,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 		}
 		return 1
 	}))
-
-	// to_string function - safely convert any value to string
-	L.SetGlobal("to_string", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(utilTable, "to_string", L.NewFunction(func(L *lua.LState) int {
 		value := L.Get(1)
 		defaultStr := L.OptString(2, "")
 
@@ -2998,35 +3026,11 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 		}
 		return 1
 	}))
+	L.SetField(workflowTable, "util", utilTable)
 
-	// json_encode function
-	L.SetGlobal("json_encode", L.NewFunction(func(L *lua.LState) int {
-		value := L.Get(1)
-		goValue := wm.convertFromLuaValue(value)
-
-		if jsonBytes, err := json.Marshal(goValue); err == nil {
-			L.Push(lua.LString(string(jsonBytes)))
-		} else {
-			L.Push(lua.LNil)
-		}
-		return 1
-	}))
-
-	// json_decode function
-	L.SetGlobal("json_decode", L.NewFunction(func(L *lua.LState) int {
-		jsonStr := L.CheckString(1)
-
-		var result interface{}
-		if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
-			L.Push(wm.convertToLuaValue(L, result))
-		} else {
-			L.Push(lua.LNil)
-		}
-		return 1
-	}))
-
-	// rcon_execute function - execute raw RCON command
-	L.SetGlobal("rcon_execute", L.NewFunction(func(L *lua.LState) int {
+	// Create workflow.rcon namespace
+	rconTable := L.NewTable()
+	L.SetField(rconTable, "execute", L.NewFunction(func(L *lua.LState) int {
 		command := L.CheckString(1)
 
 		// Replace variables in command using workflow context
@@ -3055,9 +3059,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 		L.Push(lua.LNil) // No error
 		return 2         // Return response and error (nil if successful)
 	}))
-
-	// rcon_kick function - kick a player
-	L.SetGlobal("rcon_kick", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(rconTable, "kick", L.NewFunction(func(L *lua.LState) int {
 		playerId := L.CheckString(1)
 		reason := L.OptString(2, "Kicked by workflow")
 
@@ -3084,9 +3086,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 		L.Push(lua.LString(response))
 		return 2 // Return success boolean and response
 	}))
-
-	// rcon_ban function - ban a player
-	L.SetGlobal("rcon_ban", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(rconTable, "ban", L.NewFunction(func(L *lua.LState) int {
 		playerId := L.CheckString(1)
 		duration := L.CheckNumber(2) // Duration in days
 		reason := L.OptString(3, "Banned by workflow")
@@ -3115,9 +3115,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 		L.Push(lua.LString(response))
 		return 2 // Return success boolean and response
 	}))
-
-	// rcon_warn function - warn a player
-	L.SetGlobal("rcon_warn", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(rconTable, "warn", L.NewFunction(func(L *lua.LState) int {
 		playerId := L.CheckString(1)
 		message := L.CheckString(2)
 
@@ -3144,9 +3142,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 		L.Push(lua.LString(response))
 		return 2 // Return success boolean and response
 	}))
-
-	// rcon_broadcast function - send admin broadcast
-	L.SetGlobal("rcon_broadcast", L.NewFunction(func(L *lua.LState) int {
+	L.SetField(rconTable, "broadcast", L.NewFunction(func(L *lua.LState) int {
 		message := L.CheckString(1)
 
 		// Replace variables
@@ -3170,8 +3166,447 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 		L.Push(lua.LString(response))
 		return 2 // Return success boolean and response
 	}))
+	L.SetField(workflowTable, "rcon", rconTable)
+
+	// Create workflow.kv namespace - Persistent key-value storage for this workflow
+	kvTable := L.NewTable()
+	L.SetField(kvTable, "get", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+		defaultValue := L.Get(2) // Optional default value
+
+		value, err := wm.workflowDB.GetKVValue(workflowContext.WorkflowID, key)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// Key doesn't exist, return default value
+				if defaultValue != lua.LNil {
+					L.Push(defaultValue)
+				} else {
+					L.Push(lua.LNil)
+				}
+				return 1
+			}
+			// Other error occurred
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv.get failed")
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		L.Push(wm.convertToLuaValue(L, value))
+		return 1
+	}))
+	L.SetField(kvTable, "set", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+		value := L.Get(2)
+
+		if value == lua.LNil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString("cannot set nil value, use kv.delete to remove keys"))
+			return 2
+		}
+
+		goValue := wm.convertFromLuaValue(value)
+
+		err := wm.workflowDB.SetKVValue(workflowContext.WorkflowID, key, goValue)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv.set failed")
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		log.Debug().
+			Str("execution_id", workflowContext.ExecutionID.String()).
+			Str("workflow_id", workflowContext.WorkflowID.String()).
+			Str("key", key).
+			Interface("value", goValue).
+			Msg("LUA script set KV store value")
+
+		L.Push(lua.LBool(true))
+		L.Push(lua.LNil)
+		return 2 // Return success boolean and error
+	}))
+	L.SetField(kvTable, "delete", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+
+		err := wm.workflowDB.DeleteKVValue(workflowContext.WorkflowID, key)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv.delete failed")
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		log.Debug().
+			Str("execution_id", workflowContext.ExecutionID.String()).
+			Str("workflow_id", workflowContext.WorkflowID.String()).
+			Str("key", key).
+			Msg("LUA script deleted KV store key")
+
+		L.Push(lua.LBool(true))
+		L.Push(lua.LNil)
+		return 2 // Return success boolean and error
+	}))
+	L.SetField(kvTable, "exists", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+
+		exists, err := wm.workflowDB.KVExists(workflowContext.WorkflowID, key)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv.exists failed")
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		L.Push(lua.LBool(exists))
+		return 1
+	}))
+	L.SetField(kvTable, "keys", L.NewFunction(func(L *lua.LState) int {
+		keys, err := wm.workflowDB.ListKVKeys(workflowContext.WorkflowID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Msg("LUA kv.keys failed")
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		// Create a Lua table with the keys
+		table := L.NewTable()
+		for i, key := range keys {
+			table.RawSetInt(i+1, lua.LString(key)) // Lua arrays are 1-indexed
+		}
+
+		L.Push(table)
+		return 1
+	}))
+	L.SetField(kvTable, "get_all", L.NewFunction(func(L *lua.LState) int {
+		kvPairs, err := wm.workflowDB.GetAllKVPairs(workflowContext.WorkflowID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Msg("LUA kv.get_all failed")
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		// Create a Lua table with the key-value pairs
+		table := L.NewTable()
+		for key, value := range kvPairs {
+			L.SetField(table, key, wm.convertToLuaValue(L, value))
+		}
+
+		L.Push(table)
+		return 1
+	}))
+	L.SetField(kvTable, "clear", L.NewFunction(func(L *lua.LState) int {
+		err := wm.workflowDB.ClearKVStore(workflowContext.WorkflowID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Msg("LUA kv.clear failed")
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		log.Info().
+			Str("execution_id", workflowContext.ExecutionID.String()).
+			Str("workflow_id", workflowContext.WorkflowID.String()).
+			Msg("LUA script cleared KV store")
+
+		L.Push(lua.LBool(true))
+		L.Push(lua.LNil)
+		return 2 // Return success boolean and error
+	}))
+	L.SetField(kvTable, "count", L.NewFunction(func(L *lua.LState) int {
+		count, err := wm.workflowDB.CountKVPairs(workflowContext.WorkflowID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Msg("LUA kv.count failed")
+			L.Push(lua.LNumber(0))
+			return 1
+		}
+
+		L.Push(lua.LNumber(count))
+		return 1
+	}))
+	L.SetField(kvTable, "increment", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+		delta := L.OptNumber(2, 1) // Default increment by 1
+
+		// Get current value
+		value, err := wm.workflowDB.GetKVValue(workflowContext.WorkflowID, key)
+		var currentNum float64
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// Key doesn't exist, start from 0
+				currentNum = 0
+			} else {
+				log.Error().
+					Err(err).
+					Str("execution_id", workflowContext.ExecutionID.String()).
+					Str("workflow_id", workflowContext.WorkflowID.String()).
+					Str("key", key).
+					Msg("LUA kv.increment failed to get value")
+				L.Push(lua.LNil)
+				L.Push(lua.LString(err.Error()))
+				return 2
+			}
+		} else {
+			// Try to convert to number
+			switch v := value.(type) {
+			case float64:
+				currentNum = v
+			case int:
+				currentNum = float64(v)
+			case int64:
+				currentNum = float64(v)
+			default:
+				L.Push(lua.LNil)
+				L.Push(lua.LString("existing value is not a number"))
+				return 2
+			}
+		}
+
+		// Increment
+		newNum := currentNum + float64(delta)
+
+		// Save back
+		err = wm.workflowDB.SetKVValue(workflowContext.WorkflowID, key, newNum)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv.increment failed to set value")
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		L.Push(lua.LNumber(newNum))
+		L.Push(lua.LNil)
+		return 2 // Return new value and error
+	}))
+	L.SetField(workflowTable, "kv", kvTable)
 
 	return nil
+}
+
+// addLuaBackwardCompatibilityFunctions adds deprecated global functions for backward compatibility
+func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, workflowContext *models.WorkflowExecutionContext, step *models.WorkflowStep) {
+	// Deprecated: Use workflow.log.info instead
+	L.SetGlobal("log", L.NewFunction(func(L *lua.LState) int {
+		message := L.CheckString(1)
+		wm.logWorkflowMessage(workflowContext, step, "INFO", message)
+		return 0
+	}))
+
+	// Deprecated: Use workflow.log.debug instead
+	L.SetGlobal("log_debug", L.NewFunction(func(L *lua.LState) int {
+		message := L.CheckString(1)
+		wm.logWorkflowMessage(workflowContext, step, "DEBUG", message)
+		return 0
+	}))
+
+	// Deprecated: Use workflow.log.warn instead
+	L.SetGlobal("log_warn", L.NewFunction(func(L *lua.LState) int {
+		message := L.CheckString(1)
+		wm.logWorkflowMessage(workflowContext, step, "WARN", message)
+		return 0
+	}))
+
+	// Deprecated: Use workflow.log.error instead
+	L.SetGlobal("log_error", L.NewFunction(func(L *lua.LState) int {
+		message := L.CheckString(1)
+		wm.logWorkflowMessage(workflowContext, step, "ERROR", message)
+		return 0
+	}))
+
+	// Deprecated: Use workflow.variable.set instead
+	L.SetGlobal("set_variable", L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		value := L.Get(2)
+		goValue := wm.convertFromLuaValue(value)
+		workflowContext.Variables[name] = goValue
+		return 0
+	}))
+
+	// Deprecated: Use workflow.variable.get instead
+	L.SetGlobal("get_variable", L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		if value, exists := workflowContext.Variables[name]; exists {
+			L.Push(wm.convertToLuaValue(L, value))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 1
+	}))
+
+	// Deprecated: Use workflow.util.safe_get instead
+	L.SetGlobal("safe_get", L.NewFunction(func(L *lua.LState) int {
+		table := L.CheckTable(1)
+		key := L.CheckString(2)
+		defaultValue := L.Get(3)
+		value := L.GetField(table, key)
+		if value == lua.LNil && defaultValue != lua.LNil {
+			L.Push(defaultValue)
+		} else {
+			L.Push(value)
+		}
+		return 1
+	}))
+
+	// Deprecated: Use workflow.util.to_string instead
+	L.SetGlobal("to_string", L.NewFunction(func(L *lua.LState) int {
+		value := L.Get(1)
+		defaultStr := L.OptString(2, "")
+		if value == lua.LNil {
+			L.Push(lua.LString(defaultStr))
+		} else {
+			L.Push(lua.LString(value.String()))
+		}
+		return 1
+	}))
+
+	// Deprecated: Use workflow.json.encode instead
+	L.SetGlobal("json_encode", L.NewFunction(func(L *lua.LState) int {
+		value := L.Get(1)
+		goValue := wm.convertFromLuaValue(value)
+		if jsonBytes, err := json.Marshal(goValue); err == nil {
+			L.Push(lua.LString(string(jsonBytes)))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 1
+	}))
+
+	// Deprecated: Use workflow.json.decode instead
+	L.SetGlobal("json_decode", L.NewFunction(func(L *lua.LState) int {
+		jsonStr := L.CheckString(1)
+		var result interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
+			L.Push(wm.convertToLuaValue(L, result))
+		} else {
+			L.Push(lua.LNil)
+		}
+		return 1
+	}))
+
+	// Deprecated: Use workflow.rcon.execute instead
+	L.SetGlobal("rcon_execute", L.NewFunction(func(L *lua.LState) int {
+		command := L.CheckString(1)
+		command = wm.replaceVariablesWithContext(command, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LString(response))
+		L.Push(lua.LNil)
+		return 2
+	}))
+
+	// Deprecated: Use workflow.rcon.kick instead
+	L.SetGlobal("rcon_kick", L.NewFunction(func(L *lua.LState) int {
+		playerId := L.CheckString(1)
+		reason := L.OptString(2, "Kicked by workflow")
+		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		command := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
+		if err != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LBool(true))
+		L.Push(lua.LString(response))
+		return 2
+	}))
+
+	// Deprecated: Use workflow.rcon.ban instead
+	L.SetGlobal("rcon_ban", L.NewFunction(func(L *lua.LState) int {
+		playerId := L.CheckString(1)
+		duration := L.CheckNumber(2)
+		reason := L.OptString(3, "Banned by workflow")
+		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, float64(duration), reason)
+		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
+		if err != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LBool(true))
+		L.Push(lua.LString(response))
+		return 2
+	}))
+
+	// Deprecated: Use workflow.rcon.warn instead
+	L.SetGlobal("rcon_warn", L.NewFunction(func(L *lua.LState) int {
+		playerId := L.CheckString(1)
+		message := L.CheckString(2)
+		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		command := fmt.Sprintf("AdminWarn \"%s\" %s", playerId, message)
+		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
+		if err != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LBool(true))
+		L.Push(lua.LString(response))
+		return 2
+	}))
+
+	// Deprecated: Use workflow.rcon.broadcast instead
+	L.SetGlobal("rcon_broadcast", L.NewFunction(func(L *lua.LState) int {
+		message := L.CheckString(1)
+		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		command := fmt.Sprintf("AdminBroadcast %s", message)
+		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
+		if err != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LBool(true))
+		L.Push(lua.LString(response))
+		return 2
+	}))
 }
 
 // convertToLuaValue converts a Go value to a LUA value

@@ -868,3 +868,292 @@ func (s *Server) ServerWorkflowVariableDelete(c *gin.Context) {
 
 	responses.Success(c, "Variable deleted successfully", nil)
 }
+
+// ServerWorkflowKVList lists all KV pairs for a workflow
+func (s *Server) ServerWorkflowKVList(c *gin.Context) {
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowID, err := uuid.Parse(c.Param("workflowId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid workflow ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
+
+	// Verify workflow exists and belongs to server
+	workflow, err := workflowDB.GetWorkflow(workflowID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Workflow not found", nil)
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get workflow"})
+		return
+	}
+
+	if workflow.ServerID != serverID {
+		responses.NotFound(c, "Workflow not found", nil)
+		return
+	}
+
+	// Get all KV pairs
+	kvPairs, err := workflowDB.GetAllKVPairs(workflowID)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get KV pairs"})
+		return
+	}
+
+	// Convert map to array for consistent API response
+	type KVPairResponse struct {
+		Key   string      `json:"key"`
+		Value interface{} `json:"value"`
+	}
+
+	kvArray := make([]KVPairResponse, 0, len(kvPairs))
+	for key, value := range kvPairs {
+		kvArray = append(kvArray, KVPairResponse{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	responses.Success(c, "KV pairs retrieved successfully", &gin.H{"kv_pairs": kvArray})
+}
+
+// ServerWorkflowKVGet gets a specific KV pair
+func (s *Server) ServerWorkflowKVGet(c *gin.Context) {
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowID, err := uuid.Parse(c.Param("workflowId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid workflow ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	key := c.Param("key")
+	if key == "" {
+		responses.BadRequest(c, "Key is required", nil)
+		return
+	}
+
+	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
+
+	// Verify workflow exists and belongs to server
+	workflow, err := workflowDB.GetWorkflow(workflowID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Workflow not found", nil)
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get workflow"})
+		return
+	}
+
+	if workflow.ServerID != serverID {
+		responses.NotFound(c, "Workflow not found", nil)
+		return
+	}
+
+	// Get KV value
+	value, err := workflowDB.GetKVValue(workflowID, key)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Key not found", nil)
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get KV value"})
+		return
+	}
+
+	responses.Success(c, "KV pair retrieved successfully", &gin.H{
+		"key":   key,
+		"value": value,
+	})
+}
+
+// ServerWorkflowKVSet sets a KV pair
+func (s *Server) ServerWorkflowKVSet(c *gin.Context) {
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowID, err := uuid.Parse(c.Param("workflowId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid workflow ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	var req struct {
+		Key   string      `json:"key" binding:"required"`
+		Value interface{} `json:"value" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		responses.BadRequest(c, "Invalid request body", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate key length
+	if len(req.Key) > 255 {
+		responses.BadRequest(c, "Key is too long (max 255 characters)", nil)
+		return
+	}
+
+	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
+
+	// Verify workflow exists and belongs to server
+	workflow, err := workflowDB.GetWorkflow(workflowID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Workflow not found", nil)
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get workflow"})
+		return
+	}
+
+	if workflow.ServerID != serverID {
+		responses.NotFound(c, "Workflow not found", nil)
+		return
+	}
+
+	// Set KV value
+	if err := workflowDB.SetKVValue(workflowID, req.Key, req.Value); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to set KV value"})
+		return
+	}
+
+	responses.Success(c, "KV pair set successfully", &gin.H{
+		"key":   req.Key,
+		"value": req.Value,
+	})
+}
+
+// ServerWorkflowKVDelete deletes a KV pair
+func (s *Server) ServerWorkflowKVDelete(c *gin.Context) {
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowID, err := uuid.Parse(c.Param("workflowId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid workflow ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	key := c.Param("key")
+	if key == "" {
+		responses.BadRequest(c, "Key is required", nil)
+		return
+	}
+
+	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
+
+	// Verify workflow exists and belongs to server
+	workflow, err := workflowDB.GetWorkflow(workflowID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Workflow not found", nil)
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get workflow"})
+		return
+	}
+
+	if workflow.ServerID != serverID {
+		responses.NotFound(c, "Workflow not found", nil)
+		return
+	}
+
+	// Delete KV value
+	if err := workflowDB.DeleteKVValue(workflowID, key); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete KV value"})
+		return
+	}
+
+	responses.Success(c, "KV pair deleted successfully", nil)
+}
+
+// ServerWorkflowKVClear clears all KV pairs for a workflow
+func (s *Server) ServerWorkflowKVClear(c *gin.Context) {
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowID, err := uuid.Parse(c.Param("workflowId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid workflow ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
+
+	// Verify workflow exists and belongs to server
+	workflow, err := workflowDB.GetWorkflow(workflowID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Workflow not found", nil)
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get workflow"})
+		return
+	}
+
+	if workflow.ServerID != serverID {
+		responses.NotFound(c, "Workflow not found", nil)
+		return
+	}
+
+	// Clear KV store
+	if err := workflowDB.ClearKVStore(workflowID); err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to clear KV store"})
+		return
+	}
+
+	responses.Success(c, "KV store cleared successfully", nil)
+}
