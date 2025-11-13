@@ -25,33 +25,33 @@ import { Textarea } from "~/components/ui/textarea";
 import { Badge } from "~/components/ui/badge";
 import { useToast } from "~/components/ui/toast";
 
-interface KVPair {
+interface PluginDataItem {
     key: string;
-    value: any;
+    value: string;
 }
 
 interface Props {
     serverId: string;
-    workflowId: string;
-    workflowName?: string;
+    pluginId: string;
+    pluginName?: string;
 }
 
 const props = defineProps<Props>();
 const { toast } = useToast();
 
 const loading = ref(false);
-const kvPairs = ref<KVPair[]>([]);
+const dataItems = ref<PluginDataItem[]>([]);
 const showAddDialog = ref(false);
 const showEditDialog = ref(false);
 const showDeleteDialog = ref(false);
 const selectedKey = ref<string | null>(null);
 
-const newKV = ref({
+const newData = ref({
     key: "",
     value: "",
 });
 
-const editKV = ref({
+const editData = ref({
     key: "",
     value: "",
     originalKey: "",
@@ -59,8 +59,8 @@ const editKV = ref({
 
 const searchQuery = ref("");
 
-// Fetch KV pairs
-async function fetchKVPairs() {
+// Fetch plugin data
+async function fetchPluginData() {
     loading.value = true;
     try {
         const runtimeConfig = useRuntimeConfig();
@@ -69,8 +69,8 @@ async function fetchKVPairs() {
         );
         const token = cookieToken.value;
 
-        const { data, error: fetchError } = await useFetch<any>(
-            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv`,
+        const response = await fetch(
+            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data`,
             {
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -78,19 +78,21 @@ async function fetchKVPairs() {
             },
         );
 
-        if (fetchError.value) {
-            throw new Error(fetchError.value.message);
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || "Failed to fetch plugin data");
         }
 
-        if (data.value && data.value.data && data.value.data.kv_pairs) {
-            kvPairs.value = data.value.data.kv_pairs;
+        const result = await response.json();
+        if (result.data.data && Array.isArray(result.data.data)) {
+          dataItems.value = result.data.data;
         } else {
-            kvPairs.value = [];
+            dataItems.value = [];
         }
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to fetch KV pairs",
+            description: err.message || "Failed to fetch plugin data",
             variant: "destructive",
         });
     } finally {
@@ -98,9 +100,9 @@ async function fetchKVPairs() {
     }
 }
 
-// Add KV pair
-async function addKVPair() {
-    if (!newKV.value.key.trim()) {
+// Add data item
+async function addDataItem() {
+    if (!newData.value.key.trim()) {
         toast({
             title: "Validation Error",
             description: "Key is required",
@@ -110,14 +112,6 @@ async function addKVPair() {
     }
 
     try {
-        let parsedValue: any;
-        try {
-            parsedValue = JSON.parse(newKV.value.value);
-        } catch {
-            // If not valid JSON, treat as string
-            parsedValue = newKV.value.value;
-        }
-
         const runtimeConfig = useRuntimeConfig();
         const cookieToken = useCookie(
             runtimeConfig.public.sessionCookieName as string,
@@ -125,7 +119,7 @@ async function addKVPair() {
         const token = cookieToken.value;
 
         const response = await fetch(
-            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv`,
+            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data`,
             {
                 method: "POST",
                 headers: {
@@ -133,37 +127,37 @@ async function addKVPair() {
                     Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
-                    key: newKV.value.key,
-                    value: parsedValue,
+                    key: newData.value.key,
+                    value: newData.value.value,
                 }),
             },
         );
 
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to add KV pair");
+            throw new Error(errorData.message || "Failed to add data item");
         }
 
         toast({
             title: "Success",
-            description: "KV pair added successfully",
+            description: "Data item added successfully",
         });
 
         showAddDialog.value = false;
-        resetNewKV();
-        await fetchKVPairs();
+        resetNewData();
+        await fetchPluginData();
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to add KV pair",
+            description: err.message || "Failed to add data item",
             variant: "destructive",
         });
     }
 }
 
-// Edit KV pair
-async function updateKVPair() {
-    if (!editKV.value.key.trim()) {
+// Edit data item
+async function updateDataItem() {
+    if (!editData.value.key.trim()) {
         toast({
             title: "Validation Error",
             description: "Key is required",
@@ -173,27 +167,19 @@ async function updateKVPair() {
     }
 
     try {
-        let parsedValue: any;
-        try {
-            parsedValue = JSON.parse(editKV.value.value);
-        } catch {
-            // If not valid JSON, treat as string
-            parsedValue = editKV.value.value;
-        }
-
         const runtimeConfig = useRuntimeConfig();
         const cookieToken = useCookie(
             runtimeConfig.public.sessionCookieName as string,
         );
         const token = cookieToken.value;
 
-        // If key changed, delete old key and create new one
-        if (editKV.value.key !== editKV.value.originalKey) {
-            await deleteKVPairByKey(editKV.value.originalKey, false);
+        // If key changed, delete old key first
+        if (editData.value.key !== editData.value.originalKey) {
+            await deleteDataItemByKey(editData.value.originalKey, false);
         }
 
         const response = await fetch(
-            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv`,
+            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data`,
             {
                 method: "POST",
                 headers: {
@@ -201,35 +187,35 @@ async function updateKVPair() {
                     Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
-                    key: editKV.value.key,
-                    value: parsedValue,
+                    key: editData.value.key,
+                    value: editData.value.value,
                 }),
             },
         );
 
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to update KV pair");
+            throw new Error(errorData.message || "Failed to update data item");
         }
 
         toast({
             title: "Success",
-            description: "KV pair updated successfully",
+            description: "Data item updated successfully",
         });
 
         showEditDialog.value = false;
-        await fetchKVPairs();
+        await fetchPluginData();
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to update KV pair",
+            description: err.message || "Failed to update data item",
             variant: "destructive",
         });
     }
 }
 
-// Delete KV pair
-async function deleteKVPairByKey(key: string, showToast = true) {
+// Delete data item
+async function deleteDataItemByKey(key: string, showToast = true) {
     try {
         const runtimeConfig = useRuntimeConfig();
         const cookieToken = useCookie(
@@ -238,7 +224,7 @@ async function deleteKVPairByKey(key: string, showToast = true) {
         const token = cookieToken.value;
 
         const response = await fetch(
-            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv/${encodeURIComponent(key)}`,
+            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data/${encodeURIComponent(key)}`,
             {
                 method: "DELETE",
                 headers: {
@@ -249,24 +235,24 @@ async function deleteKVPairByKey(key: string, showToast = true) {
 
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to delete KV pair");
+            throw new Error(errorData.message || "Failed to delete data item");
         }
 
         if (showToast) {
             toast({
                 title: "Success",
-                description: "KV pair deleted successfully",
+                description: "Data item deleted successfully",
             });
         }
 
         showDeleteDialog.value = false;
         selectedKey.value = null;
-        await fetchKVPairs();
+        await fetchPluginData();
     } catch (err: any) {
         if (showToast) {
             toast({
                 title: "Error",
-                description: err.message || "Failed to delete KV pair",
+                description: err.message || "Failed to delete data item",
                 variant: "destructive",
             });
         } else {
@@ -275,17 +261,17 @@ async function deleteKVPairByKey(key: string, showToast = true) {
     }
 }
 
-async function deleteKVPair() {
+async function deleteDataItem() {
     if (selectedKey.value) {
-        await deleteKVPairByKey(selectedKey.value);
+        await deleteDataItemByKey(selectedKey.value);
     }
 }
 
-// Clear all KV pairs
-async function clearAllKV() {
+// Clear all data
+async function clearAllData() {
     if (
         !confirm(
-            "Are you sure you want to delete ALL KV pairs? This action cannot be undone.",
+            "Are you sure you want to delete ALL plugin data? This action cannot be undone.",
         )
     ) {
         return;
@@ -299,7 +285,7 @@ async function clearAllKV() {
         const token = cookieToken.value;
 
         const response = await fetch(
-            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv`,
+            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data`,
             {
                 method: "DELETE",
                 headers: {
@@ -310,32 +296,29 @@ async function clearAllKV() {
 
         if (!response.ok) {
             const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to clear KV store");
+            throw new Error(errorData.message || "Failed to clear plugin data");
         }
 
         toast({
             title: "Success",
-            description: "All KV pairs cleared successfully",
+            description: "All plugin data cleared successfully",
         });
 
-        await fetchKVPairs();
+        await fetchPluginData();
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to clear KV store",
+            description: err.message || "Failed to clear plugin data",
             variant: "destructive",
         });
     }
 }
 
-function openEditDialog(pair: KVPair) {
-    editKV.value = {
-        key: pair.key,
-        value:
-            typeof pair.value === "string"
-                ? pair.value
-                : JSON.stringify(pair.value, null, 2),
-        originalKey: pair.key,
+function openEditDialog(item: PluginDataItem) {
+    editData.value = {
+        key: item.key,
+        value: item.value,
+        originalKey: item.key,
     };
     showEditDialog.value = true;
 }
@@ -345,40 +328,62 @@ function openDeleteDialog(key: string) {
     showDeleteDialog.value = true;
 }
 
-function resetNewKV() {
-    newKV.value = {
+function resetNewData() {
+    newData.value = {
         key: "",
         value: "",
     };
 }
 
-function formatValue(value: any): string {
-    if (typeof value === "string") {
-        return value;
+function isJSON(str: string): boolean {
+    try {
+        JSON.parse(str);
+        return true;
+    } catch {
+        return false;
     }
-    return JSON.stringify(value);
 }
 
-function getValueType(value: any): string {
-    if (value === null) return "null";
-    if (Array.isArray(value)) return "array";
-    return typeof value;
+function formatValue(value: string): string {
+    if (isJSON(value)) {
+        try {
+            const parsed = JSON.parse(value);
+            return JSON.stringify(parsed);
+        } catch {
+            return value;
+        }
+    }
+    return value;
 }
 
-const filteredKVPairs = computed(() => {
+function getValueType(value: string): string {
+    if (isJSON(value)) {
+        try {
+            const parsed = JSON.parse(value);
+            if (parsed === null) return "null";
+            if (Array.isArray(parsed)) return "array";
+            return typeof parsed;
+        } catch {
+            return "string";
+        }
+    }
+    return "string";
+}
+
+const filteredDataItems = computed(() => {
     if (!searchQuery.value.trim()) {
-        return kvPairs.value;
+        return dataItems.value;
     }
     const query = searchQuery.value.toLowerCase();
-    return kvPairs.value.filter(
-        (pair) =>
-            pair.key.toLowerCase().includes(query) ||
-            formatValue(pair.value).toLowerCase().includes(query),
+    return dataItems.value.filter(
+        (item) =>
+            item.key.toLowerCase().includes(query) ||
+            item.value.toLowerCase().includes(query),
     );
 });
 
 onMounted(() => {
-    fetchKVPairs();
+    fetchPluginData();
 });
 </script>
 
@@ -389,22 +394,22 @@ onMounted(() => {
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
                         <Database class="h-5 w-5" />
-                        <CardTitle>Persistent KV Store</CardTitle>
+                        <CardTitle>Plugin Data Store</CardTitle>
                     </div>
                     <div class="flex items-center gap-2">
                         <Badge variant="outline">
-                            {{ kvPairs.length }}
-                            {{ kvPairs.length === 1 ? "item" : "items" }}
+                            {{ dataItems.length }}
+                            {{ dataItems.length === 1 ? "item" : "items" }}
                         </Badge>
                     </div>
                 </div>
                 <p class="text-sm text-muted-foreground mt-2">
-                    Manage persistent key-value storage for
+                    Manage persistent data storage for
                     <span class="font-semibold">{{
-                        workflowName || "this workflow"
+                        pluginName || "this plugin"
                     }}</span
-                    >. Data persists across executions and is only accessible
-                    through Lua scripts.
+                    >. Data persists across plugin restarts and is accessible
+                    through the plugin API.
                 </p>
             </CardHeader>
             <CardContent>
@@ -420,7 +425,7 @@ onMounted(() => {
                             <Button
                                 variant="outline"
                                 size="sm"
-                                @click="fetchKVPairs"
+                                @click="fetchPluginData"
                                 :disabled="loading"
                             >
                                 <Database class="mr-2 h-4 w-4" />
@@ -429,20 +434,20 @@ onMounted(() => {
                             <Button
                                 variant="destructive"
                                 size="sm"
-                                @click="clearAllKV"
-                                :disabled="loading || kvPairs.length === 0"
+                                @click="clearAllData"
+                                :disabled="loading || dataItems.length === 0"
                             >
                                 <Trash2 class="mr-2 h-4 w-4" />
                                 Clear All
                             </Button>
                             <Button size="sm" @click="showAddDialog = true">
                                 <Plus class="mr-2 h-4 w-4" />
-                                Add KV Pair
+                                Add Data Item
                             </Button>
                         </div>
                     </div>
 
-                    <!-- KV Pairs Table -->
+                    <!-- Data Items Table -->
                     <div class="border rounded-lg">
                         <Table>
                             <TableHeader>
@@ -469,12 +474,12 @@ onMounted(() => {
                                             <div
                                                 class="animate-spin h-4 w-4 border-2 border-primary border-t-transparent rounded-full"
                                             ></div>
-                                            Loading KV pairs...
+                                            Loading plugin data...
                                         </div>
                                     </TableCell>
                                 </TableRow>
                                 <TableRow
-                                    v-else-if="filteredKVPairs.length === 0"
+                                    v-else-if="filteredDataItems.length === 0"
                                 >
                                     <TableCell
                                         colspan="4"
@@ -487,39 +492,38 @@ onMounted(() => {
                                             <p>
                                                 {{
                                                     searchQuery
-                                                        ? "No matching KV pairs found"
-                                                        : "No KV pairs yet"
+                                                        ? "No matching data items found"
+                                                        : "No data items yet"
                                                 }}
                                             </p>
                                             <p
                                                 class="text-sm"
                                                 v-if="!searchQuery"
                                             >
-                                                Add a key-value pair to get
-                                                started
+                                                Add a data item to get started
                                             </p>
                                         </div>
                                     </TableCell>
                                 </TableRow>
                                 <TableRow
-                                    v-for="pair in filteredKVPairs"
-                                    :key="pair.key"
+                                    v-for="item in filteredDataItems"
+                                    :key="item.key"
                                     v-else
                                 >
                                     <TableCell class="font-mono text-sm">
-                                        {{ pair.key }}
+                                        {{ item.key }}
                                     </TableCell>
                                     <TableCell
                                         class="font-mono text-sm max-w-md truncate"
                                     >
-                                        {{ formatValue(pair.value) }}
+                                        {{ formatValue(item.value) }}
                                     </TableCell>
                                     <TableCell>
                                         <Badge
                                             variant="secondary"
                                             class="text-xs"
                                         >
-                                            {{ getValueType(pair.value) }}
+                                            {{ getValueType(item.value) }}
                                         </Badge>
                                     </TableCell>
                                     <TableCell class="text-right">
@@ -527,7 +531,7 @@ onMounted(() => {
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                @click="openEditDialog(pair)"
+                                                @click="openEditDialog(item)"
                                             >
                                                 <Edit class="h-4 w-4" />
                                             </Button>
@@ -535,7 +539,7 @@ onMounted(() => {
                                                 variant="ghost"
                                                 size="sm"
                                                 @click="
-                                                    openDeleteDialog(pair.key)
+                                                    openDeleteDialog(item.key)
                                                 "
                                             >
                                                 <Trash2
@@ -552,15 +556,14 @@ onMounted(() => {
             </CardContent>
         </Card>
 
-        <!-- Add KV Dialog -->
+        <!-- Add Data Dialog -->
         <Dialog v-model:open="showAddDialog">
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Add KV Pair</DialogTitle>
+                    <DialogTitle>Add Data Item</DialogTitle>
                     <DialogDescription>
-                        Add a new key-value pair to the persistent store. Values
-                        can be strings, numbers, booleans, objects, or arrays
-                        (as JSON).
+                        Add a new data item to the plugin's persistent store.
+                        Values are stored as strings.
                     </DialogDescription>
                 </DialogHeader>
                 <div class="space-y-4 py-4">
@@ -568,26 +571,21 @@ onMounted(() => {
                         <Label for="new-key">Key</Label>
                         <Input
                             id="new-key"
-                            v-model="newKV.key"
-                            placeholder="e.g., player_warnings, config_max_players"
-                            maxlength="255"
+                            v-model="newData.key"
+                            placeholder="e.g., player_stats, config_value"
                         />
-                        <p class="text-xs text-muted-foreground">
-                            Maximum 255 characters
-                        </p>
                     </div>
                     <div class="space-y-2">
                         <Label for="new-value">Value</Label>
                         <Textarea
                             id="new-value"
-                            v-model="newKV.value"
-                            placeholder='e.g., "Hello World", 42, {"enabled": true}, ["item1", "item2"]'
+                            v-model="newData.value"
+                            placeholder='e.g., "Hello World", {"enabled": true}, ["item1", "item2"]'
                             rows="6"
                             class="font-mono text-sm"
                         />
                         <p class="text-xs text-muted-foreground">
-                            Enter a string or valid JSON (object, array, number,
-                            boolean)
+                            Enter a string or JSON value
                         </p>
                     </div>
                 </div>
@@ -595,7 +593,7 @@ onMounted(() => {
                     <Button variant="outline" @click="showAddDialog = false">
                         Cancel
                     </Button>
-                    <Button @click="addKVPair">
+                    <Button @click="addDataItem">
                         <Plus class="mr-2 h-4 w-4" />
                         Add
                     </Button>
@@ -603,11 +601,11 @@ onMounted(() => {
             </DialogContent>
         </Dialog>
 
-        <!-- Edit KV Dialog -->
+        <!-- Edit Data Dialog -->
         <Dialog v-model:open="showEditDialog">
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Edit KV Pair</DialogTitle>
+                    <DialogTitle>Edit Data Item</DialogTitle>
                     <DialogDescription>
                         Modify the key or value. Changing the key will delete
                         the old entry and create a new one.
@@ -616,22 +614,18 @@ onMounted(() => {
                 <div class="space-y-4 py-4">
                     <div class="space-y-2">
                         <Label for="edit-key">Key</Label>
-                        <Input
-                            id="edit-key"
-                            v-model="editKV.key"
-                            maxlength="255"
-                        />
+                        <Input id="edit-key" v-model="editData.key" />
                     </div>
                     <div class="space-y-2">
                         <Label for="edit-value">Value</Label>
                         <Textarea
                             id="edit-value"
-                            v-model="editKV.value"
+                            v-model="editData.value"
                             rows="6"
                             class="font-mono text-sm"
                         />
                         <p class="text-xs text-muted-foreground">
-                            Enter a string or valid JSON
+                            Enter a string or JSON value
                         </p>
                     </div>
                 </div>
@@ -639,7 +633,7 @@ onMounted(() => {
                     <Button variant="outline" @click="showEditDialog = false">
                         Cancel
                     </Button>
-                    <Button @click="updateKVPair">
+                    <Button @click="updateDataItem">
                         <Check class="mr-2 h-4 w-4" />
                         Update
                     </Button>
@@ -651,7 +645,7 @@ onMounted(() => {
         <Dialog v-model:open="showDeleteDialog">
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Delete KV Pair</DialogTitle>
+                    <DialogTitle>Delete Data Item</DialogTitle>
                     <DialogDescription>
                         Are you sure you want to delete the key "{{
                             selectedKey
@@ -662,7 +656,7 @@ onMounted(() => {
                     <Button variant="outline" @click="showDeleteDialog = false">
                         Cancel
                     </Button>
-                    <Button variant="destructive" @click="deleteKVPair">
+                    <Button variant="destructive" @click="deleteDataItem">
                         <Trash2 class="mr-2 h-4 w-4" />
                         Delete
                     </Button>

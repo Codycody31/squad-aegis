@@ -64,6 +64,14 @@ import {
     Database,
     X,
 } from "lucide-vue-next";
+import PluginKVStore from "~/components/PluginKVStore.vue";
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+} from "~/components/ui/sheet";
 
 definePageMeta({
     middleware: ["auth"],
@@ -88,6 +96,8 @@ const loadingPluginData = ref(false);
 const editingDataItem = ref<any>(null);
 const editingDataValue = ref("");
 const showEditDialog = ref(false);
+const showKVStoreSheet = ref(false);
+const selectedPluginForKV = ref<any>(null);
 
 // Combobox state
 const pluginSearchQuery = ref("");
@@ -659,10 +669,15 @@ const saveDataItem = async () => {
 };
 
 // Delete a data item
-const deleteDataItem = async (item: any) => {
+const openKVStoreSheet = (plugin: any) => {
+    selectedPluginForKV.value = plugin;
+    showKVStoreSheet.value = true;
+};
+
+const deleteDataItem = async (key: string) => {
     if (
         !confirm(
-            `Are you sure you want to delete the plugin data item "${item.key}"? This action cannot be undone.`,
+            `Are you sure you want to delete the plugin data item "${key}"? This action cannot be undone.`,
         )
     ) {
         return;
@@ -670,7 +685,7 @@ const deleteDataItem = async (item: any) => {
 
     try {
         await $fetch(
-            `/api/servers/${serverId}/plugins/${currentPlugin.value.id}/data/${encodeURIComponent(item.key)}`,
+            `/api/servers/${serverId}/plugins/${currentPlugin.value.id}/data/${encodeURIComponent(key)}`,
             {
                 method: "DELETE",
                 headers: {
@@ -681,7 +696,7 @@ const deleteDataItem = async (item: any) => {
 
         toast({
             title: "Success",
-            description: `Deleted plugin data item "${item.key}"`,
+            description: `Deleted plugin data item "${key}"`,
         });
 
         // Reload plugin data
@@ -699,21 +714,33 @@ const deleteDataItem = async (item: any) => {
 // Helper function to normalize field names for display
 const normalizeFieldName = (fieldName: string): string => {
     // Replace underscores with spaces
-    let normalized = fieldName.replace(/_/g, ' ');
-    
+    let normalized = fieldName.replace(/_/g, " ");
+
     // Handle camelCase by inserting space before capital letters
-    normalized = normalized.replace(/([a-z])([A-Z])/g, '$1 $2');
-    
+    normalized = normalized.replace(/([a-z])([A-Z])/g, "$1 $2");
+
     // Capitalize first letter of each word
     normalized = normalized.replace(/\b\w/g, (char) => char.toUpperCase());
-    
+
     // Handle common acronyms
-    const acronyms = ['Id', 'Ip', 'Url', 'Api', 'Fob', 'Hab', 'Tk', 'Eos', 'Rcon', 'Ui', 'Db'];
-    acronyms.forEach(acronym => {
-        const regex = new RegExp(`\\b${acronym}\\b`, 'gi');
+    const acronyms = [
+        "Id",
+        "Ip",
+        "Url",
+        "Api",
+        "Fob",
+        "Hab",
+        "Tk",
+        "Eos",
+        "Rcon",
+        "Ui",
+        "Db",
+    ];
+    acronyms.forEach((acronym) => {
+        const regex = new RegExp(`\\b${acronym}\\b`, "gi");
         normalized = normalized.replace(regex, acronym.toUpperCase());
     });
-    
+
     return normalized;
 };
 
@@ -1121,7 +1148,14 @@ onMounted(async () => {
                                                         )
                                                 "
                                             />
-                                            <Label>{{ normalizeFieldName(field.name) }} {{ index + 1 }}</Label>
+                                            <Label
+                                                >{{
+                                                    normalizeFieldName(
+                                                        field.name,
+                                                    )
+                                                }}
+                                                {{ index + 1 }}</Label
+                                            >
                                             <Button
                                                 variant="outline"
                                                 size="sm"
@@ -1152,7 +1186,8 @@ onMounted(async () => {
                                         class="space-y-4 p-4 border rounded-lg"
                                     >
                                         <h5 class="font-medium">
-                                            {{ normalizeFieldName(field.name) }} Configuration
+                                            {{ normalizeFieldName(field.name) }}
+                                            Configuration
                                         </h5>
                                         <div
                                             v-for="nestedField in field.nested ||
@@ -1163,7 +1198,11 @@ onMounted(async () => {
                                             <Label
                                                 :for="`config-${field.name}-${nestedField.name}`"
                                             >
-                                                {{ normalizeFieldName(nestedField.name) }}
+                                                {{
+                                                    normalizeFieldName(
+                                                        nestedField.name,
+                                                    )
+                                                }}
                                                 <span
                                                     v-if="nestedField.required"
                                                     class="text-red-500"
@@ -1255,7 +1294,9 @@ onMounted(async () => {
                                                 <Label
                                                     :for="`config-${field.name}-${nestedField.name}`"
                                                     >{{
-                                                        normalizeFieldName(nestedField.name)
+                                                        normalizeFieldName(
+                                                            nestedField.name,
+                                                        )
                                                     }}</Label
                                                 >
                                             </div>
@@ -1278,7 +1319,12 @@ onMounted(async () => {
                                                 class="flex justify-between items-center"
                                             >
                                                 <h6 class="font-medium">
-                                                    {{ normalizeFieldName(field.name) }} Item
+                                                    {{
+                                                        normalizeFieldName(
+                                                            field.name,
+                                                        )
+                                                    }}
+                                                    Item
                                                     {{ index + 1 }}
                                                 </h6>
                                                 <Button
@@ -1304,7 +1350,11 @@ onMounted(async () => {
                                                 <Label
                                                     :for="`config-${field.name}-${index}-${nestedField.name}`"
                                                 >
-                                                    {{ normalizeFieldName(nestedField.name) }}
+                                                    {{
+                                                        normalizeFieldName(
+                                                            nestedField.name,
+                                                        )
+                                                    }}
                                                     <span
                                                         v-if="
                                                             nestedField.required
@@ -1359,12 +1409,14 @@ onMounted(async () => {
                                                                 ] = checked)
                                                         "
                                                     />
-                                                        <Label
-                                                            :for="`config-${field.name}-${index}-${nestedField.name}`"
-                                                            >{{
-                                                                normalizeFieldName(nestedField.name)
-                                                            }}</Label
-                                                        >
+                                                    <Label
+                                                        :for="`config-${field.name}-${index}-${nestedField.name}`"
+                                                        >{{
+                                                            normalizeFieldName(
+                                                                nestedField.name,
+                                                            )
+                                                        }}</Label
+                                                    >
                                                 </div>
                                             </div>
                                         </div>
@@ -1378,7 +1430,9 @@ onMounted(async () => {
                                                 )
                                             "
                                         >
-                                            Add {{ normalizeFieldName(field.name) }} Item
+                                            Add
+                                            {{ normalizeFieldName(field.name) }}
+                                            Item
                                         </Button>
                                     </div>
                                 </div>
@@ -1518,9 +1572,9 @@ onMounted(async () => {
                                         <Button
                                             variant="outline"
                                             size="sm"
-                                            @click="loadPluginData(plugin)"
+                                            @click="openKVStoreSheet(plugin)"
                                             class="hidden sm:inline-flex"
-                                            title="View Plugin Data"
+                                            title="Manage Plugin Data"
                                         >
                                             <Database class="w-4 h-4" />
                                         </Button>
@@ -1709,7 +1763,10 @@ onMounted(async () => {
                                             )
                                     "
                                 />
-                                <Label>{{ normalizeFieldName(field.name) }} {{ index + 1 }}</Label>
+                                <Label
+                                    >{{ normalizeFieldName(field.name) }}
+                                    {{ index + 1 }}</Label
+                                >
                                 <Button
                                     variant="outline"
                                     size="sm"
@@ -1735,7 +1792,8 @@ onMounted(async () => {
                             class="space-y-4 p-4 border rounded-lg"
                         >
                             <h5 class="font-medium">
-                                {{ normalizeFieldName(field.name) }} Configuration
+                                {{ normalizeFieldName(field.name) }}
+                                Configuration
                             </h5>
                             <div
                                 v-for="nestedField in field.nested || []"
@@ -1806,7 +1864,9 @@ onMounted(async () => {
                                     />
                                     <Label
                                         :for="`edit-config-${field.name}-${nestedField.name}`"
-                                        >{{ normalizeFieldName(nestedField.name) }}</Label
+                                        >{{
+                                            normalizeFieldName(nestedField.name)
+                                        }}</Label
                                     >
                                 </div>
                             </div>
@@ -1826,7 +1886,8 @@ onMounted(async () => {
                             >
                                 <div class="flex justify-between items-center">
                                     <h6 class="font-medium">
-                                        {{ normalizeFieldName(field.name) }} Item {{ index + 1 }}
+                                        {{ normalizeFieldName(field.name) }}
+                                        Item {{ index + 1 }}
                                     </h6>
                                     <Button
                                         variant="outline"
@@ -1850,7 +1911,9 @@ onMounted(async () => {
                                     <Label
                                         :for="`edit-config-${field.name}-${index}-${nestedField.name}`"
                                     >
-                                        {{ normalizeFieldName(nestedField.name) }}
+                                        {{
+                                            normalizeFieldName(nestedField.name)
+                                        }}
                                         <span
                                             v-if="nestedField.required"
                                             class="text-red-500"
@@ -1885,7 +1948,11 @@ onMounted(async () => {
                                         />
                                         <Label
                                             :for="`edit-config-${field.name}-${index}-${nestedField.name}`"
-                                            >{{ normalizeFieldName(nestedField.name) }}</Label
+                                            >{{
+                                                normalizeFieldName(
+                                                    nestedField.name,
+                                                )
+                                            }}</Label
                                         >
                                     </div>
                                 </div>
@@ -2131,5 +2198,26 @@ onMounted(async () => {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+
+        <!-- Plugin Data KV Store Sheet -->
+        <Sheet v-model:open="showKVStoreSheet">
+            <SheetContent class="sm:max-w-4xl overflow-y-auto">
+                <SheetHeader>
+                    <SheetTitle>Plugin Data Management</SheetTitle>
+                    <SheetDescription>
+                        Manage persistent data storage for
+                        {{ selectedPluginForKV?.plugin_id }}
+                    </SheetDescription>
+                </SheetHeader>
+                <div class="mt-6">
+                    <PluginKVStore
+                        v-if="selectedPluginForKV"
+                        :server-id="String(serverId)"
+                        :plugin-id="selectedPluginForKV.id"
+                        :plugin-name="selectedPluginForKV.plugin_id"
+                    />
+                </div>
+            </SheetContent>
+        </Sheet>
     </div>
 </template>
