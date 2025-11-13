@@ -291,7 +291,7 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	var adminId uuid.UUID
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.reason, sb.duration, sb.admin_id 
+		SELECT sb.steam_id, sb.reason, sb.duration, sb.admin_id
 		FROM server_bans sb
 		WHERE sb.id = $1 AND sb.server_id = $2
 	`, banId, serverId).Scan(&steamIDInt, &reason, &duration, &adminId)
@@ -623,8 +623,9 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 
 	// Query the database for active bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at
+		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
+		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.server_id = $1
 	`, serverId)
 	if err != nil {
@@ -642,7 +643,10 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 		var reason string
 		var duration int
 		var createdAt time.Time
-		err := rows.Scan(&steamIDInt, &reason, &duration, &createdAt)
+		var adminID sql.NullString
+		var adminUsername sql.NullString
+		var adminSteamIDInt sql.NullInt64
+		err := rows.Scan(&steamIDInt, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt)
 		if err != nil {
 			responses.BadRequest(c, "Failed to scan ban", &gin.H{"error": err.Error()})
 			return
@@ -657,13 +661,36 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 			}
 		}
 
-		// Format the ban entry
+		// Format the ban entry in official Squad format
 		steamIDStr := strconv.FormatInt(steamIDInt, 10)
-		if duration == 0 {
-			banCfg.WriteString(fmt.Sprintf("%s:0\n", steamIDStr))
-		} else {
-			banCfg.WriteString(fmt.Sprintf("%s:%d\n", steamIDStr, unixTimeOfExpiry.Unix()))
+
+		// Build admin info
+		adminInfo := "System"
+		adminSteamID := "0"
+		if adminUsername.Valid && adminUsername.String != "" {
+			adminInfo = adminUsername.String
 		}
+		if adminSteamIDInt.Valid && adminSteamIDInt.Int64 > 0 {
+			adminSteamID = strconv.FormatInt(adminSteamIDInt.Int64, 10)
+		}
+
+		var expiryTimestamp string
+		if duration == 0 {
+			expiryTimestamp = "0"
+		} else {
+			expiryTimestamp = strconv.FormatInt(unixTimeOfExpiry.Unix(), 10)
+		}
+
+		// Build the reason comment
+		reasonComment := ""
+		if reason != "" {
+			reasonComment = " //" + reason
+		} else if duration == 0 {
+			reasonComment = " //Permanent ban"
+		}
+
+		banCfg.WriteString(fmt.Sprintf("%s [SteamID %s] Banned:%s:%s%s\n",
+			adminInfo, adminSteamID, steamIDStr, expiryTimestamp, reasonComment))
 	}
 
 	// Set the content type and send the response

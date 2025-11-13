@@ -189,9 +189,9 @@ func DeleteServerBanListSubscription(ctx context.Context, database db.Executor, 
 
 func GetServerActiveBans(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]models.ServerBan, error) {
 	sql := `
-		SELECT DISTINCT ON (sb.steam_id) 
-			sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, 
-			sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name, 
+		SELECT DISTINCT ON (sb.steam_id)
+			sb.id, sb.server_id, sb.admin_id, u.username, u.steam_id, sb.steam_id, sb.reason,
+			sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name,
 			sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
@@ -199,18 +199,18 @@ func GetServerActiveBans(ctx context.Context, database db.Executor, serverId uui
 		WHERE (
 			-- Direct bans on this server
 			sb.server_id = $1
-			OR 
+			OR
 			-- Bans from subscribed ban lists
 			sb.ban_list_id IN (
-				SELECT sbls.ban_list_id 
-				FROM server_ban_list_subscriptions sbls 
+				SELECT sbls.ban_list_id
+				FROM server_ban_list_subscriptions sbls
 				WHERE sbls.server_id = $1
 			)
 		)
 		AND (
 			-- Permanent bans or non-expired temporary bans
-			sb.duration = 0 
-			OR 
+			sb.duration = 0
+			OR
 			sb.created_at + (sb.duration || ' days')::interval > NOW()
 		)
 		ORDER BY sb.steam_id, sb.created_at DESC
@@ -226,10 +226,11 @@ func GetServerActiveBans(ctx context.Context, database db.Executor, serverId uui
 	for rows.Next() {
 		var ban models.ServerBan
 		var steamIDInt int64
+		var adminSteamIDInt int64
 		var ruleIDStr, banListIDStr, banListNameStr *string
 
 		err := rows.Scan(
-			&ban.ID, &ban.ServerID, &ban.AdminID, &ban.AdminName,
+			&ban.ID, &ban.ServerID, &ban.AdminID, &ban.AdminName, &adminSteamIDInt,
 			&steamIDInt, &ban.Reason, &ban.Duration, &ruleIDStr,
 			&banListIDStr, &banListNameStr, &ban.CreatedAt, &ban.UpdatedAt,
 		)
@@ -240,6 +241,9 @@ func GetServerActiveBans(ctx context.Context, database db.Executor, serverId uui
 		// Convert steamID from int64 to string
 		ban.SteamID = fmt.Sprintf("%d", steamIDInt)
 		ban.Name = ban.SteamID
+
+		// Convert admin steam ID if present
+		ban.AdminSteamID = fmt.Sprintf("%d", adminSteamIDInt)
 
 		// Set optional fields
 		ban.RuleID = ruleIDStr
