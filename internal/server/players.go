@@ -135,20 +135,20 @@ func (s *Server) PlayersList(c *gin.Context) {
 	// Link players who share either Steam ID or EOS ID
 	query := `
 		WITH matching_records AS (
-			SELECT 
+			SELECT
 				steam,
 				eos,
 				player_suffix,
 				event_time
 			FROM squad_aegis.server_join_succeeded_events
-			WHERE 
+			WHERE
 				player_suffix ILIKE ? OR
 				steam ILIKE ? OR
 				eos ILIKE ?
 		),
 		-- Collect all steam/eos pairs and their identifiers
 		player_identifiers AS (
-			SELECT 
+			SELECT
 				steam,
 				eos,
 				any(player_suffix) as player_name,
@@ -172,14 +172,14 @@ func (s *Server) PlayersList(c *gin.Context) {
 			GROUP BY eos
 		)
 		-- Consolidate by choosing primary identifier
-		SELECT 
+		SELECT
 			any(steam) as steam_id,
 			any(eos) as eos_id,
 			any(player_name) as player_name,
 			max(last_seen) as last_seen,
 			min(first_seen) as first_seen
 		FROM player_identifiers
-		GROUP BY 
+		GROUP BY
 			-- Group by the first non-empty identifier (steam preferred)
 			multiIf(
 				steam != '', steam,
@@ -304,7 +304,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 	// Link players by Steam ID or EOS ID - if either matches, they're the same player
 	topPlayersQuery := `
 		WITH player_identity AS (
-			SELECT 
+			SELECT
 				if(steam != '', steam, '') as steam_id,
 				if(eos != '', eos, '') as eos_id,
 				any(player_suffix) as player_name
@@ -313,7 +313,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			GROUP BY steam, eos
 		),
 		player_stats AS (
-			SELECT 
+			SELECT
 				attacker_steam,
 				attacker_eos,
 				attacker_name,
@@ -322,10 +322,10 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			FROM squad_aegis.server_player_died_events
 			WHERE (attacker_steam != '' OR attacker_eos != '')
 			GROUP BY attacker_steam, attacker_eos, attacker_name
-			
+
 			UNION ALL
-			
-			SELECT 
+
+			SELECT
 				victim_steam as attacker_steam,
 				victim_eos as attacker_eos,
 				victim_name as attacker_name,
@@ -336,18 +336,18 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			GROUP BY victim_steam, victim_eos, victim_name
 		),
 		normalized_stats AS (
-			SELECT 
+			SELECT
 				if(ps.attacker_steam != '', ps.attacker_steam, pi.steam_id) as norm_steam,
 				if(ps.attacker_eos != '', ps.attacker_eos, pi.eos_id) as norm_eos,
 				coalesce(pi.player_name, ps.attacker_name) as player_name,
 				ps.kills,
 				ps.deaths
 			FROM player_stats ps
-			LEFT JOIN player_identity pi ON 
+			LEFT JOIN player_identity pi ON
 				(ps.attacker_steam != '' AND ps.attacker_steam = pi.steam_id) OR
 				(ps.attacker_eos != '' AND ps.attacker_eos = pi.eos_id)
 		)
-		SELECT 
+		SELECT
 			any(norm_steam) as steam_id,
 			any(norm_eos) as eos_id,
 			any(player_name) as player_name,
@@ -411,7 +411,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 	// Get top teamkillers
 	topTeamkillersQuery := `
 		WITH player_identity AS (
-			SELECT 
+			SELECT
 				if(steam != '', steam, '') as steam_id,
 				if(eos != '', eos, '') as eos_id,
 				any(player_suffix) as player_name
@@ -420,7 +420,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			GROUP BY steam, eos
 		),
 		teamkill_stats AS (
-			SELECT 
+			SELECT
 				attacker_steam,
 				attacker_eos,
 				attacker_name,
@@ -430,17 +430,17 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			GROUP BY attacker_steam, attacker_eos, attacker_name
 		),
 		normalized_stats AS (
-			SELECT 
+			SELECT
 				if(ts.attacker_steam != '', ts.attacker_steam, pi.steam_id) as norm_steam,
 				if(ts.attacker_eos != '', ts.attacker_eos, pi.eos_id) as norm_eos,
 				coalesce(pi.player_name, ts.attacker_name) as player_name,
 				ts.teamkills
 			FROM teamkill_stats ts
-			LEFT JOIN player_identity pi ON 
+			LEFT JOIN player_identity pi ON
 				(ts.attacker_steam != '' AND ts.attacker_steam = pi.steam_id) OR
 				(ts.attacker_eos != '' AND ts.attacker_eos = pi.eos_id)
 		)
-		SELECT 
+		SELECT
 			any(norm_steam) as steam_id,
 			any(norm_eos) as eos_id,
 			any(player_name) as player_name,
@@ -504,7 +504,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 	// Get top medics (by revives)
 	topMedicsQuery := `
 		WITH player_identity AS (
-			SELECT 
+			SELECT
 				if(steam != '', steam, '') as steam_id,
 				if(eos != '', eos, '') as eos_id,
 				any(player_suffix) as player_name
@@ -513,7 +513,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			GROUP BY steam, eos
 		),
 		revive_stats AS (
-			SELECT 
+			SELECT
 				reviver_steam,
 				reviver_eos,
 				reviver_name,
@@ -523,17 +523,17 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			GROUP BY reviver_steam, reviver_eos, reviver_name
 		),
 		normalized_stats AS (
-			SELECT 
+			SELECT
 				if(rs.reviver_steam != '', rs.reviver_steam, pi.steam_id) as norm_steam,
 				if(rs.reviver_eos != '', rs.reviver_eos, pi.eos_id) as norm_eos,
 				coalesce(pi.player_name, rs.reviver_name) as player_name,
 				rs.revives
 			FROM revive_stats rs
-			LEFT JOIN player_identity pi ON 
+			LEFT JOIN player_identity pi ON
 				(rs.reviver_steam != '' AND rs.reviver_steam = pi.steam_id) OR
 				(rs.reviver_eos != '' AND rs.reviver_eos = pi.eos_id)
 		)
-		SELECT 
+		SELECT
 			any(norm_steam) as steam_id,
 			any(norm_eos) as eos_id,
 			any(player_name) as player_name,
@@ -597,7 +597,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 	// Get most recent players
 	recentPlayersQuery := `
 		WITH player_records AS (
-			SELECT 
+			SELECT
 				steam,
 				eos,
 				any(player_suffix) as player_name,
@@ -607,7 +607,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			WHERE (steam != '' OR eos != '')
 			GROUP BY steam, eos
 		)
-		SELECT 
+		SELECT
 			any(steam) as steam_id,
 			any(eos) as eos_id,
 			any(player_name) as player_name,
@@ -668,7 +668,7 @@ func (s *Server) PlayersStats(c *gin.Context) {
 	// Get overall statistics - do it in two steps for ClickHouse compatibility
 	// First get event counts
 	eventStatsQuery := `
-		SELECT 
+		SELECT
 			count(*) as total_kills,
 			count(*) as total_deaths,
 			countIf(teamkill = 1) as total_teamkills
@@ -716,7 +716,7 @@ func (s *Server) getLinkedPlayerIdentifiers(c *gin.Context, playerID string, isS
 			FROM squad_aegis.server_join_succeeded_events
 			WHERE %s
 		)
-		SELECT 
+		SELECT
 			groupUniqArray(steam) as steam_ids,
 			groupUniqArray(eos) as eos_ids
 		FROM initial_records
@@ -769,7 +769,7 @@ func (s *Server) getPlayerBasicInfo(c *gin.Context, playerID string, isSteamID b
 		),
 		linked_identifiers AS (
 			-- Collect all steam IDs and eos IDs from initial matches
-			SELECT 
+			SELECT
 				groupUniqArray(steam) as steam_ids,
 				groupUniqArray(eos) as eos_ids
 			FROM initial_records
@@ -783,11 +783,11 @@ func (s *Server) getPlayerBasicInfo(c *gin.Context, playerID string, isSteamID b
 				player_suffix,
 				event_time
 			FROM squad_aegis.server_join_succeeded_events
-			WHERE 
+			WHERE
 				(steam != '' AND steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
 				(eos != '' AND eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
 		)
-		SELECT 
+		SELECT
 			any(steam) as steam_id,
 			any(eos) as eos_id,
 			any(player_suffix) as player_name,
@@ -848,13 +848,13 @@ func (s *Server) getPlayerStatistics(c *gin.Context, playerID string, isSteamID 
 			WHERE %s
 		),
 		linked_identifiers AS (
-			SELECT 
+			SELECT
 				groupUniqArray(steam) as steam_ids,
 				groupUniqArray(eos) as eos_ids
 			FROM initial_records
 			WHERE steam != '' OR eos != ''
 		)
-		SELECT 
+		SELECT
 			countIf(
 				(attacker_steam != '' AND attacker_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
 				(attacker_eos != '' AND attacker_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
@@ -920,13 +920,13 @@ func (s *Server) getPlayerStatistics(c *gin.Context, playerID string, isSteamID 
 			WHERE %s
 		),
 		linked_identifiers AS (
-			SELECT 
+			SELECT
 				groupUniqArray(steam) as steam_ids,
 				groupUniqArray(eos) as eos_ids
 			FROM initial_records
 			WHERE steam != '' OR eos != ''
 		)
-		SELECT 
+		SELECT
 			countIf(
 				(reviver_steam != '' AND reviver_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
 				(reviver_eos != '' AND reviver_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
@@ -960,34 +960,34 @@ func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isStea
 	}
 
 	query := fmt.Sprintf(`
-		SELECT 
+		SELECT
 			event_time,
 			'connection' as event_type,
 			concat('Connected to server') as description,
 			server_id
 		FROM squad_aegis.server_join_succeeded_events
 		WHERE %s
-		
+
 		UNION ALL
-		
-		SELECT 
+
+		SELECT
 			event_time,
 			'death' as event_type,
 			concat('Killed by ', attacker_name, ' with ', weapon) as description,
 			server_id
 		FROM squad_aegis.server_player_died_events
 		WHERE victim_steam = ? OR victim_eos = ?
-		
+
 		UNION ALL
-		
-		SELECT 
+
+		SELECT
 			sent_at as event_time,
 			'chat' as event_type,
 			concat('[', chat_type, '] ', message) as description,
 			server_id
 		FROM squad_aegis.server_player_chat_messages
 		WHERE steam_id = ? OR eos_id = ?
-		
+
 		ORDER BY event_time DESC
 		LIMIT ?
 	`, whereClause)
@@ -1034,7 +1034,7 @@ func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID
 	}
 
 	query := fmt.Sprintf(`
-		SELECT 
+		SELECT
 			sent_at,
 			message,
 			chat_type,
@@ -1096,7 +1096,7 @@ func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID 
 	}
 
 	query := `
-		SELECT 
+		SELECT
 			violation_id,
 			server_id,
 			rule_id,
@@ -1128,6 +1128,35 @@ func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID 
 		if err != nil {
 			continue
 		}
+
+		// Enrich with server name from PostgreSQL
+		serverNameQuery := `SELECT name FROM servers WHERE id = $1`
+		row := s.Dependencies.DB.QueryRow(serverNameQuery, violation.ServerID)
+		var serverName string
+		if err := row.Scan(&serverName); err == nil {
+			violation.ServerName = serverName
+		}
+
+		// Enrich with rule name from PostgreSQL if rule_id is present
+		if violation.RuleID != nil && *violation.RuleID != "" {
+			ruleNameQuery := `SELECT title FROM server_rules WHERE id = $1`
+			row := s.Dependencies.DB.QueryRow(ruleNameQuery, *violation.RuleID)
+			var ruleName string
+			if err := row.Scan(&ruleName); err == nil {
+				violation.RuleName = &ruleName
+			}
+		}
+
+		// Enrich with admin name from PostgreSQL if admin_user_id is present
+		if violation.AdminUserID != nil && *violation.AdminUserID != "" {
+			adminNameQuery := `SELECT name FROM users WHERE id = $1`
+			row := s.Dependencies.DB.QueryRow(adminNameQuery, *violation.AdminUserID)
+			var adminName string
+			if err := row.Scan(&adminName); err == nil {
+				violation.AdminName = &adminName
+			}
+		}
+
 		violations = append(violations, violation)
 	}
 
@@ -1142,7 +1171,7 @@ func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteam
 	}
 
 	query := fmt.Sprintf(`
-		SELECT 
+		SELECT
 			server_id,
 			max(event_time) as last_seen,
 			count(*) as sessions
