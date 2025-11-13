@@ -30,22 +30,23 @@ type Server struct {
 }
 
 type ServerBan struct {
-	ID          string    `json:"id"`
-	ServerID    uuid.UUID `json:"server_id"`
-	AdminID     uuid.UUID `json:"admin_id"`
-	AdminName   string    `json:"admin_name"`
-	SteamID     string    `json:"steam_id,string"`
-	Name        string    `json:"name"`
-	Reason      string    `json:"reason"`
-	Duration    int       `json:"duration"`
-	RuleID      *string   `json:"rule_id,omitempty"`
-	RuleName    *string   `json:"rule_name,omitempty"`
-	BanListID   *string   `json:"ban_list_id,omitempty"`
-	BanListName *string   `json:"ban_list_name,omitempty"`
-	Permanent   bool      `json:"permanent"`
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	ServerID     uuid.UUID `json:"server_id"`
+	AdminID      uuid.UUID `json:"admin_id"`
+	AdminName    string    `json:"admin_name"`
+	AdminSteamID string    `json:"admin_steam_id,omitempty"`
+	SteamID      string    `json:"steam_id,string"`
+	Name         string    `json:"name"`
+	Reason       string    `json:"reason"`
+	Duration     int       `json:"duration"`
+	RuleID       *string   `json:"rule_id,omitempty"`
+	RuleName     *string   `json:"rule_name,omitempty"`
+	BanListID    *string   `json:"ban_list_id,omitempty"`
+	BanListName  *string   `json:"ban_list_name,omitempty"`
+	Permanent    bool      `json:"permanent"`
+	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type BanList struct {

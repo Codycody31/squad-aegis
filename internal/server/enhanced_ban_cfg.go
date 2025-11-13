@@ -56,8 +56,9 @@ func (s *Server) ServerBansCfgEnhanced(c *gin.Context) {
 func (s *Server) generateServerSpecificBans(c *gin.Context, serverId uuid.UUID, banCfg *strings.Builder, now time.Time) error {
 	// Query only direct server bans (not from ban lists)
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at
+		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
+		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.server_id = $1 AND sb.ban_list_id IS NULL
 	`, serverId)
 	if err != nil {
@@ -79,7 +80,7 @@ func (s *Server) generateAllActiveBans(c *gin.Context, serverId uuid.UUID, banCf
 	for _, ban := range bans {
 		// Skip expired bans
 		if ban.Duration > 0 {
-			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * time.Minute)
+			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * (time.Hour * 24))
 			if now.After(expiryTime) {
 				continue
 			}
@@ -95,13 +96,34 @@ func (s *Server) generateAllActiveBans(c *gin.Context, serverId uuid.UUID, banCf
 			continue
 		}
 
-		// Format the ban entry
-		if ban.Duration == 0 {
-			banCfg.WriteString(fmt.Sprintf("%s:0\n", ban.SteamID))
-		} else {
-			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * time.Minute)
-			banCfg.WriteString(fmt.Sprintf("%s:%d\n", ban.SteamID, expiryTime.Unix()))
+		// Format the ban entry in official Squad format
+		adminInfo := "System"
+		adminSteamID := "0"
+		if ban.AdminName != "" {
+			adminInfo = ban.AdminName
 		}
+		if ban.AdminSteamID != "" {
+			adminSteamID = ban.AdminSteamID
+		}
+
+		var expiryTimestamp string
+		if ban.Duration == 0 {
+			expiryTimestamp = "0"
+		} else {
+			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * (time.Hour * 24))
+			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
+		}
+
+		// Build the reason comment
+		reasonComment := ""
+		if ban.Reason != "" {
+			reasonComment = " //" + ban.Reason
+		} else if ban.Duration == 0 {
+			reasonComment = " //Permanent ban"
+		}
+
+		banCfg.WriteString(fmt.Sprintf("%s [SteamID %s] Banned:%s:%s%s\n",
+			adminInfo, adminSteamID, ban.SteamID, expiryTimestamp, reasonComment))
 	}
 
 	// Include remote ban sources if requested
@@ -122,28 +144,54 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 		var reason string
 		var duration int
 		var createdAt time.Time
+		var adminID sql.NullString
+		var adminUsername sql.NullString
+		var adminSteamIDInt sql.NullInt64
 
-		err := rows.Scan(&steamIDInt, &reason, &duration, &createdAt)
+		err := rows.Scan(&steamIDInt, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt)
 		if err != nil {
 			return err
 		}
 
 		// Skip expired bans
 		if duration > 0 {
-			expiryTime := createdAt.Add(time.Duration(duration) * time.Minute)
+			expiryTime := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
 			if now.After(expiryTime) {
 				continue
 			}
 		}
 
-		// Format the ban entry
+		// Format the ban entry in official Squad format
 		steamIDStr := strconv.FormatInt(steamIDInt, 10)
-		if duration == 0 {
-			banCfg.WriteString(fmt.Sprintf("%s:0\n", steamIDStr))
-		} else {
-			expiryTime := createdAt.Add(time.Duration(duration) * time.Minute)
-			banCfg.WriteString(fmt.Sprintf("%s:%d\n", steamIDStr, expiryTime.Unix()))
+
+		// Build admin info
+		adminInfo := "System"
+		adminSteamID := "0"
+		if adminUsername.Valid && adminUsername.String != "" {
+			adminInfo = adminUsername.String
 		}
+		if adminSteamIDInt.Valid && adminSteamIDInt.Int64 > 0 {
+			adminSteamID = strconv.FormatInt(adminSteamIDInt.Int64, 10)
+		}
+
+		var expiryTimestamp string
+		if duration == 0 {
+			expiryTimestamp = "0"
+		} else {
+			expiryTime := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
+			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
+		}
+
+		// Build the reason comment
+		reasonComment := ""
+		if reason != "" {
+			reasonComment = " //" + reason
+		} else if duration == 0 {
+			reasonComment = " //Permanent ban"
+		}
+
+		banCfg.WriteString(fmt.Sprintf("%s [SteamID %s] Banned:%s:%s%s\n",
+			adminInfo, adminSteamID, steamIDStr, expiryTimestamp, reasonComment))
 	}
 	return nil
 }
@@ -241,7 +289,8 @@ func (s *Server) processCSVBans(c *gin.Context, body io.Reader, banCfg *strings.
 			}
 		}
 
-		banCfg.WriteString(fmt.Sprintf("%s:%s\n", steamID, expiry))
+		// Remote bans don't have admin info, so use "Remote" as admin name
+		banCfg.WriteString(fmt.Sprintf("Remote [SteamID 0] Banned:%s:%s //From remote source\n", steamID, expiry))
 	}
 
 	return nil
@@ -287,7 +336,8 @@ func (s *Server) processTextBans(c *gin.Context, body io.Reader, banCfg *strings
 			}
 		}
 
-		banCfg.WriteString(fmt.Sprintf("%s:%s\n", steamID, expiryStr))
+		// Remote bans don't have admin info, so use "Remote" as admin name
+		banCfg.WriteString(fmt.Sprintf("Remote [SteamID 0] Banned:%s:%s //From remote source\n", steamID, expiryStr))
 	}
 
 	return scanner.Err()
@@ -304,8 +354,9 @@ func (s *Server) BanListCfg(c *gin.Context) {
 
 	// Query bans from the specific ban list
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at
+		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
+		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.ban_list_id = $1
 	`, banListId)
 	if err != nil {
