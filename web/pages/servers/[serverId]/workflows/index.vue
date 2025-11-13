@@ -156,6 +156,7 @@ const eventTypes = [
     { value: "RCON_PLAYER_KICKED", label: "Player Kicked" },
     { value: "RCON_PLAYER_BANNED", label: "Player Banned" },
     { value: "RCON_SQUAD_CREATED", label: "Squad Created" },
+    { value: "RCON_SERVER_INFO", label: "Server Info" },
     { value: "LOG_PLAYER_CONNECTED", label: "Player Connected" },
     { value: "LOG_JOIN_SUCCEEDED", label: "Player Join Succeeded" },
     { value: "LOG_PLAYER_DISCONNECTED", label: "Player Disconnected" },
