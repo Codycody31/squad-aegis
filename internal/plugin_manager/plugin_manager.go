@@ -658,7 +658,7 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 	instance.Status = PluginStatusStarting
 
 	// Create plugin APIs
-	apis := pm.createPluginAPIs(instance.ServerID, instance.ID, instance.PluginName)
+	apis := pm.createPluginAPIs(instance.ServerID, instance.ID, instance.PluginName, instance.PluginID)
 
 	// Initialize plugin
 	if err := instance.Plugin.Initialize(instance.Config, apis); err != nil {
@@ -724,7 +724,7 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 	}
 }
 
-func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, pluginName string) *PluginAPIs {
+func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, pluginName, pluginID string) *PluginAPIs {
 	return &PluginAPIs{
 		ServerAPI:    NewServerAPI(serverID, pm.db, pm.rconManager),
 		DatabaseAPI:  NewDatabaseAPI(instanceID, pm.db),
@@ -732,7 +732,7 @@ func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, plugin
 		AdminAPI:     NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
 		EventAPI:     NewEventAPI(serverID, instanceID, pluginName, pm.eventManager),
 		ConnectorAPI: NewConnectorAPI(pm),
-		LogAPI:       NewLogAPI(serverID, instanceID, pm.clickhouseClient, pm.db),
+		LogAPI:       NewLogAPI(serverID, instanceID, pluginName, pluginID, pm.clickhouseClient, pm.db, pm.eventManager),
 	}
 }
 

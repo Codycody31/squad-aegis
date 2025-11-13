@@ -150,7 +150,7 @@ func (api *serverAPI) GetPlayers() ([]*PlayerInfo, error) {
 func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	// Get admins that have either a user account or are defined by steam ID only
 	query := `
-		SELECT sa.id, 
+		SELECT sa.id,
 		       COALESCE(u.name, 'Steam ID: ' || sa.steam_id) as name,
 		       COALESCE(u.steam_id, sa.steam_id) as steam_id,
 		       sr.id as role_id,
@@ -759,16 +759,22 @@ func (api *connectorAPI) ListConnectors() []string {
 type logAPI struct {
 	serverID         uuid.UUID
 	instanceID       uuid.UUID
+	pluginName       string
+	pluginID         string
 	clickhouseClient *clickhouse.Client
 	db               *sql.DB
+	eventManager     *event_manager.EventManager
 }
 
-func NewLogAPI(serverID, instanceID uuid.UUID, clickhouseClient *clickhouse.Client, db *sql.DB) LogAPI {
+func NewLogAPI(serverID, instanceID uuid.UUID, pluginName, pluginID string, clickhouseClient *clickhouse.Client, db *sql.DB, eventManager *event_manager.EventManager) LogAPI {
 	return &logAPI{
 		serverID:         serverID,
 		instanceID:       instanceID,
+		pluginName:       pluginName,
+		pluginID:         pluginID,
 		clickhouseClient: clickhouseClient,
 		db:               db,
+		eventManager:     eventManager,
 	}
 }
 
@@ -782,6 +788,8 @@ func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fi
 		}
 	}
 
+	timestamp := time.Now().UTC()
+
 	// Insert into ClickHouse
 	insertQuery := `
 		INSERT INTO squad_aegis.plugin_logs (
@@ -794,7 +802,7 @@ func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fi
 	defer cancel()
 
 	if err := api.clickhouseClient.Exec(ctx, insertQuery,
-		time.Now().UTC(),
+		timestamp,
 		api.serverID,
 		api.instanceID,
 		level,
@@ -803,6 +811,22 @@ func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fi
 		fieldsJSON,
 	); err != nil {
 		log.Error().Err(err).Msg("Failed to write plugin log to ClickHouse")
+	}
+
+	// Publish event to event manager
+	if api.eventManager != nil {
+		eventData := event_manager.PluginLogEventData{
+			PluginInstanceID: api.instanceID.String(),
+			PluginName:       api.pluginName,
+			PluginID:         api.pluginID,
+			Timestamp:        timestamp.Format(time.RFC3339Nano),
+			Level:            level,
+			Message:          message,
+			ErrorMessage:     errorMsg,
+			Fields:           fields,
+		}
+
+		api.eventManager.PublishEvent(api.serverID, eventData, nil)
 	}
 }
 

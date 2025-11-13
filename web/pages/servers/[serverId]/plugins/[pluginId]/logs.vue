@@ -67,6 +67,12 @@ const oldestLogId = ref<string | null>(null);
 const newestLogId = ref<string | null>(null);
 const isAtBottom = ref(true);
 
+// WebSocket state
+const isConnected = ref(false);
+const connecting = ref(false);
+const error = ref<string | null>(null);
+let websocket: WebSocket | null = null;
+
 // Available log levels for filtering
 const logLevels = ["debug", "info", "warn", "error"];
 
@@ -392,6 +398,135 @@ const scrollToBottom = () => {
     }
 };
 
+// WebSocket connection management
+const connectToLogs = async () => {
+    if (isConnected.value || connecting.value) return;
+
+    connecting.value = true;
+    error.value = null;
+
+    try {
+        const runtimeConfig = useRuntimeConfig();
+        const cookieToken = useCookie(
+            runtimeConfig.public.sessionCookieName as string,
+        );
+        const token = cookieToken.value;
+
+        if (!token) {
+            throw new Error("Authentication required");
+        }
+
+        // Convert HTTP/HTTPS URL to WebSocket URL
+        const backendUrl = window.location.origin;
+        const wsProtocol = backendUrl.startsWith("https") ? "wss" : "ws";
+        const baseUrl = backendUrl.replace(/^https?:\/\//, "");
+        const url = `${wsProtocol}://${baseUrl}/api/servers/${serverId}/plugins/${pluginId}/logs/ws?token=${token}`;
+
+        websocket = new WebSocket(url);
+
+        websocket.onopen = () => {
+            isConnected.value = true;
+            connecting.value = false;
+            error.value = null;
+        };
+
+        websocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleLogEvent(data);
+            } catch (err) {
+                console.error("Failed to parse WebSocket message:", err);
+            }
+        };
+
+        websocket.onclose = (event) => {
+            console.log("WebSocket connection closed:", event);
+            isConnected.value = false;
+            connecting.value = false;
+
+            // Retry connection after 5 seconds if not manually disconnected
+            if (event.code !== 1000) {
+                error.value = "Connection to live logs was lost";
+                setTimeout(() => {
+                    if (!isConnected.value) {
+                        connectToLogs();
+                    }
+                }, 5000);
+            }
+        };
+
+        websocket.onerror = (event) => {
+            console.error("WebSocket error:", event);
+            error.value = "Connection to live logs failed";
+            isConnected.value = false;
+            connecting.value = false;
+        };
+    } catch (err: any) {
+        error.value = err.message || "Failed to connect to live logs";
+        connecting.value = false;
+    }
+};
+
+// Disconnect from WebSocket
+const disconnectFromLogs = () => {
+    if (websocket) {
+        websocket.close(1000, "User disconnect");
+        websocket = null;
+    }
+    isConnected.value = false;
+    connecting.value = false;
+    error.value = null;
+};
+
+// Toggle connection
+const toggleConnection = () => {
+    if (isConnected.value) {
+        disconnectFromLogs();
+    } else {
+        connectToLogs();
+    }
+};
+
+// Handle incoming log events (real-time)
+const handleLogEvent = (event: any) => {
+    // Handle connection message
+    if (event.type === "connected") {
+        console.log("Connected to logs:", event.message);
+        return;
+    }
+
+    if (event.type === "log") {
+        const maxLogs = 1000; // Limit stored logs
+
+        // Apply filters if set
+        if (logLevelFilter.value && event.level !== logLevelFilter.value) {
+            return;
+        }
+        if (
+            searchFilter.value &&
+            !event.message
+                .toLowerCase()
+                .includes(searchFilter.value.toLowerCase())
+        ) {
+            return;
+        }
+
+        // Add log to the end
+        logs.value.push(event);
+        if (logs.value.length > maxLogs) {
+            logs.value = logs.value.slice(-maxLogs);
+        }
+
+        // Update newest log ID
+        newestLogId.value = event.id;
+
+        // Auto-scroll to bottom if user was already at bottom
+        if (isAtBottom.value) {
+            nextTick(() => scrollToBottom());
+        }
+    }
+};
+
 // Refresh logs
 const refreshLogs = async () => {
     refreshing.value = true;
@@ -484,9 +619,13 @@ onMounted(async () => {
     try {
         await Promise.all([loadPlugin(), loadInitialLogs()]);
 
+        // Connect to WebSocket for live updates
+        connectToLogs();
+
         // Add keyboard event listeners
         document.addEventListener("keydown", handleKeydown);
 
+        // Add scroll listener to console container</parameter>
         // Add scroll listener to console container
         const container = document.getElementById("console-container");
         if (container) {
@@ -499,6 +638,9 @@ onMounted(async () => {
 
 // Cleanup on unmount
 onUnmounted(() => {
+    // Disconnect from WebSocket
+    disconnectFromLogs();
+
     document.removeEventListener("keydown", handleKeydown);
 
     const container = document.getElementById("console-container");
@@ -537,6 +679,30 @@ onUnmounted(() => {
                     </div>
 
                     <div class="flex items-center gap-2">
+                        <!-- WebSocket Connection Toggle -->
+                        <Button
+                            :variant="isConnected ? 'default' : 'outline'"
+                            size="sm"
+                            @click="toggleConnection"
+                            :disabled="connecting"
+                        >
+                            <div
+                                class="w-2 h-2 rounded-full mr-2"
+                                :class="{
+                                    'bg-green-500 animate-pulse': isConnected,
+                                    'bg-yellow-500 animate-pulse': connecting,
+                                    'bg-red-500': !isConnected && !connecting,
+                                }"
+                            ></div>
+                            {{
+                                isConnected
+                                    ? "Live"
+                                    : connecting
+                                      ? "Connecting..."
+                                      : "Connect"
+                            }}
+                        </Button>
+
                         <Button
                             variant="outline"
                             size="sm"
