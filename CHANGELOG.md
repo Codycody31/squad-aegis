@@ -19,6 +19,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix: ban cfg format not correct [[#112](https://github.com/Codycody31/squad-aegis/pull/112)]
 - fix: auto tk warn plugin & live plugin logs [[#111](https://github.com/Codycody31/squad-aegis/pull/111)]
 - fix: missing RCON_SERVER_INFO workflow event in UI [[#108](https://github.com/Codycody31/squad-aegis/pull/108)]
 - fix(feeds): teamkill feed not showing attacker name [[#105](https://github.com/Codycody31/squad-aegis/pull/105)]
