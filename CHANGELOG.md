@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feat: live viewing of plugin logs [[#110](https://github.com/Codycody31/squad-aegis/pull/110)]
 - feat: add JSON editor for workflow definition management [[#107](https://github.com/Codycody31/squad-aegis/pull/107)]
 - feat(workflow): workflow conditions can have nested steps [[#104](https://github.com/Codycody31/squad-aegis/pull/104)]
 
