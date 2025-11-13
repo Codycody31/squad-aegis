@@ -213,6 +213,184 @@ else
 end
 ```
 
+### Persistent KV Store Functions
+
+The KV (Key-Value) Store provides persistent storage that survives across workflow executions and server restarts. Each workflow has its own isolated KV store that cannot be accessed by other workflows or actions.
+
+#### `kv_get(key, default_value)`
+
+Retrieves a value from the persistent KV store.
+
+**Parameters:**
+
+- `key` (string): The key to retrieve
+- `default_value` (optional): Value to return if key doesn't exist
+
+**Returns:** The stored value, or `default_value` if key doesn't exist, or `nil` if no default provided
+
+```lua
+-- Get a counter, defaulting to 0 if it doesn't exist
+local count = kv_get("player_warnings", 0)
+
+-- Get a string value
+local last_warned = kv_get("last_warned_player", "none")
+
+-- Get a table/object
+local player_stats = kv_get("player_stats", {})
+```
+
+#### `kv_set(key, value)`
+
+Sets a value in the persistent KV store (creates or updates).
+
+**Parameters:**
+
+- `key` (string): The key to set (max 255 characters)
+- `value` (any): The value to store (cannot be `nil`, must be JSON-serializable)
+
+**Returns:** `success, error`
+
+- `success` (boolean): `true` if successful
+- `error` (string or nil): Error message if failed
+
+```lua
+-- Store a number
+local success, err = kv_set("player_count", 42)
+
+-- Store a string
+kv_set("server_status", "active")
+
+-- Store a table
+kv_set("player_data", {
+    name = "PlayerOne",
+    warnings = 3,
+    last_seen = os.time()
+})
+
+-- Always check for errors
+if not success then
+    log_error("Failed to save: " .. err)
+end
+```
+
+#### `kv_delete(key)`
+
+Deletes a key from the persistent KV store.
+
+**Parameters:**
+
+- `key` (string): The key to delete
+
+**Returns:** `success, error`
+
+```lua
+local success, err = kv_delete("old_data")
+if not success then
+    log_error("Failed to delete key: " .. err)
+end
+```
+
+#### `kv_exists(key)`
+
+Checks if a key exists in the persistent KV store.
+
+**Parameters:**
+
+- `key` (string): The key to check
+
+**Returns:** `boolean` - `true` if key exists, `false` otherwise
+
+```lua
+if kv_exists("player_warnings") then
+    log("Player has warnings on record")
+else
+    log("Player has no warnings")
+end
+```
+
+#### `kv_keys()`
+
+Returns all keys in the persistent KV store.
+
+**Returns:** Array of key names (strings)
+
+```lua
+local keys = kv_keys()
+for i, key in ipairs(keys) do
+    log("Found key: " .. key)
+end
+```
+
+#### `kv_get_all()`
+
+Returns all key-value pairs from the persistent KV store.
+
+**Returns:** Table with all key-value pairs
+
+```lua
+local all_data = kv_get_all()
+for key, value in pairs(all_data) do
+    log("Key: " .. key .. ", Value: " .. tostring(value))
+end
+```
+
+#### `kv_clear()`
+
+Clears all key-value pairs from the persistent KV store.
+
+**Returns:** `success, error`
+
+```lua
+local success, err = kv_clear()
+if success then
+    log("KV store cleared")
+else
+    log_error("Failed to clear KV store: " .. err)
+end
+```
+
+#### `kv_count()`
+
+Returns the number of key-value pairs in the persistent KV store.
+
+**Returns:** Number of items in the store
+
+```lua
+local count = kv_count()
+log("KV store contains " .. count .. " items")
+```
+
+#### `kv_increment(key, delta)`
+
+Atomically increments a numeric value in the persistent KV store. If the key doesn't exist, it starts from 0.
+
+**Parameters:**
+
+- `key` (string): The key to increment
+- `delta` (number, optional): Amount to increment by (default: 1)
+
+**Returns:** `new_value, error`
+
+- `new_value` (number): The new value after incrementing
+- `error` (string or nil): Error message if failed
+
+```lua
+-- Increment by 1 (default)
+local new_count, err = kv_increment("player_joins")
+
+-- Increment by custom amount
+local score, err = kv_increment("player_score", 10)
+
+-- Decrement (negative delta)
+local remaining, err = kv_increment("lives", -1)
+
+if err then
+    log_error("Failed to increment: " .. err)
+else
+    log("New value: " .. new_count)
+end
+```
+
 ## Workflow Data Access
 
 ### `workflow.trigger_event`
@@ -279,6 +457,176 @@ result.analysis_complete = true
 
 ## Common Patterns
 
+### Persistent Player Warning System
+
+Track warnings per player across workflow executions:
+
+```lua
+-- Get player ID from trigger event
+local player_id = safe_get(workflow.trigger_event, "steam_id", "")
+local player_name = safe_get(workflow.trigger_event, "player_name", "Unknown")
+
+if player_id == "" then
+    log_error("No valid player ID")
+    return
+end
+
+-- Get current warning count from KV store
+local warning_key = "warnings_" .. player_id
+local warnings = kv_get(warning_key, 0)
+
+-- Increment warnings
+warnings = warnings + 1
+local success, err = kv_set(warning_key, warnings)
+
+if not success then
+    log_error("Failed to save warning count: " .. err)
+    return
+end
+
+log("Player " .. player_name .. " now has " .. warnings .. " warnings")
+
+-- Take action based on warning count
+if warnings >= 3 then
+    log_warn("Player " .. player_name .. " has reached 3 warnings, kicking...")
+    rcon_kick(player_id, "Too many warnings")
+    
+    -- Reset warnings after kick
+    kv_delete(warning_key)
+elseif warnings >= 2 then
+    rcon_warn(player_id, "WARNING: You have " .. warnings .. " warnings. One more and you will be kicked!")
+else
+    rcon_warn(player_id, "Warning issued. You have " .. warnings .. " warning(s).")
+end
+
+-- Store last warning time
+kv_set("last_warning_time_" .. player_id, os.time())
+```
+
+### Rate Limiting with KV Store
+
+Prevent actions from happening too frequently:
+
+```lua
+local action_name = "admin_broadcast"
+local cooldown_seconds = 300 -- 5 minutes
+local cooldown_key = "cooldown_" .. action_name
+
+-- Get last execution time
+local last_time = kv_get(cooldown_key, 0)
+local current_time = os.time()
+
+if current_time - last_time < cooldown_seconds then
+    local remaining = cooldown_seconds - (current_time - last_time)
+    log_warn("Action on cooldown. " .. remaining .. " seconds remaining.")
+    return
+end
+
+-- Execute action
+rcon_broadcast("Scheduled server message")
+
+-- Update last execution time
+kv_set(cooldown_key, current_time)
+log("Broadcast sent, cooldown activated")
+```
+
+### Player Statistics Tracker
+
+Maintain comprehensive player statistics:
+
+```lua
+local player_id = safe_get(workflow.trigger_event, "steam_id", "")
+local event_type = safe_get(workflow.trigger_event, "event_type", "")
+
+if player_id == "" then
+    return
+end
+
+-- Get or create player stats
+local stats_key = "stats_" .. player_id
+local stats = kv_get(stats_key, {
+    kills = 0,
+    deaths = 0,
+    joins = 0,
+    playtime = 0,
+    last_seen = 0
+})
+
+-- Update stats based on event type
+if event_type == "player_connected" then
+    stats.joins = stats.joins + 1
+    stats.last_seen = os.time()
+elseif event_type == "player_killed" then
+    stats.kills = stats.kills + 1
+elseif event_type == "player_died" then
+    stats.deaths = stats.deaths + 1
+end
+
+-- Calculate K/D ratio
+local kd_ratio = stats.deaths > 0 and (stats.kills / stats.deaths) or stats.kills
+
+-- Save updated stats
+kv_set(stats_key, stats)
+
+log_debug("Updated stats for player " .. player_id .. " - K/D: " .. string.format("%.2f", kd_ratio))
+
+-- Store result for other steps
+result.player_stats = stats
+result.kd_ratio = kd_ratio
+```
+
+### Dynamic Configuration Storage
+
+Store and retrieve configuration values:
+
+```lua
+-- Initialize default configuration if not exists
+if not kv_exists("config") then
+    kv_set("config", {
+        max_warnings = 3,
+        ban_duration_days = 7,
+        auto_kick_enabled = true,
+        welcome_message = "Welcome to the server!"
+    })
+    log("Initialized default configuration")
+end
+
+-- Get configuration
+local config = kv_get("config")
+
+-- Use configuration values
+if config.auto_kick_enabled then
+    local player_id = safe_get(workflow.trigger_event, "steam_id", "")
+    local warnings = kv_get("warnings_" .. player_id, 0)
+    
+    if warnings >= config.max_warnings then
+        rcon_kick(player_id, "Exceeded maximum warnings (" .. config.max_warnings .. ")")
+    end
+end
+```
+
+### Simple Counter with kv_increment
+
+Use atomic increment for reliable counting:
+
+```lua
+-- Increment total player joins
+local total_joins, err = kv_increment("total_player_joins")
+if err then
+    log_error("Failed to increment counter: " .. err)
+else
+    log("Total player joins: " .. total_joins)
+end
+
+-- Increment event-specific counter
+local event_type = safe_get(workflow.trigger_event, "event_type", "unknown")
+local event_count, err = kv_increment("event_count_" .. event_type)
+
+log("Event " .. event_type .. " has occurred " .. event_count .. " times")
+```
+
+## Common Patterns (Workflow Variables)
+
 ### Safe Event Data Access
 
 Always check for nil values when accessing event data:
@@ -344,12 +692,20 @@ result.usage_count = usage_count + 1
 
 ### Error Handling
 
-Always check return values from RCON functions:
+Always check return values from RCON and KV store functions:
 
 ```lua
+-- RCON functions
 local success, response = rcon_kick(player_id, reason)
 if not success then
     log_error("Failed to kick player: " .. response)
+    return
+end
+
+-- KV store write operations
+local success, err = kv_set("player_data", data)
+if not success then
+    log_error("Failed to save data: " .. err)
     return
 end
 ```
@@ -360,6 +716,11 @@ end
 2. **Use timeouts** - Set appropriate timeout values for your scripts
 3. **Avoid infinite loops** - Always have exit conditions
 4. **Cache expensive operations** - Store results in variables when possible
+5. **Use KV store efficiently**:
+   - Avoid excessive reads/writes in tight loops
+   - Use `kv_get_all()` instead of multiple `kv_get()` calls when needed
+   - Use `kv_increment()` instead of get-modify-set patterns for counters
+   - Cache frequently accessed KV values in local variables during a single execution
 
 ### Data Validation
 
@@ -410,3 +771,69 @@ log_warn("High damage teamkill detected: " .. damage)
 -- Errors that need attention
 log_error("Failed to execute RCON command: " .. error_message)
 ```
+
+### KV Store Best Practices
+
+1. **Use descriptive keys** with prefixes for organization:
+   ```lua
+   -- Good
+   kv_set("warnings_" .. player_id, count)
+   kv_set("config_max_players", 64)
+   
+   -- Avoid
+   kv_set("w1", count)
+   kv_set("temp", 64)
+   ```
+
+2. **Always provide defaults** to `kv_get()`:
+   ```lua
+   -- Good - handles missing keys gracefully
+   local count = kv_get("counter", 0)
+   
+   -- Risky - may return nil
+   local count = kv_get("counter")
+   if count then count = count + 1 end
+   ```
+
+3. **Store related data in tables**:
+   ```lua
+   -- Good - organized structure
+   kv_set("player_data_" .. player_id, {
+       warnings = 3,
+       last_warning = os.time(),
+       banned = false
+   })
+   
+   -- Less optimal - multiple separate keys
+   kv_set("player_warnings_" .. player_id, 3)
+   kv_set("player_last_warning_" .. player_id, os.time())
+   kv_set("player_banned_" .. player_id, false)
+   ```
+
+4. **Use atomic operations** for counters:
+   ```lua
+   -- Good - atomic, no race conditions
+   kv_increment("page_views")
+   
+   -- Less optimal - potential race condition
+   local views = kv_get("page_views", 0)
+   kv_set("page_views", views + 1)
+   ```
+
+5. **Clean up old data** periodically:
+   ```lua
+   -- Remove temporary or expired data
+   local keys = kv_keys()
+   for _, key in ipairs(keys) do
+       if string.match(key, "^temp_") then
+           kv_delete(key)
+       end
+   end
+   ```
+
+6. **Remember isolation** - Each workflow has its own KV store:
+   ```lua
+   -- Data stored in one workflow cannot be accessed by another workflow
+   -- Use workflow variables if you need to pass data between steps in the same execution
+   -- Use KV store for data that needs to persist across executions
+   ```

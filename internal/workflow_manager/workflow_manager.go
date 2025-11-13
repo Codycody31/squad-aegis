@@ -1824,7 +1824,7 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 	// Handle the condition result
 	if result {
 		// Condition passed - execute true branch
-		
+
 		// First, execute inline steps if present
 		if len(trueStepsInline) > 0 {
 			log.Debug().
@@ -1923,7 +1923,7 @@ func (wm *WorkflowManager) executeConditionStep(context *models.WorkflowExecutio
 		}
 	} else {
 		// Condition failed - execute false branch
-		
+
 		// First, execute inline steps if present
 		if len(falseStepsInline) > 0 {
 			log.Debug().
@@ -3169,6 +3169,273 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowContext
 		L.Push(lua.LBool(true))
 		L.Push(lua.LString(response))
 		return 2 // Return success boolean and response
+	}))
+
+	// KV Store Functions - Persistent key-value storage for this workflow
+
+	// kv_get - get a value from the persistent KV store
+	L.SetGlobal("kv_get", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+		defaultValue := L.Get(2) // Optional default value
+
+		value, err := wm.workflowDB.GetKVValue(workflowContext.WorkflowID, key)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// Key doesn't exist, return default value
+				if defaultValue != lua.LNil {
+					L.Push(defaultValue)
+				} else {
+					L.Push(lua.LNil)
+				}
+				return 1
+			}
+			// Other error occurred
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv_get failed")
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		L.Push(wm.convertToLuaValue(L, value))
+		return 1
+	}))
+
+	// kv_set - set a value in the persistent KV store
+	L.SetGlobal("kv_set", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+		value := L.Get(2)
+
+		if value == lua.LNil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString("cannot set nil value, use kv_delete to remove keys"))
+			return 2
+		}
+
+		goValue := wm.convertFromLuaValue(value)
+
+		err := wm.workflowDB.SetKVValue(workflowContext.WorkflowID, key, goValue)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv_set failed")
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		log.Debug().
+			Str("execution_id", workflowContext.ExecutionID.String()).
+			Str("workflow_id", workflowContext.WorkflowID.String()).
+			Str("key", key).
+			Interface("value", goValue).
+			Msg("LUA script set KV store value")
+
+		L.Push(lua.LBool(true))
+		L.Push(lua.LNil)
+		return 2 // Return success boolean and error
+	}))
+
+	// kv_delete - delete a key from the persistent KV store
+	L.SetGlobal("kv_delete", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+
+		err := wm.workflowDB.DeleteKVValue(workflowContext.WorkflowID, key)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv_delete failed")
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		log.Debug().
+			Str("execution_id", workflowContext.ExecutionID.String()).
+			Str("workflow_id", workflowContext.WorkflowID.String()).
+			Str("key", key).
+			Msg("LUA script deleted KV store key")
+
+		L.Push(lua.LBool(true))
+		L.Push(lua.LNil)
+		return 2 // Return success boolean and error
+	}))
+
+	// kv_exists - check if a key exists in the persistent KV store
+	L.SetGlobal("kv_exists", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+
+		exists, err := wm.workflowDB.KVExists(workflowContext.WorkflowID, key)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv_exists failed")
+			L.Push(lua.LBool(false))
+			return 1
+		}
+
+		L.Push(lua.LBool(exists))
+		return 1
+	}))
+
+	// kv_keys - get all keys from the persistent KV store
+	L.SetGlobal("kv_keys", L.NewFunction(func(L *lua.LState) int {
+		keys, err := wm.workflowDB.ListKVKeys(workflowContext.WorkflowID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Msg("LUA kv_keys failed")
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		// Create a Lua table with the keys
+		table := L.NewTable()
+		for i, key := range keys {
+			table.RawSetInt(i+1, lua.LString(key)) // Lua arrays are 1-indexed
+		}
+
+		L.Push(table)
+		return 1
+	}))
+
+	// kv_get_all - get all key-value pairs from the persistent KV store
+	L.SetGlobal("kv_get_all", L.NewFunction(func(L *lua.LState) int {
+		kvPairs, err := wm.workflowDB.GetAllKVPairs(workflowContext.WorkflowID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Msg("LUA kv_get_all failed")
+			L.Push(lua.LNil)
+			return 1
+		}
+
+		// Create a Lua table with the key-value pairs
+		table := L.NewTable()
+		for key, value := range kvPairs {
+			L.SetField(table, key, wm.convertToLuaValue(L, value))
+		}
+
+		L.Push(table)
+		return 1
+	}))
+
+	// kv_clear - clear all key-value pairs from the persistent KV store
+	L.SetGlobal("kv_clear", L.NewFunction(func(L *lua.LState) int {
+		err := wm.workflowDB.ClearKVStore(workflowContext.WorkflowID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Msg("LUA kv_clear failed")
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		log.Info().
+			Str("execution_id", workflowContext.ExecutionID.String()).
+			Str("workflow_id", workflowContext.WorkflowID.String()).
+			Msg("LUA script cleared KV store")
+
+		L.Push(lua.LBool(true))
+		L.Push(lua.LNil)
+		return 2 // Return success boolean and error
+	}))
+
+	// kv_count - count the number of key-value pairs in the persistent KV store
+	L.SetGlobal("kv_count", L.NewFunction(func(L *lua.LState) int {
+		count, err := wm.workflowDB.CountKVPairs(workflowContext.WorkflowID)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Msg("LUA kv_count failed")
+			L.Push(lua.LNumber(0))
+			return 1
+		}
+
+		L.Push(lua.LNumber(count))
+		return 1
+	}))
+
+	// kv_increment - atomically increment a numeric value in the KV store
+	L.SetGlobal("kv_increment", L.NewFunction(func(L *lua.LState) int {
+		key := L.CheckString(1)
+		delta := L.OptNumber(2, 1) // Default increment by 1
+
+		// Get current value
+		value, err := wm.workflowDB.GetKVValue(workflowContext.WorkflowID, key)
+		var currentNum float64
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// Key doesn't exist, start from 0
+				currentNum = 0
+			} else {
+				log.Error().
+					Err(err).
+					Str("execution_id", workflowContext.ExecutionID.String()).
+					Str("workflow_id", workflowContext.WorkflowID.String()).
+					Str("key", key).
+					Msg("LUA kv_increment failed to get value")
+				L.Push(lua.LNil)
+				L.Push(lua.LString(err.Error()))
+				return 2
+			}
+		} else {
+			// Try to convert to number
+			switch v := value.(type) {
+			case float64:
+				currentNum = v
+			case int:
+				currentNum = float64(v)
+			case int64:
+				currentNum = float64(v)
+			default:
+				L.Push(lua.LNil)
+				L.Push(lua.LString("existing value is not a number"))
+				return 2
+			}
+		}
+
+		// Increment
+		newNum := currentNum + float64(delta)
+
+		// Save back
+		err = wm.workflowDB.SetKVValue(workflowContext.WorkflowID, key, newNum)
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("execution_id", workflowContext.ExecutionID.String()).
+				Str("workflow_id", workflowContext.WorkflowID.String()).
+				Str("key", key).
+				Msg("LUA kv_increment failed to set value")
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		L.Push(lua.LNumber(newNum))
+		L.Push(lua.LNil)
+		return 2 // Return new value and error
 	}))
 
 	return nil
