@@ -24,6 +24,7 @@ import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
 import { Badge } from "~/components/ui/badge";
 import { useToast } from "~/components/ui/toast";
+import JSONInput from "~/components/JSONInput.vue";
 
 interface PluginDataItem {
     key: string;
@@ -85,7 +86,7 @@ async function fetchPluginData() {
 
         const result = await response.json();
         if (result.data.data && Array.isArray(result.data.data)) {
-          dataItems.value = result.data.data;
+            dataItems.value = result.data.data;
         } else {
             dataItems.value = [];
         }
@@ -576,17 +577,12 @@ onMounted(() => {
                         />
                     </div>
                     <div class="space-y-2">
-                        <Label for="new-value">Value</Label>
-                        <Textarea
-                            id="new-value"
+                        <JSONInput
                             v-model="newData.value"
+                            label="Value"
                             placeholder='e.g., "Hello World", {"enabled": true}, ["item1", "item2"]'
-                            rows="6"
-                            class="font-mono text-sm"
+                            :rows="6"
                         />
-                        <p class="text-xs text-muted-foreground">
-                            Enter a string or JSON value
-                        </p>
                     </div>
                 </div>
                 <DialogFooter>
@@ -617,16 +613,11 @@ onMounted(() => {
                         <Input id="edit-key" v-model="editData.key" />
                     </div>
                     <div class="space-y-2">
-                        <Label for="edit-value">Value</Label>
-                        <Textarea
-                            id="edit-value"
+                        <JSONInput
                             v-model="editData.value"
-                            rows="6"
-                            class="font-mono text-sm"
+                            label="Value"
+                            :rows="6"
                         />
-                        <p class="text-xs text-muted-foreground">
-                            Enter a string or JSON value
-                        </p>
                     </div>
                 </div>
                 <DialogFooter>

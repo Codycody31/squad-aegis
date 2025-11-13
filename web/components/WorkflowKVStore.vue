@@ -24,6 +24,7 @@ import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
 import { Badge } from "~/components/ui/badge";
 import { useToast } from "~/components/ui/toast";
+import JSONInput from "~/components/JSONInput.vue";
 
 interface KVPair {
     key: string;
@@ -577,18 +578,12 @@ onMounted(() => {
                         </p>
                     </div>
                     <div class="space-y-2">
-                        <Label for="new-value">Value</Label>
-                        <Textarea
-                            id="new-value"
+                        <JSONInput
                             v-model="newKV.value"
+                            label="Value"
                             placeholder='e.g., "Hello World", 42, {"enabled": true}, ["item1", "item2"]'
-                            rows="6"
-                            class="font-mono text-sm"
+                            :rows="6"
                         />
-                        <p class="text-xs text-muted-foreground">
-                            Enter a string or valid JSON (object, array, number,
-                            boolean)
-                        </p>
                     </div>
                 </div>
                 <DialogFooter>
@@ -623,16 +618,11 @@ onMounted(() => {
                         />
                     </div>
                     <div class="space-y-2">
-                        <Label for="edit-value">Value</Label>
-                        <Textarea
-                            id="edit-value"
+                        <JSONInput
                             v-model="editKV.value"
-                            rows="6"
-                            class="font-mono text-sm"
+                            label="Value"
+                            :rows="6"
                         />
-                        <p class="text-xs text-muted-foreground">
-                            Enter a string or valid JSON
-                        </p>
                     </div>
                 </div>
                 <DialogFooter>
