@@ -53,6 +53,7 @@ const (
 
 	// Plugin Events
 	EventTypePluginCustom EventType = "PLUGIN_CUSTOM"
+	EventTypePluginLog    EventType = "PLUGIN_LOG"
 )
 
 // Event represents a unified event from any source

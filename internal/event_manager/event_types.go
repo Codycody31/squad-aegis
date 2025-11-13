@@ -307,3 +307,17 @@ type PluginCustomEventData struct {
 }
 
 func (d PluginCustomEventData) GetEventType() EventType { return EventTypePluginCustom }
+
+// PluginLogEventData represents log event data from plugins
+type PluginLogEventData struct {
+	PluginInstanceID string                 `json:"plugin_instance_id"`
+	PluginName       string                 `json:"plugin_name"`
+	PluginID         string                 `json:"plugin_id"`
+	Timestamp        string                 `json:"timestamp"`
+	Level            string                 `json:"level"`
+	Message          string                 `json:"message"`
+	ErrorMessage     *string                `json:"error_message,omitempty"`
+	Fields           map[string]interface{} `json:"fields,omitempty"`
+}
+
+func (d PluginLogEventData) GetEventType() EventType { return EventTypePluginLog }

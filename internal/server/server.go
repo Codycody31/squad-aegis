@@ -258,6 +258,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				{
 					pluginGroup.GET("", server.ServerPluginList)
 					pluginGroup.GET("/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogsAll)
+					pluginGroup.GET("/logs/ws", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogsAllWebSocket)
 					pluginGroup.POST("", server.AuthHasServerPermission("manageserver"), server.ServerPluginCreate)
 					pluginGroup.GET("/:pluginId", server.ServerPluginGet)
 					pluginGroup.PUT("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginUpdate)
@@ -265,6 +266,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 					pluginGroup.POST("/:pluginId/disable", server.AuthHasServerPermission("manageserver"), server.ServerPluginDisable)
 					pluginGroup.DELETE("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginDelete)
 					pluginGroup.GET("/:pluginId/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogs)
+					pluginGroup.GET("/:pluginId/logs/ws", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogsWebSocket)
 					pluginGroup.GET("/:pluginId/metrics", server.ServerPluginMetrics)
 					pluginGroup.GET("/:pluginId/data", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataGet)
 					pluginGroup.POST("/:pluginId/data", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataSet)
