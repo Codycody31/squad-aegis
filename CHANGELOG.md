@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-10
+## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-13
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -17,6 +17,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix: missing RCON_SERVER_INFO workflow event in UI [[#108](https://github.com/Codycody31/squad-aegis/pull/108)]
 - fix(feeds): teamkill feed not showing attacker name [[#105](https://github.com/Codycody31/squad-aegis/pull/105)]
 
 ### 📦️ Dependency
