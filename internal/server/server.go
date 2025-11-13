@@ -315,6 +315,16 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 							variablesGroup.PUT("/:variableId", server.ServerWorkflowVariableUpdate)
 							variablesGroup.DELETE("/:variableId", server.ServerWorkflowVariableDelete)
 						}
+
+						// Workflow KV store
+						kvGroup := workflowGroup.Group("/kv")
+						{
+							kvGroup.GET("", server.ServerWorkflowKVList)
+							kvGroup.GET("/:key", server.ServerWorkflowKVGet)
+							kvGroup.POST("", server.ServerWorkflowKVSet)
+							kvGroup.DELETE("/:key", server.ServerWorkflowKVDelete)
+							kvGroup.DELETE("", server.ServerWorkflowKVClear)
+						}
 					}
 				}
 			}

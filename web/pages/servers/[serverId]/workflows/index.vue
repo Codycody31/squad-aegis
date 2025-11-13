@@ -15,6 +15,7 @@ import {
     CirclePlay,
     BookText,
     Upload,
+    Database,
 } from "lucide-vue-next";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -59,6 +60,7 @@ import {
 import { useToast } from "~/components/ui/toast";
 import WorkflowEditor from "~/components/WorkflowEditor.vue";
 import WorkflowExecutions from "~/components/WorkflowExecutions.vue";
+import WorkflowKVStore from "~/components/WorkflowKVStore.vue";
 
 interface WorkflowTrigger {
     id: string;
@@ -123,6 +125,8 @@ const showCreateDialog = ref<boolean>(false);
 const showEditDialog = ref<boolean>(false);
 const showExecutionDialog = ref<boolean>(false);
 const showImportDialog = ref<boolean>(false);
+const showKVStoreSheet = ref<boolean>(false);
+const selectedWorkflowForKV = ref<Workflow | null>(null);
 const isCreating = ref<boolean>(false);
 const isUpdating = ref<boolean>(false);
 const isExecuting = ref<boolean>(false);
@@ -477,8 +481,13 @@ function openEditDialog(workflow: Workflow) {
 // Open execution history dialog
 async function openExecutionDialog(workflow: Workflow) {
     selectedWorkflow.value = workflow;
-    await fetchExecutions(workflow.id);
     showExecutionDialog.value = true;
+    await fetchExecutions(workflow.id);
+}
+
+function openKVStoreSheet(workflow: Workflow) {
+    selectedWorkflowForKV.value = workflow;
+    showKVStoreSheet.value = true;
 }
 
 // Reset form
@@ -820,6 +829,14 @@ definePageMeta({
                                             <BookText class="w-4 h-4" />
                                         </Button>
                                         <Button
+                                            @click="openKVStoreSheet(workflow)"
+                                            variant="ghost"
+                                            size="sm"
+                                            title="Manage KV Store"
+                                        >
+                                            <Database class="w-4 h-4" />
+                                        </Button>
+                                        <Button
                                             @click="toggleWorkflow(workflow)"
                                             variant="ghost"
                                             size="sm"
@@ -1117,5 +1134,26 @@ definePageMeta({
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+
+        <!-- KV Store Sheet -->
+        <Sheet v-model:open="showKVStoreSheet">
+            <SheetContent class="sm:max-w-4xl overflow-y-auto">
+                <SheetHeader>
+                    <SheetTitle>KV Store Management</SheetTitle>
+                    <SheetDescription>
+                        Manage persistent key-value storage for
+                        {{ selectedWorkflowForKV?.name }}
+                    </SheetDescription>
+                </SheetHeader>
+                <div class="mt-6">
+                    <WorkflowKVStore
+                        v-if="selectedWorkflowForKV"
+                        :server-id="serverId"
+                        :workflow-id="selectedWorkflowForKV.id"
+                        :workflow-name="selectedWorkflowForKV.name"
+                    />
+                </div>
+            </SheetContent>
+        </Sheet>
     </div>
 </template>
