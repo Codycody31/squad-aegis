@@ -53,6 +53,20 @@ func (pm *PluginManager) loadPluginsFromDatabase() error {
 			continue
 		}
 
+		// Get plugin definition to set plugin name
+		definition, err := pm.registry.GetPlugin(instance.PluginID)
+		if err != nil {
+			log.Error().
+				Str("instanceID", instance.ID.String()).
+				Str("pluginID", instance.PluginID).
+				Err(err).
+				Msg("Failed to get plugin definition")
+			continue
+		}
+
+		// Set plugin name from definition
+		instance.PluginName = definition.Name
+
 		// Create plugin instance
 		plugin, err := pm.registry.CreatePluginInstance(instance.PluginID)
 		if err != nil {

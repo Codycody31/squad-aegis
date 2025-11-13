@@ -69,7 +69,7 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		Events: []event_manager.EventType{
-			event_manager.EventTypeLogPlayerDied,
+			event_manager.EventTypeLogPlayerWounded,
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
@@ -143,7 +143,7 @@ func (p *AutoTKWarnPlugin) Stop() error {
 
 // HandleEvent processes an event if the plugin is subscribed to it
 func (p *AutoTKWarnPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
-	if event.Data.(*event_manager.LogPlayerDiedData).Teamkill {
+	if event.Data.(*event_manager.LogPlayerWoundedData).Teamkill {
 		return p.handleTeamkill(event)
 	}
 
@@ -180,17 +180,12 @@ func (p *AutoTKWarnPlugin) UpdateConfig(config map[string]interface{}) error {
 
 	p.config = config
 
-	p.apis.LogAPI.Info("Auto TK Warn plugin configuration updated", map[string]interface{}{
-		"warn_attacker": config["warn_attacker"],
-		"warn_victim":   config["warn_victim"],
-	})
-
 	return nil
 }
 
 // handleTeamkill processes teamkill events
 func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) error {
-	event, ok := rawEvent.Data.(*event_manager.LogPlayerDiedData)
+	event, ok := rawEvent.Data.(*event_manager.LogPlayerWoundedData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")
 	}
@@ -211,13 +206,6 @@ func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) 
 				"attacker_steam_id": event.AttackerSteam,
 				"attacker_eos_id":   event.AttackerEOS,
 				"victim_name":       event.VictimName,
-			})
-		} else {
-			p.apis.LogAPI.Info("Warned teamkill attacker", map[string]interface{}{
-				"attacker_steam_id": event.AttackerSteam,
-				"attacker_eos_id":   event.AttackerEOS,
-				"victim_name":       event.VictimName,
-				"weapon":            event.Weapon,
 			})
 		}
 	}
@@ -241,13 +229,6 @@ func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) 
 					"victim_name":     event.VictimName,
 					"victim_steam_id": victimSteamID,
 					"attacker_eos":    event.AttackerEOS,
-				})
-			} else {
-				p.apis.LogAPI.Info("Warned teamkill victim", map[string]interface{}{
-					"victim_name":     event.VictimName,
-					"victim_steam_id": victimSteamID,
-					"attacker_eos":    event.AttackerEOS,
-					"weapon":          event.Weapon,
 				})
 			}
 		}
