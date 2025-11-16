@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-13
+## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-16
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -19,6 +19,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix: ban duration of 0 not working [[#114](https://github.com/Codycody31/squad-aegis/pull/114)]
 - feat(workflow): implement workflow kv store [[#113](https://github.com/Codycody31/squad-aegis/pull/113)]
 - fix: ban cfg format not correct [[#112](https://github.com/Codycody31/squad-aegis/pull/112)]
 - fix: auto tk warn plugin & live plugin logs [[#111](https://github.com/Codycody31/squad-aegis/pull/111)]
