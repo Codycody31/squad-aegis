@@ -14,6 +14,7 @@
 
 ### 📈 Enhancement
 
+- refactor: add CBL info + steam & battlemetrics links to player profile [[#115](https://github.com/Codycody31/squad-aegis/pull/115)]
 - refactor: improve player violations tab [[#109](https://github.com/Codycody31/squad-aegis/pull/109)]
 - refactor: add player profile link and fetch name if empty for players… [[#102](https://github.com/Codycody31/squad-aegis/pull/102)]
 
