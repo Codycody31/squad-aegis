@@ -14,6 +14,7 @@ import {
 import { Badge } from "~/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { useAuthStore } from "@/stores/auth";
+import { ExternalLink } from "lucide-vue-next";
 
 const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
@@ -23,6 +24,8 @@ const router = useRouter();
 const loading = ref(true);
 const error = ref<string | null>(null);
 const player = ref<PlayerProfile | null>(null);
+const cblData = ref<CBLUser | null>(null);
+const cblLoading = ref(false);
 
 interface PlayerProfile {
     steam_id: string;
@@ -91,6 +94,26 @@ interface PlayerResponse {
     };
 }
 
+interface CBLUser {
+    id: string;
+    name: string;
+    avatarFull: string;
+    reputationPoints: number;
+    riskRating: number;
+    reputationRank: number;
+    lastRefreshedInfo: string;
+    lastRefreshedReputationPoints: string;
+    lastRefreshedReputationRank: string;
+    reputationPointsMonthChange: number;
+}
+
+interface CBLGraphQLResponse {
+    data: {
+        steamUser: CBLUser | null;
+    };
+    errors?: any[];
+}
+
 // Function to fetch player profile
 async function fetchPlayerProfile() {
     loading.value = true;
@@ -135,6 +158,95 @@ async function fetchPlayerProfile() {
             err.message || "An error occurred while fetching player profile";
     } finally {
         loading.value = false;
+    }
+}
+
+// Function to fetch CBL reputation data
+async function fetchCBLData(steamId: string) {
+    cblLoading.value = true;
+
+    const query = `
+        query Search($id: String!) {
+            steamUser(id: $id) {
+                id
+                name
+                avatarFull
+                reputationPoints
+                riskRating
+                reputationRank
+                lastRefreshedInfo
+                lastRefreshedReputationPoints
+                lastRefreshedReputationRank
+                reputationPointsMonthChange
+            }
+        }
+    `;
+
+    try {
+        const response = await fetch("https://communitybanlist.com/graphql", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                query,
+                variables: {
+                    id: steamId,
+                },
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error("Failed to fetch CBL data");
+        }
+
+        const result: CBLGraphQLResponse = await response.json();
+
+        if (result.errors && result.errors.length > 0) {
+            throw new Error("GraphQL errors occurred");
+        }
+
+        cblData.value = result.data.steamUser;
+    } catch (err: any) {
+        console.error("Failed to fetch CBL data:", err);
+        cblData.value = null;
+    } finally {
+        cblLoading.value = false;
+    }
+}
+
+// Helper function to get risk rating color and label
+function getRiskRatingInfo(riskRating: number) {
+    if (riskRating >= 8) {
+        return {
+            variant: "destructive" as const,
+            label: "Very High Risk",
+            colorClass: "text-destructive",
+        };
+    } else if (riskRating >= 6) {
+        return {
+            variant: "destructive" as const,
+            label: "High Risk",
+            colorClass: "text-orange-500",
+        };
+    } else if (riskRating >= 4) {
+        return {
+            variant: "secondary" as const,
+            label: "Medium Risk",
+            colorClass: "text-yellow-600",
+        };
+    } else if (riskRating >= 2) {
+        return {
+            variant: "secondary" as const,
+            label: "Low Risk",
+            colorClass: "text-blue-500",
+        };
+    } else {
+        return {
+            variant: "default" as const,
+            label: "Very Low Risk",
+            colorClass: "text-green-500",
+        };
     }
 }
 
@@ -231,12 +343,17 @@ function getChatTypeColor(chatType: string): string {
     }
 }
 
-onMounted(() => {
+onMounted(async () => {
     if (!authStore.isLoggedIn) {
         navigateTo("/login");
         return;
     }
-    fetchPlayerProfile();
+    await fetchPlayerProfile();
+
+    // Fetch CBL data if steam_id is available
+    if (player.value && player.value.steam_id) {
+        fetchCBLData(player.value.steam_id);
+    }
 });
 </script>
 
@@ -275,7 +392,7 @@ onMounted(() => {
                 </CardHeader>
                 <CardContent>
                     <div
-                        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+                        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4"
                     >
                         <div>
                             <div class="text-sm text-muted-foreground">
@@ -312,6 +429,145 @@ onMounted(() => {
                                 {{ formatDate(player.first_seen) }}
                             </div>
                         </div>
+                    </div>
+
+                    <!-- External Links -->
+                    <div class="pt-4 border-t">
+                        <div class="text-sm text-muted-foreground mb-3">
+                            External Links
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <a
+                                v-if="player.steam_id"
+                                :href="`https://steamcommunity.com/profiles/${player.steam_id}`"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#171a21] hover:bg-[#1b2838] text-white rounded-md transition-colors"
+                            >
+                                <ExternalLink :size="14" />
+                                <span>Steam</span>
+                            </a>
+                            <a
+                                v-if="player.steam_id"
+                                :href="`https://www.battlemetrics.com/players?filter[search]=${player.steam_id}`"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#f26a21] hover:bg-[#d85a15] text-white rounded-md transition-colors"
+                            >
+                                <ExternalLink :size="14" />
+                                <span>Battlemetrics</span>
+                            </a>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
+            <!-- CBL Reputation Card -->
+            <Card v-if="player.steam_id" class="mb-6">
+                <CardHeader>
+                    <div class="flex items-center justify-between">
+                        <CardTitle class="text-lg"
+                            >Community Ban List Reputation</CardTitle
+                        >
+                        <a
+                            :href="`https://communitybanlist.com/search/${player.steam_id}`"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                        >
+                            <span>View Full Profile</span>
+                            <ExternalLink :size="14" />
+                        </a>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <div v-if="cblLoading" class="flex justify-center py-4">
+                        <div
+                            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                        ></div>
+                    </div>
+                    <div
+                        v-else-if="cblData"
+                        class="grid grid-cols-1 md:grid-cols-3 gap-4"
+                    >
+                        <div class="text-center p-4 bg-muted/50 rounded-lg">
+                            <div class="text-sm text-muted-foreground mb-1">
+                                Reputation Points
+                            </div>
+                            <div
+                                class="text-3xl font-bold"
+                                :class="{
+                                    'text-destructive':
+                                        cblData.reputationPoints >= 6,
+                                    'text-orange-500':
+                                        cblData.reputationPoints >= 3 &&
+                                        cblData.reputationPoints < 6,
+                                    'text-green-500':
+                                        cblData.reputationPoints < 3,
+                                }"
+                            >
+                                {{ cblData.reputationPoints }}
+                            </div>
+                            <div
+                                v-if="cblData.reputationPointsMonthChange !== 0"
+                                class="text-xs mt-1"
+                                :class="{
+                                    'text-destructive':
+                                        cblData.reputationPointsMonthChange > 0,
+                                    'text-green-500':
+                                        cblData.reputationPointsMonthChange < 0,
+                                }"
+                            >
+                                {{
+                                    cblData.reputationPointsMonthChange > 0
+                                        ? "+"
+                                        : ""
+                                }}{{ cblData.reputationPointsMonthChange }} this
+                                month
+                            </div>
+                        </div>
+                        <div class="text-center p-4 bg-muted/50 rounded-lg">
+                            <div class="text-sm text-muted-foreground mb-1">
+                                Risk Rating
+                            </div>
+                            <div
+                                class="text-3xl font-bold"
+                                :class="
+                                    getRiskRatingInfo(cblData.riskRating)
+                                        .colorClass
+                                "
+                            >
+                                {{ cblData.riskRating }}/10
+                            </div>
+                            <Badge
+                                :variant="
+                                    getRiskRatingInfo(cblData.riskRating)
+                                        .variant
+                                "
+                                class="mt-2"
+                            >
+                                {{
+                                    getRiskRatingInfo(cblData.riskRating).label
+                                }}
+                            </Badge>
+                        </div>
+                        <div class="text-center p-4 bg-muted/50 rounded-lg">
+                            <div class="text-sm text-muted-foreground mb-1">
+                                Reputation Rank
+                            </div>
+                            <div class="text-3xl font-bold">
+                                #{{ cblData.reputationRank.toLocaleString() }}
+                            </div>
+                            <div class="text-xs text-muted-foreground mt-1">
+                                Global ranking
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="text-center py-4 text-muted-foreground">
+                        <p>No Community Ban List data available</p>
+                        <p class="text-xs mt-1">
+                            Player may not be in the CBL database
+                        </p>
                     </div>
                 </CardContent>
             </Card>
@@ -381,9 +637,7 @@ onMounted(() => {
                             {{ player.total_sessions }}
                         </div>
                         <div class="text-xs text-muted-foreground">
-                            ~{{
-                                formatPlayTime(player.total_play_time)
-                            }}
+                            ~{{ formatPlayTime(player.total_play_time) }}
                             playtime
                         </div>
                     </CardContent>
