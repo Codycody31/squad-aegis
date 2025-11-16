@@ -187,7 +187,7 @@ func DeleteServerBanListSubscription(ctx context.Context, database db.Executor, 
 
 // Enhanced Ban Functions
 
-func GetServerActiveBans(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]models.ServerBan, error) {
+func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]models.ServerBan, error) {
 	sql := `
 		SELECT DISTINCT ON (sb.steam_id)
 			sb.id, sb.server_id, sb.admin_id, u.username, u.steam_id, sb.steam_id, sb.reason,
@@ -206,12 +206,6 @@ func GetServerActiveBans(ctx context.Context, database db.Executor, serverId uui
 				FROM server_ban_list_subscriptions sbls
 				WHERE sbls.server_id = $1
 			)
-		)
-		AND (
-			-- Permanent bans or non-expired temporary bans
-			sb.duration = 0
-			OR
-			sb.created_at + (sb.duration || ' days')::interval > NOW()
 		)
 		ORDER BY sb.steam_id, sb.created_at DESC
 	`

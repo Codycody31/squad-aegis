@@ -39,8 +39,8 @@ func (s *Server) ServerBansCfgEnhanced(c *gin.Context) {
 		// Only return server-specific bans (for pushing to CBL)
 		err = s.generateServerSpecificBans(c, serverId, &banCfg, now)
 	} else {
-		// Return all active bans (server + subscribed ban lists + remote sources)
-		err = s.generateAllActiveBans(c, serverId, &banCfg, now, includeRemote)
+		// Return all bans (server + subscribed ban lists + remote sources)
+		err = s.generateAllBans(c, serverId, &banCfg, now, includeRemote)
 	}
 
 	if err != nil {
@@ -69,23 +69,15 @@ func (s *Server) generateServerSpecificBans(c *gin.Context, serverId uuid.UUID, 
 	return s.processBanRows(rows, banCfg, now)
 }
 
-func (s *Server) generateAllActiveBans(c *gin.Context, serverId uuid.UUID, banCfg *strings.Builder, now time.Time, includeRemote bool) error {
+func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *strings.Builder, now time.Time, includeRemote bool) error {
 	// Get all active bans using the enhanced core function
-	bans, err := core.GetServerActiveBans(c.Request.Context(), s.Dependencies.DB, serverId)
+	bans, err := core.GetServerBans(c.Request.Context(), s.Dependencies.DB, serverId)
 	if err != nil {
 		return err
 	}
 
 	// Process database bans
 	for _, ban := range bans {
-		// Skip expired bans
-		if ban.Duration > 0 {
-			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * (time.Hour * 24))
-			if now.After(expiryTime) {
-				continue
-			}
-		}
-
 		// Check if this Steam ID is in the ignore list
 		isIgnored, err := core.IsIgnoredSteamID(c.Request.Context(), s.Dependencies.DB, ban.SteamID)
 		if err != nil {
@@ -108,7 +100,7 @@ func (s *Server) generateAllActiveBans(c *gin.Context, serverId uuid.UUID, banCf
 
 		var expiryTimestamp string
 		if ban.Duration == 0 {
-			expiryTimestamp = "0"
+			expiryTimestamp = "9999999999"
 		} else {
 			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * (time.Hour * 24))
 			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
@@ -153,14 +145,6 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 			return err
 		}
 
-		// Skip expired bans
-		if duration > 0 {
-			expiryTime := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
-			if now.After(expiryTime) {
-				continue
-			}
-		}
-
 		// Format the ban entry in official Squad format
 		steamIDStr := strconv.FormatInt(steamIDInt, 10)
 
@@ -176,7 +160,7 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 
 		var expiryTimestamp string
 		if duration == 0 {
-			expiryTimestamp = "0"
+			expiryTimestamp = "9999999999"
 		} else {
 			expiryTime := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
 			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
@@ -280,12 +264,16 @@ func (s *Server) processCSVBans(c *gin.Context, body io.Reader, banCfg *strings.
 		// For CSV format, we assume permanent bans unless specified otherwise
 		expiry := "0"
 		if len(record) > 3 && record[3] != "" {
-			// If there's an expiry timestamp
-			if expiryTime, err := time.Parse(time.RFC3339, record[3]); err == nil {
-				if now.After(expiryTime) {
-					continue // Skip expired bans
+			if record[3] == "0" {
+				expiry = "9999999999"
+			} else {
+				// If there's an expiry timestamp
+				if expiryTime, err := time.Parse(time.RFC3339, record[3]); err == nil {
+					if now.After(expiryTime) {
+						continue // Skip expired bans
+					}
+					expiry = strconv.FormatInt(expiryTime.Unix(), 10)
 				}
-				expiry = strconv.FormatInt(expiryTime.Unix(), 10)
 			}
 		}
 
@@ -334,6 +322,8 @@ func (s *Server) processTextBans(c *gin.Context, body io.Reader, banCfg *strings
 					continue // Skip expired bans
 				}
 			}
+		} else {
+			expiryStr = "9999999999"
 		}
 
 		// Remote bans don't have admin info, so use "Remote" as admin name
