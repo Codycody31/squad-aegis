@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -38,7 +40,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 
 	// Query the database for bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -60,6 +62,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		var ruleTitle sql.NullString
 		var banListID sql.NullString
 		var banListName sql.NullString
+		var evidenceText sql.NullString
 		err := rows.Scan(
 			&ban.ID,
 			&ban.ServerID,
@@ -72,6 +75,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			&ruleTitle,
 			&banListID,
 			&banListName,
+			&evidenceText,
 			&ban.CreatedAt,
 			&ban.UpdatedAt,
 		)
@@ -104,11 +108,19 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			ban.BanListName = &banListName.String
 		}
 
+		// Set evidence text if present
+		if evidenceText.Valid {
+			ban.EvidenceText = &evidenceText.String
+		}
+
 		// Calculate if ban is permanent and expiry date
 		ban.Permanent = ban.Duration == 0
 		if !ban.Permanent {
 			ban.ExpiresAt = ban.CreatedAt.Add(time.Duration(ban.Duration) * time.Minute)
 		}
+
+		// Load evidence records for this ban
+		ban.Evidence, _ = s.loadBanEvidence(c.Request.Context(), ban.ID)
 
 		bans = append(bans, ban)
 	}
@@ -166,15 +178,15 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	}
 
 	// Insert the ban into the database (using steam_id directly)
-	var banID string
+	var banID uuid.UUID = uuid.New()
 	now := time.Now()
 
 	query := `
-		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, evidence_text, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id
 	`
-	args := []interface{}{uuid.New(), serverId, user.Id, steamID, request.Reason, request.Duration, now, now}
+	args := []interface{}{banID, serverId, user.Id, steamID, request.Reason, request.Duration, request.EvidenceText, now, now}
 
 	// Add rule_id and ban_list_id if provided
 	if request.RuleID != nil && *request.RuleID != "" {
@@ -191,18 +203,18 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 				return
 			}
 			query = `
-				INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, ban_list_id, created_at, updated_at)
+				INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, ban_list_id, evidence_text, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+				RETURNING id
+			`
+			args = append(args[:6], ruleUUID, banListUUID, request.EvidenceText, now, now)
+		} else {
+			query = `
+				INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, evidence_text, created_at, updated_at)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 				RETURNING id
 			`
-			args = append(args[:6], ruleUUID, banListUUID, now, now)
-		} else {
-			query = `
-				INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-				RETURNING id
-			`
-			args = append(args[:6], ruleUUID, now, now)
+			args = append(args[:6], ruleUUID, request.EvidenceText, now, now)
 		}
 	} else if request.BanListID != nil && *request.BanListID != "" {
 		banListUUID, err := uuid.Parse(*request.BanListID)
@@ -211,17 +223,27 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 			return
 		}
 		query = `
-			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, ban_list_id, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, ban_list_id, evidence_text, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			RETURNING id
 		`
-		args = append(args[:6], banListUUID, now, now)
+		args = append(args[:6], banListUUID, request.EvidenceText, now, now)
 	}
 
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&banID)
+	var returnedBanID string
+	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&returnedBanID)
 	if err != nil {
 		responses.BadRequest(c, "Failed to create ban", &gin.H{"error": err.Error()})
 		return
+	}
+
+	// Insert evidence records if provided
+	if len(request.Evidence) > 0 {
+		err = s.createBanEvidence(c.Request.Context(), banID.String(), serverId, request.Evidence)
+		if err != nil {
+			log.Error().Err(err).Str("banId", banID.String()).Msg("Failed to create ban evidence")
+			// Don't fail the entire ban creation, just log the error
+		}
 	}
 
 	// Also apply the ban via RCON if the server is online
@@ -240,10 +262,11 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 
 	// Create detailed audit log
 	auditData := map[string]interface{}{
-		"banId":    banID,
-		"steamId":  request.SteamID,
-		"reason":   request.Reason,
-		"duration": request.Duration,
+		"banId":         banID.String(),
+		"steamId":       request.SteamID,
+		"reason":        request.Reason,
+		"duration":      request.Duration,
+		"evidenceCount": len(request.Evidence),
 	}
 
 	// Add expiry information if not permanent
@@ -255,7 +278,7 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:create", auditData)
 
 	responses.Success(c, "Ban created successfully", &gin.H{
-		"banId": banID,
+		"banId": banID.String(),
 	})
 }
 
@@ -387,9 +410,10 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var ruleTitle sql.NullString
 	var banListID sql.NullString
 	var banListName sql.NullString
+	var evidenceText sql.NullString
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -407,6 +431,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&ruleTitle,
 		&banListID,
 		&banListName,
+		&evidenceText,
 		&currentBan.CreatedAt,
 		&currentBan.UpdatedAt,
 	)
@@ -439,6 +464,11 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	}
 	if banListName.Valid {
 		currentBan.BanListName = &banListName.String
+	}
+
+	// Set evidence text if present
+	if evidenceText.Valid {
+		currentBan.EvidenceText = &evidenceText.String
 	}
 
 	// Calculate if ban is permanent and expiry date
@@ -493,8 +523,18 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		argIndex++
 	}
 
-	// If no fields to update, return error
-	if len(updateFields) == 0 {
+	if request.EvidenceText != nil {
+		updateFields = append(updateFields, fmt.Sprintf("evidence_text = $%d", argIndex))
+		updateArgs = append(updateArgs, *request.EvidenceText)
+		argIndex++
+	}
+
+	// Check if evidence is being updated (separate from ban fields)
+	// Evidence can be nil (not updating), empty array (clearing evidence), or have items (updating evidence)
+	hasEvidenceUpdate := request.Evidence != nil
+
+	// If no fields to update and no evidence update, return error
+	if len(updateFields) == 0 && !hasEvidenceUpdate {
 		responses.BadRequest(c, "No fields to update", &gin.H{"error": "At least one field must be provided for update"})
 		return
 	}
@@ -528,6 +568,47 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		return
 	}
 
+	// Update evidence records if provided (including empty array to clear evidence)
+	if request.Evidence != nil {
+		// Use a transaction to ensure atomicity - if insert fails, rollback the delete
+		tx, txErr := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+		if txErr != nil {
+			log.Error().Err(txErr).Str("banId", banId.String()).Msg("Failed to begin transaction for evidence update")
+			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to start evidence update transaction"})
+			return
+		}
+		defer tx.Rollback()
+
+		// Delete existing evidence
+		_, delErr := tx.ExecContext(c.Request.Context(), `
+			DELETE FROM ban_evidence WHERE ban_id = $1
+		`, banId)
+		if delErr != nil {
+			log.Error().Err(delErr).Str("banId", banId.String()).Msg("Failed to delete old ban evidence")
+			tx.Rollback()
+			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to delete existing evidence"})
+			return
+		}
+
+		// Insert new evidence (if any)
+		if len(*request.Evidence) > 0 {
+			createErr := s.createBanEvidenceWithTx(c.Request.Context(), tx, banId.String(), serverId, *request.Evidence)
+			if createErr != nil {
+				log.Error().Err(createErr).Str("banId", banId.String()).Msg("Failed to create updated ban evidence")
+				tx.Rollback()
+				responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": createErr.Error()})
+				return
+			}
+		}
+
+		// Commit the transaction
+		if commitErr := tx.Commit(); commitErr != nil {
+			log.Error().Err(commitErr).Str("banId", banId.String()).Msg("Failed to commit evidence update transaction")
+			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to commit evidence update"})
+			return
+		}
+	}
+
 	// Get updated ban details for response and RCON
 	var updatedBan models.ServerBan
 	var updatedSteamIDInt int64
@@ -535,9 +616,10 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var updatedRuleTitle sql.NullString
 	var updatedBanListID sql.NullString
 	var updatedBanListName sql.NullString
+	var updatedEvidenceText sql.NullString
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -555,6 +637,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&updatedRuleTitle,
 		&updatedBanListID,
 		&updatedBanListName,
+		&updatedEvidenceText,
 		&updatedBan.CreatedAt,
 		&updatedBan.UpdatedAt,
 	)
@@ -584,6 +667,14 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	if updatedBanListName.Valid {
 		updatedBan.BanListName = &updatedBanListName.String
 	}
+
+	// Set evidence text if present
+	if updatedEvidenceText.Valid {
+		updatedBan.EvidenceText = &updatedEvidenceText.String
+	}
+
+	// Load evidence records
+	updatedBan.Evidence, _ = s.loadBanEvidence(c.Request.Context(), updatedBan.ID)
 
 	// Calculate if ban is permanent and expiry date
 	updatedBan.Permanent = updatedBan.Duration == 0
@@ -696,4 +787,454 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 	// Set the content type and send the response
 	c.Header("Content-Type", "text/plain")
 	c.String(http.StatusOK, banCfg.String())
+}
+
+// loadBanEvidence loads all evidence records for a given ban
+func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.BanEvidence, error) {
+	rows, err := s.Dependencies.DB.QueryContext(ctx, `
+		SELECT id, ban_id, evidence_type, clickhouse_table, record_id, server_id, event_time, metadata, file_path, file_name, file_size, file_type, text_content, created_at, updated_at
+		FROM ban_evidence
+		WHERE ban_id = $1
+		ORDER BY COALESCE(event_time, created_at) DESC
+	`, banID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var evidence []models.BanEvidence
+	for rows.Next() {
+		var ev models.BanEvidence
+		var metadataJSON []byte
+		var clickhouseTable, recordID sql.NullString
+		var eventTime sql.NullTime
+		var filePath, fileName, fileType, textContent sql.NullString
+		var fileSize sql.NullInt64
+
+		err := rows.Scan(
+			&ev.ID,
+			&ev.BanID,
+			&ev.EvidenceType,
+			&clickhouseTable,
+			&recordID,
+			&ev.ServerID,
+			&eventTime,
+			&metadataJSON,
+			&filePath,
+			&fileName,
+			&fileSize,
+			&fileType,
+			&textContent,
+			&ev.CreatedAt,
+			&ev.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Set nullable fields
+		if clickhouseTable.Valid {
+			ev.ClickhouseTable = &clickhouseTable.String
+		}
+		if recordID.Valid {
+			ev.RecordID = &recordID.String
+		}
+		if eventTime.Valid {
+			ev.EventTime = &eventTime.Time
+		}
+		if filePath.Valid {
+			ev.FilePath = &filePath.String
+		}
+		if fileName.Valid {
+			ev.FileName = &fileName.String
+		}
+		if fileSize.Valid {
+			ev.FileSize = &fileSize.Int64
+		}
+		if fileType.Valid {
+			ev.FileType = &fileType.String
+		}
+		if textContent.Valid {
+			ev.TextContent = &textContent.String
+		}
+
+		// Fetch metadata from ClickHouse if not already stored (only for ClickHouse events)
+		if ev.EvidenceType != "file_upload" && ev.EvidenceType != "text_paste" {
+			if len(metadataJSON) == 0 || string(metadataJSON) == "{}" {
+				if ev.ClickhouseTable != nil && ev.RecordID != nil {
+					metadata, err := s.fetchEvidenceMetadataFromClickHouse(ctx, *ev.ClickhouseTable, *ev.RecordID, ev.ServerID, ev.EvidenceType)
+					if err != nil {
+						log.Warn().Err(err).
+							Str("table", *ev.ClickhouseTable).
+							Str("record_id", *ev.RecordID).
+							Msg("Failed to fetch evidence metadata from ClickHouse")
+						// Continue with empty metadata if fetch fails
+						ev.Metadata = make(map[string]interface{})
+					} else {
+						ev.Metadata = metadata
+					}
+				} else {
+					ev.Metadata = make(map[string]interface{})
+				}
+			} else {
+				// Parse existing metadata JSON
+				var metadata map[string]interface{}
+				if err := json.Unmarshal(metadataJSON, &metadata); err == nil {
+					ev.Metadata = metadata
+				} else {
+					ev.Metadata = make(map[string]interface{})
+				}
+			}
+		} else {
+			// For file/text evidence, parse metadata if present
+			if len(metadataJSON) > 0 && string(metadataJSON) != "{}" {
+				var metadata map[string]interface{}
+				if err := json.Unmarshal(metadataJSON, &metadata); err == nil {
+					ev.Metadata = metadata
+				} else {
+					ev.Metadata = make(map[string]interface{})
+				}
+			} else {
+				ev.Metadata = make(map[string]interface{})
+			}
+		}
+
+		evidence = append(evidence, ev)
+	}
+
+	return evidence, nil
+}
+
+// fetchEvidenceMetadataFromClickHouse fetches the full event data from ClickHouse
+func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableName, recordID string, serverID uuid.UUID, evidenceType string) (map[string]interface{}, error) {
+	if s.Dependencies.Clickhouse == nil {
+		return nil, fmt.Errorf("ClickHouse client not available")
+	}
+
+	var query string
+	var args []interface{}
+
+	switch evidenceType {
+	case "player_died":
+		query = `
+			SELECT 
+				chain_id,
+				event_time,
+				victim_name,
+				weapon,
+				attacker_player_controller,
+				attacker_eos,
+				toString(attacker_steam) as attacker_steam,
+				teamkill,
+				damage
+			FROM squad_aegis.server_player_died_events
+			WHERE server_id = ? AND chain_id = ?
+			LIMIT 1
+		`
+		args = []interface{}{serverID.String(), recordID}
+
+	case "player_wounded":
+		query = `
+			SELECT 
+				chain_id,
+				event_time,
+				victim_name,
+				weapon,
+				attacker_player_controller,
+				attacker_eos,
+				toString(attacker_steam) as attacker_steam,
+				teamkill,
+				damage
+			FROM squad_aegis.server_player_wounded_events
+			WHERE server_id = ? AND chain_id = ?
+			LIMIT 1
+		`
+		args = []interface{}{serverID.String(), recordID}
+
+	case "player_damaged":
+		query = `
+			SELECT 
+				chain_id,
+				event_time,
+				victim_name,
+				weapon,
+				attacker_controller,
+				attacker_eos,
+				toString(attacker_steam) as attacker_steam,
+				damage
+			FROM squad_aegis.server_player_damaged_events
+			WHERE server_id = ? AND chain_id = ?
+			LIMIT 1
+		`
+		args = []interface{}{serverID.String(), recordID}
+
+	case "chat_message":
+		// For chat messages, record_id is message_id (UUID)
+		query = `
+			SELECT 
+				toString(message_id) as message_id,
+				sent_at as event_time,
+				player_name,
+				chat_type,
+				message,
+				steam_id,
+				eos_id
+			FROM squad_aegis.server_player_chat_messages
+			WHERE server_id = ? AND toString(message_id) = ?
+			LIMIT 1
+		`
+		args = []interface{}{serverID.String(), recordID}
+
+	case "player_connected":
+		query = `
+			SELECT 
+				chain_id,
+				event_time,
+				player_controller,
+				ip,
+				steam,
+				eos
+			FROM squad_aegis.server_player_connected_events
+			WHERE server_id = ? AND chain_id = ?
+			LIMIT 1
+		`
+		args = []interface{}{serverID.String(), recordID}
+
+	default:
+		return nil, fmt.Errorf("unknown evidence type: %s", evidenceType)
+	}
+
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query ClickHouse: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, fmt.Errorf("evidence record not found in ClickHouse")
+	}
+
+	metadata := make(map[string]interface{})
+
+	switch evidenceType {
+	case "player_died", "player_wounded":
+		var chainID, victimName, weapon, attackerController, attackerEos, attackerSteam string
+		var eventTime string
+		var teamkill uint8
+		var damage float32
+
+		err := rows.Scan(&chainID, &eventTime, &victimName, &weapon, &attackerController, &attackerEos, &attackerSteam, &teamkill, &damage)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		metadata["chain_id"] = chainID
+		metadata["event_time"] = eventTime
+		metadata["victim_name"] = victimName
+		metadata["weapon"] = weapon
+		metadata["attacker_player_controller"] = attackerController
+		metadata["attacker_eos"] = attackerEos
+		metadata["attacker_steam"] = attackerSteam
+		metadata["teamkill"] = teamkill == 1
+		metadata["damage"] = damage
+
+	case "player_damaged":
+		var chainID, victimName, weapon, attackerController, attackerEos, attackerSteam string
+		var eventTime string
+		var damage float32
+
+		err := rows.Scan(&chainID, &eventTime, &victimName, &weapon, &attackerController, &attackerEos, &attackerSteam, &damage)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		metadata["chain_id"] = chainID
+		metadata["event_time"] = eventTime
+		metadata["victim_name"] = victimName
+		metadata["weapon"] = weapon
+		metadata["attacker_controller"] = attackerController
+		metadata["attacker_eos"] = attackerEos
+		metadata["attacker_steam"] = attackerSteam
+		metadata["damage"] = damage
+
+	case "chat_message":
+		var messageID, playerName, chatType, message, eosID string
+		var eventTime string
+		var steamIDVal uint64
+
+		err := rows.Scan(&messageID, &eventTime, &playerName, &chatType, &message, &steamIDVal, &eosID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		metadata["message_id"] = messageID
+		metadata["event_time"] = eventTime
+		metadata["sent_at"] = eventTime
+		metadata["player_name"] = playerName
+		metadata["chat_type"] = chatType
+		metadata["message"] = message
+		metadata["steam_id"] = steamIDVal
+		metadata["eos_id"] = eosID
+
+	case "player_connected":
+		var chainID, playerController, ip, steam, eos string
+		var eventTime string
+
+		err := rows.Scan(&chainID, &eventTime, &playerController, &ip, &steam, &eos)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		metadata["chain_id"] = chainID
+		metadata["event_time"] = eventTime
+		metadata["player_controller"] = playerController
+		metadata["ip"] = ip
+		metadata["steam"] = steam
+		metadata["eos"] = eos
+	}
+
+	return metadata, nil
+}
+
+// createBanEvidence creates evidence records for a ban
+func (s *Server) createBanEvidence(ctx context.Context, banID string, serverID uuid.UUID, evidence []models.BanEvidenceCreateItem) error {
+	if len(evidence) == 0 {
+		return nil
+	}
+
+	// Start a transaction for batch insert
+	tx, err := s.Dependencies.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO ban_evidence (id, ban_id, evidence_type, clickhouse_table, record_id, server_id, event_time, metadata, file_path, file_name, file_size, file_type, text_content, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	for _, ev := range evidence {
+		// Convert metadata to JSON - always ensure we have valid JSON (empty object if nil)
+		var metadataJSON []byte
+		if ev.Metadata != nil && len(ev.Metadata) > 0 {
+			var marshalErr error
+			metadataJSON, marshalErr = json.Marshal(ev.Metadata)
+			if marshalErr != nil {
+				log.Error().Err(marshalErr).Msg("Failed to marshal evidence metadata")
+				metadataJSON = []byte("{}")
+			}
+		} else {
+			// Ensure we always have valid JSON, even if metadata is nil or empty
+			metadataJSON = []byte("{}")
+		}
+
+		// Handle event_time - use current time for file/text evidence if not provided
+		var eventTime interface{}
+		if ev.EventTime != nil {
+			eventTime = *ev.EventTime
+		} else if ev.EvidenceType == "file_upload" || ev.EvidenceType == "text_paste" {
+			eventTime = now
+		} else {
+			eventTime = nil
+		}
+
+		_, err = stmt.ExecContext(ctx,
+			uuid.New(),
+			banID,
+			ev.EvidenceType,
+			ev.ClickhouseTable,
+			ev.RecordID,
+			serverID,
+			eventTime,
+			metadataJSON,
+			ev.FilePath,
+			ev.FileName,
+			ev.FileSize,
+			ev.FileType,
+			ev.TextContent,
+			now,
+			now,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert evidence: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// createBanEvidenceWithTx creates evidence records for a ban using an existing transaction
+func (s *Server) createBanEvidenceWithTx(ctx context.Context, tx *sql.Tx, banID string, serverID uuid.UUID, evidence []models.BanEvidenceCreateItem) error {
+	if len(evidence) == 0 {
+		return nil
+	}
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO ban_evidence (id, ban_id, evidence_type, clickhouse_table, record_id, server_id, event_time, metadata, file_path, file_name, file_size, file_type, text_content, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	for _, ev := range evidence {
+		// Convert metadata to JSON - always ensure we have valid JSON (empty object if nil)
+		var metadataJSON []byte
+		if ev.Metadata != nil && len(ev.Metadata) > 0 {
+			var marshalErr error
+			metadataJSON, marshalErr = json.Marshal(ev.Metadata)
+			if marshalErr != nil {
+				log.Error().Err(marshalErr).Msg("Failed to marshal evidence metadata")
+				metadataJSON = []byte("{}")
+			}
+		} else {
+			// Ensure we always have valid JSON, even if metadata is nil or empty
+			metadataJSON = []byte("{}")
+		}
+
+		// Handle event_time - use current time for file/text evidence if not provided
+		var eventTime interface{}
+		if ev.EventTime != nil {
+			eventTime = *ev.EventTime
+		} else if ev.EvidenceType == "file_upload" || ev.EvidenceType == "text_paste" {
+			eventTime = now
+		} else {
+			eventTime = nil
+		}
+
+		_, err = stmt.ExecContext(ctx,
+			uuid.New(),
+			banID,
+			ev.EvidenceType,
+			ev.ClickhouseTable,
+			ev.RecordID,
+			serverID,
+			eventTime,
+			metadataJSON,
+			ev.FilePath,
+			ev.FileName,
+			ev.FileSize,
+			ev.FileType,
+			ev.TextContent,
+			now,
+			now,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert evidence: %w", err)
+		}
+	}
+
+	return nil
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, nextTick } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import {
@@ -44,6 +44,12 @@ import {
     SelectTrigger,
     SelectValue,
 } from "~/components/ui/select";
+import {
+    Tabs,
+    TabsList,
+    TabsTrigger,
+    TabsContent,
+} from "~/components/ui/tabs";
 import { Plus, Trash2 } from "lucide-vue-next";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
@@ -71,12 +77,43 @@ const searchQuery = ref("");
 const showAddBanDialog = ref(false);
 const showEditBanDialog = ref(false);
 const showBanListDialog = ref(false);
+const showEvidenceViewDialog = ref(false);
+const viewingBanEvidence = ref<BannedPlayer | null>(null);
 const addBanLoading = ref(false);
 const editBanLoading = ref(false);
 const selectedBanListId = ref("");
 const subscribing = ref(false);
 const unsubscribing = ref<string>("");
 const editingBan = ref<BannedPlayer | null>(null);
+const evidenceSearchQuery = ref("");
+const evidenceSearchResults = ref<any[]>([]);
+const selectedEvidence = ref<any[]>([]);
+const isSearchingEvidence = ref(false);
+const evidenceText = ref("");
+const evidenceSearchType = ref("player_died");
+const evidenceSearchSteamId = ref("");
+const uploadedFiles = ref<any[]>([]);
+const textEvidenceItems = ref<any[]>([]);
+const isUploadingFile = ref(false);
+const evidenceTab = ref("events"); // 'events', 'files', 'text'
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const fileInputRefEdit = ref<HTMLInputElement | null>(null);
+
+interface BanEvidence {
+    id: string;
+    evidence_type: string;
+    clickhouse_table?: string | null;
+    record_id?: string | null;
+    event_time?: string | null;
+    metadata?: any;
+    // File upload evidence fields
+    file_path?: string | null;
+    file_name?: string | null;
+    file_size?: number | null;
+    file_type?: string | null;
+    // Text paste evidence field
+    text_content?: string | null;
+}
 
 interface BannedPlayer {
     id: string;
@@ -97,6 +134,8 @@ interface BannedPlayer {
     rule_name?: string;
     rule_number?: string;
     player_name?: string;
+    evidence_text?: string;
+    evidence?: BanEvidence[];
 }
 
 interface BannedPlayersResponse {
@@ -118,6 +157,7 @@ const formSchema = toTypedSchema(
         duration: z.number().min(0, "Duration must be at least 0"),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
+        evidence_text: z.string().optional(),
     }),
 );
 
@@ -128,6 +168,7 @@ const editFormSchema = toTypedSchema(
         duration: z.number().min(0, "Duration must be at least 0"),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
+        evidence_text: z.string().optional(),
     }),
 );
 
@@ -141,6 +182,7 @@ const form = useForm({
         duration: 24,
         ban_list_id: "",
         rule_id: "",
+        evidence_text: "",
     },
 });
 
@@ -218,7 +260,7 @@ async function fetchBannedPlayers() {
 
 // Function to add a ban
 async function addBan(values: any) {
-    const { steam_id, player_name, reason, duration, ban_list_id, rule_id } =
+    const { steam_id, player_name, reason, duration, ban_list_id, rule_id, evidence_text } =
         values;
 
     addBanLoading.value = true;
@@ -237,6 +279,9 @@ async function addBan(values: any) {
     }
 
     try {
+        // Clean and validate steam_id
+        const cleanId = cleanSteamId(steam_id);
+
         // Enhance the reason with player name if provided
         let enhancedReason = reason;
         if (player_name && player_name.trim()) {
@@ -244,7 +289,7 @@ async function addBan(values: any) {
         }
 
         const requestBody: any = {
-            steam_id,
+            steam_id: cleanId,
             reason: enhancedReason,
             duration,
         };
@@ -257,6 +302,48 @@ async function addBan(values: any) {
         // Add rule_id if selected
         if (rule_id && rule_id.trim()) {
             requestBody.rule_id = rule_id;
+        }
+
+        // Add evidence text if provided
+        if (evidence_text && evidence_text.trim()) {
+            requestBody.evidence_text = evidence_text;
+        }
+
+        // Combine all evidence types
+        const allEvidence: any[] = [];
+
+        // Add ClickHouse event evidence
+        if (selectedEvidence.value.length > 0) {
+            allEvidence.push(...selectedEvidence.value.map((ev) => ({
+                evidence_type: ev.evidence_type,
+                clickhouse_table: ev.clickhouse_table,
+                record_id: ev.record_id,
+                event_time: ev.event_time,
+                metadata: ev.metadata || {},
+            })));
+        }
+
+        // Add file upload evidence
+        if (uploadedFiles.value.length > 0) {
+            allEvidence.push(...uploadedFiles.value.map((file) => ({
+                evidence_type: "file_upload",
+                file_path: file.file_path,
+                file_name: file.file_name,
+                file_size: file.file_size,
+                file_type: file.file_type,
+            })));
+        }
+
+        // Add text paste evidence
+        if (textEvidenceItems.value.length > 0) {
+            allEvidence.push(...textEvidenceItems.value.map((text) => ({
+                evidence_type: "text_paste",
+                text_content: text.text_content,
+            })));
+        }
+
+        if (allEvidence.length > 0) {
+            requestBody.evidence = allEvidence;
         }
 
         const { data, error: fetchError } = await useFetch(
@@ -276,6 +363,12 @@ async function addBan(values: any) {
 
         // Reset form and close dialog
         form.resetForm();
+        selectedEvidence.value = [];
+        evidenceText.value = "";
+        uploadedFiles.value = [];
+        textEvidenceItems.value = [];
+        evidenceSearchResults.value = [];
+        evidenceTab.value = "events";
         showAddBanDialog.value = false;
 
         toast({
@@ -341,7 +434,7 @@ async function removeBan(banId: string) {
 
 // Function to edit a ban
 async function editBan(values: any) {
-    const { reason, duration, ban_list_id, rule_id } = values;
+    const { reason, duration, ban_list_id, rule_id, evidence_text } = values;
 
     if (!editingBan.value) {
         error.value = "No ban selected for editing";
@@ -391,8 +484,53 @@ async function editBan(values: any) {
             requestBody.rule_id = newRuleId || null;
         }
 
+        // Handle evidence text changes
+        const currentEvidenceText = editingBan.value.evidence_text || "";
+        const newEvidenceText = evidence_text || "";
+
+        if (currentEvidenceText !== newEvidenceText) {
+            requestBody.evidence_text = newEvidenceText;
+        }
+
+        // Combine all evidence types
+        const allEvidence: any[] = [];
+
+        // Add ClickHouse event evidence
+        if (selectedEvidence.value.length > 0) {
+            allEvidence.push(...selectedEvidence.value.map((ev) => ({
+                evidence_type: ev.evidence_type,
+                clickhouse_table: ev.clickhouse_table,
+                record_id: ev.record_id,
+                event_time: ev.event_time,
+                metadata: ev.metadata || {},
+            })));
+        }
+
+        // Add file upload evidence
+        if (uploadedFiles.value.length > 0) {
+            allEvidence.push(...uploadedFiles.value.map((file) => ({
+                evidence_type: "file_upload",
+                file_path: file.file_path,
+                file_name: file.file_name,
+                file_size: file.file_size,
+                file_type: file.file_type,
+            })));
+        }
+
+        // Add text paste evidence
+        if (textEvidenceItems.value.length > 0) {
+            allEvidence.push(...textEvidenceItems.value.map((text) => ({
+                evidence_type: "text_paste",
+                text_content: text.text_content,
+            })));
+        }
+
+        if (allEvidence.length > 0) {
+            requestBody.evidence = allEvidence;
+        }
+
         // If no changes were made, just close the dialog
-        if (Object.keys(requestBody).length === 0) {
+        if (Object.keys(requestBody).length === 0 && allEvidence.length === 0) {
             closeEditBanDialog();
             return;
         }
@@ -440,6 +578,39 @@ function getRuleDetails(ruleId: string) {
 async function openEditBanDialog(ban: BannedPlayer) {
     editingBan.value = ban;
 
+    // Load existing evidence if present
+    selectedEvidence.value = [];
+    uploadedFiles.value = [];
+    textEvidenceItems.value = [];
+    
+    if (ban.evidence && ban.evidence.length > 0) {
+        ban.evidence.forEach((ev) => {
+            if (ev.evidence_type === "file_upload") {
+                uploadedFiles.value.push({
+                    evidence_type: "file_upload",
+                    file_path: ev.file_path,
+                    file_name: ev.file_name,
+                    file_size: ev.file_size,
+                    file_type: ev.file_type,
+                });
+            } else if (ev.evidence_type === "text_paste") {
+                textEvidenceItems.value.push({
+                    evidence_type: "text_paste",
+                    text_content: ev.text_content,
+                });
+            } else {
+                // ClickHouse event evidence
+                selectedEvidence.value.push({
+                    evidence_type: ev.evidence_type,
+                    clickhouse_table: ev.clickhouse_table,
+                    record_id: ev.record_id,
+                    event_time: ev.event_time,
+                    metadata: ev.metadata || {},
+                });
+            }
+        });
+    }
+
     // Ensure rules are loaded
     if (serverRules.value.length === 0) {
         await fetchServerRules();
@@ -465,6 +636,90 @@ async function openEditBanDialog(ban: BannedPlayer) {
 function closeEditBanDialog() {
     showEditBanDialog.value = false;
     editingBan.value = null;
+    selectedEvidence.value = [];
+    uploadedFiles.value = [];
+    textEvidenceItems.value = [];
+    evidenceSearchResults.value = [];
+    evidenceTab.value = "events";
+}
+
+// Function to open evidence view dialog
+function openEvidenceViewDialog(ban: BannedPlayer) {
+    viewingBanEvidence.value = ban;
+    showEvidenceViewDialog.value = true;
+}
+
+// Function to close evidence view dialog
+function closeEvidenceViewDialog() {
+    showEvidenceViewDialog.value = false;
+    viewingBanEvidence.value = null;
+}
+
+// Function to get evidence count by type
+function getEvidenceCounts(ban: BannedPlayer | null) {
+    if (!ban || !ban.evidence) {
+        return { events: 0, files: 0, text: 0 };
+    }
+    const events = ban.evidence.filter((e) => 
+        e.evidence_type !== "file_upload" && e.evidence_type !== "text_paste"
+    ).length;
+    const files = ban.evidence.filter((e) => e.evidence_type === "file_upload").length;
+    const text = ban.evidence.filter((e) => e.evidence_type === "text_paste").length;
+    return { events, files, text };
+}
+
+// Function to download evidence file
+async function downloadEvidenceFile(filePath: string, fileName: string) {
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(
+        runtimeConfig.public.sessionCookieName as string,
+    );
+    const token = cookieToken.value;
+
+    if (!token) {
+        toast({
+            title: "Error",
+            description: "Authentication required",
+            variant: "destructive",
+        });
+        return;
+    }
+
+    try {
+        // Extract file ID from path (last part before extension)
+        const fileId = filePath.split('/').pop()?.split('.')[0];
+        if (!fileId) {
+            throw new Error("Invalid file path");
+        }
+
+        const url = `${runtimeConfig.public.backendApi}/servers/${serverId}/evidence/files/${fileId}`;
+        const response = await fetch(url, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error("Failed to download file");
+        }
+
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+    } catch (err: any) {
+        console.error("File download error:", err);
+        toast({
+            title: "Error",
+            description: err.message || "Failed to download file",
+            variant: "destructive",
+        });
+    }
 }
 
 // Function to fetch ban lists
@@ -785,6 +1040,275 @@ function calculateSuggestedDuration() {
     }
 }
 
+// Function to open evidence dialog
+// Helper function to clean and validate steam_id
+function cleanSteamId(steamId: string | number | undefined | null): string {
+    if (!steamId) {
+        throw new Error("Steam ID is required");
+    }
+    // Remove any quotes, whitespace, and ensure it's a number string
+    const cleaned = String(steamId).trim().replace(/['"]/g, '');
+    
+    // Validate it's a valid number
+    if (!/^\d+$/.test(cleaned)) {
+        throw new Error("Steam ID must be a valid number");
+    }
+    
+    return cleaned;
+}
+
+// Function to search evidence inline (no longer opens a dialog)
+async function searchEvidenceInline(steamId: string) {
+    try {
+        const cleanId = cleanSteamId(steamId);
+        evidenceSearchSteamId.value = cleanId;
+        isSearchingEvidence.value = true;
+        evidenceSearchResults.value = [];
+
+        const runtimeConfig = useRuntimeConfig();
+        const cookieToken = useCookie(
+            runtimeConfig.public.sessionCookieName as string,
+        );
+        const token = cookieToken.value;
+
+        if (!token) {
+            toast({
+                title: "Error",
+                description: "Authentication required",
+                variant: "destructive",
+            });
+            isSearchingEvidence.value = false;
+            return;
+        }
+
+        const params = new URLSearchParams({
+            steam_id: cleanId,
+            event_type: evidenceSearchType.value,
+        });
+
+        const { data, error: fetchError } = await useFetch(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/events/search?${params.toString()}`,
+            {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            },
+        );
+
+        if (fetchError.value) {
+            throw new Error(
+                fetchError.value.message || "Failed to search for evidence",
+            );
+        }
+
+        if (data.value && (data.value as any).data) {
+            evidenceSearchResults.value = (data.value as any).data.events || [];
+        }
+    } catch (err: any) {
+        console.error("Failed to search evidence:", err);
+        toast({
+            title: "Error",
+            description: err.message || "Failed to search for evidence",
+            variant: "destructive",
+        });
+    } finally {
+        isSearchingEvidence.value = false;
+    }
+}
+
+
+// Function to toggle evidence selection
+function toggleEvidenceSelection(event: any) {
+    // Use record_id if available (from fixed API), otherwise fall back to event_id/message_id
+    const recordId = event.record_id || event.event_id || event.message_id;
+    
+    const index = selectedEvidence.value.findIndex(
+        (e) => e.record_id === recordId,
+    );
+
+    if (index > -1) {
+        selectedEvidence.value.splice(index, 1);
+    } else {
+        selectedEvidence.value.push({
+            evidence_type: evidenceSearchType.value,
+            clickhouse_table: getClickhouseTableForType(evidenceSearchType.value),
+            record_id: recordId,
+            event_time: event.event_time || event.sent_at,
+            metadata: event,
+        });
+    }
+}
+
+// Function to check if evidence is selected
+function isEvidenceSelected(event: any): boolean {
+    // Use record_id if available (from fixed API), otherwise fall back to event_id/message_id
+    const recordId = event.record_id || event.event_id || event.message_id;
+    return selectedEvidence.value.some((e) => e.record_id === recordId);
+}
+
+// Function to get ClickHouse table name for event type
+function getClickhouseTableForType(type: string): string {
+    const tableMap: Record<string, string> = {
+        player_died: "server_player_died_events",
+        player_wounded: "server_player_wounded_events",
+        player_damaged: "server_player_damaged_events",
+        chat_message: "server_player_chat_messages",
+        player_connected: "server_player_connected_events",
+    };
+    return tableMap[type] || "server_player_died_events";
+}
+
+// Function to format event for display
+function formatEventDescription(event: any, type: string): string {
+    if (type === "player_died" || type === "player_wounded") {
+        const victim = event.victim_name || "Unknown";
+        const weapon = event.weapon || "Unknown";
+        const teamkill = event.teamkill ? " (TEAMKILL)" : "";
+        return `Killed ${victim} with ${weapon}${teamkill}`;
+    } else if (type === "player_damaged") {
+        const victim = event.victim_name || "Unknown";
+        const damage = event.damage || 0;
+        return `Damaged ${victim} for ${damage} HP`;
+    } else if (type === "chat_message") {
+        return event.message || "No message";
+    } else if (type === "player_connected") {
+        return `Connected from ${event.ip || "Unknown IP"}`;
+    } else if (type === "file_upload") {
+        return event.file_name || "Uploaded file";
+    } else if (type === "text_paste") {
+        const text = event.text_content || "";
+        return text.length > 50 ? text.substring(0, 50) + "..." : text;
+    }
+    return "Event";
+}
+
+// Function to handle file upload
+async function handleFileUpload(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const files = target.files;
+    if (!files || files.length === 0) return;
+
+    isUploadingFile.value = true;
+    const runtimeConfig = useRuntimeConfig();
+    const cookieToken = useCookie(
+        runtimeConfig.public.sessionCookieName as string,
+    );
+    const token = cookieToken.value;
+
+    if (!token) {
+        toast({
+            title: "Error",
+            description: "Authentication required",
+            variant: "destructive",
+        });
+        isUploadingFile.value = false;
+        return;
+    }
+
+    try {
+        for (const file of Array.from(files)) {
+            const formData = new FormData();
+            formData.append("file", file);
+
+            const { data, error: uploadError } = await useFetch(
+                `${runtimeConfig.public.backendApi}/servers/${serverId}/evidence/upload`,
+                {
+                    method: "POST",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: formData,
+                },
+            );
+
+            if (uploadError.value) {
+                throw new Error(uploadError.value.message || "Failed to upload file");
+            }
+
+            if (data.value && (data.value as any).data) {
+                const fileData = (data.value as any).data;
+                uploadedFiles.value.push({
+                    evidence_type: "file_upload",
+                    file_path: fileData.file_path,
+                    file_name: fileData.file_name,
+                    file_size: fileData.file_size,
+                    file_type: fileData.file_type,
+                    file_id: fileData.file_id,
+                });
+            }
+        }
+
+        toast({
+            title: "Success",
+            description: `Uploaded ${files.length} file(s) successfully`,
+        });
+    } catch (err: any) {
+        console.error("File upload error:", err);
+        toast({
+            title: "Error",
+            description: err.message || "Failed to upload file",
+            variant: "destructive",
+        });
+    } finally {
+        isUploadingFile.value = false;
+        // Reset file input safely using nextTick to avoid DOM issues
+        // Wait for Vue to finish its update cycle before resetting
+        nextTick(() => {
+            try {
+                if (target && target.value !== undefined) {
+                    target.value = "";
+                }
+            } catch (resetErr) {
+                // Ignore errors when resetting - element might have been removed or is no longer usable
+                // This is safe to ignore as the input will reset naturally on next interaction
+                console.debug("File input reset skipped (safe to ignore):", resetErr);
+            }
+        });
+    }
+}
+
+// Function to remove uploaded file
+function removeUploadedFile(index: number) {
+    uploadedFiles.value.splice(index, 1);
+}
+
+// Function to add text evidence
+function addTextEvidence() {
+    if (!evidenceText.value.trim()) {
+        toast({
+            title: "Error",
+            description: "Please enter some text",
+            variant: "destructive",
+        });
+        return;
+    }
+
+    textEvidenceItems.value.push({
+        evidence_type: "text_paste",
+        text_content: evidenceText.value.trim(),
+    });
+
+    evidenceText.value = "";
+
+    toast({
+        title: "Success",
+        description: "Text evidence added",
+    });
+}
+
+// Function to remove text evidence
+function removeTextEvidence(index: number) {
+    textEvidenceItems.value.splice(index, 1);
+}
+
+// Function to format file size
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+}
+
 // Setup auto-refresh
 onMounted(async () => {
     await fetchBanLists();
@@ -820,10 +1344,10 @@ function copyBanCfgUrl() {
 </script>
 
 <template>
-    <div class="p-4">
-        <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold">Banned Players</h1>
-            <div class="flex gap-2">
+    <div class="p-3 sm:p-4">
+        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0 mb-3 sm:mb-4">
+            <h1 class="text-xl sm:text-2xl font-bold">Banned Players</h1>
+            <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                 <Form
                     v-slot="{ handleSubmit }"
                     as=""
@@ -838,7 +1362,7 @@ function copyBanCfgUrl() {
                         rule_id: '',
                     }"
                 >
-                    <Dialog v-model:open="showAddBanDialog">
+                    <Dialog v-model:open="showAddBanDialog" @update:open="(open) => { if (!open) { selectedEvidence = []; evidenceText = ''; } }">
                         <DialogTrigger asChild>
                             <Button
                                 v-if="
@@ -847,15 +1371,16 @@ function copyBanCfgUrl() {
                                         'ban',
                                     )
                                 "
+                                class="w-full sm:w-auto text-sm sm:text-base"
                                 >Add Ban Manually</Button
                             >
                         </DialogTrigger>
                         <DialogContent
-                            class="sm:max-w-[500px] max-h-[90vh] overflow-y-auto"
+                            class="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto p-4 sm:p-6"
                         >
                             <DialogHeader>
-                                <DialogTitle>Add New Ban</DialogTitle>
-                                <DialogDescription>
+                                <DialogTitle class="text-base sm:text-lg">Add New Ban</DialogTitle>
+                                <DialogDescription class="text-xs sm:text-sm">
                                     Enter the details of the player you want to
                                     ban. You can optionally assign the ban to a
                                     shared ban list.
@@ -1128,6 +1653,244 @@ function copyBanCfgUrl() {
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
+
+                                    <FormField
+                                        name="evidence_text"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel
+                                                >Evidence Description (Optional)</FormLabel
+                                            >
+                                            <FormControl>
+                                                <Textarea
+                                                    placeholder="Describe the evidence for this ban..."
+                                                    v-bind="componentField"
+                                                    rows="2"
+                                                />
+                                            </FormControl>
+                                            <FormDescription>
+                                                Provide additional context about the evidence
+                                            </FormDescription>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+
+                                    <!-- Evidence Section with Tabs -->
+                                    <div class="border rounded-md p-3 bg-muted/50">
+                                        <h4 class="font-medium text-sm mb-3">Attached Evidence</h4>
+                                        <Tabs v-model="evidenceTab" class="w-full">
+                                            <TabsList class="grid w-full grid-cols-3">
+                                                <TabsTrigger value="events">
+                                                    Events
+                                                    <Badge v-if="selectedEvidence.length > 0" variant="secondary" class="ml-2">
+                                                        {{ selectedEvidence.length }}
+                                                    </Badge>
+                                                </TabsTrigger>
+                                                <TabsTrigger value="files">
+                                                    Files
+                                                    <Badge v-if="uploadedFiles.length > 0" variant="secondary" class="ml-2">
+                                                        {{ uploadedFiles.length }}
+                                                    </Badge>
+                                                </TabsTrigger>
+                                                <TabsTrigger value="text">
+                                                    Text
+                                                    <Badge v-if="textEvidenceItems.length > 0" variant="secondary" class="ml-2">
+                                                        {{ textEvidenceItems.length }}
+                                                    </Badge>
+                                                </TabsTrigger>
+                                            </TabsList>
+
+                                            <!-- Events Tab -->
+                                            <TabsContent value="events" class="mt-4">
+                                                <div class="space-y-3">
+                                                    <!-- Search Controls -->
+                                                    <div class="flex flex-col sm:flex-row gap-2">
+                                                        <Select v-model="evidenceSearchType" class="w-full sm:w-[180px]">
+                                                            <SelectTrigger class="text-xs sm:text-sm">
+                                                                <SelectValue placeholder="Event Type" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="player_died" class="text-xs sm:text-sm">Player Deaths</SelectItem>
+                                                                <SelectItem value="player_wounded" class="text-xs sm:text-sm">Player Wounded</SelectItem>
+                                                                <SelectItem value="player_damaged" class="text-xs sm:text-sm">Player Damaged</SelectItem>
+                                                                <SelectItem value="chat_message" class="text-xs sm:text-sm">Chat Messages</SelectItem>
+                                                                <SelectItem value="player_connected" class="text-xs sm:text-sm">Connections</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <Button
+                                                            type="button"
+                                                            @click="searchEvidenceInline(form.values.steam_id || '')"
+                                                            :disabled="!form.values.steam_id || form.values.steam_id.length !== 17 || isSearchingEvidence"
+                                                            class="flex-1 text-xs sm:text-sm"
+                                                        >
+                                                            <Icon v-if="isSearchingEvidence" name="mdi:loading" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2 animate-spin" />
+                                                            <Icon v-else name="lucide:search" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+                                                            <span class="hidden sm:inline">{{ isSearchingEvidence ? "Searching..." : "Search Events" }}</span>
+                                                            <span class="sm:hidden">{{ isSearchingEvidence ? "Searching..." : "Search" }}</span>
+                                                        </Button>
+                                                    </div>
+
+                                                    <!-- Search Results -->
+                                                    <div v-if="evidenceSearchResults.length > 0" class="border rounded-md max-h-[300px] overflow-y-auto">
+                                                        <div class="divide-y">
+                                                            <div
+                                                                v-for="event in evidenceSearchResults"
+                                                                :key="event.record_id || event.event_id || event.message_id"
+                                                                class="p-3 hover:bg-muted/50 cursor-pointer transition-colors"
+                                                                :class="{ 'bg-primary/10': isEvidenceSelected(event) }"
+                                                                @click="toggleEvidenceSelection(event)"
+                                                            >
+                                                                <div class="flex items-start justify-between">
+                                                                    <div class="flex-1">
+                                                                        <div class="font-medium text-sm">
+                                                                            {{ formatEventDescription(event, evidenceSearchType) }}
+                                                                        </div>
+                                                                        <div class="text-xs text-muted-foreground mt-1">
+                                                                            {{ new Date(event.event_time || event.sent_at).toLocaleString() }}
+                                                                        </div>
+                                                                        <div v-if="event.teamkill" class="mt-1">
+                                                                            <Badge variant="destructive" class="text-xs">TEAMKILL</Badge>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div v-if="isEvidenceSelected(event)" class="ml-2">
+                                                                        <Icon name="lucide:check-circle" class="h-5 w-5 text-primary" />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <!-- Selected Events -->
+                                                    <div v-if="selectedEvidence.length > 0" class="space-y-2">
+                                                        <div class="text-sm font-medium">Selected Events ({{ selectedEvidence.length }})</div>
+                                                        <div class="space-y-2">
+                                                            <div
+                                                                v-for="(evidence, idx) in selectedEvidence"
+                                                                :key="`event-${idx}`"
+                                                                class="flex items-center justify-between text-sm p-2 bg-background rounded border"
+                                                            >
+                                                                <div class="flex-1">
+                                                                    <div class="font-medium">{{ formatEventDescription(evidence.metadata, evidence.evidence_type) }}</div>
+                                                                    <div class="text-xs text-muted-foreground">
+                                                                        {{ new Date(evidence.event_time).toLocaleString() }}
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    @click="selectedEvidence.splice(idx, 1)"
+                                                                >
+                                                                    <Icon name="lucide:x" class="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <!-- Empty State -->
+                                                    <div v-if="evidenceSearchResults.length === 0 && selectedEvidence.length === 0 && !isSearchingEvidence" class="text-sm text-muted-foreground text-center py-4">
+                                                        Enter a Steam ID and click "Search Events" to find game events
+                                                    </div>
+                                                </div>
+                                            </TabsContent>
+
+                                            <!-- Files Tab -->
+                                            <TabsContent value="files" class="mt-4">
+                                                <div class="space-y-3">
+                                                    <div class="flex items-center gap-2">
+                                                        <Input
+                                                            type="file"
+                                                            accept="image/*,video/*,.pdf,.txt"
+                                                            @change="handleFileUpload"
+                                                            :disabled="isUploadingFile"
+                                                            class="flex-1"
+                                                            multiple
+                                                        />
+                                                    </div>
+                                                    <div v-if="uploadedFiles.length > 0" class="space-y-2">
+                                                        <div class="text-sm font-medium">Uploaded Files ({{ uploadedFiles.length }})</div>
+                                                        <div class="space-y-1">
+                                                            <div
+                                                                v-for="(file, idx) in uploadedFiles"
+                                                                :key="`file-${idx}`"
+                                                                class="flex items-center justify-between text-sm p-2 bg-background rounded border"
+                                                            >
+                                                                <div class="flex-1">
+                                                                    <div class="font-medium">{{ file.file_name }}</div>
+                                                                    <div class="text-xs text-muted-foreground">
+                                                                        {{ formatFileSize(file.file_size) }} • {{ file.file_type }}
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    @click="removeUploadedFile(idx)"
+                                                                >
+                                                                    <Icon name="lucide:x" class="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div v-else class="text-sm text-muted-foreground text-center py-4">
+                                                        No files uploaded. Select files above to upload.
+                                                    </div>
+                                                </div>
+                                            </TabsContent>
+
+                                            <!-- Text Tab -->
+                                            <TabsContent value="text" class="mt-4">
+                                                <div class="space-y-3">
+                                                    <div class="flex items-center gap-2">
+                                                        <Textarea
+                                                            v-model="evidenceText"
+                                                            placeholder="Paste text evidence here..."
+                                                            rows="4"
+                                                            class="flex-1"
+                                                        />
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            @click="addTextEvidence"
+                                                            :disabled="!evidenceText.trim()"
+                                                        >
+                                                            <Icon name="lucide:plus" class="h-4 w-4 mr-1" />
+                                                            Add
+                                                        </Button>
+                                                    </div>
+                                                    <div v-if="textEvidenceItems.length > 0" class="space-y-2">
+                                                        <div class="text-sm font-medium">Text Evidence ({{ textEvidenceItems.length }})</div>
+                                                        <div class="space-y-1">
+                                                            <div
+                                                                v-for="(text, idx) in textEvidenceItems"
+                                                                :key="`text-${idx}`"
+                                                                class="flex items-start justify-between text-sm p-2 bg-background rounded border"
+                                                            >
+                                                                <div class="flex-1">
+                                                                    <div class="font-medium">Text Evidence</div>
+                                                                    <div class="text-xs text-muted-foreground mt-1">
+                                                                        {{ text.text_content.length > 100 ? text.text_content.substring(0, 100) + "..." : text.text_content }}
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    @click="removeTextEvidence(idx)"
+                                                                >
+                                                                    <Icon name="lucide:x" class="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div v-else class="text-sm text-muted-foreground text-center py-4">
+                                                        No text evidence added. Paste text above and click "Add".
+                                                    </div>
+                                                </div>
+                                            </TabsContent>
+                                        </Tabs>
+                                    </div>
                                 </div>
                                 <DialogFooter>
                                     <Button
@@ -1165,15 +1928,16 @@ function copyBanCfgUrl() {
                         duration: editingBan?.duration,
                         ban_list_id: editingBan?.ban_list_id || '',
                         rule_id: editingBan?.rule_id || '',
+                        evidence_text: editingBan?.evidence_text || '',
                     }"
                 >
                     <Dialog v-model:open="showEditBanDialog">
                         <DialogContent
-                            class="sm:max-w-[500px] max-h-[90vh] overflow-y-auto"
+                            class="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto p-4 sm:p-6"
                         >
                             <DialogHeader>
-                                <DialogTitle>Edit Ban</DialogTitle>
-                                <DialogDescription>
+                                <DialogTitle class="text-base sm:text-lg">Edit Ban</DialogTitle>
+                                <DialogDescription class="text-xs sm:text-sm">
                                     Update the ban details for player
                                     {{ editingBan?.steam_id }}.
                                 </DialogDescription>
@@ -1318,6 +2082,244 @@ function copyBanCfgUrl() {
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
+
+                                    <FormField
+                                        name="evidence_text"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel
+                                                >Evidence Description (Optional)</FormLabel
+                                            >
+                                            <FormControl>
+                                                <Textarea
+                                                    placeholder="Describe the evidence for this ban..."
+                                                    v-bind="componentField"
+                                                    rows="2"
+                                                />
+                                            </FormControl>
+                                            <FormDescription>
+                                                Provide additional context about the evidence
+                                            </FormDescription>
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+
+                                    <!-- Evidence Section with Tabs -->
+                                    <div class="border rounded-md p-3 bg-muted/50">
+                                        <h4 class="font-medium text-sm mb-3">Attached Evidence</h4>
+                                        <Tabs v-model="evidenceTab" class="w-full">
+                                            <TabsList class="grid w-full grid-cols-3">
+                                                <TabsTrigger value="events">
+                                                    Events
+                                                    <Badge v-if="selectedEvidence.length > 0" variant="secondary" class="ml-2">
+                                                        {{ selectedEvidence.length }}
+                                                    </Badge>
+                                                </TabsTrigger>
+                                                <TabsTrigger value="files">
+                                                    Files
+                                                    <Badge v-if="uploadedFiles.length > 0" variant="secondary" class="ml-2">
+                                                        {{ uploadedFiles.length }}
+                                                    </Badge>
+                                                </TabsTrigger>
+                                                <TabsTrigger value="text">
+                                                    Text
+                                                    <Badge v-if="textEvidenceItems.length > 0" variant="secondary" class="ml-2">
+                                                        {{ textEvidenceItems.length }}
+                                                    </Badge>
+                                                </TabsTrigger>
+                                            </TabsList>
+
+                                            <!-- Events Tab -->
+                                            <TabsContent value="events" class="mt-4">
+                                                <div class="space-y-3">
+                                                    <!-- Search Controls -->
+                                                    <div class="flex flex-col sm:flex-row gap-2">
+                                                        <Select v-model="evidenceSearchType" class="w-full sm:w-[180px]">
+                                                            <SelectTrigger class="text-xs sm:text-sm">
+                                                                <SelectValue placeholder="Event Type" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="player_died" class="text-xs sm:text-sm">Player Deaths</SelectItem>
+                                                                <SelectItem value="player_wounded" class="text-xs sm:text-sm">Player Wounded</SelectItem>
+                                                                <SelectItem value="player_damaged" class="text-xs sm:text-sm">Player Damaged</SelectItem>
+                                                                <SelectItem value="chat_message" class="text-xs sm:text-sm">Chat Messages</SelectItem>
+                                                                <SelectItem value="player_connected" class="text-xs sm:text-sm">Connections</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <Button
+                                                            type="button"
+                                                            @click="searchEvidenceInline(editingBan?.steam_id || '')"
+                                                            :disabled="!editingBan?.steam_id || isSearchingEvidence"
+                                                            class="flex-1 text-xs sm:text-sm"
+                                                        >
+                                                            <Icon v-if="isSearchingEvidence" name="mdi:loading" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2 animate-spin" />
+                                                            <Icon v-else name="lucide:search" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+                                                            <span class="hidden sm:inline">{{ isSearchingEvidence ? "Searching..." : "Search Events" }}</span>
+                                                            <span class="sm:hidden">{{ isSearchingEvidence ? "Searching..." : "Search" }}</span>
+                                                        </Button>
+                                                    </div>
+
+                                                    <!-- Search Results -->
+                                                    <div v-if="evidenceSearchResults.length > 0" class="border rounded-md max-h-[300px] overflow-y-auto">
+                                                        <div class="divide-y">
+                                                            <div
+                                                                v-for="event in evidenceSearchResults"
+                                                                :key="event.record_id || event.event_id || event.message_id"
+                                                                class="p-3 hover:bg-muted/50 cursor-pointer transition-colors"
+                                                                :class="{ 'bg-primary/10': isEvidenceSelected(event) }"
+                                                                @click="toggleEvidenceSelection(event)"
+                                                            >
+                                                                <div class="flex items-start justify-between">
+                                                                    <div class="flex-1">
+                                                                        <div class="font-medium text-sm">
+                                                                            {{ formatEventDescription(event, evidenceSearchType) }}
+                                                                        </div>
+                                                                        <div class="text-xs text-muted-foreground mt-1">
+                                                                            {{ new Date(event.event_time || event.sent_at).toLocaleString() }}
+                                                                        </div>
+                                                                        <div v-if="event.teamkill" class="mt-1">
+                                                                            <Badge variant="destructive" class="text-xs">TEAMKILL</Badge>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div v-if="isEvidenceSelected(event)" class="ml-2">
+                                                                        <Icon name="lucide:check-circle" class="h-5 w-5 text-primary" />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <!-- Selected Events -->
+                                                    <div v-if="selectedEvidence.length > 0" class="space-y-2">
+                                                        <div class="text-sm font-medium">Selected Events ({{ selectedEvidence.length }})</div>
+                                                        <div class="space-y-2">
+                                                            <div
+                                                                v-for="(evidence, idx) in selectedEvidence"
+                                                                :key="`event-${idx}`"
+                                                                class="flex items-center justify-between text-sm p-2 bg-background rounded border"
+                                                            >
+                                                                <div class="flex-1">
+                                                                    <div class="font-medium">{{ formatEventDescription(evidence.metadata, evidence.evidence_type) }}</div>
+                                                                    <div class="text-xs text-muted-foreground">
+                                                                        {{ new Date(evidence.event_time).toLocaleString() }}
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    @click="selectedEvidence.splice(idx, 1)"
+                                                                >
+                                                                    <Icon name="lucide:x" class="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <!-- Empty State -->
+                                                    <div v-if="evidenceSearchResults.length === 0 && selectedEvidence.length === 0 && !isSearchingEvidence" class="text-sm text-muted-foreground text-center py-4">
+                                                        Click "Search Events" to find game events for this player
+                                                    </div>
+                                                </div>
+                                            </TabsContent>
+
+                                            <!-- Files Tab -->
+                                            <TabsContent value="files" class="mt-4">
+                                                <div class="space-y-3">
+                                                    <div class="flex items-center gap-2">
+                                                        <Input
+                                                            type="file"
+                                                            accept="image/*,video/*,.pdf,.txt"
+                                                            @change="handleFileUpload"
+                                                            :disabled="isUploadingFile"
+                                                            class="flex-1"
+                                                            multiple
+                                                        />
+                                                    </div>
+                                                    <div v-if="uploadedFiles.length > 0" class="space-y-2">
+                                                        <div class="text-sm font-medium">Uploaded Files ({{ uploadedFiles.length }})</div>
+                                                        <div class="space-y-1">
+                                                            <div
+                                                                v-for="(file, idx) in uploadedFiles"
+                                                                :key="`file-${idx}`"
+                                                                class="flex items-center justify-between text-sm p-2 bg-background rounded border"
+                                                            >
+                                                                <div class="flex-1">
+                                                                    <div class="font-medium">{{ file.file_name }}</div>
+                                                                    <div class="text-xs text-muted-foreground">
+                                                                        {{ formatFileSize(file.file_size) }} • {{ file.file_type }}
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    @click="removeUploadedFile(idx)"
+                                                                >
+                                                                    <Icon name="lucide:x" class="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div v-else class="text-sm text-muted-foreground text-center py-4">
+                                                        No files uploaded. Select files above to upload.
+                                                    </div>
+                                                </div>
+                                            </TabsContent>
+
+                                            <!-- Text Tab -->
+                                            <TabsContent value="text" class="mt-4">
+                                                <div class="space-y-3">
+                                                    <div class="flex items-center gap-2">
+                                                        <Textarea
+                                                            v-model="evidenceText"
+                                                            placeholder="Paste text evidence here..."
+                                                            rows="4"
+                                                            class="flex-1"
+                                                        />
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            @click="addTextEvidence"
+                                                            :disabled="!evidenceText.trim()"
+                                                        >
+                                                            <Icon name="lucide:plus" class="h-4 w-4 mr-1" />
+                                                            Add
+                                                        </Button>
+                                                    </div>
+                                                    <div v-if="textEvidenceItems.length > 0" class="space-y-2">
+                                                        <div class="text-sm font-medium">Text Evidence ({{ textEvidenceItems.length }})</div>
+                                                        <div class="space-y-1">
+                                                            <div
+                                                                v-for="(text, idx) in textEvidenceItems"
+                                                                :key="`text-${idx}`"
+                                                                class="flex items-start justify-between text-sm p-2 bg-background rounded border"
+                                                            >
+                                                                <div class="flex-1">
+                                                                    <div class="font-medium">Text Evidence</div>
+                                                                    <div class="text-xs text-muted-foreground mt-1">
+                                                                        {{ text.text_content.length > 100 ? text.text_content.substring(0, 100) + "..." : text.text_content }}
+                                                                    </div>
+                                                                </div>
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    @click="removeTextEvidence(idx)"
+                                                                >
+                                                                    <Icon name="lucide:x" class="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div v-else class="text-sm text-muted-foreground text-center py-4">
+                                                        No text evidence added. Paste text above and click "Add".
+                                                    </div>
+                                                </div>
+                                            </TabsContent>
+                                        </Tabs>
+                                    </div>
                                 </div>
                                 <DialogFooter>
                                     <Button
@@ -1342,192 +2344,475 @@ function copyBanCfgUrl() {
                         </DialogContent>
                     </Dialog>
                 </Form>
+
+                <!-- Evidence View Dialog -->
+                <Dialog v-model:open="showEvidenceViewDialog">
+                    <DialogContent class="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+                        <DialogHeader>
+                            <DialogTitle class="text-base sm:text-lg">Ban Evidence</DialogTitle>
+                            <DialogDescription class="text-xs sm:text-sm">
+                                View all evidence linked to this ban
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div v-if="viewingBanEvidence" class="space-y-4">
+                            <!-- Ban Info -->
+                            <div class="border rounded-md p-3 bg-muted/50">
+                                <div class="grid grid-cols-2 gap-2 text-sm">
+                                    <div>
+                                        <span class="text-muted-foreground">Steam ID:</span>
+                                        <span class="ml-2 font-medium">{{ viewingBanEvidence.steam_id }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-muted-foreground">Reason:</span>
+                                        <span class="ml-2 font-medium">{{ viewingBanEvidence.reason }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-muted-foreground">Banned At:</span>
+                                        <span class="ml-2">{{ formatDate(viewingBanEvidence.created_at) }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-muted-foreground">Duration:</span>
+                                        <span class="ml-2">
+                                            {{ viewingBanEvidence.duration === 0 ? "Permanent" : `${viewingBanEvidence.duration} days` }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Evidence Description -->
+                            <div v-if="viewingBanEvidence.evidence_text" class="border rounded-md p-3">
+                                <h4 class="font-medium text-sm mb-2">Evidence Description</h4>
+                                <p class="text-sm text-muted-foreground whitespace-pre-wrap">{{ viewingBanEvidence.evidence_text }}</p>
+                            </div>
+
+                            <!-- Evidence Tabs -->
+                            <Tabs value="events" class="w-full">
+                                <TabsList class="grid w-full grid-cols-3">
+                                    <TabsTrigger value="events" class="text-xs sm:text-sm">
+                                        <span class="hidden sm:inline">Events</span>
+                                        <span class="sm:hidden">Events</span>
+                                        <Badge v-if="getEvidenceCounts(viewingBanEvidence).events > 0" variant="secondary" class="ml-1 sm:ml-2 text-xs">
+                                            {{ getEvidenceCounts(viewingBanEvidence).events }}
+                                        </Badge>
+                                    </TabsTrigger>
+                                    <TabsTrigger value="files" class="text-xs sm:text-sm">
+                                        <span class="hidden sm:inline">Files</span>
+                                        <span class="sm:hidden">Files</span>
+                                        <Badge v-if="getEvidenceCounts(viewingBanEvidence).files > 0" variant="secondary" class="ml-1 sm:ml-2 text-xs">
+                                            {{ getEvidenceCounts(viewingBanEvidence).files }}
+                                        </Badge>
+                                    </TabsTrigger>
+                                    <TabsTrigger value="text" class="text-xs sm:text-sm">
+                                        <span class="hidden sm:inline">Text</span>
+                                        <span class="sm:hidden">Text</span>
+                                        <Badge v-if="getEvidenceCounts(viewingBanEvidence).text > 0" variant="secondary" class="ml-1 sm:ml-2 text-xs">
+                                            {{ getEvidenceCounts(viewingBanEvidence).text }}
+                                        </Badge>
+                                    </TabsTrigger>
+                                </TabsList>
+
+                                <!-- Events Tab -->
+                                <TabsContent value="events" class="mt-4">
+                                    <div v-if="viewingBanEvidence.evidence && viewingBanEvidence.evidence.filter(e => e.evidence_type !== 'file_upload' && e.evidence_type !== 'text_paste').length > 0" class="space-y-2">
+                                        <div
+                                            v-for="(evidence, idx) in viewingBanEvidence.evidence.filter(e => e.evidence_type !== 'file_upload' && e.evidence_type !== 'text_paste')"
+                                            :key="`event-${idx}`"
+                                            class="border rounded-md p-3"
+                                        >
+                                            <div class="flex items-start justify-between">
+                                                <div class="flex-1">
+                                                    <div class="font-medium text-sm mb-1">
+                                                        {{ formatEventDescription(evidence.metadata || {}, evidence.evidence_type) }}
+                                                    </div>
+                                                    <div class="text-xs text-muted-foreground space-y-1">
+                                                        <div>Type: {{ evidence.evidence_type }}</div>
+                                                        <div v-if="evidence.event_time">
+                                                            Time: {{ new Date(evidence.event_time).toLocaleString() }}
+                                                        </div>
+                                                        <div v-if="evidence.metadata && evidence.metadata.teamkill">
+                                                            <Badge variant="destructive" class="text-xs">TEAMKILL</Badge>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-else class="text-sm text-muted-foreground text-center py-8">
+                                        No event evidence attached to this ban.
+                                    </div>
+                                </TabsContent>
+
+                                <!-- Files Tab -->
+                                <TabsContent value="files" class="mt-4">
+                                    <div v-if="viewingBanEvidence.evidence && viewingBanEvidence.evidence.filter(e => e.evidence_type === 'file_upload').length > 0" class="space-y-2">
+                                        <div
+                                            v-for="(evidence, idx) in viewingBanEvidence.evidence.filter(e => e.evidence_type === 'file_upload')"
+                                            :key="`file-${idx}`"
+                                            class="border rounded-md p-3"
+                                        >
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex-1">
+                                                    <div class="font-medium text-sm">{{ evidence.file_name }}</div>
+                                                    <div class="text-xs text-muted-foreground mt-1">
+                                                        {{ formatFileSize(evidence.file_size || 0) }} • {{ evidence.file_type }}
+                                                    </div>
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    @click="downloadEvidenceFile(evidence.file_path ?? '', evidence.file_name ?? 'file')"
+                                                >
+                                                    <Icon name="lucide:download" class="h-4 w-4 mr-1" />
+                                                    Download
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-else class="text-sm text-muted-foreground text-center py-8">
+                                        No file evidence attached to this ban.
+                                    </div>
+                                </TabsContent>
+
+                                <!-- Text Tab -->
+                                <TabsContent value="text" class="mt-4">
+                                    <div v-if="viewingBanEvidence.evidence && viewingBanEvidence.evidence.filter(e => e.evidence_type === 'text_paste').length > 0" class="space-y-2">
+                                        <div
+                                            v-for="(evidence, idx) in viewingBanEvidence.evidence.filter(e => e.evidence_type === 'text_paste')"
+                                            :key="`text-${idx}`"
+                                            class="border rounded-md p-3"
+                                        >
+                                            <div class="font-medium text-sm mb-2">Text Evidence</div>
+                                            <div class="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/50 p-2 rounded">
+                                                {{ evidence.text_content }}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-else class="text-sm text-muted-foreground text-center py-8">
+                                        No text evidence attached to this ban.
+                                    </div>
+                                </TabsContent>
+                            </Tabs>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" @click="closeEvidenceViewDialog">
+                                Close
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
                 <Button
                     @click="refreshData"
                     :disabled="loading"
                     variant="outline"
+                    class="w-full sm:w-auto text-sm sm:text-base"
                 >
                     {{ loading ? "Refreshing..." : "Refresh" }}
                 </Button>
-                <Button @click="copyBanCfgUrl">Copy Ban Config URL</Button>
+                <Button @click="copyBanCfgUrl" class="w-full sm:w-auto text-sm sm:text-base">Copy Ban Config URL</Button>
             </div>
         </div>
 
-        <div v-if="error" class="bg-red-500 text-white p-4 rounded mb-4">
+        <div v-if="error" class="bg-red-500 text-white p-3 sm:p-4 rounded mb-3 sm:mb-4 text-sm sm:text-base">
             {{ error }}
         </div>
 
-        <Card class="mb-4">
-            <CardHeader class="pb-2">
-                <CardTitle>Ban List</CardTitle>
-                <p class="text-sm text-muted-foreground">
+        <Card class="mb-3 sm:mb-4">
+            <CardHeader class="pb-2 sm:pb-3">
+                <CardTitle class="text-base sm:text-lg">Ban List</CardTitle>
+                <p class="text-xs sm:text-sm text-muted-foreground">
                     View and manage banned players. Data refreshes automatically
                     every 60 seconds.
                 </p>
             </CardHeader>
             <CardContent>
-                <div class="flex items-center space-x-2 mb-4">
+                <div class="flex items-center space-x-2 mb-3 sm:mb-4">
                     <Input
                         v-model="searchQuery"
                         placeholder="Search by Steam ID, or reason..."
-                        class="flex-grow"
+                        class="flex-grow text-sm sm:text-base"
                     />
                 </div>
 
-                <div class="text-sm text-muted-foreground mb-2">
+                <div class="text-xs sm:text-sm text-muted-foreground mb-2">
                     Showing {{ filteredBannedPlayers.length }} of
                     {{ bannedPlayers.length }} bans
                 </div>
 
                 <div
                     v-if="loading && bannedPlayers.length === 0"
-                    class="text-center py-8"
+                    class="text-center py-6 sm:py-8"
                 >
                     <div
                         class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
                     ></div>
-                    <p>Loading banned players...</p>
+                    <p class="text-sm sm:text-base">Loading banned players...</p>
                 </div>
 
                 <div
                     v-else-if="bannedPlayers.length === 0"
-                    class="text-center py-8"
+                    class="text-center py-6 sm:py-8"
                 >
-                    <p>No banned players found</p>
+                    <p class="text-sm sm:text-base">No banned players found</p>
                 </div>
 
                 <div
                     v-else-if="filteredBannedPlayers.length === 0"
-                    class="text-center py-8"
+                    class="text-center py-6 sm:py-8"
                 >
-                    <p>No players match your search</p>
+                    <p class="text-sm sm:text-base">No players match your search</p>
                 </div>
 
-                <div v-else class="overflow-x-auto">
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Steam ID</TableHead>
-                                <TableHead>Reason</TableHead>
-                                <TableHead>Rule</TableHead>
-                                <TableHead>Banned At</TableHead>
-                                <TableHead>Duration</TableHead>
-                                <TableHead>Source</TableHead>
-                                <TableHead class="text-right"
-                                    >Actions</TableHead
+                <template v-else>
+                    <!-- Desktop Table View -->
+                    <div class="hidden md:block w-full overflow-x-auto">
+                        <Table class="min-w-full">
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead class="text-xs sm:text-sm">Steam ID</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Reason</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Rule</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Evidence</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Banned At</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Duration</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Source</TableHead>
+                                    <TableHead class="text-right text-xs sm:text-sm"
+                                        >Actions</TableHead
+                                    >
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                <TableRow
+                                    v-for="player in filteredBannedPlayers"
+                                    :key="player.id"
+                                    class="hover:bg-muted/50"
                                 >
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            <TableRow
-                                v-for="player in filteredBannedPlayers"
-                                :key="player.id"
-                                class="hover:bg-muted/50"
+                                    <TableCell>
+                                        <div class="font-medium text-sm sm:text-base">
+                                            {{ player.steam_id }}
+                                        </div>
+                                        <div
+                                            v-if="player.player_name"
+                                            class="text-xs text-muted-foreground"
+                                        >
+                                            {{ player.player_name }}
+                                        </div>
+                                    </TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{ player.reason }}</TableCell>
+                                    <TableCell>
+                                        <div
+                                            v-if="player.rule_name"
+                                            class="flex flex-col"
+                                        >
+                                            <span class="font-medium text-xs sm:text-sm">{{
+                                                player.rule_name
+                                            }}</span>
+                                        </div>
+                                        <span
+                                            v-else
+                                            class="text-muted-foreground text-xs"
+                                            >No rule specified</span
+                                        >
+                                    </TableCell>
+                                    <TableCell>
+                                        <Button
+                                            v-if="(player.evidence && player.evidence.length > 0) || player.evidence_text"
+                                            variant="ghost"
+                                            size="sm"
+                                            @click="openEvidenceViewDialog(player)"
+                                            class="h-auto p-1 text-xs"
+                                        >
+                                            <div class="flex items-center gap-1">
+                                                <Icon name="lucide:file-check" class="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
+                                                <span class="text-xs sm:text-sm">
+                                                    {{ player.evidence ? player.evidence.length : 0 }} item(s)
+                                                </span>
+                                            </div>
+                                        </Button>
+                                        <span v-else class="text-muted-foreground text-xs">None</span>
+                                    </TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{
+                                        formatDate(player.created_at)
+                                    }}</TableCell>
+                                    <TableCell>
+                                        <Badge
+                                            :variant="
+                                                player.duration == 0
+                                                    ? 'destructive'
+                                                    : 'outline'
+                                            "
+                                            class="text-xs"
+                                        >
+                                            {{
+                                                player.duration == 0
+                                                    ? "Permanent"
+                                                    : player.duration + " days"
+                                            }}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge variant="secondary" class="text-xs">
+                                            {{ player.ban_list_name || "Manual" }}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell class="text-right">
+                                        <div class="flex gap-2 justify-end">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                @click="openEditBanDialog(player)"
+                                                :disabled="loading"
+                                                v-if="
+                                                    authStore.getServerPermission(
+                                                        serverId,
+                                                        'ban',
+                                                    )
+                                                "
+                                                class="text-xs"
+                                            >
+                                                Edit
+                                            </Button>
+                                            <Button
+                                                variant="destructive"
+                                                size="sm"
+                                                @click="removeBan(player.id)"
+                                                :disabled="loading"
+                                                v-if="
+                                                    authStore.getServerPermission(
+                                                        serverId,
+                                                        'ban',
+                                                    )
+                                                "
+                                                class="text-xs"
+                                            >
+                                                Unban
+                                            </Button>
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </div>
+
+                    <!-- Mobile Card View -->
+                    <div class="md:hidden space-y-3">
+                        <div
+                            v-for="player in filteredBannedPlayers"
+                            :key="player.id"
+                            class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                        >
+                        <div class="flex items-start justify-between gap-2 mb-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="font-semibold text-sm sm:text-base mb-1">
+                                    {{ player.steam_id }}
+                                </div>
+                                <div
+                                    v-if="player.player_name"
+                                    class="text-xs text-muted-foreground mb-2"
+                                >
+                                    {{ player.player_name }}
+                                </div>
+                                <div class="space-y-1.5">
+                                    <div>
+                                        <span class="text-xs text-muted-foreground">Reason: </span>
+                                        <span class="text-xs sm:text-sm break-words">{{ player.reason }}</span>
+                                    </div>
+                                    <div v-if="player.rule_name">
+                                        <span class="text-xs text-muted-foreground">Rule: </span>
+                                        <span class="text-xs sm:text-sm font-medium">{{ player.rule_name }}</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <Badge
+                                            :variant="
+                                                player.duration == 0
+                                                    ? 'destructive'
+                                                    : 'outline'
+                                            "
+                                            class="text-xs"
+                                        >
+                                            {{
+                                                player.duration == 0
+                                                    ? "Permanent"
+                                                    : player.duration + " days"
+                                            }}
+                                        </Badge>
+                                        <Badge variant="secondary" class="text-xs">
+                                            {{ player.ban_list_name || "Manual" }}
+                                        </Badge>
+                                    </div>
+                                    <div class="text-xs text-muted-foreground">
+                                        Banned: {{ formatDate(player.created_at) }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between gap-2 pt-2 border-t">
+                            <Button
+                                v-if="(player.evidence && player.evidence.length > 0) || player.evidence_text"
+                                variant="ghost"
+                                size="sm"
+                                @click="openEvidenceViewDialog(player)"
+                                class="h-8 text-xs"
                             >
-                                <TableCell>
-                                    <div class="font-medium">
-                                        {{ player.steam_id }}
-                                    </div>
-                                    <div
-                                        v-if="player.player_name"
-                                        class="text-xs text-muted-foreground"
-                                    >
-                                        {{ player.player_name }}
-                                    </div>
-                                </TableCell>
-                                <TableCell>{{ player.reason }}</TableCell>
-                                <TableCell>
-                                    <div
-                                        v-if="player.rule_name"
-                                        class="flex flex-col"
-                                    >
-                                        <span class="font-medium">{{
-                                            player.rule_name
-                                        }}</span>
-                                    </div>
-                                    <span
-                                        v-else
-                                        class="text-muted-foreground text-xs"
-                                        >No rule specified</span
-                                    >
-                                </TableCell>
-                                <TableCell>{{
-                                    formatDate(player.created_at)
-                                }}</TableCell>
-                                <TableCell>
-                                    <Badge
-                                        :variant="
-                                            player.duration == 0
-                                                ? 'destructive'
-                                                : 'outline'
-                                        "
-                                    >
-                                        {{
-                                            player.duration == 0
-                                                ? "Permanent"
-                                                : player.duration + " days"
-                                        }}
-                                    </Badge>
-                                </TableCell>
-                                <TableCell>
-                                    <Badge variant="secondary">
-                                        {{ player.ban_list_name || "Manual" }}
-                                    </Badge>
-                                </TableCell>
-                                <TableCell class="text-right">
-                                    <div class="flex gap-2 justify-end">
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            @click="openEditBanDialog(player)"
-                                            :disabled="loading"
-                                            v-if="
-                                                authStore.getServerPermission(
-                                                    serverId,
-                                                    'ban',
-                                                )
-                                            "
-                                        >
-                                            Edit
-                                        </Button>
-                                        <Button
-                                            variant="destructive"
-                                            size="sm"
-                                            @click="removeBan(player.id)"
-                                            :disabled="loading"
-                                            v-if="
-                                                authStore.getServerPermission(
-                                                    serverId,
-                                                    'ban',
-                                                )
-                                            "
-                                        >
-                                            Unban
-                                        </Button>
-                                    </div>
-                                </TableCell>
-                            </TableRow>
-                        </TableBody>
-                    </Table>
-                </div>
+                                <Icon name="lucide:file-check" class="h-3 w-3 mr-1 text-green-500" />
+                                {{ player.evidence ? player.evidence.length : 0 }} evidence
+                            </Button>
+                            <div v-else class="text-xs text-muted-foreground">No evidence</div>
+                            <div class="flex gap-1">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    @click="openEditBanDialog(player)"
+                                    :disabled="loading"
+                                    v-if="
+                                        authStore.getServerPermission(
+                                            serverId,
+                                            'ban',
+                                        )
+                                    "
+                                    class="h-8 text-xs"
+                                >
+                                    Edit
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    @click="removeBan(player.id)"
+                                    :disabled="loading"
+                                    v-if="
+                                        authStore.getServerPermission(
+                                            serverId,
+                                            'ban',
+                                        )
+                                    "
+                                    class="h-8 text-xs"
+                                >
+                                    Unban
+                                </Button>
+                            </div>
+                        </div>
+                        </div>
+                    </div>
+                </template>
             </CardContent>
         </Card>
 
         <!-- Ban List Subscriptions -->
-        <Card class="mb-4">
+        <Card class="mb-3 sm:mb-4">
             <CardHeader>
-                <CardTitle>Ban List Subscriptions</CardTitle>
-                <CardDescription>
+                <CardTitle class="text-base sm:text-lg">Ban List Subscriptions</CardTitle>
+                <CardDescription class="text-xs sm:text-sm">
                     Manage which ban lists this server subscribes to for
                     automatic ban synchronization.
                 </CardDescription>
             </CardHeader>
             <CardContent>
-                <div class="space-y-4">
+                <div class="space-y-3 sm:space-y-4">
                     <!-- Add Ban List Subscription -->
-                    <div class="flex gap-2 items-center">
+                    <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                         <Select v-model="selectedBanListId">
-                            <SelectTrigger class="w-64">
+                            <SelectTrigger class="w-full sm:w-64 text-sm sm:text-base">
                                 <SelectValue
                                     placeholder="Select a ban list to subscribe to"
                                 />
@@ -1545,6 +2830,7 @@ function copyBanCfgUrl() {
                         <Button
                             @click="subscribeToBanList"
                             :disabled="!selectedBanListId || subscribing"
+                            class="w-full sm:w-auto text-sm sm:text-base"
                         >
                             <Plus class="h-4 w-4 mr-2" />
                             {{ subscribing ? "Subscribing..." : "Subscribe" }}
@@ -1553,23 +2839,23 @@ function copyBanCfgUrl() {
 
                     <!-- Current Subscriptions -->
                     <div v-if="subscribedBanLists.length > 0">
-                        <h4 class="text-sm font-medium mb-2">
+                        <h4 class="text-xs sm:text-sm font-medium mb-2">
                             Current Subscriptions
                         </h4>
                         <div class="space-y-2">
                             <div
                                 v-for="subscription in subscribedBanLists"
                                 :key="subscription.ban_list_id"
-                                class="flex items-center justify-between p-3 border rounded-lg"
+                                class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded-lg"
                             >
-                                <div>
-                                    <div class="font-medium">
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-medium text-sm sm:text-base">
                                         {{
                                             subscription.ban_list_name ||
                                             "Unknown Ban List"
                                         }}
                                     </div>
-                                    <div class="text-sm text-gray-500">
+                                    <div class="text-xs sm:text-sm text-gray-500">
                                         Subscribed on
                                         {{
                                             new Date(
@@ -1590,8 +2876,9 @@ function copyBanCfgUrl() {
                                         unsubscribing ===
                                         subscription.ban_list_id.toString()
                                     "
+                                    class="w-full sm:w-auto text-xs sm:text-sm"
                                 >
-                                    <Trash2 class="h-4 w-4 mr-2" />
+                                    <Trash2 class="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
                                     {{
                                         unsubscribing ===
                                         subscription.ban_list_id.toString()
@@ -1603,7 +2890,7 @@ function copyBanCfgUrl() {
                         </div>
                     </div>
 
-                    <div v-else class="text-center text-gray-500 py-4">
+                    <div v-else class="text-center text-gray-500 py-4 text-xs sm:text-sm">
                         No ban list subscriptions configured
                     </div>
                 </div>
@@ -1612,25 +2899,25 @@ function copyBanCfgUrl() {
 
         <Card>
             <CardHeader>
-                <CardTitle>About Bans</CardTitle>
+                <CardTitle class="text-base sm:text-lg">About Bans</CardTitle>
             </CardHeader>
             <CardContent>
-                <p class="text-sm text-muted-foreground">
+                <p class="text-xs sm:text-sm text-muted-foreground">
                     This page shows players who have been banned from the
                     server. You can add new bans manually or remove existing
                     bans.
                 </p>
-                <p class="text-sm text-muted-foreground mt-2">
+                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
                     Permanent bans will remain in effect until manually removed.
                     Temporary bans will expire after the specified duration.
                 </p>
-                <p class="text-sm text-muted-foreground mt-2">
+                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
                     Ban list subscriptions allow this server to automatically
                     include bans from other shared ban lists. Players banned on
                     subscribed lists will be automatically banned on this server
                     as well.
                 </p>
-                <p class="text-sm text-muted-foreground mt-2">
+                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
                     <strong>Note:</strong> Squad servers typically cache ban
                     configurations and refresh them periodically. Changes to ban
                     list subscriptions will be reflected in the ban
@@ -1640,9 +2927,11 @@ function copyBanCfgUrl() {
                 </p>
             </CardContent>
         </Card>
+
     </div>
 </template>
 
 <style scoped>
 /* Add any page-specific styles here */
 </style>
+

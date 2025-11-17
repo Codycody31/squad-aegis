@@ -864,30 +864,30 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="p-4">
-        <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold">Users & Roles</h1>
+    <div class="p-3 sm:p-4">
+        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0 mb-3 sm:mb-4">
+            <h1 class="text-xl sm:text-2xl font-bold">Users & Roles</h1>
 
-            <Button @click="copyAdminCfgUrl">Copy Admin Config URL</Button>
+            <Button @click="copyAdminCfgUrl" class="w-full sm:w-auto text-sm sm:text-base">Copy Admin Config URL</Button>
         </div>
 
-        <div v-if="error" class="bg-red-500 text-white p-4 rounded mb-4">
+        <div v-if="error" class="bg-red-500 text-white p-3 sm:p-4 rounded mb-3 sm:mb-4 text-sm sm:text-base">
             {{ error }}
         </div>
 
         <Tabs v-model="activeTab" class="w-full">
             <TabsList class="grid w-full grid-cols-2">
-                <TabsTrigger value="roles">Roles</TabsTrigger>
-                <TabsTrigger value="admins">Admins</TabsTrigger>
+                <TabsTrigger value="roles" class="text-xs sm:text-sm">Roles</TabsTrigger>
+                <TabsTrigger value="admins" class="text-xs sm:text-sm">Admins</TabsTrigger>
             </TabsList>
 
             <!-- Roles Tab -->
             <TabsContent value="roles">
                 <Card>
                     <CardHeader
-                        class="flex flex-row items-center justify-between pb-2"
+                        class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 pb-2 sm:pb-3"
                     >
-                        <CardTitle>Role Management</CardTitle>
+                        <CardTitle class="text-base sm:text-lg">Role Management</CardTitle>
                         <Form
                             v-slot="{ handleSubmit }"
                             as=""
@@ -900,14 +900,14 @@ onMounted(() => {
                         >
                             <Dialog v-model:open="showAddRoleDialog">
                                 <DialogTrigger asChild>
-                                    <Button>Add Role</Button>
+                                    <Button class="w-full sm:w-auto text-sm sm:text-base">Add Role</Button>
                                 </DialogTrigger>
                                 <DialogContent
-                                    class="sm:max-w-[600px] max-h-[80vh] overflow-y-auto"
+                                    class="w-[95vw] sm:max-w-[600px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
                                 >
                                     <DialogHeader>
-                                        <DialogTitle>Add New Role</DialogTitle>
-                                        <DialogDescription>
+                                        <DialogTitle class="text-base sm:text-lg">Add New Role</DialogTitle>
+                                        <DialogDescription class="text-xs sm:text-sm">
                                             Create a new role with specific
                                             permissions for Squad server
                                             administration.
@@ -962,7 +962,7 @@ onMounted(() => {
                                                     </FormDescription>
 
                                                     <div
-                                                        class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2"
+                                                        class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-2"
                                                     >
                                                         <div
                                                             v-for="category in permissionCategories"
@@ -1063,70 +1063,111 @@ onMounted(() => {
                         </Form>
                     </CardHeader>
                     <CardContent>
-                        <div v-if="loading.roles" class="text-center py-8">
+                        <div v-if="loading.roles" class="text-center py-6 sm:py-8">
                             <div
                                 class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
                             ></div>
-                            <p>Loading roles...</p>
+                            <p class="text-sm sm:text-base">Loading roles...</p>
                         </div>
 
                         <div
                             v-else-if="roles.length === 0"
-                            class="text-center py-8"
+                            class="text-center py-6 sm:py-8"
                         >
-                            <p>No roles found. Create a role to get started.</p>
+                            <p class="text-sm sm:text-base">No roles found. Create a role to get started.</p>
                         </div>
 
-                        <div v-else class="overflow-x-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Role Name</TableHead>
-                                        <TableHead>Permissions</TableHead>
-                                        <TableHead>Created At</TableHead>
-                                        <TableHead class="text-right"
-                                            >Actions</TableHead
+                        <template v-else>
+                            <!-- Desktop Table View -->
+                            <div class="hidden md:block overflow-x-auto">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead class="text-xs sm:text-sm">Role Name</TableHead>
+                                            <TableHead class="text-xs sm:text-sm">Permissions</TableHead>
+                                            <TableHead class="text-xs sm:text-sm">Created At</TableHead>
+                                            <TableHead class="text-right text-xs sm:text-sm"
+                                                >Actions</TableHead
+                                            >
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        <TableRow
+                                            v-for="role in roles"
+                                            :key="role.id"
+                                            class="hover:bg-muted/50"
                                         >
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    <TableRow
-                                        v-for="role in roles"
-                                        :key="role.id"
-                                        class="hover:bg-muted/50"
-                                    >
-                                        <TableCell class="font-medium">{{
-                                            role.name
-                                        }}</TableCell>
-                                        <TableCell>
-                                            <div class="flex flex-wrap gap-1">
-                                                <Badge
-                                                    v-for="permission in role.permissions"
-                                                    :key="permission"
-                                                    variant="outline"
+                                            <TableCell class="font-medium text-sm sm:text-base">{{
+                                                role.name
+                                            }}</TableCell>
+                                            <TableCell>
+                                                <div class="flex flex-wrap gap-1">
+                                                    <Badge
+                                                        v-for="permission in role.permissions"
+                                                        :key="permission"
+                                                        variant="outline"
+                                                        class="text-xs"
+                                                    >
+                                                        {{ permission }}
+                                                    </Badge>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell class="text-xs sm:text-sm">{{
+                                                formatDate(role.created_at)
+                                            }}</TableCell>
+                                            <TableCell class="text-right">
+                                                <Button
+                                                    variant="destructive"
+                                                    size="sm"
+                                                    @click="removeRole(role.id)"
+                                                    :disabled="loading.roles"
                                                     class="text-xs"
                                                 >
-                                                    {{ permission }}
-                                                </Badge>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell>{{
-                                            formatDate(role.created_at)
-                                        }}</TableCell>
-                                        <TableCell class="text-right">
-                                            <Button
-                                                variant="destructive"
-                                                size="sm"
-                                                @click="removeRole(role.id)"
-                                                :disabled="loading.roles"
-                                            >
-                                                Remove
-                                            </Button>
-                                        </TableCell>
-                                    </TableRow>
-                                </TableBody>
-                            </Table>
-                        </div>
+                                                    Remove
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    </TableBody>
+                                </Table>
+                            </div>
+
+                            <!-- Mobile Card View -->
+                            <div class="md:hidden space-y-3">
+                            <div
+                                v-for="role in roles"
+                                :key="role.id"
+                                class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                            >
+                                <div class="flex items-start justify-between gap-2 mb-2">
+                                    <div class="flex-1 min-w-0">
+                                        <h3 class="font-semibold text-sm sm:text-base mb-1">{{ role.name }}</h3>
+                                        <p class="text-xs text-muted-foreground">
+                                            Created: {{ formatDate(role.created_at) }}
+                                        </p>
+                                    </div>
+                                    <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        @click="removeRole(role.id)"
+                                        :disabled="loading.roles"
+                                        class="h-8 text-xs flex-shrink-0"
+                                    >
+                                        Remove
+                                    </Button>
+                                </div>
+                                <div class="flex flex-wrap gap-1 mt-2">
+                                    <Badge
+                                        v-for="permission in role.permissions"
+                                        :key="permission"
+                                        variant="outline"
+                                        class="text-xs"
+                                    >
+                                        {{ permission }}
+                                    </Badge>
+                                </div>
+                            </div>
+                            </div>
+                        </template>
                     </CardContent>
                 </Card>
             </TabsContent>
@@ -1135,15 +1176,16 @@ onMounted(() => {
             <TabsContent value="admins">
                 <Card>
                     <CardHeader
-                        class="flex flex-row items-center justify-between pb-2"
+                        class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 pb-2 sm:pb-3"
                     >
-                        <CardTitle>Admin Management</CardTitle>
-                        <div class="flex gap-2">
+                        <CardTitle class="text-base sm:text-lg">Admin Management</CardTitle>
+                        <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                             <Button
                                 variant="outline"
                                 size="sm"
                                 @click="cleanupExpiredAdmins"
                                 :disabled="cleanupLoading"
+                                class="w-full sm:w-auto text-xs sm:text-sm"
                             >
                                 {{
                                     cleanupLoading
@@ -1167,16 +1209,16 @@ onMounted(() => {
                             >
                                 <Dialog v-model:open="showAddAdminDialog">
                                     <DialogTrigger asChild>
-                                        <Button>Add Admin</Button>
+                                        <Button class="w-full sm:w-auto text-sm sm:text-base">Add Admin</Button>
                                     </DialogTrigger>
                                     <DialogContent
-                                        class="sm:max-w-[425px] max-h-[80vh] overflow-y-auto"
+                                        class="w-[95vw] sm:max-w-[425px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
                                     >
                                         <DialogHeader>
-                                            <DialogTitle
+                                            <DialogTitle class="text-base sm:text-lg"
                                                 >Add New Admin</DialogTitle
                                             >
-                                            <DialogDescription>
+                                            <DialogDescription class="text-xs sm:text-sm">
                                                 Assign a user as an admin with a
                                                 specific role.
                                             </DialogDescription>
@@ -1457,12 +1499,12 @@ onMounted(() => {
                                 v-slot="{ handleSubmit }"
                             >
                                 <Dialog v-model:open="showEditAdminDialog">
-                                    <DialogContent class="sm:max-w-[500px]">
+                                    <DialogContent class="w-[95vw] sm:max-w-[500px] p-4 sm:p-6">
                                         <DialogHeader>
-                                            <DialogTitle
+                                            <DialogTitle class="text-base sm:text-lg"
                                                 >Edit Admin Notes</DialogTitle
                                             >
-                                            <DialogDescription>
+                                            <DialogDescription class="text-xs sm:text-sm">
                                                 Update the notes for this admin
                                                 assignment.
                                             </DialogDescription>
@@ -1530,30 +1572,32 @@ onMounted(() => {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <div v-if="loading.admins" class="text-center py-8">
+                        <div v-if="loading.admins" class="text-center py-6 sm:py-8">
                             <div
                                 class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
                             ></div>
-                            <p>Loading admins...</p>
+                            <p class="text-sm sm:text-base">Loading admins...</p>
                         </div>
 
                         <div
                             v-else-if="admins.length === 0"
-                            class="text-center py-8"
+                            class="text-center py-6 sm:py-8"
                         >
-                            <p>No admins found. Add an admin to get started.</p>
+                            <p class="text-sm sm:text-base">No admins found. Add an admin to get started.</p>
                         </div>
 
-                        <div v-else class="overflow-x-auto">
+                        <template v-else>
+                            <!-- Desktop Table View -->
+                            <div class="hidden md:block overflow-x-auto">
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>User</TableHead>
-                                        <TableHead>Role</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead>Notes</TableHead>
-                                        <TableHead>Created At</TableHead>
-                                        <TableHead class="text-right"
+                                        <TableHead class="text-xs sm:text-sm">User</TableHead>
+                                        <TableHead class="text-xs sm:text-sm">Role</TableHead>
+                                        <TableHead class="text-xs sm:text-sm">Status</TableHead>
+                                        <TableHead class="text-xs sm:text-sm">Notes</TableHead>
+                                        <TableHead class="text-xs sm:text-sm">Created At</TableHead>
+                                        <TableHead class="text-right text-xs sm:text-sm"
                                             >Actions</TableHead
                                         >
                                     </TableRow>
@@ -1576,11 +1620,11 @@ onMounted(() => {
                                             <TableCell>
                                                 <!-- Only show user info for the first row of each group -->
                                                 <div v-if="index === 0">
-                                                    {{
+                                                    <span class="text-sm sm:text-base">{{
                                                         getAdminDisplayName(
                                                             admin,
                                                         )
-                                                    }}
+                                                    }}</span>
                                                     <div
                                                         v-if="
                                                             adminGroup.length >
@@ -1594,7 +1638,7 @@ onMounted(() => {
                                                 </div>
                                             </TableCell>
                                             <TableCell>
-                                                <Badge variant="outline">
+                                                <Badge variant="outline" class="text-xs">
                                                     {{
                                                         roles.find(
                                                             (r) =>
@@ -1619,7 +1663,7 @@ onMounted(() => {
                                                                 admin,
                                                             ).class
                                                         "
-                                                        class="w-fit"
+                                                        class="w-fit text-xs"
                                                     >
                                                         {{
                                                             formatExpirationStatus(
@@ -1650,17 +1694,17 @@ onMounted(() => {
                                                 >
                                                     <span
                                                         v-if="admin.notes"
-                                                        class="text-sm"
+                                                        class="text-xs sm:text-sm"
                                                         >{{ admin.notes }}</span
                                                     >
                                                     <span
                                                         v-else
-                                                        class="text-sm text-muted-foreground italic"
+                                                        class="text-xs sm:text-sm text-muted-foreground italic"
                                                         >No notes</span
                                                     >
                                                 </div>
                                             </TableCell>
-                                            <TableCell>{{
+                                            <TableCell class="text-xs sm:text-sm">{{
                                                 formatDate(admin.created_at)
                                             }}</TableCell>
                                             <TableCell class="text-right">
@@ -1678,6 +1722,7 @@ onMounted(() => {
                                                         :disabled="
                                                             loading.admins
                                                         "
+                                                        class="text-xs"
                                                     >
                                                         Edit
                                                     </Button>
@@ -1692,6 +1737,7 @@ onMounted(() => {
                                                         :disabled="
                                                             loading.admins
                                                         "
+                                                        class="text-xs"
                                                     >
                                                         Remove
                                                     </Button>
@@ -1702,47 +1748,164 @@ onMounted(() => {
                                 </TableBody>
                             </Table>
                         </div>
+
+                            <!-- Mobile Card View -->
+                            <div class="md:hidden space-y-3">
+                                <template
+                                    v-for="(
+                                        adminGroup, key
+                                    ) in groupedAdmins"
+                                    :key="key"
+                                >
+                                    <div
+                                        v-for="(admin, index) in adminGroup"
+                                        :key="admin.id"
+                                        class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                                        :class="{
+                                            'opacity-60': admin.is_expired,
+                                        }"
+                                    >
+                                        <div class="flex items-start justify-between gap-2 mb-2">
+                                            <div class="flex-1 min-w-0">
+                                                <div v-if="index === 0">
+                                                    <h3 class="font-semibold text-sm sm:text-base mb-1">{{
+                                                        getAdminDisplayName(
+                                                            admin,
+                                                        )
+                                                    }}</h3>
+                                                    <div
+                                                        v-if="
+                                                            adminGroup.length >
+                                                            1
+                                                        "
+                                                        class="text-xs text-blue-600 font-medium mb-1"
+                                                    >
+                                                        {{ adminGroup.length }}
+                                                        roles
+                                                    </div>
+                                                </div>
+                                                <div class="space-y-1.5 mt-1">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-xs text-muted-foreground">Role:</span>
+                                                        <Badge variant="outline" class="text-xs">
+                                                            {{
+                                                                roles.find(
+                                                                    (r) =>
+                                                                        r.id ===
+                                                                        admin.server_role_id,
+                                                                )?.name
+                                                            }}
+                                                        </Badge>
+                                                    </div>
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-xs text-muted-foreground">Status:</span>
+                                                        <Badge
+                                                            :variant="
+                                                                formatExpirationStatus(
+                                                                    admin,
+                                                                ).variant
+                                                            "
+                                                            :class="
+                                                                formatExpirationStatus(
+                                                                    admin,
+                                                                ).class
+                                                            "
+                                                            class="text-xs"
+                                                        >
+                                                            {{
+                                                                formatExpirationStatus(
+                                                                    admin,
+                                                                ).text
+                                                            }}
+                                                        </Badge>
+                                                    </div>
+                                                    <div v-if="admin.notes" class="flex items-start gap-2">
+                                                        <span class="text-xs text-muted-foreground">Notes:</span>
+                                                        <span class="text-xs break-all">{{ admin.notes }}</span>
+                                                    </div>
+                                                    <div class="text-xs text-muted-foreground">
+                                                        Created: {{ formatDate(admin.created_at) }}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="flex flex-col gap-1 flex-shrink-0">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    @click="
+                                                        openEditAdminDialog(
+                                                            admin,
+                                                        )
+                                                    "
+                                                    :disabled="
+                                                        loading.admins
+                                                    "
+                                                    class="h-8 text-xs"
+                                                >
+                                                    Edit
+                                                </Button>
+                                                <Button
+                                                    variant="destructive"
+                                                    size="sm"
+                                                    @click="
+                                                        removeAdmin(
+                                                            admin.id,
+                                                        )
+                                                    "
+                                                    :disabled="
+                                                        loading.admins
+                                                    "
+                                                    class="h-8 text-xs"
+                                                >
+                                                    Remove
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
                     </CardContent>
                 </Card>
             </TabsContent>
         </Tabs>
 
-        <Card class="mt-6">
+        <Card class="mt-4 sm:mt-6">
             <CardHeader>
-                <CardTitle>About Users & Roles</CardTitle>
+                <CardTitle class="text-base sm:text-lg">About Users & Roles</CardTitle>
             </CardHeader>
             <CardContent>
-                <p class="text-sm text-muted-foreground">
+                <p class="text-xs sm:text-sm text-muted-foreground">
                     This page allows you to manage roles and admins for your
                     Squad server. Roles define what permissions an admin has,
                     and admins are users assigned to those roles. Users can have
                     multiple roles simultaneously.
                 </p>
-                <p class="text-sm text-muted-foreground mt-2">
+                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
                     <strong>Roles</strong> - Create roles with specific
                     permissions that determine what actions admins can perform
                     on the server.
                 </p>
-                <p class="text-sm text-muted-foreground mt-2">
+                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
                     <strong>Admins</strong> - Assign users to roles, giving them
                     admin privileges on your server. You can set an expiration
                     date for temporary access (e.g., trial periods, temporary
                     whitelist). Users can be assigned multiple different roles,
                     but cannot have duplicate role assignments.
                 </p>
-                <p class="text-sm text-muted-foreground mt-2">
+                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
                     <strong>Admin Expiration</strong> - Expired admin roles are
                     automatically cleaned up hourly. You can also manually
                     trigger cleanup using the "Cleanup Expired" button.
                 </p>
-                <p class="text-sm text-muted-foreground mt-2">
+                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
                     <strong>Admin Config</strong> - Download the admin
                     configuration file to use with your Squad server. Only
                     active (non-expired) admins are included in the config.
                 </p>
                 <div class="mt-4">
-                    <h3 class="font-medium mb-2">Permission Categories</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <h3 class="font-medium mb-2 text-sm sm:text-base">Permission Categories</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                         <div
                             v-for="category in permissionCategories"
                             :key="category.name"

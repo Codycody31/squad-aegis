@@ -366,15 +366,15 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <div class="flex justify-between items-center">
+  <div class="p-3 sm:p-6 space-y-4 sm:space-y-6">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
       <div>
-        <h1 class="text-3xl font-bold tracking-tight">Audit Logs</h1>
-        <p class="text-muted-foreground">
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Audit Logs</h1>
+        <p class="text-sm sm:text-base text-muted-foreground">
           Track all administrative actions and changes
         </p>
       </div>
-      <Button @click="fetchAuditLogs" :disabled="loading" class="gap-2">
+      <Button @click="fetchAuditLogs" :disabled="loading" class="gap-2 w-full sm:w-auto">
         <svg
           v-if="loading"
           class="animate-spin h-4 w-4"
@@ -396,38 +396,39 @@ onMounted(() => {
             d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
           ></path>
         </svg>
-        {{ loading ? "Refreshing..." : "Refresh" }}
+        <span class="hidden sm:inline">{{ loading ? "Refreshing..." : "Refresh" }}</span>
+        <span class="sm:hidden">{{ loading ? "Refreshing..." : "Refresh" }}</span>
       </Button>
     </div>
 
     <div
       v-if="error"
-      class="bg-destructive/15 text-destructive border border-destructive/20 p-4 rounded-lg"
+      class="bg-destructive/15 text-destructive border border-destructive/20 p-3 sm:p-4 rounded-lg text-sm sm:text-base"
     >
       {{ error }}
     </div>
 
     <!-- Filters Card -->
     <Card>
-      <CardHeader class="pb-4">
-        <CardTitle class="text-lg">Filters</CardTitle>
+      <CardHeader class="pb-3 sm:pb-4">
+        <CardTitle class="text-base sm:text-lg">Filters</CardTitle>
       </CardHeader>
       <CardContent>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
           <div class="space-y-2">
-            <label class="text-sm font-medium">Search</label>
+            <label class="text-xs sm:text-sm font-medium">Search</label>
             <Input
               v-model="searchQuery"
               placeholder="Search logs..."
-              class="w-full"
+              class="w-full text-sm sm:text-base"
               @keyup.enter="applyFilters"
             />
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Action Type</label>
+            <label class="text-xs sm:text-sm font-medium">Action Type</label>
             <Select v-model="actionTypeFilter">
-              <SelectTrigger>
+              <SelectTrigger class="text-sm sm:text-base">
                 <SelectValue placeholder="Filter by action" />
               </SelectTrigger>
               <SelectContent>
@@ -435,6 +436,7 @@ onMounted(() => {
                   v-for="actionType in actionTypes"
                   :key="actionType.value"
                   :value="actionType.value"
+                  class="text-sm sm:text-base"
                 >
                   {{ actionType.label }}
                 </SelectItem>
@@ -443,17 +445,18 @@ onMounted(() => {
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">User</label>
+            <label class="text-xs sm:text-sm font-medium">User</label>
             <Select v-model="userFilter">
-              <SelectTrigger>
+              <SelectTrigger class="text-sm sm:text-base">
                 <SelectValue placeholder="Filter by user" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Users</SelectItem>
+                <SelectItem value="all" class="text-sm sm:text-base">All Users</SelectItem>
                 <SelectItem
                   v-for="user in uniqueUsers"
                   :key="user.id"
                   :value="user.id"
+                  class="text-sm sm:text-base"
                 >
                   {{ user.username }}
                 </SelectItem>
@@ -462,9 +465,9 @@ onMounted(() => {
           </div>
 
           <div class="space-y-2">
-            <label class="text-sm font-medium">Date Range</label>
+            <label class="text-xs sm:text-sm font-medium">Date Range</label>
             <Select v-model="dateFilter">
-              <SelectTrigger>
+              <SelectTrigger class="text-sm sm:text-base">
                 <SelectValue placeholder="Filter by date" />
               </SelectTrigger>
               <SelectContent>
@@ -472,6 +475,7 @@ onMounted(() => {
                   v-for="option in dateFilterOptions"
                   :key="option.value"
                   :value="option.value"
+                  class="text-sm sm:text-base"
                 >
                   {{ option.label }}
                 </SelectItem>
@@ -480,39 +484,39 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="flex justify-between">
-          <Button variant="outline" @click="resetFilters">
+        <div class="flex flex-col sm:flex-row justify-between gap-2 sm:gap-0">
+          <Button variant="outline" @click="resetFilters" class="w-full sm:w-auto text-sm sm:text-base">
             Reset Filters
           </Button>
-          <Button @click="applyFilters"> Apply Filters </Button>
+          <Button @click="applyFilters" class="w-full sm:w-auto text-sm sm:text-base"> Apply Filters </Button>
         </div>
       </CardContent>
     </Card>
 
     <!-- Main Content Card -->
     <Card>
-      <CardHeader class="pb-4">
+      <CardHeader class="pb-3 sm:pb-4">
         <div class="flex justify-between items-center">
           <div>
-            <CardTitle class="text-lg">Activity History</CardTitle>
-            <p class="text-sm text-muted-foreground mt-1">
+            <CardTitle class="text-base sm:text-lg">Activity History</CardTitle>
+            <p class="text-xs sm:text-sm text-muted-foreground mt-1">
               {{ totalItems }} total logs found
             </p>
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        <div v-if="loading && auditLogs.length === 0" class="text-center py-12">
+        <div v-if="loading && auditLogs.length === 0" class="text-center py-8 sm:py-12">
           <div
             class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
           ></div>
-          <p class="text-muted-foreground">Loading audit logs...</p>
+          <p class="text-sm sm:text-base text-muted-foreground">Loading audit logs...</p>
         </div>
 
-        <div v-else-if="auditLogs.length === 0" class="text-center py-12">
+        <div v-else-if="auditLogs.length === 0" class="text-center py-8 sm:py-12">
           <div class="text-muted-foreground mb-2">
             <svg
-              class="h-12 w-12 mx-auto mb-4"
+              class="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-4"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -525,22 +529,23 @@ onMounted(() => {
               />
             </svg>
           </div>
-          <p class="text-lg font-medium">No audit logs found</p>
-          <p class="text-muted-foreground">
+          <p class="text-base sm:text-lg font-medium">No audit logs found</p>
+          <p class="text-sm sm:text-base text-muted-foreground">
             Try adjusting your filters or refresh the page.
           </p>
         </div>
 
-        <div v-else class="space-y-4">
-          <div class="rounded-md border overflow-hidden">
+        <div v-else class="space-y-3 sm:space-y-4">
+          <!-- Desktop Table View -->
+          <div class="hidden md:block rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow class="bg-muted/50">
-                  <TableHead class="w-[180px]">Time</TableHead>
-                  <TableHead class="w-[140px]">User</TableHead>
-                  <TableHead class="w-[160px]">Action</TableHead>
-                  <TableHead class="w-[160px]">Type</TableHead>
-                  <TableHead class="w-[100px]">Details</TableHead>
+                  <TableHead class="w-[180px] text-xs sm:text-sm">Time</TableHead>
+                  <TableHead class="w-[140px] text-xs sm:text-sm">User</TableHead>
+                  <TableHead class="w-[160px] text-xs sm:text-sm">Action</TableHead>
+                  <TableHead class="w-[160px] text-xs sm:text-sm">Type</TableHead>
+                  <TableHead class="w-[100px] text-xs sm:text-sm">Details</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -549,16 +554,14 @@ onMounted(() => {
                   :key="log.id"
                   class="hover:bg-muted/30 transition-colors"
                 >
-                  <TableCell class="font-mono text-sm">
-                    {{
-                      formatDate(log.timestamp)
-                    }}
+                  <TableCell class="font-mono text-xs sm:text-sm">
+                    {{ formatDate(log.timestamp) }}
                   </TableCell>
                   <TableCell>
                     <Badge
                       variant="outline"
                       :class="getActionBadgeColor(log.action)"
-                      class="font-medium"
+                      class="font-medium text-xs"
                     >
                       {{ log.username }}
                     </Badge>
@@ -567,7 +570,7 @@ onMounted(() => {
                     <Badge
                       variant="outline"
                       :class="getActionBadgeColor(log.action)"
-                      class="font-medium"
+                      class="font-medium text-xs"
                     >
                       {{ log.action }}
                     </Badge>
@@ -576,7 +579,7 @@ onMounted(() => {
                     <Badge
                       variant="outline"
                       :class="getActionBadgeColor(log.action)"
-                      class="font-medium"
+                      class="font-medium text-xs"
                     >
                       {{ formatActionType(log.action) }}
                     </Badge>
@@ -587,10 +590,10 @@ onMounted(() => {
                       size="sm"
                       @click="viewLogDetails(log)"
                       :disabled="!hasDetailedChanges(log.changes)"
-                      class="gap-1"
+                      class="gap-1 text-xs"
                     >
                       <svg
-                        class="h-4 w-4"
+                        class="h-3 w-3 sm:h-4 sm:w-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -616,22 +619,90 @@ onMounted(() => {
             </Table>
           </div>
 
+          <!-- Mobile Card View -->
+          <div class="md:hidden space-y-3">
+            <div
+              v-for="log in filteredAuditLogs"
+              :key="log.id"
+              class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+            >
+              <div class="flex items-start justify-between gap-2 mb-2">
+                <div class="flex-1 min-w-0">
+                  <p class="font-mono text-xs text-muted-foreground mb-1">
+                    {{ formatDate(log.timestamp) }}
+                  </p>
+                  <Badge
+                    variant="outline"
+                    :class="getActionBadgeColor(log.action)"
+                    class="font-medium text-xs mb-1"
+                  >
+                    {{ formatActionType(log.action) }}
+                  </Badge>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  @click="viewLogDetails(log)"
+                  :disabled="!hasDetailedChanges(log.changes)"
+                  class="h-8 w-8 p-0 flex-shrink-0"
+                >
+                  <svg
+                    class="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                    />
+                  </svg>
+                </Button>
+              </div>
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-muted-foreground">User:</span>
+                  <Badge
+                    variant="outline"
+                    :class="getActionBadgeColor(log.action)"
+                    class="font-medium text-xs"
+                  >
+                    {{ log.username }}
+                  </Badge>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-muted-foreground">Action:</span>
+                  <span class="text-xs font-medium break-all">{{ log.action }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Pagination -->
-          <div class="flex justify-between items-center pt-4">
-            <div class="text-sm text-muted-foreground">
+          <div class="flex flex-col sm:flex-row justify-between items-center gap-3 sm:gap-0 pt-3 sm:pt-4">
+            <div class="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
               Showing {{ Math.min(auditLogs.length, itemsPerPage) }} of
               {{ totalItems }} entries
             </div>
 
-            <div v-if="totalPages > 1" class="flex items-center space-x-2">
+            <div v-if="totalPages > 1" class="flex items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
                 @click="changePage(Math.max(1, currentPage - 1))"
                 :disabled="currentPage === 1"
+                class="text-xs sm:text-sm"
               >
                 <svg
-                  class="h-4 w-4 mr-1"
+                  class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -643,14 +714,13 @@ onMounted(() => {
                     d="M15 19l-7-7 7-7"
                   />
                 </svg>
-                Previous
+                <span class="hidden sm:inline">Previous</span>
+                <span class="sm:hidden">Prev</span>
               </Button>
 
-              <div class="flex items-center gap-1">
-                <span class="text-sm font-medium">{{ currentPage }}</span>
-                <span class="text-sm text-muted-foreground"
-                  >of {{ totalPages }}</span
-                >
+              <div class="flex items-center gap-1 px-2">
+                <span class="text-xs sm:text-sm font-medium">{{ currentPage }}</span>
+                <span class="text-xs sm:text-sm text-muted-foreground">/ {{ totalPages }}</span>
               </div>
 
               <Button
@@ -658,10 +728,12 @@ onMounted(() => {
                 size="sm"
                 @click="changePage(Math.min(totalPages, currentPage + 1))"
                 :disabled="currentPage === totalPages"
+                class="text-xs sm:text-sm"
               >
-                Next
+                <span class="hidden sm:inline">Next</span>
+                <span class="sm:hidden">Next</span>
                 <svg
-                  class="h-4 w-4 ml-1"
+                  class="h-3 w-3 sm:h-4 sm:w-4 sm:ml-1"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -682,11 +754,11 @@ onMounted(() => {
 
     <!-- Enhanced Log Details Dialog -->
     <Dialog v-model:open="showLogDetailsDialog">
-      <DialogContent class="sm:max-w-[700px] max-h-[80vh]">
+      <DialogContent class="w-[95vw] sm:max-w-[700px] max-h-[85vh] sm:max-h-[80vh] p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle class="flex items-center gap-2">
+          <DialogTitle class="flex items-center gap-2 text-base sm:text-lg">
             <svg
-              class="h-5 w-5"
+              class="h-4 w-4 sm:h-5 sm:w-5"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -700,68 +772,68 @@ onMounted(() => {
             </svg>
             Audit Log Details
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription class="text-xs sm:text-sm">
             Complete information about this administrative action.
           </DialogDescription>
         </DialogHeader>
 
-        <div class="max-h-[60vh] overflow-y-auto" v-if="selectedLog">
-          <div class="space-y-6 pr-4">
+        <div class="max-h-[60vh] sm:max-h-[60vh] overflow-y-auto" v-if="selectedLog">
+          <div class="space-y-4 sm:space-y-6 pr-2 sm:pr-4">
             <!-- Header Info -->
-            <div class="grid grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <div class="space-y-3">
                 <div>
-                  <h3 class="text-sm font-medium text-muted-foreground">
+                  <h3 class="text-xs sm:text-sm font-medium text-muted-foreground">
                     Timestamp
                   </h3>
-                  <p class="text-sm font-mono">
+                  <p class="text-xs sm:text-sm font-mono break-all">
                     {{ formatDate(selectedLog.timestamp) }}
                   </p>
                 </div>
                 <div>
-                  <h3 class="text-sm font-medium text-muted-foreground">
+                  <h3 class="text-xs sm:text-sm font-medium text-muted-foreground">
                     User
                   </h3>
                   <div class="flex items-center gap-2 mt-1">
                     <div
-                      class="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center"
+                      class="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0"
                     >
                       <span class="text-xs font-medium text-primary">{{
                         selectedLog.username.charAt(0).toUpperCase()
                       }}</span>
                     </div>
-                    <span class="font-medium">{{ selectedLog.username }}</span>
+                    <span class="font-medium text-sm sm:text-base break-all">{{ selectedLog.username }}</span>
                   </div>
                 </div>
               </div>
 
               <div class="space-y-3">
                 <div>
-                  <h3 class="text-sm font-medium text-muted-foreground">
+                  <h3 class="text-xs sm:text-sm font-medium text-muted-foreground">
                     Action Type
                   </h3>
                   <Badge
                     variant="outline"
                     :class="getActionBadgeColor(selectedLog.action)"
-                    class="font-medium mt-1"
+                    class="font-medium mt-1 text-xs"
                   >
                     {{ formatActionType(selectedLog.action) }}
                   </Badge>
                 </div>
                 <div>
-                  <h3 class="text-sm font-medium text-muted-foreground">
+                  <h3 class="text-xs sm:text-sm font-medium text-muted-foreground">
                     Action
                   </h3>
                   <Badge
                     variant="outline"
                     :class="getActionBadgeColor(selectedLog.action)"
-                    class="font-medium mt-1"
+                    class="font-medium mt-1 text-xs break-all"
                   >
                     {{ selectedLog.action }}
                   </Badge>
                 </div>
                 <div>
-                  <h3 class="text-sm font-medium text-muted-foreground">
+                  <h3 class="text-xs sm:text-sm font-medium text-muted-foreground">
                     Log ID
                   </h3>
                   <p class="text-xs font-mono text-muted-foreground break-all">
@@ -775,11 +847,11 @@ onMounted(() => {
 
             <!-- Raw Data -->
             <div v-if="hasDetailedChanges(selectedLog.changes)">
-              <h3 class="text-sm font-medium text-muted-foreground mb-2">
+              <h3 class="text-xs sm:text-sm font-medium text-muted-foreground mb-2">
                 Raw Data
               </h3>
               <div class="bg-muted/50 rounded-md border">
-                <div class="p-3 border-b bg-muted/30">
+                <div class="p-2 sm:p-3 border-b bg-muted/30">
                   <div class="flex items-center justify-between">
                     <span class="text-xs font-medium text-muted-foreground"
                       >JSON</span
@@ -798,9 +870,9 @@ onMounted(() => {
                     </Button>
                   </div>
                 </div>
-                <div class="max-h-[300px] overflow-y-auto">
+                <div class="max-h-[250px] sm:max-h-[300px] overflow-y-auto">
                   <pre
-                    class="p-3 text-xs font-mono whitespace-pre-wrap break-words"
+                    class="p-2 sm:p-3 text-xs font-mono whitespace-pre-wrap break-words"
                     >{{ formatJsonForDisplay(selectedLog.changes) }}</pre
                   >
                 </div>
@@ -808,9 +880,9 @@ onMounted(() => {
             </div>
 
             <div v-else>
-              <div class="text-center py-8 text-muted-foreground">
+              <div class="text-center py-6 sm:py-8 text-muted-foreground">
                 <svg
-                  class="h-8 w-8 mx-auto mb-2"
+                  class="h-6 w-6 sm:h-8 sm:w-8 mx-auto mb-2"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -822,7 +894,7 @@ onMounted(() => {
                     d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
                   />
                 </svg>
-                <p class="text-sm">
+                <p class="text-xs sm:text-sm">
                   No additional data available for this action
                 </p>
               </div>

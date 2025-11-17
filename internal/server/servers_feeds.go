@@ -70,7 +70,7 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 				event_manager.EventTypeLogPlayerDisconnected,
 			)
 		case "teamkills":
-			eventTypes = append(eventTypes, event_manager.EventTypeLogPlayerDied)
+			eventTypes = append(eventTypes, event_manager.EventTypeLogPlayerWounded)
 		}
 	}
 
@@ -209,30 +209,30 @@ func (s *Server) formatEventForFeed(event event_manager.Event, feedTypes []strin
 			}
 		}
 
-	case event_manager.EventTypeLogPlayerDied:
+	case event_manager.EventTypeLogPlayerWounded:
 		if !contains(feedTypes, "teamkills") {
 			return nil
 		}
-		if diedData, ok := event.Data.(*event_manager.LogPlayerDiedData); ok {
+		if woundedData, ok := event.Data.(*event_manager.LogPlayerWoundedData); ok {
 			// Only include teamkills
-			if !diedData.Teamkill {
+			if !woundedData.Teamkill {
 				return nil
 			}
 			feedEvent.Type = "teamkill"
 
 			// Use Steam ID as fallback if attacker name is empty
-			attackerName := diedData.AttackerName
-			if attackerName == "" && diedData.AttackerSteam != "" {
-				attackerName = diedData.AttackerSteam
+			attackerName := woundedData.AttackerName
+			if attackerName == "" && woundedData.AttackerSteam != "" {
+				attackerName = woundedData.AttackerSteam
 			}
 
 			feedEvent.Data = map[string]interface{}{
-				"victim_name":    diedData.VictimName,
+				"victim_name":    woundedData.VictimName,
 				"attacker_name":  attackerName,
-				"attacker_steam": diedData.AttackerSteam,
-				"attacker_eos":   diedData.AttackerEOS,
-				"weapon":         diedData.Weapon,
-				"damage":         diedData.Damage,
+				"attacker_steam": woundedData.AttackerSteam,
+				"attacker_eos":   woundedData.AttackerEOS,
+				"weapon":         woundedData.Weapon,
+				"damage":         woundedData.Damage,
 			}
 		}
 
@@ -561,7 +561,7 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 			attacker_eos,
 			weapon,
 			damage
-		FROM squad_aegis.server_player_died_events 
+		FROM squad_aegis.server_player_wounded_events 
 		WHERE server_id = ? AND teamkill = 1`
 
 	args := []interface{}{serverId}
