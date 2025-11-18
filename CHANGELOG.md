@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-16
+## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-18
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -14,6 +14,7 @@
 
 ### 📈 Enhancement
 
+- refactor(ui): add demote commander btn [[#116](https://github.com/Codycody31/squad-aegis/pull/116)]
 - refactor: add CBL info + steam & battlemetrics links to player profile [[#115](https://github.com/Codycody31/squad-aegis/pull/115)]
 - refactor: improve player violations tab [[#109](https://github.com/Codycody31/squad-aegis/pull/109)]
 - refactor: add player profile link and fetch name if empty for players… [[#102](https://github.com/Codycody31/squad-aegis/pull/102)]
