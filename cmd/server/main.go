@@ -48,6 +48,9 @@ var (
 )
 
 func main() {
+	// Set time zone to UTC
+	time.Local = time.UTC
+
 	ctx := utils.WithContextSigtermCallback(context.Background(), func() {
 		log.Info().Msg("termination signal is received, shutting down server")
 	})
