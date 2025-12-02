@@ -30,23 +30,43 @@ type Server struct {
 }
 
 type ServerBan struct {
-	ID           string    `json:"id"`
-	ServerID     uuid.UUID `json:"server_id"`
-	AdminID      uuid.UUID `json:"admin_id"`
-	AdminName    string    `json:"admin_name"`
-	AdminSteamID string    `json:"admin_steam_id,omitempty"`
-	SteamID      string    `json:"steam_id,string"`
-	Name         string    `json:"name"`
-	Reason       string    `json:"reason"`
-	Duration     int       `json:"duration"`
-	RuleID       *string   `json:"rule_id,omitempty"`
-	RuleName     *string   `json:"rule_name,omitempty"`
-	BanListID    *string   `json:"ban_list_id,omitempty"`
-	BanListName  *string   `json:"ban_list_name,omitempty"`
-	Permanent    bool      `json:"permanent"`
-	ExpiresAt    time.Time `json:"expires_at,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string         `json:"id"`
+	ServerID     uuid.UUID      `json:"server_id"`
+	AdminID      uuid.UUID      `json:"admin_id"`
+	AdminName    string         `json:"admin_name"`
+	AdminSteamID string         `json:"admin_steam_id,omitempty"`
+	SteamID      string         `json:"steam_id,string"`
+	Name         string         `json:"name"`
+	Reason       string         `json:"reason"`
+	Duration     int            `json:"duration"`
+	RuleID       *string        `json:"rule_id,omitempty"`
+	RuleName     *string        `json:"rule_name,omitempty"`
+	BanListID    *string        `json:"ban_list_id,omitempty"`
+	BanListName  *string        `json:"ban_list_name,omitempty"`
+	EvidenceText *string        `json:"evidence_text,omitempty"`
+	Evidence     []BanEvidence  `json:"evidence,omitempty"`
+	Permanent    bool           `json:"permanent"`
+	ExpiresAt    time.Time      `json:"expires_at,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
+type BanEvidence struct {
+	ID              string                 `json:"id"`
+	BanID           string                 `json:"ban_id"`
+	EvidenceType    string                 `json:"evidence_type"`
+	ClickhouseTable *string                `json:"clickhouse_table,omitempty"` // Nullable for file/text evidence
+	RecordID        *string                `json:"record_id,omitempty"`         // Nullable for file/text evidence
+	ServerID        uuid.UUID              `json:"server_id"`
+	EventTime       *time.Time             `json:"event_time,omitempty"` // Nullable for file uploads
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	FilePath        *string                `json:"file_path,omitempty"` // For file uploads
+	FileName        *string                `json:"file_name,omitempty"` // For file uploads
+	FileSize        *int64                 `json:"file_size,omitempty"` // For file uploads (bytes)
+	FileType        *string                `json:"file_type,omitempty"`   // MIME type for file uploads
+	TextContent     *string                `json:"text_content,omitempty"` // For text paste evidence
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
 }
 
 type BanList struct {
@@ -116,18 +136,37 @@ type ServerRole struct {
 // ------------------------------------------
 
 type ServerBanCreateRequest struct {
-	SteamID   string  `json:"steam_id"`
-	Reason    string  `json:"reason"`
-	Duration  int     `json:"duration"`
-	RuleID    *string `json:"rule_id,omitempty"`
-	BanListID *string `json:"ban_list_id,omitempty"`
+	SteamID      string                   `json:"steam_id"`
+	Reason       string                   `json:"reason"`
+	Duration     int                      `json:"duration"`
+	RuleID       *string                  `json:"rule_id,omitempty"`
+	BanListID    *string                  `json:"ban_list_id,omitempty"`
+	EvidenceText *string                  `json:"evidence_text,omitempty"`
+	Evidence     []BanEvidenceCreateItem  `json:"evidence,omitempty"`
+}
+
+type BanEvidenceCreateItem struct {
+	EvidenceType    string                 `json:"evidence_type"` // 'player_died', 'player_wounded', 'player_damaged', 'chat_message', 'player_connected', 'file_upload', 'text_paste'
+	ClickhouseTable *string                `json:"clickhouse_table,omitempty"` // Required for ClickHouse events, null for file/text
+	RecordID        *string                `json:"record_id,omitempty"`         // Required for ClickHouse events, null for file/text
+	EventTime       *time.Time             `json:"event_time,omitempty"`        // Required for ClickHouse events, optional for file/text
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	// File upload fields (for evidence_type = 'file_upload')
+	FilePath *string `json:"file_path,omitempty"`
+	FileName *string `json:"file_name,omitempty"`
+	FileSize *int64  `json:"file_size,omitempty"`
+	FileType *string `json:"file_type,omitempty"`
+	// Text paste field (for evidence_type = 'text_paste')
+	TextContent *string `json:"text_content,omitempty"`
 }
 
 type ServerBanUpdateRequest struct {
-	Reason    *string    `json:"reason,omitempty"`
-	Duration  *int       `json:"duration,omitempty"`
-	BanListID *string    `json:"ban_list_id,omitempty"`
-	RuleID    *uuid.UUID `json:"rule_id,omitempty"`
+	Reason       *string                  `json:"reason,omitempty"`
+	Duration     *int                     `json:"duration,omitempty"`
+	BanListID    *string                  `json:"ban_list_id,omitempty"`
+	RuleID       *uuid.UUID               `json:"rule_id,omitempty"`
+	EvidenceText *string                  `json:"evidence_text,omitempty"`
+	Evidence     *[]BanEvidenceCreateItem `json:"evidence,omitempty"`
 }
 
 type BanListCreateRequest struct {

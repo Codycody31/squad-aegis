@@ -1,9 +1,9 @@
 <template>
-  <div class="flex flex-col h-[calc(100vh-8rem)] p-6">
-    <div class="flex items-center justify-between mb-4 flex-shrink-0">
+  <div class="flex flex-col h-[calc(100vh-6rem)] sm:h-[calc(100vh-8rem)] p-3 sm:p-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 flex-shrink-0 gap-3">
       <div>
-        <h1 class="text-3xl font-bold tracking-tight">Live Feeds</h1>
-        <p class="text-muted-foreground">
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Live Feeds</h1>
+        <p class="text-sm sm:text-base text-muted-foreground">
           Real-time chat messages, player connections, and teamkills
         </p>
       </div>
@@ -13,45 +13,46 @@
           size="sm"
           @click="refreshFeeds"
           :disabled="loading || connecting"
+          class="text-xs sm:text-sm"
         >
           <Icon
             :name="loading ? 'mdi:loading' : 'mdi:refresh'"
-            :class="['h-4 w-4 mr-2', { 'animate-spin': loading }]"
+            :class="['h-4 w-4 sm:mr-2', { 'animate-spin': loading }]"
           />
-          Refresh
+          <span class="hidden sm:inline">Refresh</span>
         </Button>
-        <Button variant="outline" size="sm" @click="clearAllFeeds">
-          <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-          Clear All
+        <Button variant="outline" size="sm" @click="clearAllFeeds" class="text-xs sm:text-sm">
+          <Icon name="mdi:delete" class="h-4 w-4 sm:mr-2" />
+          <span class="hidden sm:inline">Clear All</span>
         </Button>
       </div>
     </div>
 
     <!-- Connection Status -->
-    <div v-if="connecting || error" class="mb-4 flex-shrink-0">
-      <Card v-if="connecting" class="mb-4 border-blue-200 bg-blue-50">
-        <CardContent class="p-4">
+    <div v-if="connecting || error" class="mb-3 sm:mb-4 flex-shrink-0">
+      <Card v-if="connecting" class="mb-2 sm:mb-4 border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800">
+        <CardContent class="p-3 sm:p-4">
           <div class="flex items-center space-x-2">
             <Icon
               name="mdi:loading"
-              class="h-4 w-4 animate-spin text-blue-600"
+              class="h-4 w-4 sm:h-5 sm:w-5 animate-spin text-blue-600 flex-shrink-0"
             />
-            <div>
-              <p class="font-medium text-blue-900">Connecting</p>
-              <p class="text-sm text-blue-700">
+            <div class="min-w-0">
+              <p class="font-medium text-sm sm:text-base text-blue-900 dark:text-blue-100">Connecting</p>
+              <p class="text-xs sm:text-sm text-blue-700 dark:text-blue-300">
                 Establishing connection to live feeds...
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
-      <Card v-if="error" class="mb-4 border-red-200 bg-red-50">
-        <CardContent class="p-4">
+      <Card v-if="error" class="mb-2 sm:mb-4 border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800">
+        <CardContent class="p-3 sm:p-4">
           <div class="flex items-center space-x-2">
-            <Icon name="mdi:alert-circle" class="h-4 w-4 text-red-600" />
-            <div>
-              <p class="font-medium text-red-900">Connection Error</p>
-              <p class="text-sm text-red-700">{{ error }}</p>
+            <Icon name="mdi:alert-circle" class="h-4 w-4 sm:h-5 sm:w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+            <div class="min-w-0">
+              <p class="font-medium text-sm sm:text-base text-red-900 dark:text-red-100">Connection Error</p>
+              <p class="text-xs sm:text-sm text-red-700 dark:text-red-300 break-words">{{ error }}</p>
             </div>
           </div>
         </CardContent>
@@ -60,28 +61,31 @@
 
     <!-- Tabs -->
     <Tabs v-model="activeTab" class="w-full flex flex-col flex-1 min-h-0">
-      <TabsList class="grid w-full grid-cols-3 flex-shrink-0 mb-2">
-        <TabsTrigger value="chat" class="relative">
-          <Icon name="mdi:message-text" class="h-4 w-4 mr-2" />
-          Chat Messages
+      <TabsList class="grid w-full grid-cols-3 flex-shrink-0 mb-2 overflow-x-auto">
+        <TabsTrigger value="chat" class="relative text-xs sm:text-sm">
+          <Icon name="mdi:message-text" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+          <span class="hidden sm:inline">Chat Messages</span>
+          <span class="sm:hidden">Chat</span>
           <span
             v-if="hasUnread.chat"
             class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
             title="New messages available"
           ></span>
         </TabsTrigger>
-        <TabsTrigger value="connections" class="relative">
-          <Icon name="mdi:account-multiple" class="h-4 w-4 mr-2" />
-          Player Connections
+        <TabsTrigger value="connections" class="relative text-xs sm:text-sm">
+          <Icon name="mdi:account-multiple" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+          <span class="hidden sm:inline">Player Connections</span>
+          <span class="sm:hidden">Connections</span>
           <span
             v-if="hasUnread.connections"
             class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
             title="New connections available"
           ></span>
         </TabsTrigger>
-        <TabsTrigger value="teamkills" class="relative">
-          <Icon name="mdi:skull" class="h-4 w-4 mr-2" />
-          Teamkills
+        <TabsTrigger value="teamkills" class="relative text-xs sm:text-sm">
+          <Icon name="mdi:skull" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+          <span class="hidden sm:inline">Teamkills</span>
+          <span class="sm:hidden">TKs</span>
           <span
             v-if="hasUnread.teamkills"
             class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
@@ -92,17 +96,17 @@
 
       <!-- Chat Feed -->
       <TabsContent value="chat" class="mt-0 flex-1 min-h-0">
-        <div class="flex flex-col h-full space-y-4">
-          <div class="flex items-center justify-between flex-shrink-0">
-            <h3 class="text-lg font-semibold">Chat Messages</h3>
+        <div class="flex flex-col h-full space-y-3 sm:space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-shrink-0 gap-2">
+            <h3 class="text-base sm:text-lg font-semibold">Chat Messages</h3>
             <div class="flex items-center space-x-2">
-              <Button variant="outline" size="sm" @click="scrollToBottom('chat')">
-                <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
-                Bottom
+              <Button variant="outline" size="sm" @click="scrollToBottom('chat')" class="text-xs sm:text-sm">
+                <Icon name="mdi:arrow-down" class="h-4 w-4 sm:mr-2" />
+                <span class="hidden sm:inline">Bottom</span>
               </Button>
-              <Button variant="outline" size="sm" @click="clearFeed('chat')">
-                <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-                Clear
+              <Button variant="outline" size="sm" @click="clearFeed('chat')" class="text-xs sm:text-sm">
+                <Icon name="mdi:delete" class="h-4 w-4 sm:mr-2" />
+                <span class="hidden sm:inline">Clear</span>
               </Button>
             </div>
           </div>
@@ -111,11 +115,11 @@
             <div
               ref="chatContainer"
               @scroll="(e) => handleScroll(e, 'chat')"
-              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
+              class="flex-1 overflow-y-auto min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'chat'"
-                class="p-2 text-center bg-blue-50 border-b"
+                class="p-2 text-center bg-blue-50 border-b text-xs sm:text-sm"
               >
                 <Icon
                   name="mdi:loading"
@@ -125,54 +129,56 @@
               </div>
               <div
                 v-if="chatMessages.length === 0"
-                class="p-8 text-center text-muted-foreground"
+                class="p-6 sm:p-8 text-center text-muted-foreground"
               >
                 <Icon
                   name="mdi:message-text-outline"
-                  class="h-12 w-12 mx-auto mb-4 opacity-50"
+                  class="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-4 opacity-50"
                 />
-                <p>No chat messages yet</p>
-                <p class="text-sm">
+                <p class="text-sm sm:text-base">No chat messages yet</p>
+                <p class="text-xs sm:text-sm mt-1">
                   Messages will appear here when players chat
                 </p>
               </div>
-              <div v-else class="space-y-1 p-4">
+              <div v-else class="space-y-2 p-3 sm:p-4">
                 <div
                   v-for="message in chatMessages"
                   :key="message.id"
-                  class="flex items-start space-x-3 p-2 rounded-lg hover:bg-muted/50"
+                  class="flex items-start gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
                 >
                   <div class="flex-shrink-0 mt-1">
                     <div
-                      class="w-2 h-2 rounded-full"
+                      class="w-2.5 h-2.5 rounded-full"
                       :class="getChatTypeColor(message.data.chat_type)"
                     ></div>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <div class="flex items-center space-x-2">
-                      <p class="font-medium text-sm">
+                    <div class="flex flex-wrap items-center gap-2 mb-1.5">
+                      <p class="font-semibold text-sm sm:text-base">
                         {{ message.data.player_name }}
                       </p>
                       <Badge
                         :variant="getChatTypeBadge(message.data.chat_type)"
-                        class="text-xs"
+                        class="text-xs px-1.5 py-0.5"
                       >
                         {{ message.data.chat_type }}
                       </Badge>
-                      <span class="text-xs text-muted-foreground">
+                      <span class="text-xs text-muted-foreground whitespace-nowrap">
                         {{ formatTimestamp(message.timestamp) }}
                       </span>
                     </div>
-                    <div class="flex items-center justify-between mt-1">
-                      <p class="text-sm text-foreground flex-1">
+                    <div class="flex items-start justify-between gap-2">
+                      <p class="text-sm sm:text-base text-foreground flex-1 break-words">
                         {{ message.data.message }}
                       </p>
-                      <PlayerActionMenu
-                        v-if="message.data.steam_id || message.data.eos_id"
-                        :player="createPlayerFromFeedData(message.data, message.data.player_name)"
-                        :serverId="serverId"
-                        @action-completed="refreshFeeds"
-                      />
+                      <div class="flex-shrink-0">
+                        <PlayerActionMenu
+                          v-if="message.data.steam_id || message.data.eos_id"
+                          :player="createPlayerFromFeedData(message.data, message.data.player_name)"
+                          :serverId="serverId"
+                          @action-completed="refreshFeeds"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -185,12 +191,12 @@
 
       <!-- Connections Feed -->
       <TabsContent value="connections" class="mt-0 flex-1 min-h-0">
-        <div class="flex flex-col h-full space-y-4">
-          <div class="flex items-center justify-between flex-shrink-0">
-            <h3 class="text-lg font-semibold">Player Connections</h3>
-            <Button variant="outline" size="sm" @click="clearFeed('connections')">
-              <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-              Clear
+        <div class="flex flex-col h-full space-y-3 sm:space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-shrink-0 gap-2">
+            <h3 class="text-base sm:text-lg font-semibold">Player Connections</h3>
+            <Button variant="outline" size="sm" @click="clearFeed('connections')" class="text-xs sm:text-sm">
+              <Icon name="mdi:delete" class="h-4 w-4 sm:mr-2" />
+              <span class="hidden sm:inline">Clear</span>
             </Button>
           </div>
           <Card class="flex-1 flex flex-col min-h-0">
@@ -198,11 +204,11 @@
             <div
               ref="connectionsContainer"
               @scroll="(e) => handleScroll(e, 'connections')"
-              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
+              class="flex-1 overflow-y-auto min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'connections'"
-                class="p-2 text-center bg-blue-50 border-b"
+                class="p-2 text-center bg-blue-50 border-b text-xs sm:text-sm"
               >
                 <Icon
                   name="mdi:loading"
@@ -212,22 +218,22 @@
               </div>
               <div
                 v-if="connections.length === 0"
-                class="p-8 text-center text-muted-foreground"
+                class="p-6 sm:p-8 text-center text-muted-foreground"
               >
                 <Icon
                   name="mdi:account-multiple-outline"
-                  class="h-12 w-12 mx-auto mb-4 opacity-50"
+                  class="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-4 opacity-50"
                 />
-                <p>No connection events yet</p>
-                <p class="text-sm">Player connections will appear here</p>
+                <p class="text-sm sm:text-base">No connection events yet</p>
+                <p class="text-xs sm:text-sm mt-1">Player connections will appear here</p>
               </div>
-              <div v-else class="space-y-1 p-4">
+              <div v-else class="space-y-2 p-3 sm:p-4">
                 <div
                   v-for="connection in connections"
                   :key="connection.id"
-                  class="flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50"
+                  class="flex items-start gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
                 >
-                  <div class="flex-shrink-0">
+                  <div class="flex-shrink-0 mt-1">
                     <Icon
                       v-if="connection.data.action === 'connected' || connection.data.action === 'joined'"
                       :name="
@@ -237,20 +243,20 @@
                       "
                       :class="
                         connection.data.action === 'connected'
-                          ? 'text-green-500'
-                          : 'text-blue-500'
+                          ? 'text-green-600'
+                          : 'text-blue-600'
                       "
-                      class="h-5 w-5"
+                      class="h-5 w-5 sm:h-6 sm:w-6"
                     />
                     <Icon
                       v-if="connection.data.action === 'disconnected'"
                       name="mdi:account-remove"
-                      class="h-5 w-5 text-red-500"
+                      class="h-5 w-5 sm:h-6 sm:w-6 text-red-600"
                     />
                   </div>
-                  <div class="flex-1">
-                    <div class="flex items-center space-x-2">
-                      <p class="font-medium text-sm">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex flex-wrap items-center gap-2 mb-1.5">
+                      <p class="font-semibold text-sm sm:text-base">
                         {{
                           connection.data.player_suffix ||
                           connection.data.player_controller
@@ -260,30 +266,34 @@
                         :variant="
                           connection.data.action === 'connected'
                             ? 'default'
+                            : connection.data.action === 'disconnected'
+                            ? 'destructive'
                             : 'secondary'
                         "
-                        class="text-xs"
+                        class="text-xs px-1.5 py-0.5"
                       >
                         {{ connection.data.action }}
                       </Badge>
-                      <span class="text-xs text-muted-foreground">
+                      <span class="text-xs text-muted-foreground whitespace-nowrap">
                         {{ formatTimestamp(connection.timestamp) }}
                       </span>
                     </div>
-                    <div class="flex items-center justify-between mt-1">
-                      <p class="text-xs text-muted-foreground">
+                    <div class="flex items-center justify-between gap-2 mt-1">
+                      <p class="text-xs sm:text-sm text-muted-foreground break-all">
                         IP: {{ connection.data.ip_address || "Unknown" }}
                       </p>
-                      <PlayerActionMenu
-                        v-if="connection.data.steam_id || connection.data.eos_id"
-                        :player="createPlayerFromFeedData(
-                          connection.data,
-                          connection.data.player_suffix || connection.data.player_controller,
-                          connection.data.action === 'disconnected'
-                        )"
-                        :serverId="serverId"
-                        @action-completed="refreshFeeds"
-                      />
+                      <div class="flex-shrink-0">
+                        <PlayerActionMenu
+                          v-if="connection.data.steam_id || connection.data.eos_id"
+                          :player="createPlayerFromFeedData(
+                            connection.data,
+                            connection.data.player_suffix || connection.data.player_controller,
+                            connection.data.action === 'disconnected'
+                          )"
+                          :serverId="serverId"
+                          @action-completed="refreshFeeds"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -296,21 +306,22 @@
 
       <!-- Teamkills Feed -->
       <TabsContent value="teamkills" class="mt-0 flex-1 min-h-0">
-        <div class="flex flex-col h-full space-y-4">
-          <div class="flex items-center justify-between flex-shrink-0">
-            <h3 class="text-lg font-semibold">Teamkills</h3>
+        <div class="flex flex-col h-full space-y-3 sm:space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-shrink-0 gap-2">
+            <h3 class="text-base sm:text-lg font-semibold">Teamkills</h3>
             <div class="flex items-center space-x-2">
               <Button
                 variant="outline"
                 size="sm"
                 @click="scrollToBottom('teamkills')"
+                class="text-xs sm:text-sm"
               >
-                <Icon name="mdi:arrow-down" class="h-4 w-4 mr-2" />
-                Bottom
+                <Icon name="mdi:arrow-down" class="h-4 w-4 sm:mr-2" />
+                <span class="hidden sm:inline">Bottom</span>
               </Button>
-              <Button variant="outline" size="sm" @click="clearFeed('teamkills')">
-                <Icon name="mdi:delete" class="h-4 w-4 mr-2" />
-                Clear
+              <Button variant="outline" size="sm" @click="clearFeed('teamkills')" class="text-xs sm:text-sm">
+                <Icon name="mdi:delete" class="h-4 w-4 sm:mr-2" />
+                <span class="hidden sm:inline">Clear</span>
               </Button>
             </div>
           </div>
@@ -319,11 +330,11 @@
             <div
               ref="teamkillsContainer"
               @scroll="(e) => handleScroll(e, 'teamkills')"
-              class="flex-1 overflow-y-auto border rounded-lg min-h-0"
+              class="flex-1 overflow-y-auto min-h-0"
             >
               <div
                 v-if="loadingOlder && activeTab === 'teamkills'"
-                class="p-2 text-center bg-blue-50 border-b"
+                class="p-2 text-center bg-blue-50 border-b text-xs sm:text-sm"
               >
                 <Icon
                   name="mdi:loading"
@@ -333,49 +344,62 @@
               </div>
               <div
                 v-if="teamkills.length === 0"
-                class="p-8 text-center text-muted-foreground"
+                class="p-6 sm:p-8 text-center text-muted-foreground"
               >
                 <Icon
                   name="mdi:skull-outline"
-                  class="h-12 w-12 mx-auto mb-4 opacity-50"
+                  class="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-4 opacity-50"
                 />
-                <p>No teamkills yet</p>
-                <p class="text-sm">Teamkill events will appear here</p>
+                <p class="text-sm sm:text-base">No teamkills yet</p>
+                <p class="text-xs sm:text-sm mt-1">Teamkill events will appear here</p>
               </div>
-              <div v-else class="space-y-1 p-4">
+              <div v-else class="space-y-2 p-3 sm:p-4">
                 <div
                   v-for="teamkill in teamkills"
                   :key="teamkill.id"
-                  class="flex items-start space-x-3 p-2 rounded-lg hover:bg-muted/50 border-l-4 border-red-500"
+                  class="flex items-start gap-3 p-3 rounded-lg border bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-900/50 hover:bg-red-100/70 dark:hover:bg-red-950/30 transition-colors"
                 >
                   <div class="flex-shrink-0 mt-1">
-                    <Icon name="mdi:skull" class="h-5 w-5 text-red-500" />
+                    <div class="p-1.5 rounded-full bg-red-100 dark:bg-red-900/30">
+                      <Icon name="mdi:skull" class="h-4 w-4 sm:h-5 sm:w-5 text-red-600 dark:text-red-400" />
+                    </div>
                   </div>
-                  <div class="flex-1">
-                    <div class="flex items-center space-x-2">
-                      <p class="font-medium text-sm text-red-600">
-                        {{ teamkill.data.attacker_name }} →
-                        {{ teamkill.data.victim_name }}
-                      </p>
-                      <span class="text-xs text-muted-foreground">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <p class="font-semibold text-sm sm:text-base text-red-700 dark:text-red-400">
+                          {{ teamkill.data.attacker_name }}
+                        </p>
+                        <Icon name="mdi:arrow-right" class="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+                        <p class="font-semibold text-sm sm:text-base text-red-700 dark:text-red-400">
+                          {{ teamkill.data.victim_name }}
+                        </p>
+                      </div>
+                      <span class="text-xs text-muted-foreground whitespace-nowrap ml-auto">
                         {{ formatTimestamp(teamkill.timestamp) }}
                       </span>
                     </div>
-                    <div
-                      class="flex items-center justify-between mt-1"
-                    >
-                      <div class="flex items-center space-x-4 text-xs text-muted-foreground">
-                        <span>Weapon: {{ teamkill.data.weapon }}</span>
-                        <span>Damage: {{ teamkill.data.damage }}</span>
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-1">
+                      <div class="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-muted-foreground">
+                        <span class="flex items-center gap-1">
+                          <Icon name="mdi:pistol" class="h-3 w-3" />
+                          <span class="font-medium">{{ teamkill.data.weapon }}</span>
+                        </span>
+                        <span class="flex items-center gap-1">
+                          <Icon name="mdi:heart-broken" class="h-3 w-3" />
+                          <span>{{ teamkill.data.damage }} dmg</span>
+                        </span>
                       </div>
-                      <div class="flex items-center space-x-2">
+                      <div class="flex items-center gap-2">
                         <PlayerActionMenu
                           v-if="teamkill.data.attacker_steam || teamkill.data.attacker_eos"
                           :player="createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name)"
                           :serverId="serverId"
                           @action-completed="refreshFeeds"
                         />
-                        <span class="text-xs text-muted-foreground">Attacker</span>
+                        <Badge variant="destructive" class="text-xs px-1.5 py-0.5">
+                          Attacker
+                        </Badge>
                       </div>
                     </div>
                   </div>
@@ -801,7 +825,30 @@ const scrollToBottom = (feedType: string) => {
 };
 
 const formatTimestamp = (timestamp: string) => {
-  return new Date(timestamp).toLocaleString();
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  
+  // Show relative time for recent events (within last hour)
+  if (diffMins < 60) {
+    if (diffMins < 1) return "Just now";
+    return `${diffMins}m ago`;
+  }
+  
+  // Show time only for today, full date for older
+  const isToday = date.toDateString() === now.toDateString();
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  
+  // Show date and time for older events
+  return date.toLocaleString([], { 
+    month: 'short', 
+    day: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  });
 };
 
 const getChatTypeColor = (chatType: string) => {

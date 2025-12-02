@@ -214,11 +214,11 @@ await fetchServers();
                     :tooltip="item.title"
                     :isActive="pathname === item.to?.name"
                   >
-                    <Icon :name="item.icon" v-if="item.icon" />
-                    <span>{{ item.title }}</span>
+                    <Icon :name="item.icon" v-if="item.icon" class="size-4 shrink-0 text-sidebar-foreground [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-foreground" />
+                    <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
                     <Icon
                       name="lucide:chevron-right"
-                      class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
+                      class="ml-auto size-4 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90 group-data-[collapsible=icon]:hidden shrink-0 text-sidebar-foreground"
                     />
                   </SidebarMenuButton>
                 </CollapsibleTrigger>
@@ -258,8 +258,8 @@ await fetchServers();
                   :to="item.to ? item.to : '/'"
                   @click="closeSidebarOnMobile"
                 >
-                  <Icon :name="item.icon" v-if="item.icon" />
-                  <span>{{ item.title }}</span>
+                  <Icon :name="item.icon" v-if="item.icon" class="size-4 shrink-0 text-sidebar-foreground [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-foreground" />
+                  <span class="group-data-[collapsible=icon]:hidden">{{ item.title }}</span>
                 </RouterLink>
               </SidebarMenuButton>
             </SidebarMenuItem>

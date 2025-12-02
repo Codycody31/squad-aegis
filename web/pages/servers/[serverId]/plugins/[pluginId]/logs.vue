@@ -639,51 +639,52 @@ onUnmounted(() => {
         <div
             class="flex-shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
         >
-            <div class="p-4">
+            <div class="p-3 sm:p-4">
                 <div
-                    class="flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                    class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4"
                 >
                     <div
-                        class="flex flex-col sm:flex-row sm:items-center gap-4"
+                        class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4"
                     >
-                        <Button variant="outline" @click="goBack" size="sm">
-                            <ArrowLeft class="w-4 h-4 mr-2" />
-                            Back
+                        <Button variant="outline" @click="goBack" size="sm" class="w-fit">
+                            <ArrowLeft class="w-4 h-4 sm:mr-2" />
+                            <span class="hidden sm:inline">Back</span>
                         </Button>
                         <div>
-                            <h1 class="text-xl font-bold">
+                            <h1 class="text-lg sm:text-xl font-bold">
                                 {{ plugin?.plugin_name || "Plugin" }} Plugin
                                 Logs
                             </h1>
-                            <p class="text-sm text-muted-foreground">
+                            <p class="text-xs sm:text-sm text-muted-foreground">
                                 Live log stream • {{ logs.length }} entries
                             </p>
                         </div>
                     </div>
 
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-1 sm:gap-2 flex-wrap">
                         <!-- WebSocket Connection Toggle -->
                         <Button
                             :variant="isConnected ? 'default' : 'outline'"
                             size="sm"
                             @click="toggleConnection"
                             :disabled="connecting"
+                            class="flex-shrink-0"
                         >
                             <div
-                                class="w-2 h-2 rounded-full mr-2"
+                                class="w-2 h-2 rounded-full sm:mr-2"
                                 :class="{
                                     'bg-green-500 animate-pulse': isConnected,
                                     'bg-yellow-500 animate-pulse': connecting,
                                     'bg-red-500': !isConnected && !connecting,
                                 }"
                             ></div>
-                            {{
+                            <span class="hidden sm:inline">{{
                                 isConnected
                                     ? "Live"
                                     : connecting
                                       ? "Connecting..."
                                       : "Connect"
-                            }}
+                            }}</span>
                         </Button>
 
                         <Button
@@ -692,6 +693,7 @@ onUnmounted(() => {
                             @click="expandAllLogs"
                             :disabled="logs.length === 0"
                             title="Ctrl+E"
+                            class="hidden md:inline-flex"
                         >
                             <ChevronDown class="w-4 h-4 mr-2" />
                             Expand All
@@ -702,6 +704,7 @@ onUnmounted(() => {
                             @click="collapseAllLogs"
                             :disabled="expandedLogs.size === 0"
                             title="Ctrl+Shift+E"
+                            class="hidden md:inline-flex"
                         >
                             <ChevronRightIcon class="w-4 h-4 mr-2" />
                             Collapse All
@@ -712,17 +715,19 @@ onUnmounted(() => {
                             @click="refreshLogs"
                             :disabled="refreshing"
                             title="Ctrl+R"
+                            class="flex-shrink-0"
                         >
                             <RefreshCw
-                                class="w-4 h-4 mr-2"
+                                class="w-4 h-4 sm:mr-2"
                                 :class="{ 'animate-spin': refreshing }"
                             />
-                            Refresh
+                            <span class="hidden sm:inline">Refresh</span>
                         </Button>
                         <Button
                             variant="outline"
                             size="sm"
                             @click="scrollToBottomAndRefresh"
+                            class="hidden sm:inline-flex"
                         >
                             <ArrowDown class="w-4 h-4 mr-2" />
                             Latest
@@ -733,45 +738,49 @@ onUnmounted(() => {
                             size="sm"
                             @click="exportLogs"
                             :disabled="logs.length === 0"
+                            class="flex-shrink-0"
                         >
-                            <Download class="w-4 h-4 mr-2" />
-                            Export
+                            <Download class="w-4 h-4 sm:mr-2" />
+                            <span class="hidden sm:inline">Export</span>
                         </Button>
                     </div>
                 </div>
 
                 <!-- Compact Filters -->
-                <div class="flex flex-col sm:flex-row gap-2 mt-4">
-                    <div class="flex-1">
+                <div class="flex flex-col sm:flex-row gap-2 mt-3 sm:mt-4">
+                    <div class="flex-1 min-w-0">
                         <Input
                             v-model="searchFilter"
                             placeholder="Search messages..."
                             size="sm"
                             @keyup.enter="applyFilters"
-                            class="text-sm"
+                            class="text-sm w-full"
                         />
                     </div>
-                    <Select v-model="logLevelFilter">
-                        <SelectTrigger class="w-32">
-                            <SelectValue placeholder="All" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All</SelectItem>
-                            <SelectItem
-                                v-for="level in logLevels"
-                                :key="level"
-                                :value="level"
-                            >
-                                {{ level.toUpperCase() }}
-                            </SelectItem>
-                        </SelectContent>
-                    </Select>
-                    <Button @click="applyFilters" size="sm" variant="outline">
-                        Apply
-                    </Button>
-                    <Button @click="clearFilters" size="sm" variant="outline">
-                        <X class="w-4 h-4" />
-                    </Button>
+                    <div class="flex gap-2">
+                        <Select v-model="logLevelFilter">
+                            <SelectTrigger class="w-full sm:w-32">
+                                <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All</SelectItem>
+                                <SelectItem
+                                    v-for="level in logLevels"
+                                    :key="level"
+                                    :value="level"
+                                >
+                                    {{ level.toUpperCase() }}
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Button @click="applyFilters" size="sm" variant="outline" class="flex-shrink-0">
+                            <span class="hidden sm:inline">Apply</span>
+                            <span class="sm:hidden">Filter</span>
+                        </Button>
+                        <Button @click="clearFilters" size="sm" variant="outline" class="flex-shrink-0">
+                            <X class="w-4 h-4" />
+                        </Button>
+                    </div>
                 </div>
 
                 <!-- Display Options -->
@@ -821,7 +830,7 @@ onUnmounted(() => {
 
             <!-- Console Container -->
             <div
-                class="h-full bg-black text-green-400 font-mono text-sm overflow-auto p-4"
+                class="h-full bg-black text-green-400 font-mono text-xs sm:text-sm overflow-auto p-2 sm:p-4"
                 id="console-container"
                 @scroll="handleScroll"
             >
@@ -843,7 +852,7 @@ onUnmounted(() => {
                     >
                         <!-- Main log line -->
                         <div
-                            class="flex items-start text-xs leading-relaxed hover:bg-gray-900/50 px-3 py-2 cursor-pointer"
+                            class="flex items-start text-xs leading-relaxed hover:bg-gray-900/50 px-2 sm:px-3 py-2 cursor-pointer"
                             @click="
                                 hasAdditionalData(log) || showMetadata
                                     ? toggleLogExpansion(log.id)
@@ -856,7 +865,7 @@ onUnmounted(() => {
                         >
                             <!-- Expand/Collapse indicator -->
                             <div
-                                class="flex-shrink-0 w-4 mr-2 flex items-center"
+                                class="flex-shrink-0 w-3 sm:w-4 mr-1 sm:mr-2 flex items-center"
                             >
                                 <component
                                     v-if="
@@ -873,25 +882,25 @@ onUnmounted(() => {
 
                             <!-- Timestamp -->
                             <div
-                                class="text-gray-500 mr-3 flex-shrink-0 w-20 text-xs"
+                                class="text-gray-500 mr-1.5 sm:mr-3 flex-shrink-0 text-[10px] sm:text-xs"
                             >
-                                <div>
+                                <div class="whitespace-nowrap">
                                     {{ formatConsoleTimestamp(log.timestamp) }}
                                 </div>
                             </div>
 
                             <!-- Level Badge with Icon -->
                             <div
-                                class="flex items-center mr-3 flex-shrink-0 w-16"
+                                class="flex items-center mr-1.5 sm:mr-3 flex-shrink-0"
                             >
                                 <component
                                     :is="getLogLevelIcon(log.level)"
-                                    class="w-3 h-3 mr-1"
+                                    class="w-3 h-3 sm:mr-1"
                                     :class="getLogLevelStyle(log.level)"
                                 />
                                 <span
                                     :class="getLogLevelStyle(log.level)"
-                                    class="text-right font-bold text-xs"
+                                    class="font-bold text-[10px] sm:text-xs hidden sm:inline"
                                 >
                                     {{
                                         log.level?.toUpperCase().substring(0, 4)
@@ -912,7 +921,7 @@ onUnmounted(() => {
 
                             <!-- Data indicators -->
                             <div
-                                class="flex items-center gap-1 ml-2 flex-shrink-0"
+                                class="flex items-center gap-1 ml-1 sm:ml-2 flex-shrink-0"
                             >
                                 <Hash
                                     v-if="showMetadata"
@@ -1051,15 +1060,15 @@ onUnmounted(() => {
             v-if="logs.length > 0"
             class="flex-shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
         >
-            <div class="p-3">
-                <div class="flex items-center justify-between text-sm">
-                    <div class="text-muted-foreground flex items-center gap-4">
+            <div class="p-2 sm:p-3">
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs sm:text-sm">
+                    <div class="text-muted-foreground flex flex-wrap items-center gap-2 sm:gap-4">
                         <span>{{ logs.length }} entries loaded</span>
                         <span class="flex items-center gap-1">
                             <Clock class="w-3 h-3" />
                             {{ expandedLogs.size }} expanded
                         </span>
-                        <span v-if="logs.length > 0" class="text-xs">
+                        <span v-if="logs.length > 0" class="hidden md:inline text-xs">
                             Latest:
                             {{
                                 formatConsoleTimestamp(
@@ -1070,20 +1079,21 @@ onUnmounted(() => {
                         <span v-if="loadingOlder" class="text-blue-400 text-xs">
                             Loading older logs...
                         </span>
-                        <span v-if="!hasMoreLogs" class="text-gray-500 text-xs">
+                        <span v-if="!hasMoreLogs" class="text-gray-500 text-xs hidden sm:inline">
                             No more logs to load
                         </span>
                     </div>
-                    <div class="flex items-center space-x-2">
+                    <div class="flex items-center gap-1 sm:gap-2 w-full sm:w-auto">
                         <Button
                             variant="outline"
                             size="sm"
                             @click="prevPage"
                             :disabled="!hasMoreLogs || loadingOlder"
                             title="Scroll to top to load older logs"
+                            class="flex-1 sm:flex-initial"
                         >
-                            <ChevronLeft class="w-4 h-4" />
-                            Older
+                            <ChevronLeft class="w-4 h-4 sm:mr-1" />
+                            <span class="hidden sm:inline">Older</span>
                         </Button>
                         <Button
                             variant="outline"
@@ -1091,13 +1101,14 @@ onUnmounted(() => {
                             @click="scrollToBottomAndRefresh"
                             :disabled="refreshing"
                             title="Jump to latest logs"
+                            class="flex-1 sm:flex-initial"
                         >
-                            <ArrowDown class="w-4 h-4" />
-                            Latest
+                            <ArrowDown class="w-4 h-4 sm:mr-1" />
+                            <span class="hidden sm:inline">Latest</span>
                         </Button>
 
                         <!-- Status indicators -->
-                        <div class="ml-4 flex items-center gap-2">
+                        <div class="hidden sm:flex items-center gap-2 ml-2">
                             <div
                                 v-if="!isAtBottom"
                                 class="flex items-center gap-1 text-orange-400 text-xs"
@@ -1120,15 +1131,15 @@ onUnmounted(() => {
         <!-- Floating "new logs" indicator -->
         <div
             v-if="!isAtBottom && logs.length > 0"
-            class="fixed bottom-20 right-6 z-10"
+            class="fixed bottom-16 sm:bottom-20 right-3 sm:right-6 z-10"
         >
             <Button
                 @click="scrollToBottom"
                 class="shadow-lg bg-blue-600 hover:bg-blue-700 text-white"
                 size="sm"
             >
-                <ArrowDown class="w-4 h-4 mr-2" />
-                New logs available
+                <ArrowDown class="w-4 h-4 sm:mr-2" />
+                <span class="hidden sm:inline">New logs available</span>
             </Button>
         </div>
     </div>

@@ -63,6 +63,7 @@ import {
     ChevronsUpDown,
     Database,
     X,
+    MoreVertical,
 } from "lucide-vue-next";
 import PluginKVStore from "~/components/PluginKVStore.vue";
 import {
@@ -72,6 +73,12 @@ import {
     SheetHeader,
     SheetTitle,
 } from "~/components/ui/sheet";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
 
 definePageMeta({
     middleware: ["auth"],
@@ -1587,11 +1594,48 @@ onMounted(async () => {
                                             <Trash2 class="w-4 h-4" />
                                         </Button>
                                         <!-- Mobile dropdown menu -->
-                                        <div class="sm:hidden">
-                                            <Button variant="outline" size="sm">
-                                                <Settings class="w-4 h-4" />
-                                            </Button>
-                                        </div>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger as-child>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    class="sm:hidden"
+                                                >
+                                                    <MoreVertical class="w-4 h-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem
+                                                    @click="configurePlugin(plugin)"
+                                                >
+                                                    <Settings class="w-4 h-4 mr-2" />
+                                                    Configure
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    @click="
+                                                        $router.push(
+                                                            `/servers/${serverId}/plugins/${plugin.id}/logs`,
+                                                        )
+                                                    "
+                                                >
+                                                    <FileText class="w-4 h-4 mr-2" />
+                                                    View Logs
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    @click="openKVStoreSheet(plugin)"
+                                                >
+                                                    <Database class="w-4 h-4 mr-2" />
+                                                    Manage Data
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    @click="deletePlugin(plugin)"
+                                                    class="text-destructive focus:text-destructive"
+                                                >
+                                                    <Trash2 class="w-4 h-4 mr-2" />
+                                                    Delete
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
                                     </div>
                                 </TableCell>
                             </TableRow>

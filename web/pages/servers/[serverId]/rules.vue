@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { FileText, Layers, Download, Code, Upload, Save, ChevronDown, ChevronUp, Minimize2, Maximize2, Plus } from 'lucide-vue-next'
 import RuleComponent from '~/components/RuleComponent.vue'
 import { Button } from "~/components/ui/button"
@@ -735,13 +736,46 @@ const annotateNumbers = () => {
   });
 };
 
+// Warn user before leaving page with unsaved changes
+const hasUnsavedChangesToWarn = computed(() => {
+  return hasUnsavedChanges.value || deletedRuleIds.value.length > 0;
+});
+
+// Handle browser navigation (refresh, close tab, etc.)
+const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+  if (hasUnsavedChangesToWarn.value) {
+    event.preventDefault();
+    // Modern browsers ignore custom messages and show their own
+    event.returnValue = '';
+    return '';
+  }
+};
+
+// Handle Vue Router navigation (within the app)
+onBeforeRouteLeave((to, from, next) => {
+  if (hasUnsavedChangesToWarn.value) {
+    const confirmed = confirm(
+      'You have unsaved changes. Are you sure you want to leave? Your changes will be lost.'
+    );
+    if (confirmed) {
+      next();
+    } else {
+      next(false);
+    }
+  } else {
+    next();
+  }
+});
+
 onMounted(() => {
   fetchRules();
   document.addEventListener('click', handleClickOutside);
+  window.addEventListener('beforeunload', handleBeforeUnload);
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside);
+  window.removeEventListener('beforeunload', handleBeforeUnload);
 });
 </script>
 
