@@ -422,7 +422,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 		query = `
 			SELECT * FROM (
 				SELECT 
-					chain_id as id,
+					id,
 					event_time,
 					'connected' as action,
 					player_controller,
@@ -433,7 +433,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 				WHERE server_id = ? AND event_time < ?
 				UNION ALL
 				SELECT 
-					chain_id as id,
+					id,
 					event_time,
 					'joined' as action,
 					player_suffix as player_controller,
@@ -444,7 +444,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 				WHERE server_id = ? AND event_time < ?
 				UNION ALL
 				SELECT 
-					chain_id as id,
+					id,
 					event_time,
 					'disconnected' as action,
 					player_suffix as player_controller,
@@ -459,7 +459,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 		query = `
 			SELECT * FROM (
 				SELECT 
-					chain_id as id,
+					id,
 					event_time,
 					'connected' as action,
 					player_controller,
@@ -470,7 +470,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 				WHERE server_id = ?
 				UNION ALL
 				SELECT 
-					chain_id as id,
+					id,
 					event_time,
 					'joined' as action,
 					player_suffix as player_controller,
@@ -481,7 +481,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 				WHERE server_id = ?
 				UNION ALL
 				SELECT 
-					chain_id as id,
+					id,
 					event_time,
 					'disconnected' as action,
 					player_suffix as player_controller,
@@ -553,7 +553,7 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 
 	query := `
 		SELECT 
-			chain_id,
+			id,
 			event_time,
 			victim_name,
 			attacker_name,
