@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feat(events): simplify query logic and enhance player_connected handling [[#119](https://github.com/Codycody31/squad-aegis/pull/119)]
 - feat: add storage volume and set timezone to UTC [[#118](https://github.com/Codycody31/squad-aegis/pull/118)]
 - feature: ban evidence [[#117](https://github.com/Codycody31/squad-aegis/pull/117)]
 - feat: live viewing of plugin logs [[#110](https://github.com/Codycody31/squad-aegis/pull/110)]
