@@ -875,16 +875,25 @@ func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.Ba
 		if ev.EvidenceType != "file_upload" && ev.EvidenceType != "text_paste" {
 			if len(metadataJSON) == 0 || string(metadataJSON) == "{}" {
 				if ev.ClickhouseTable != nil && ev.RecordID != nil {
-					metadata, err := s.fetchEvidenceMetadataFromClickHouse(ctx, *ev.ClickhouseTable, *ev.RecordID, ev.ServerID, ev.EvidenceType)
-					if err != nil {
-						log.Warn().Err(err).
+					recordUUID, parseErr := uuid.Parse(*ev.RecordID)
+					if parseErr != nil {
+						log.Warn().Err(parseErr).
 							Str("table", *ev.ClickhouseTable).
 							Str("record_id", *ev.RecordID).
-							Msg("Failed to fetch evidence metadata from ClickHouse")
-						// Continue with empty metadata if fetch fails
+							Msg("Failed to parse record ID as UUID")
 						ev.Metadata = make(map[string]interface{})
 					} else {
-						ev.Metadata = metadata
+						metadata, err := s.fetchEvidenceMetadataFromClickHouse(ctx, *ev.ClickhouseTable, recordUUID, ev.ServerID, ev.EvidenceType)
+						if err != nil {
+							log.Warn().Err(err).
+								Str("table", *ev.ClickhouseTable).
+								Str("record_id", *ev.RecordID).
+								Msg("Failed to fetch evidence metadata from ClickHouse")
+							// Continue with empty metadata if fetch fails
+							ev.Metadata = make(map[string]interface{})
+						} else {
+							ev.Metadata = metadata
+						}
 					}
 				} else {
 					ev.Metadata = make(map[string]interface{})
@@ -919,7 +928,7 @@ func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.Ba
 }
 
 // fetchEvidenceMetadataFromClickHouse fetches the full event data from ClickHouse
-func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableName, recordID string, serverID uuid.UUID, evidenceType string) (map[string]interface{}, error) {
+func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableName string, recordID uuid.UUID, serverID uuid.UUID, evidenceType string) (map[string]interface{}, error) {
 	if s.Dependencies.Clickhouse == nil {
 		return nil, fmt.Errorf("ClickHouse client not available")
 	}
@@ -928,64 +937,11 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 	var args []interface{}
 
 	switch evidenceType {
-	case "player_died":
-		query = `
-			SELECT 
-				chain_id,
-				event_time,
-				victim_name,
-				weapon,
-				attacker_player_controller,
-				attacker_eos,
-				toString(attacker_steam) as attacker_steam,
-				teamkill,
-				damage
-			FROM squad_aegis.server_player_died_events
-			WHERE server_id = ? AND chain_id = ?
-			LIMIT 1
-		`
-		args = []interface{}{serverID.String(), recordID}
-
-	case "player_wounded":
-		query = `
-			SELECT 
-				chain_id,
-				event_time,
-				victim_name,
-				weapon,
-				attacker_player_controller,
-				attacker_eos,
-				toString(attacker_steam) as attacker_steam,
-				teamkill,
-				damage
-			FROM squad_aegis.server_player_wounded_events
-			WHERE server_id = ? AND chain_id = ?
-			LIMIT 1
-		`
-		args = []interface{}{serverID.String(), recordID}
-
-	case "player_damaged":
-		query = `
-			SELECT 
-				chain_id,
-				event_time,
-				victim_name,
-				weapon,
-				attacker_controller,
-				attacker_eos,
-				toString(attacker_steam) as attacker_steam,
-				damage
-			FROM squad_aegis.server_player_damaged_events
-			WHERE server_id = ? AND chain_id = ?
-			LIMIT 1
-		`
-		args = []interface{}{serverID.String(), recordID}
-
 	case "chat_message":
 		// For chat messages, record_id is message_id (UUID)
 		query = `
 			SELECT 
-				toString(message_id) as message_id,
+				message_id,
 				sent_at as event_time,
 				player_name,
 				chat_type,
@@ -993,25 +949,25 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 				steam_id,
 				eos_id
 			FROM squad_aegis.server_player_chat_messages
-			WHERE server_id = ? AND toString(message_id) = ?
+			WHERE server_id = ? AND message_id = ?
 			LIMIT 1
 		`
-		args = []interface{}{serverID.String(), recordID}
+		args = []interface{}{serverID.String(), recordID.String()}
 
 	case "player_connected":
 		query = `
 			SELECT 
-				chain_id,
+				id,
 				event_time,
 				player_controller,
 				ip,
 				steam,
 				eos
 			FROM squad_aegis.server_player_connected_events
-			WHERE server_id = ? AND chain_id = ?
+			WHERE server_id = ? AND id = ?
 			LIMIT 1
 		`
-		args = []interface{}{serverID.String(), recordID}
+		args = []interface{}{serverID.String(), recordID.String()}
 
 	default:
 		return nil, fmt.Errorf("unknown evidence type: %s", evidenceType)
@@ -1031,17 +987,18 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 
 	switch evidenceType {
 	case "player_died", "player_wounded":
-		var chainID, victimName, weapon, attackerController, attackerEos, attackerSteam string
+		var id uuid.UUID
+		var victimName, weapon, attackerController, attackerEos, attackerSteam string
 		var eventTime string
 		var teamkill uint8
 		var damage float32
 
-		err := rows.Scan(&chainID, &eventTime, &victimName, &weapon, &attackerController, &attackerEos, &attackerSteam, &teamkill, &damage)
+		err := rows.Scan(&id, &eventTime, &victimName, &weapon, &attackerController, &attackerEos, &attackerSteam, &teamkill, &damage)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		metadata["chain_id"] = chainID
+		metadata["id"] = id.String()
 		metadata["event_time"] = eventTime
 		metadata["victim_name"] = victimName
 		metadata["weapon"] = weapon
@@ -1052,16 +1009,17 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 		metadata["damage"] = damage
 
 	case "player_damaged":
-		var chainID, victimName, weapon, attackerController, attackerEos, attackerSteam string
+		var id uuid.UUID
+		var victimName, weapon, attackerController, attackerEos, attackerSteam string
 		var eventTime string
 		var damage float32
 
-		err := rows.Scan(&chainID, &eventTime, &victimName, &weapon, &attackerController, &attackerEos, &attackerSteam, &damage)
+		err := rows.Scan(&id, &eventTime, &victimName, &weapon, &attackerController, &attackerEos, &attackerSteam, &damage)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		metadata["chain_id"] = chainID
+		metadata["id"] = id.String()
 		metadata["event_time"] = eventTime
 		metadata["victim_name"] = victimName
 		metadata["weapon"] = weapon
@@ -1071,7 +1029,8 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 		metadata["damage"] = damage
 
 	case "chat_message":
-		var messageID, playerName, chatType, message, eosID string
+		var messageID uuid.UUID
+		var playerName, chatType, message, eosID string
 		var eventTime string
 		var steamIDVal uint64
 
@@ -1080,7 +1039,7 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		metadata["message_id"] = messageID
+		metadata["message_id"] = messageID.String()
 		metadata["event_time"] = eventTime
 		metadata["sent_at"] = eventTime
 		metadata["player_name"] = playerName
@@ -1090,15 +1049,16 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 		metadata["eos_id"] = eosID
 
 	case "player_connected":
-		var chainID, playerController, ip, steam, eos string
+		var id uuid.UUID
+		var playerController, ip, steam, eos string
 		var eventTime string
 
-		err := rows.Scan(&chainID, &eventTime, &playerController, &ip, &steam, &eos)
+		err := rows.Scan(&id, &eventTime, &playerController, &ip, &steam, &eos)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		metadata["chain_id"] = chainID
+		metadata["id"] = id.String()
 		metadata["event_time"] = eventTime
 		metadata["player_controller"] = playerController
 		metadata["ip"] = ip

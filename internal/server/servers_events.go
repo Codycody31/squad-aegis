@@ -1,11 +1,13 @@
 package server
 
 import (
+	"database/sql"
 	"fmt"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
@@ -60,67 +62,11 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 	var tableName string
 
 	switch eventType {
-	case "player_died":
-		tableName = "server_player_died_events"
-		query = fmt.Sprintf(`
-			SELECT 
-				chain_id as record_id,
-				event_time,
-				victim_name,
-				weapon,
-				attacker_player_controller,
-				attacker_eos,
-				toString(attacker_steam) as attacker_steam,
-				teamkill,
-				damage
-			FROM squad_aegis.%s
-			WHERE server_id = ? AND attacker_steam = ?
-			ORDER BY event_time DESC
-			LIMIT ?
-		`, tableName)
-
-	case "player_wounded":
-		tableName = "server_player_wounded_events"
-		query = fmt.Sprintf(`
-			SELECT 
-				chain_id as record_id,
-				event_time,
-				victim_name,
-				weapon,
-				attacker_player_controller,
-				attacker_eos,
-				toString(attacker_steam) as attacker_steam,
-				teamkill,
-				damage
-			FROM squad_aegis.%s
-			WHERE server_id = ? AND attacker_steam = ?
-			ORDER BY event_time DESC
-			LIMIT ?
-		`, tableName)
-
-	case "player_damaged":
-		tableName = "server_player_damaged_events"
-		query = fmt.Sprintf(`
-			SELECT 
-				chain_id as record_id,
-				event_time,
-				victim_name,
-				weapon,
-				attacker_controller,
-				attacker_eos,
-				toString(attacker_steam) as attacker_steam,
-				damage
-			FROM squad_aegis.%s
-			WHERE server_id = ? AND attacker_steam = ?
-			ORDER BY event_time DESC
-			LIMIT ?
-		`, tableName)
-
 	case "chat_message":
 		tableName = "server_player_chat_messages"
 		query = fmt.Sprintf(`
 			SELECT 
-				toString(message_id) as record_id,
+				message_id,
 				sent_at as event_time,
 				player_name,
 				chat_type,
@@ -137,29 +83,48 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		tableName = "server_player_connected_events"
 		query = fmt.Sprintf(`
 			SELECT 
-				chain_id as record_id,
-				event_time,
-				player_controller,
-				ip,
-				steam,
-				eos
-			FROM squad_aegis.%s
-			WHERE server_id = ? AND steam = ?
-			ORDER BY event_time DESC
+				pc.id,
+				pc.event_time,
+				pc.player_controller,
+				pc.ip,
+				pc.steam,
+				pc.eos,
+				pc.chain_id,
+				argMin(js.player_suffix, abs(toUnixTimestamp(pc.event_time) - toUnixTimestamp(js.event_time))) as joined_name
+			FROM squad_aegis.%s pc
+			LEFT JOIN squad_aegis.server_join_succeeded_events js
+				ON pc.server_id = js.server_id
+				AND pc.chain_id = js.chain_id
+				AND (
+					(pc.steam IS NOT NULL AND pc.steam = js.steam)
+					OR (pc.eos IS NOT NULL AND pc.eos = js.eos)
+				)
+				AND abs(toUnixTimestamp(pc.event_time) - toUnixTimestamp(js.event_time)) <= 10
+			WHERE pc.server_id = ? AND pc.steam = ?
+			GROUP BY pc.id, pc.event_time, pc.player_controller, pc.ip, pc.steam, pc.eos, pc.chain_id
+			ORDER BY pc.event_time DESC
 			LIMIT ?
 		`, tableName)
 
 	default:
 		responses.BadRequest(c, "Invalid event type", &gin.H{
-			"error":        "event_type must be one of: player_died, player_wounded, player_damaged, chat_message, player_connected",
-			"provided":     eventType,
-			"valid_types": []string{"player_died", "player_wounded", "player_damaged", "chat_message", "player_connected"},
+			"error":       "event_type must be one of: chat_message, player_connected",
+			"provided":    eventType,
+			"valid_types": []string{"chat_message", "player_connected"},
 		})
 		return
 	}
 
 	// Execute the query
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, serverId.String(), steamIDInt, limit)
+	// For player_connected, steam is a string column, so convert steamIDInt to string
+	var queryArgs []interface{}
+	if eventType == "player_connected" {
+		queryArgs = []interface{}{serverId.String(), strconv.FormatUint(steamIDInt, 10), limit}
+	} else {
+		queryArgs = []interface{}{serverId.String(), steamIDInt, limit}
+	}
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, queryArgs...)
 	if err != nil {
 		responses.BadRequest(c, "Failed to query events", &gin.H{"error": err.Error()})
 		return
@@ -173,85 +138,54 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		event := make(map[string]interface{})
 
 		switch eventType {
-		case "player_died", "player_wounded":
-			var recordID, victimName, weapon, attackerController, attackerEos, attackerSteam string
-			var eventTime string
-			var teamkill uint8
-			var damage float32
-
-			err := rows.Scan(&recordID, &eventTime, &victimName, &weapon, &attackerController, &attackerEos, &attackerSteam, &teamkill, &damage)
-			if err != nil {
-				continue
-			}
-
-			event["event_id"] = recordID // For frontend compatibility
-			event["record_id"] = recordID // Actual chain_id
-			event["event_time"] = eventTime
-			event["victim_name"] = victimName
-			event["weapon"] = weapon
-			event["attacker_player_controller"] = attackerController
-			event["attacker_eos"] = attackerEos
-			event["attacker_steam"] = attackerSteam
-			event["teamkill"] = teamkill == 1
-			event["damage"] = damage
-
-		case "player_damaged":
-			var recordID, victimName, weapon, attackerController, attackerEos, attackerSteam string
-			var eventTime string
-			var damage float32
-
-			err := rows.Scan(&recordID, &eventTime, &victimName, &weapon, &attackerController, &attackerEos, &attackerSteam, &damage)
-			if err != nil {
-				continue
-			}
-
-			event["event_id"] = recordID // For frontend compatibility
-			event["record_id"] = recordID // Actual chain_id
-			event["event_time"] = eventTime
-			event["victim_name"] = victimName
-			event["weapon"] = weapon
-			event["attacker_controller"] = attackerController
-			event["attacker_eos"] = attackerEos
-			event["attacker_steam"] = attackerSteam
-			event["damage"] = damage
-
 		case "chat_message":
-			var recordID, playerName, chatType, message, eosID string
+			var messageID uuid.UUID
+			var playerName, chatType, message, eosID string
 			var eventTime string
 			var steamIDVal uint64
 
-			err := rows.Scan(&recordID, &eventTime, &playerName, &chatType, &message, &steamIDVal, &eosID)
+			err := rows.Scan(&messageID, &eventTime, &playerName, &chatType, &message, &steamIDVal, &eosID)
 			if err != nil {
+				log.Error().Err(err).Msg("Failed to scan row")
 				continue
 			}
 
+			recordID := messageID.String()
 			event["message_id"] = recordID // For frontend compatibility
-			event["event_id"] = recordID    // Also include event_id
-			event["record_id"] = recordID   // Actual message_id
+			event["event_id"] = recordID   // Also include event_id
+			event["record_id"] = recordID  // Actual message_id UUID
 			event["sent_at"] = eventTime
 			event["event_time"] = eventTime // Also include event_time
 			event["player_name"] = playerName
 			event["chat_type"] = chatType
 			event["message"] = message
-			event["steam_id"] = steamIDVal
+			event["steam_id"] = strconv.FormatUint(steamIDVal, 10)
 			event["eos_id"] = eosID
 
 		case "player_connected":
-			var recordID, playerController, ip, steam, eos string
+			var id uuid.UUID
+			var playerController, ip, steam, eos, chainID string
 			var eventTime string
+			var joinedName sql.NullString
 
-			err := rows.Scan(&recordID, &eventTime, &playerController, &ip, &steam, &eos)
+			err := rows.Scan(&id, &eventTime, &playerController, &ip, &steam, &eos, &chainID, &joinedName)
 			if err != nil {
+				log.Error().Err(err).Msg("Failed to scan row")
 				continue
 			}
 
-			event["event_id"] = recordID // For frontend compatibility
-			event["record_id"] = recordID // Actual chain_id
+			recordID := id.String()
+			event["event_id"] = recordID  // For frontend compatibility
+			event["record_id"] = recordID // Actual id UUID
 			event["event_time"] = eventTime
 			event["player_controller"] = playerController
 			event["ip"] = ip
 			event["steam"] = steam
 			event["eos"] = eos
+			event["chain_id"] = chainID
+			if joinedName.Valid {
+				event["joined_name"] = joinedName.String
+			}
 		}
 
 		events = append(events, event)
@@ -264,4 +198,3 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		"steam_id":   steamID,
 	})
 }
-
