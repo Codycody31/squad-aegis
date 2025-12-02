@@ -327,6 +327,13 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		return
 	}
 
+	// Delete evidence files from storage before deleting the ban
+	// (ban deletion will cascade delete evidence records)
+	if err := s.deleteBanEvidenceFiles(c.Request.Context(), banId.String()); err != nil {
+		log.Warn().Err(err).Str("banId", banId.String()).Msg("Failed to delete some evidence files from storage, continuing with ban deletion")
+		// Continue with ban deletion even if file deletion fails
+	}
+
 	// Delete the ban from the database
 	result, err := s.Dependencies.DB.ExecContext(c.Request.Context(), `
 		DELETE FROM server_bans
@@ -570,6 +577,12 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 
 	// Update evidence records if provided (including empty array to clear evidence)
 	if request.Evidence != nil {
+		// Delete evidence files from storage before deleting database records
+		if err := s.deleteBanEvidenceFiles(c.Request.Context(), banId.String()); err != nil {
+			log.Warn().Err(err).Str("banId", banId.String()).Msg("Failed to delete some evidence files from storage, continuing with database deletion")
+			// Continue with deletion even if file deletion fails
+		}
+
 		// Use a transaction to ensure atomicity - if insert fails, rollback the delete
 		tx, txErr := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
 		if txErr != nil {
@@ -1168,6 +1181,54 @@ func (s *Server) createBanEvidence(ctx context.Context, banID string, serverID u
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// deleteBanEvidenceFiles deletes all file evidence files from storage for a given ban
+func (s *Server) deleteBanEvidenceFiles(ctx context.Context, banID string) error {
+	// Query for all file_upload evidence records for this ban
+	rows, err := s.Dependencies.DB.QueryContext(ctx, `
+		SELECT file_path
+		FROM ban_evidence
+		WHERE ban_id = $1 AND evidence_type = 'file_upload' AND file_path IS NOT NULL
+	`, banID)
+	if err != nil {
+		return fmt.Errorf("failed to query evidence files: %w", err)
+	}
+	defer rows.Close()
+
+	var deleteErrors []error
+	for rows.Next() {
+		var filePath sql.NullString
+		if err := rows.Scan(&filePath); err != nil {
+			log.Warn().Err(err).Str("banId", banID).Msg("Failed to scan file path")
+			continue
+		}
+
+		if !filePath.Valid || filePath.String == "" {
+			continue
+		}
+
+		// Delete the file from storage
+		if err := s.Dependencies.Storage.Delete(ctx, filePath.String); err != nil {
+			log.Warn().Err(err).
+				Str("banId", banID).
+				Str("filePath", filePath.String).
+				Msg("Failed to delete evidence file from storage")
+			deleteErrors = append(deleteErrors, fmt.Errorf("failed to delete file %s: %w", filePath.String, err))
+			// Continue deleting other files even if one fails
+		} else {
+			log.Info().
+				Str("banId", banID).
+				Str("filePath", filePath.String).
+				Msg("Deleted evidence file from storage")
+		}
+	}
+
+	if len(deleteErrors) > 0 {
+		return fmt.Errorf("failed to delete %d file(s): %v", len(deleteErrors), deleteErrors[0])
 	}
 
 	return nil

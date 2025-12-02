@@ -525,12 +525,17 @@ async function editBan(values: any) {
             })));
         }
 
-        if (allEvidence.length > 0) {
+        // Check if ban originally had evidence
+        const hadOriginalEvidence = editingBan.value.evidence && editingBan.value.evidence.length > 0;
+        
+        // If ban had evidence but now has none, send empty array to clear it
+        // If ban had no evidence and still has none, don't send the field
+        if (hadOriginalEvidence || allEvidence.length > 0) {
             requestBody.evidence = allEvidence;
         }
 
         // If no changes were made, just close the dialog
-        if (Object.keys(requestBody).length === 0 && allEvidence.length === 0) {
+        if (Object.keys(requestBody).length === 0 && allEvidence.length === 0 && !hadOriginalEvidence) {
             closeEditBanDialog();
             return;
         }
