@@ -28,5 +28,7 @@ FROM scratch
 COPY --from=go-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=go-build /out/squad-aegis /squad-aegis
 ENV APP_IN_CONTAINER=true
+ENV STORAGE_LOCAL_PATH=/etc/squad-aegis/storage
+VOLUME /etc/squad-aegis
 EXPOSE 3113
 ENTRYPOINT ["/squad-aegis"]
