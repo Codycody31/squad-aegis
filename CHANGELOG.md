@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-11-18
+## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-12-02
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feature: ban evidence [[#117](https://github.com/Codycody31/squad-aegis/pull/117)]
 - feat: live viewing of plugin logs [[#110](https://github.com/Codycody31/squad-aegis/pull/110)]
 - feat: add JSON editor for workflow definition management [[#107](https://github.com/Codycody31/squad-aegis/pull/107)]
 - feat(workflow): workflow conditions can have nested steps [[#104](https://github.com/Codycody31/squad-aegis/pull/104)]
