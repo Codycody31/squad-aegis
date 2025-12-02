@@ -48,4 +48,16 @@ type Struct struct {
 		Pretty  bool `default:"true"`
 		NoColor bool `default:"false"`
 	}
+	Storage struct {
+		Type      string `default:"local"` // "local" or "s3"
+		LocalPath string `default:"storage"`
+		S3        struct {
+			Region          string `default:"us-east-1"`
+			Bucket          string `default:""`
+			AccessKeyID     string `default:""`
+			SecretAccessKey string `default:""`
+			Endpoint        string `default:""` // Optional: for S3-compatible services (MinIO, etc.)
+			UseSSL          bool   `default:"true"`
+		}
+	}
 }

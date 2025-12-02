@@ -31,6 +31,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 	"go.codycody31.dev/squad-aegis/internal/shared/logger"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
+	"go.codycody31.dev/squad-aegis/internal/storage"
 	"go.codycody31.dev/squad-aegis/internal/valkey"
 	"go.codycody31.dev/squad-aegis/internal/workflow_manager"
 	"golang.org/x/sync/errgroup"
@@ -224,6 +225,14 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to start workflow manager: %w", err)
 	}
 
+	// Initialize storage
+	log.Info().Str("type", config.Config.Storage.Type).Msg("Initializing storage...")
+	storageBackend, err := storage.NewStorage(*config.Config)
+	if err != nil {
+		return fmt.Errorf("failed to initialize storage: %w", err)
+	}
+	log.Info().Str("type", config.Config.Storage.Type).Msg("Storage initialized successfully")
+
 	// Start connection managers
 	go rconManager.StartConnectionManager()
 	go logwatcherManager.StartConnectionManager()
@@ -282,6 +291,7 @@ func run(ctx context.Context) error {
 			PluginManager:        pluginManager,
 			WorkflowManager:      workflowManager,
 			RemoteBanSyncService: core.NewRemoteBanSyncService(database, database),
+			Storage:              storageBackend,
 		}
 
 		// Start remote ban sync service

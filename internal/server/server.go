@@ -16,6 +16,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/web"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/storage"
 	"go.codycody31.dev/squad-aegis/internal/workflow_manager"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,7 @@ type Dependencies struct {
 	PluginManager        *plugin_manager.PluginManager
 	WorkflowManager      *workflow_manager.WorkflowManager
 	RemoteBanSyncService *core.RemoteBanSyncService
+	Storage              storage.Storage
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {
@@ -216,6 +218,13 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Live feeds for chat, connections, and teamkills
 				serverGroup.GET("/feeds", server.AuthSession, server.ServerFeeds)
 				serverGroup.GET("/feeds/history", server.AuthSession, server.ServerFeedsHistory)
+
+				// Events search for evidence
+				serverGroup.GET("/events/search", server.AuthHasServerPermission("ban"), server.ServerEventsSearch)
+
+				// Evidence file upload/download
+				serverGroup.POST("/evidence/upload", server.AuthHasServerPermission("ban"), server.ServerEvidenceFileUpload)
+				serverGroup.GET("/evidence/files/:fileId", server.AuthHasServerPermission("ban"), server.ServerEvidenceFileDownload)
 
 				serverGroup.GET("/roles", server.ServerRolesList)
 				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)
