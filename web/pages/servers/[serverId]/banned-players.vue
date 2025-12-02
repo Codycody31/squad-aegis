@@ -1155,30 +1155,20 @@ function isEvidenceSelected(event: any): boolean {
 // Function to get ClickHouse table name for event type
 function getClickhouseTableForType(type: string): string {
     const tableMap: Record<string, string> = {
-        player_died: "server_player_died_events",
-        player_wounded: "server_player_wounded_events",
-        player_damaged: "server_player_damaged_events",
         chat_message: "server_player_chat_messages",
         player_connected: "server_player_connected_events",
     };
-    return tableMap[type] || "server_player_died_events";
+    return tableMap[type] || "server_player_chat_messages";
 }
 
 // Function to format event for display
 function formatEventDescription(event: any, type: string): string {
-    if (type === "player_died" || type === "player_wounded") {
-        const victim = event.victim_name || "Unknown";
-        const weapon = event.weapon || "Unknown";
-        const teamkill = event.teamkill ? " (TEAMKILL)" : "";
-        return `Killed ${victim} with ${weapon}${teamkill}`;
-    } else if (type === "player_damaged") {
-        const victim = event.victim_name || "Unknown";
-        const damage = event.damage || 0;
-        return `Damaged ${victim} for ${damage} HP`;
-    } else if (type === "chat_message") {
+    if (type === "chat_message") {
         return event.message || "No message";
     } else if (type === "player_connected") {
-        return `Connected from ${event.ip || "Unknown IP"}`;
+        const joinedName = event.joined_name || event.player_controller || "Unknown Player";
+        const ip = event.ip || "Unknown IP";
+        return `${joinedName} @ ${ip}`;
     } else if (type === "file_upload") {
         return event.file_name || "Uploaded file";
     } else if (type === "text_paste") {
@@ -2145,9 +2135,6 @@ function copyBanCfgUrl() {
                                                                 <SelectValue placeholder="Event Type" />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                <SelectItem value="player_died" class="text-xs sm:text-sm">Player Deaths</SelectItem>
-                                                                <SelectItem value="player_wounded" class="text-xs sm:text-sm">Player Wounded</SelectItem>
-                                                                <SelectItem value="player_damaged" class="text-xs sm:text-sm">Player Damaged</SelectItem>
                                                                 <SelectItem value="chat_message" class="text-xs sm:text-sm">Chat Messages</SelectItem>
                                                                 <SelectItem value="player_connected" class="text-xs sm:text-sm">Connections</SelectItem>
                                                             </SelectContent>
