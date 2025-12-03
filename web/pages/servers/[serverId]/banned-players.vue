@@ -2655,7 +2655,7 @@ function copyBanCfgUrl() {
                                     </TableCell>
                                     <TableCell>
                                         <Button
-                                            v-if="(player.evidence && player.evidence.length > 0) || player.evidence_text"
+                                            v-if="(player.evidence && player.evidence.length > 0) || (player.evidence_text && player.evidence_text.trim())"
                                             variant="ghost"
                                             size="sm"
                                             @click="openEvidenceViewDialog(player)"
@@ -2787,7 +2787,7 @@ function copyBanCfgUrl() {
                         </div>
                         <div class="flex items-center justify-between gap-2 pt-2 border-t">
                             <Button
-                                v-if="(player.evidence && player.evidence.length > 0) || player.evidence_text"
+                                v-if="(player.evidence && player.evidence.length > 0) || (player.evidence_text && player.evidence_text.trim())"
                                 variant="ghost"
                                 size="sm"
                                 @click="openEvidenceViewDialog(player)"
@@ -2796,7 +2796,7 @@ function copyBanCfgUrl() {
                                 <Icon name="lucide:file-check" class="h-3 w-3 mr-1 text-green-500" />
                                 {{ player.evidence ? player.evidence.length : 0 }} evidence
                             </Button>
-                            <div v-else class="text-xs text-muted-foreground">No evidence</div>
+                            <div v-else class="text-xs text-muted-foreground">None</div>
                             <div class="flex gap-1">
                                 <Button
                                     variant="outline"
