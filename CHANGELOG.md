@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-12-03
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### ✨ Features
+
+- feat(events): simplify query logic and enhance player_connected handling [[#119](https://github.com/Codycody31/squad-aegis/pull/119)]
+- feat: add storage volume and set timezone to UTC [[#118](https://github.com/Codycody31/squad-aegis/pull/118)]
+- feature: ban evidence [[#117](https://github.com/Codycody31/squad-aegis/pull/117)]
+- feat: live viewing of plugin logs [[#110](https://github.com/Codycody31/squad-aegis/pull/110)]
+- feat: add JSON editor for workflow definition management [[#107](https://github.com/Codycody31/squad-aegis/pull/107)]
+- feat(workflow): workflow conditions can have nested steps [[#104](https://github.com/Codycody31/squad-aegis/pull/104)]
+
+### 📈 Enhancement
+
+- refactor: add option to hide expired bans in banned players list [[#120](https://github.com/Codycody31/squad-aegis/pull/120)]
+- refactor(ui): add demote commander btn [[#116](https://github.com/Codycody31/squad-aegis/pull/116)]
+- refactor: add CBL info + steam & battlemetrics links to player profile [[#115](https://github.com/Codycody31/squad-aegis/pull/115)]
+- refactor: improve player violations tab [[#109](https://github.com/Codycody31/squad-aegis/pull/109)]
+- refactor: add player profile link and fetch name if empty for players… [[#102](https://github.com/Codycody31/squad-aegis/pull/102)]
+
+### 🐛 Bug Fixes
+
+- fix: ban duration of 0 not working [[#114](https://github.com/Codycody31/squad-aegis/pull/114)]
+- feat(workflow): implement workflow kv store [[#113](https://github.com/Codycody31/squad-aegis/pull/113)]
+- fix: ban cfg format not correct [[#112](https://github.com/Codycody31/squad-aegis/pull/112)]
+- fix: auto tk warn plugin & live plugin logs [[#111](https://github.com/Codycody31/squad-aegis/pull/111)]
+- fix: missing RCON_SERVER_INFO workflow event in UI [[#108](https://github.com/Codycody31/squad-aegis/pull/108)]
+- fix(feeds): teamkill feed not showing attacker name [[#105](https://github.com/Codycody31/squad-aegis/pull/105)]
+
+### 📦️ Dependency
+
+- chore(deps): update fumadocs and tailwind dependencies to latest vers… [[#106](https://github.com/Codycody31/squad-aegis/pull/106)]
+
+### Misc
+
+- chore: update squad aegis icon [[#121](https://github.com/Codycody31/squad-aegis/pull/121)]
+
 ## [0.3.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.1) - 2025-11-08
 
 ### ❤️ Thanks to all contributors! ❤️
