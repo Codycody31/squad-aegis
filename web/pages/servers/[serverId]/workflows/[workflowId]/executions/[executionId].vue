@@ -1,20 +1,20 @@
 <template>
-    <div class="p-6 space-y-6">
+    <div class="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
         <!-- Header -->
-        <div class="flex items-center justify-between">
-            <RouterLink :to="`/servers/${serverId}/workflows`">
-                <Button variant="outline" size="sm">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
+            <RouterLink :to="`/servers/${serverId}/workflows`" class="w-full sm:w-auto">
+                <Button variant="outline" size="sm" class="w-full sm:w-auto text-sm sm:text-base">
                     <ArrowLeft class="w-4 h-4 mr-2" />
                     Back
                 </Button>
             </RouterLink>
-            <div>
-                <h1 class="text-3xl font-bold">Workflow Execution</h1>
-                <p class="text-muted-foreground">
+            <div class="flex-1 text-center sm:text-left">
+                <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Workflow Execution</h1>
+                <p class="text-xs sm:text-sm text-muted-foreground">
                     Execution ID: {{ executionId }}
                 </p>
             </div>
-            <Button @click="refreshData" :disabled="loading">
+            <Button @click="refreshData" :disabled="loading" class="w-full sm:w-auto text-sm sm:text-base">
                 <RefreshCw
                     class="h-4 w-4 mr-2"
                     :class="{ 'animate-spin': loading }"
@@ -34,13 +34,13 @@
         <!-- Error State -->
         <div
             v-else-if="error"
-            class="border border-red-200 bg-red-50 p-4 rounded-lg"
+            class="border border-red-200 bg-red-50 p-3 sm:p-4 rounded-lg"
         >
             <div class="flex items-center gap-2 text-red-800">
-                <AlertCircle class="h-4 w-4" />
-                <h3 class="font-medium">Error</h3>
+                <AlertCircle class="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                <h3 class="font-medium text-sm sm:text-base">Error</h3>
             </div>
-            <p class="text-red-700 mt-1">{{ error }}</p>
+            <p class="text-red-700 mt-1 text-xs sm:text-sm break-words">{{ error }}</p>
         </div>
 
         <!-- Execution Details -->
@@ -48,35 +48,35 @@
             <!-- Status Card -->
             <Card>
                 <CardHeader>
-                    <CardTitle class="flex items-center gap-2">
+                    <CardTitle class="flex items-center gap-2 text-base sm:text-lg">
                         <component
                             :is="getStatusIcon(execution.status)"
                             :class="getStatusColor(execution.status)"
-                            class="h-5 w-5"
+                            class="h-4 w-4 sm:h-5 sm:w-5"
                         />
                         Execution Status
                     </CardTitle>
                 </CardHeader>
-                <CardContent class="space-y-4">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <CardContent class="space-y-3 sm:space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                         <div>
-                            <Label class="text-sm font-medium">Status</Label>
+                            <Label class="text-xs sm:text-sm font-medium">Status</Label>
                             <p
                                 :class="getStatusColor(execution.status)"
-                                class="font-medium"
+                                class="font-medium text-sm sm:text-base"
                             >
                                 {{ execution.status }}
                             </p>
                         </div>
                         <div>
-                            <Label class="text-sm font-medium"
+                            <Label class="text-xs sm:text-sm font-medium"
                                 >Started At</Label
                             >
-                            <p>{{ formatDateTime(execution.started_at) }}</p>
+                            <p class="text-xs sm:text-sm">{{ formatDateTime(execution.started_at) }}</p>
                         </div>
                         <div>
-                            <Label class="text-sm font-medium">Duration</Label>
-                            <p>
+                            <Label class="text-xs sm:text-sm font-medium">Duration</Label>
+                            <p class="text-xs sm:text-sm">
                                 {{
                                     formatDuration(
                                         execution.started_at,
@@ -88,9 +88,9 @@
                     </div>
 
                     <div v-if="execution.trigger_data" class="space-y-2">
-                        <Label class="text-sm font-medium">Trigger Data</Label>
+                        <Label class="text-xs sm:text-sm font-medium">Trigger Data</Label>
                         <div
-                            class="bg-muted p-3 rounded-md text-sm overflow-auto whitespace-pre-wrap break-words font-mono"
+                            class="bg-muted p-2 sm:p-3 rounded-md text-xs sm:text-sm overflow-auto whitespace-pre-wrap break-words font-mono"
                             v-html="
                                 syntaxHighlight(
                                     JSON.stringify(
@@ -104,15 +104,15 @@
                     </div>
 
                     <div v-if="execution.error" class="space-y-2">
-                        <Label class="text-sm font-medium text-red-600"
+                        <Label class="text-xs sm:text-sm font-medium text-red-600"
                             >Error Message</Label
                         >
                         <div
-                            class="border border-red-200 bg-red-50 p-3 rounded-lg"
+                            class="border border-red-200 bg-red-50 p-2 sm:p-3 rounded-lg"
                         >
                             <div class="flex items-center gap-2 text-red-800">
-                                <AlertCircle class="h-4 w-4" />
-                                <p class="text-red-700">
+                                <AlertCircle class="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                                <p class="text-xs sm:text-sm text-red-700 break-words">
                                     {{ execution.error }}
                                 </p>
                             </div>
@@ -124,14 +124,14 @@
             <!-- Execution Logs & Messages -->
             <Card>
                 <CardHeader>
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-4">
-                            <CardTitle>Execution Details</CardTitle>
+                    <div class="flex flex-col gap-3 sm:gap-0 sm:flex-row sm:items-center sm:justify-between">
+                        <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                            <CardTitle class="text-base sm:text-lg">Execution Details</CardTitle>
                             <div class="flex border rounded-lg p-1 bg-muted">
                                 <button
                                     @click="activeTab = 'logs'"
                                     :class="[
-                                        'px-3 py-1 text-sm font-medium rounded-md transition-colors',
+                                        'px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors',
                                         activeTab === 'logs'
                                             ? 'bg-background text-foreground shadow-sm'
                                             : 'text-muted-foreground hover:text-foreground',
@@ -142,7 +142,7 @@
                                 <button
                                     @click="activeTab = 'messages'"
                                     :class="[
-                                        'px-3 py-1 text-sm font-medium rounded-md transition-colors',
+                                        'px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors',
                                         activeTab === 'messages'
                                             ? 'bg-background text-foreground shadow-sm'
                                             : 'text-muted-foreground hover:text-foreground',
@@ -152,7 +152,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div class="flex flex-wrap items-center gap-2">
                             <Button
                                 v-if="activeTab === 'logs'"
                                 variant="outline"
@@ -160,9 +160,11 @@
                                 @click="expandAllSteps"
                                 :disabled="logsLoading"
                                 title="Expand all steps (Ctrl+E)"
+                                class="text-xs sm:text-sm"
                             >
-                                <ChevronDown class="h-4 w-4 mr-2" />
-                                Expand All
+                                <ChevronDown class="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                                <span class="hidden sm:inline">Expand All</span>
+                                <span class="sm:hidden">Expand</span>
                             </Button>
                             <Button
                                 v-if="activeTab === 'logs'"
@@ -171,9 +173,11 @@
                                 @click="collapseAllSteps"
                                 :disabled="logsLoading"
                                 title="Collapse all steps (Ctrl+C)"
+                                class="text-xs sm:text-sm"
                             >
-                                <ChevronUp class="h-4 w-4 mr-2" />
-                                Collapse All
+                                <ChevronUp class="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                                <span class="hidden sm:inline">Collapse All</span>
+                                <span class="sm:hidden">Collapse</span>
                             </Button>
                             <Button
                                 variant="outline"
@@ -188,9 +192,10 @@
                                         ? logsLoading
                                         : messagesLoading
                                 "
+                                class="text-xs sm:text-sm"
                             >
                                 <RefreshCw
-                                    class="h-4 w-4 mr-2"
+                                    class="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2"
                                     :class="{
                                         'animate-spin':
                                             activeTab === 'logs'
@@ -198,15 +203,15 @@
                                                 : messagesLoading,
                                     }"
                                 />
-                                Refresh
-                                {{ activeTab === "logs" ? "Logs" : "Messages" }}
+                                <span class="hidden sm:inline">Refresh {{ activeTab === "logs" ? "Logs" : "Messages" }}</span>
+                                <span class="sm:hidden">Refresh</span>
                             </Button>
                             <Select
                                 v-if="activeTab === 'logs'"
                                 v-model="logsPageSize"
                                 @update:model-value="onPageSizeChange"
                             >
-                                <SelectTrigger class="w-24">
+                                <SelectTrigger class="w-20 sm:w-24 text-xs sm:text-sm">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -221,7 +226,7 @@
                                 v-model="messagesPageSize"
                                 @update:model-value="onMessagePageSizeChange"
                             >
-                                <SelectTrigger class="w-24">
+                                <SelectTrigger class="w-20 sm:w-24 text-xs sm:text-sm">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -254,13 +259,13 @@
                             >
                                 <!-- Step Header (Always Visible) -->
                                 <div
-                                    class="p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                                    class="p-3 sm:p-4 cursor-pointer hover:bg-muted/50 transition-colors"
                                     @click="toggleStepCollapse(log.step_order)"
                                 >
                                     <div
-                                        class="flex items-start justify-between"
+                                        class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-0"
                                     >
-                                        <div class="flex items-center gap-2">
+                                        <div class="flex items-center gap-2 flex-wrap">
                                             <component
                                                 :is="
                                                     isStepCollapsed(
@@ -269,24 +274,24 @@
                                                         ? ChevronRight
                                                         : ChevronDown
                                                 "
-                                                class="h-4 w-4 text-muted-foreground transition-transform"
+                                                class="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground transition-transform shrink-0"
                                             />
-                                            <Badge variant="outline"
+                                            <Badge variant="outline" class="text-xs sm:text-sm"
                                                 >Step
                                                 {{ log.step_order + 1 }}</Badge
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="font-medium text-sm sm:text-base">{{
                                                 log.step_name
                                             }}</span>
                                             <span
-                                                class="text-sm text-muted-foreground"
+                                                class="text-xs sm:text-sm text-muted-foreground"
                                             >
                                                 ({{ log.step_type }})
                                             </span>
                                         </div>
-                                        <div class="flex items-center gap-4">
+                                        <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                                             <div
-                                                class="flex items-center gap-2 text-sm"
+                                                class="flex items-center gap-2 text-xs sm:text-sm"
                                             >
                                                 <span
                                                     :class="
@@ -312,9 +317,9 @@
                                                 >
                                             </div>
                                             <div
-                                                class="flex items-center gap-2 text-sm text-muted-foreground"
+                                                class="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground"
                                             >
-                                                <Clock class="h-4 w-4" />
+                                                <Clock class="h-3 w-3 sm:h-4 sm:w-4" />
                                                 {{
                                                     formatDateTime(
                                                         log.event_time,
@@ -328,10 +333,10 @@
                                 <!-- Step Details (Collapsible) -->
                                 <div
                                     v-if="!isStepCollapsed(log.step_order)"
-                                    class="px-4 pb-4 space-y-3 border-t bg-muted/25"
+                                    class="px-3 sm:px-4 pb-3 sm:pb-4 space-y-2 sm:space-y-3 border-t bg-muted/25"
                                 >
                                     <div
-                                        class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm pt-3"
+                                        class="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 text-xs sm:text-sm pt-2 sm:pt-3"
                                     >
                                         <div>
                                             <Label class="text-xs font-medium"
@@ -538,29 +543,30 @@
                                 v-if="totalLogs > logs.length"
                                 class="flex justify-center pt-4"
                             >
-                                <Button
-                                    variant="outline"
-                                    @click="loadMoreLogs"
-                                    :disabled="logsLoading"
-                                >
-                                    <ChevronDown class="h-4 w-4 mr-2" />
-                                    Load More Logs ({{
-                                        totalLogs - logs.length
-                                    }}
-                                    remaining)
-                                </Button>
+                            <Button
+                                variant="outline"
+                                @click="loadMoreLogs"
+                                :disabled="logsLoading"
+                                class="w-full sm:w-auto text-xs sm:text-sm"
+                            >
+                                <ChevronDown class="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                                Load More Logs ({{
+                                    totalLogs - logs.length
+                                }}
+                                remaining)
+                            </Button>
                             </div>
                         </div>
 
                         <!-- No Logs -->
                         <div
                             v-else
-                            class="text-center py-8 text-muted-foreground"
+                            class="text-center py-6 sm:py-8 text-muted-foreground"
                         >
                             <FileText
-                                class="h-12 w-12 mx-auto mb-4 opacity-50"
+                                class="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 opacity-50"
                             />
-                            <p>No execution logs found</p>
+                            <p class="text-sm sm:text-base">No execution logs found</p>
                         </div>
                     </div>
 
@@ -579,13 +585,13 @@
                             <div
                                 v-for="message in messages"
                                 :key="`${message.step_id}-${message.log_time}`"
-                                class="border rounded-lg p-4 hover:bg-muted/25 transition-colors"
+                                class="border rounded-lg p-3 sm:p-4 hover:bg-muted/25 transition-colors"
                             >
                                 <div
-                                    class="flex items-start justify-between gap-4"
+                                    class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4"
                                 >
                                     <div
-                                        class="flex items-start gap-3 flex-1 min-w-0"
+                                        class="flex items-start gap-2 sm:gap-3 flex-1 min-w-0"
                                     >
                                         <!-- Log Level Badge -->
                                         <Badge
@@ -603,7 +609,7 @@
                                         <!-- Message Content -->
                                         <div class="flex-1 min-w-0">
                                             <div
-                                                class="flex items-center gap-2 text-sm mb-1"
+                                                class="flex flex-wrap items-center gap-1 sm:gap-2 text-xs sm:text-sm mb-1"
                                             >
                                                 <span
                                                     class="font-medium text-foreground"
@@ -612,11 +618,11 @@
                                                     }}</span
                                                 >
                                                 <span
-                                                    class="text-muted-foreground"
+                                                    class="text-muted-foreground hidden sm:inline"
                                                     >•</span
                                                 >
                                                 <span
-                                                    class="text-muted-foreground"
+                                                    class="text-muted-foreground text-xs"
                                                     >{{
                                                         formatDateTime(
                                                             message.log_time,
@@ -625,7 +631,7 @@
                                                 >
                                             </div>
                                             <p
-                                                class="text-sm text-foreground break-words"
+                                                class="text-xs sm:text-sm text-foreground break-words"
                                             >
                                                 {{ message.message }}
                                             </p>
@@ -700,30 +706,31 @@
                                 v-if="totalMessages > messages.length"
                                 class="flex justify-center pt-4"
                             >
-                                <Button
-                                    variant="outline"
-                                    @click="loadMoreMessages"
-                                    :disabled="messagesLoading"
-                                >
-                                    <ChevronDown class="h-4 w-4 mr-2" />
-                                    Load More Messages ({{
-                                        totalMessages - messages.length
-                                    }}
-                                    remaining)
-                                </Button>
+                            <Button
+                                variant="outline"
+                                @click="loadMoreMessages"
+                                :disabled="messagesLoading"
+                                class="w-full sm:w-auto text-xs sm:text-sm"
+                            >
+                                <ChevronDown class="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+                                Load More Messages ({{
+                                    totalMessages - messages.length
+                                }}
+                                remaining)
+                            </Button>
                             </div>
                         </div>
 
                         <!-- No Messages -->
                         <div
                             v-else
-                            class="text-center py-8 text-muted-foreground"
+                            class="text-center py-6 sm:py-8 text-muted-foreground"
                         >
                             <FileText
-                                class="h-12 w-12 mx-auto mb-4 opacity-50"
+                                class="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-3 sm:mb-4 opacity-50"
                             />
-                            <p>No log messages found</p>
-                            <p class="text-sm mt-2">
+                            <p class="text-sm sm:text-base">No log messages found</p>
+                            <p class="text-xs sm:text-sm mt-2 px-2">
                                 Log messages are generated by
                                 <code class="bg-muted px-1 rounded text-xs"
                                     >log()</code

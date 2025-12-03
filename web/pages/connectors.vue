@@ -346,25 +346,25 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="p-4">
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+  <div class="p-3 sm:p-4">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-3 sm:mb-4">
       <div>
-        <h1 class="text-3xl font-bold">Global Connectors</h1>
-        <p class="text-muted-foreground">
+        <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Global Connectors</h1>
+        <p class="text-xs sm:text-sm text-muted-foreground mt-1">
           Manage global service connectors (Discord, Slack, etc.)
         </p>
       </div>
       <Dialog v-model:open="showAddDialog">
         <DialogTrigger as-child>
-          <Button>
+          <Button class="w-full sm:w-auto text-sm sm:text-base">
             <Plus class="w-4 h-4 mr-2" />
             Add Connector
           </Button>
         </DialogTrigger>
-        <DialogContent class="max-w-2xl">
+        <DialogContent class="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle>Add New Connector</DialogTitle>
-            <DialogDescription>
+            <DialogTitle class="text-base sm:text-lg">Add New Connector</DialogTitle>
+            <DialogDescription class="text-xs sm:text-sm">
               Select a connector type and configure its settings.
             </DialogDescription>
           </DialogHeader>
@@ -447,20 +447,20 @@ onMounted(async () => {
 
     <!-- Connectors List -->
     <Card>
-      <CardHeader>
-        <CardTitle>Active Connectors</CardTitle>
-        <CardDescription>
+      <CardHeader class="pb-2 sm:pb-3">
+        <CardTitle class="text-base sm:text-lg">Active Connectors</CardTitle>
+        <CardDescription class="text-xs sm:text-sm">
           Global service connectors available to all plugins
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div v-if="loading" class="flex items-center justify-center py-8">
+        <div v-if="loading" class="flex items-center justify-center py-6 sm:py-8">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
         
-        <div v-else-if="connectors.length === 0" class="text-center py-8">
-          <p class="text-muted-foreground">No connectors configured</p>
-          <div class="mt-4 p-4 bg-muted rounded-lg text-sm">
+        <div v-else-if="connectors.length === 0" class="text-center py-6 sm:py-8">
+          <p class="text-sm sm:text-base text-muted-foreground">No connectors configured</p>
+          <div class="mt-4 p-3 sm:p-4 bg-muted rounded-lg text-xs sm:text-sm">
             <p class="font-medium mb-2">Debug Information:</p>
             <p>Available connector types: {{ availableConnectors.length }}</p>
             <p v-if="availableConnectors.length > 0">
@@ -472,82 +472,153 @@ onMounted(async () => {
           </div>
         </div>
         
-        <Table v-else>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Type</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Enabled</TableHead>
-              <TableHead>Last Error</TableHead>
-              <TableHead class="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow v-for="connector in connectors" :key="connector.id">
-              <TableCell>
-                <div class="flex items-center space-x-2">
-                  <component :is="getStatusIcon(connector.status)" class="w-4 h-4" />
-                  <span class="font-medium">{{ connector.id }}</span>
+        <template v-else>
+          <!-- Desktop Table View -->
+          <div class="hidden md:block w-full overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="text-xs sm:text-sm">Type</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Name</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Status</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Enabled</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Last Error</TableHead>
+                  <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="connector in connectors" :key="connector.id" class="hover:bg-muted/50">
+                  <TableCell>
+                    <div class="flex items-center space-x-2">
+                      <component :is="getStatusIcon(connector.status)" class="w-4 h-4" />
+                      <span class="font-medium text-sm sm:text-base">{{ connector.id }}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div class="flex flex-col">
+                      <span class="text-sm sm:text-base">{{ availableConnectors.find(c => c.id === connector.id)?.name || connector.id }}</span>
+                      <span class="text-xs sm:text-sm text-muted-foreground">
+                        {{ availableConnectors.find(c => c.id === connector.id)?.description }}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge :class="getStatusColor(connector.status)" class="text-xs">
+                      <component :is="getStatusIcon(connector.status)" class="w-3 h-3 mr-1" />
+                      {{ connector.status }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Switch :model-value="connector.enabled" disabled />
+                  </TableCell>
+                  <TableCell>
+                    <span 
+                      v-if="connector.last_error" 
+                      class="text-xs sm:text-sm text-red-600 dark:text-red-400"
+                      :title="connector.last_error"
+                    >
+                      {{ connector.last_error.length > 50 ? connector.last_error.substring(0, 50) + '...' : connector.last_error }}
+                    </span>
+                    <span v-else class="text-xs sm:text-sm text-muted-foreground">None</span>
+                  </TableCell>
+                  <TableCell class="text-right">
+                    <div class="flex items-center justify-end space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        @click="configureConnector(connector)"
+                        class="text-xs"
+                      >
+                        <Settings class="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        @click="deleteConnector(connector)"
+                        class="text-xs"
+                      >
+                        <Trash2 class="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+
+          <!-- Mobile Card View -->
+          <div class="md:hidden space-y-3">
+            <div
+              v-for="connector in connectors"
+              :key="connector.id"
+              class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+            >
+              <div class="flex items-start justify-between gap-2 mb-2">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-1">
+                    <component :is="getStatusIcon(connector.status)" class="w-4 h-4" />
+                    <span class="font-semibold text-sm sm:text-base">{{ connector.id }}</span>
+                  </div>
+                  <div class="space-y-1.5">
+                    <div>
+                      <span class="text-xs text-muted-foreground">Name: </span>
+                      <span class="text-xs sm:text-sm">{{ availableConnectors.find(c => c.id === connector.id)?.name || connector.id }}</span>
+                    </div>
+                    <div v-if="availableConnectors.find(c => c.id === connector.id)?.description">
+                      <span class="text-xs text-muted-foreground">Description: </span>
+                      <span class="text-xs sm:text-sm">{{ availableConnectors.find(c => c.id === connector.id)?.description }}</span>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                      <Badge :class="getStatusColor(connector.status)" class="text-xs">
+                        <component :is="getStatusIcon(connector.status)" class="w-3 h-3 mr-1" />
+                        {{ connector.status }}
+                      </Badge>
+                      <div class="flex items-center gap-1">
+                        <Switch :model-value="connector.enabled" disabled />
+                        <span class="text-xs text-muted-foreground">{{ connector.enabled ? 'Enabled' : 'Disabled' }}</span>
+                      </div>
+                    </div>
+                    <div v-if="connector.last_error" class="mt-2">
+                      <span class="text-xs text-muted-foreground">Last Error: </span>
+                      <span class="text-xs text-red-600 dark:text-red-400 break-words">
+                        {{ connector.last_error.length > 100 ? connector.last_error.substring(0, 100) + '...' : connector.last_error }}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              </TableCell>
-              <TableCell>
-                <div class="flex flex-col">
-                  <span>{{ availableConnectors.find(c => c.id === connector.id)?.name || connector.id }}</span>
-                  <span class="text-sm text-muted-foreground">
-                    {{ availableConnectors.find(c => c.id === connector.id)?.description }}
-                  </span>
-                </div>
-              </TableCell>
-              <TableCell>
-                <Badge :class="getStatusColor(connector.status)">
-                  <component :is="getStatusIcon(connector.status)" class="w-3 h-3 mr-1" />
-                  {{ connector.status }}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <Switch :model-value="connector.enabled" disabled />
-              </TableCell>
-              <TableCell>
-                <span 
-                  v-if="connector.last_error" 
-                  class="text-sm text-red-600 dark:text-red-400"
-                  :title="connector.last_error"
+              </div>
+              <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  @click="configureConnector(connector)"
+                  class="h-8 text-xs flex-1"
                 >
-                  {{ connector.last_error.length > 50 ? connector.last_error.substring(0, 50) + '...' : connector.last_error }}
-                </span>
-                <span v-else class="text-muted-foreground">None</span>
-              </TableCell>
-              <TableCell class="text-right">
-                <div class="flex items-center justify-end space-x-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    @click="configureConnector(connector)"
-                  >
-                    <Settings class="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    @click="deleteConnector(connector)"
-                  >
-                    <Trash2 class="w-4 h-4" />
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
+                  <Settings class="w-3 h-3 mr-1" />
+                  Configure
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  @click="deleteConnector(connector)"
+                  class="h-8 text-xs flex-1"
+                >
+                  <Trash2 class="w-3 h-3 mr-1" />
+                  Delete
+                </Button>
+              </div>
+            </div>
+          </div>
+        </template>
       </CardContent>
     </Card>
 
     <!-- Configuration Dialog -->
     <Dialog v-model:open="showConfigDialog">
-      <DialogContent class="max-w-2xl">
+      <DialogContent class="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Configure {{ currentConnector?.id }} Connector</DialogTitle>
-          <DialogDescription>
+          <DialogTitle class="text-base sm:text-lg">Configure {{ currentConnector?.id }} Connector</DialogTitle>
+          <DialogDescription class="text-xs sm:text-sm">
             Update the configuration for this connector.
           </DialogDescription>
         </DialogHeader>

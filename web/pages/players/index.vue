@@ -226,354 +226,554 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="container mx-auto p-6">
-    <div class="flex justify-between items-center mb-6">
-      <h1 class="text-3xl font-bold">Player Profiles</h1>
+  <div class="container mx-auto p-3 sm:p-4 lg:p-6">
+    <div class="flex justify-between items-center mb-4 sm:mb-6">
+      <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Player Profiles</h1>
     </div>
 
     <!-- Overall Statistics -->
-    <div v-if="stats && !statsLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div v-if="stats && !statsLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
       <Card>
         <CardHeader class="pb-2">
-          <CardTitle class="text-sm font-medium text-muted-foreground">Total Players</CardTitle>
+          <CardTitle class="text-xs sm:text-sm font-medium text-muted-foreground">Total Players</CardTitle>
         </CardHeader>
         <CardContent>
-          <div class="text-2xl font-bold">{{ formatNumber(stats.total_players) }}</div>
+          <div class="text-xl sm:text-2xl font-bold">{{ formatNumber(stats.total_players) }}</div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader class="pb-2">
-          <CardTitle class="text-sm font-medium text-muted-foreground">Total Kills</CardTitle>
+          <CardTitle class="text-xs sm:text-sm font-medium text-muted-foreground">Total Kills</CardTitle>
         </CardHeader>
         <CardContent>
-          <div class="text-2xl font-bold">{{ formatNumber(stats.total_kills) }}</div>
+          <div class="text-xl sm:text-2xl font-bold">{{ formatNumber(stats.total_kills) }}</div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader class="pb-2">
-          <CardTitle class="text-sm font-medium text-muted-foreground">Total Deaths</CardTitle>
+          <CardTitle class="text-xs sm:text-sm font-medium text-muted-foreground">Total Deaths</CardTitle>
         </CardHeader>
         <CardContent>
-          <div class="text-2xl font-bold">{{ formatNumber(stats.total_deaths) }}</div>
+          <div class="text-xl sm:text-2xl font-bold">{{ formatNumber(stats.total_deaths) }}</div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader class="pb-2">
-          <CardTitle class="text-sm font-medium text-muted-foreground">Total Teamkills</CardTitle>
+          <CardTitle class="text-xs sm:text-sm font-medium text-muted-foreground">Total Teamkills</CardTitle>
         </CardHeader>
         <CardContent>
-          <div class="text-2xl font-bold text-destructive">{{ formatNumber(stats.total_teamkills) }}</div>
+          <div class="text-xl sm:text-2xl font-bold text-destructive">{{ formatNumber(stats.total_teamkills) }}</div>
         </CardContent>
       </Card>
     </div>
 
     <!-- Statistics Tabs -->
-    <Tabs v-if="stats && !statsLoading" default-value="top-players" class="mb-6">
-      <TabsList class="grid w-full grid-cols-4">
-        <TabsTrigger value="top-players">Top Players</TabsTrigger>
-        <TabsTrigger value="top-teamkillers">Top Teamkillers</TabsTrigger>
-        <TabsTrigger value="top-medics">Top Medics</TabsTrigger>
-        <TabsTrigger value="recent">Most Recent</TabsTrigger>
+    <Tabs v-if="stats && !statsLoading" default-value="top-players" class="mb-4 sm:mb-6">
+      <TabsList class="grid w-full grid-cols-2 sm:grid-cols-4">
+        <TabsTrigger value="top-players" class="text-xs sm:text-sm">Top Players</TabsTrigger>
+        <TabsTrigger value="top-teamkillers" class="text-xs sm:text-sm">Top Teamkillers</TabsTrigger>
+        <TabsTrigger value="top-medics" class="text-xs sm:text-sm">Top Medics</TabsTrigger>
+        <TabsTrigger value="recent" class="text-xs sm:text-sm">Most Recent</TabsTrigger>
       </TabsList>
 
       <TabsContent value="top-players">
         <Card>
-          <CardHeader>
-            <CardTitle>Top 10 Players by K/D Ratio</CardTitle>
-            <CardDescription>Minimum 10 kills required</CardDescription>
+          <CardHeader class="pb-2 sm:pb-3">
+            <CardTitle class="text-base sm:text-lg">Top 10 Players by K/D Ratio</CardTitle>
+            <CardDescription class="text-xs sm:text-sm">Minimum 10 kills required</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Rank</TableHead>
-                  <TableHead>Player</TableHead>
-                  <TableHead class="text-right">K/D Ratio</TableHead>
-                  <TableHead class="text-right">Kills</TableHead>
-                  <TableHead class="text-right">Deaths</TableHead>
-                  <TableHead class="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow
-                  v-for="(player, index) in stats.top_players"
-                  :key="player.steam_id || player.eos_id"
-                  class="cursor-pointer hover:bg-muted/50"
-                  @click="viewPlayerProfile(player)"
-                >
-                  <TableCell>
-                    <Badge v-if="index === 0" variant="default">🥇</Badge>
-                    <Badge v-else-if="index === 1" variant="secondary">🥈</Badge>
-                    <Badge v-else-if="index === 2" variant="outline">🥉</Badge>
-                    <span v-else class="text-muted-foreground">{{ index + 1 }}</span>
-                  </TableCell>
-                  <TableCell class="font-medium">{{ player.player_name }}</TableCell>
-                  <TableCell class="text-right font-bold text-green-500">{{ player.kd_ratio.toFixed(2) }}</TableCell>
-                  <TableCell class="text-right">{{ player.kills }}</TableCell>
-                  <TableCell class="text-right">{{ player.deaths }}</TableCell>
-                  <TableCell class="text-right">
-                    <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
-                      <Button size="sm" variant="ghost">
-                      View
+            <!-- Desktop Table View -->
+            <div class="hidden md:block w-full overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="text-xs sm:text-sm">Rank</TableHead>
+                    <TableHead class="text-xs sm:text-sm">Player</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">K/D Ratio</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">Kills</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">Deaths</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow
+                    v-for="(player, index) in stats.top_players"
+                    :key="player.steam_id || player.eos_id"
+                    class="cursor-pointer hover:bg-muted/50"
+                    @click="viewPlayerProfile(player)"
+                  >
+                    <TableCell>
+                      <Badge v-if="index === 0" variant="default" class="text-xs">🥇</Badge>
+                      <Badge v-else-if="index === 1" variant="secondary" class="text-xs">🥈</Badge>
+                      <Badge v-else-if="index === 2" variant="outline" class="text-xs">🥉</Badge>
+                      <span v-else class="text-xs sm:text-sm text-muted-foreground">{{ index + 1 }}</span>
+                    </TableCell>
+                    <TableCell class="font-medium text-sm sm:text-base">{{ player.player_name }}</TableCell>
+                    <TableCell class="text-right font-bold text-green-500 text-xs sm:text-sm">{{ player.kd_ratio.toFixed(2) }}</TableCell>
+                    <TableCell class="text-right text-xs sm:text-sm">{{ player.kills }}</TableCell>
+                    <TableCell class="text-right text-xs sm:text-sm">{{ player.deaths }}</TableCell>
+                    <TableCell class="text-right">
+                      <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
+                        <Button size="sm" variant="ghost" class="text-xs">
+                        View
+                      </Button>
+                      </RouterLink>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+
+            <!-- Mobile Card View -->
+            <div class="md:hidden space-y-3">
+              <div
+                v-for="(player, index) in stats.top_players"
+                :key="player.steam_id || player.eos_id"
+                class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors cursor-pointer"
+                @click="viewPlayerProfile(player)"
+              >
+                <div class="flex items-start justify-between gap-2 mb-2">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                      <Badge v-if="index === 0" variant="default" class="text-xs">🥇</Badge>
+                      <Badge v-else-if="index === 1" variant="secondary" class="text-xs">🥈</Badge>
+                      <Badge v-else-if="index === 2" variant="outline" class="text-xs">🥉</Badge>
+                      <span v-else class="text-xs text-muted-foreground">{{ index + 1 }}</span>
+                      <span class="font-semibold text-sm sm:text-base">{{ player.player_name }}</span>
+                    </div>
+                    <div class="space-y-1.5">
+                      <div>
+                        <span class="text-xs text-muted-foreground">K/D Ratio: </span>
+                        <span class="text-xs sm:text-sm font-bold text-green-500">{{ player.kd_ratio.toFixed(2) }}</span>
+                      </div>
+                      <div>
+                        <span class="text-xs text-muted-foreground">Kills: </span>
+                        <span class="text-xs sm:text-sm">{{ player.kills }}</span>
+                        <span class="text-xs text-muted-foreground ml-2">Deaths: </span>
+                        <span class="text-xs sm:text-sm">{{ player.deaths }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                  <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" class="w-full">
+                    <Button size="sm" variant="ghost" class="w-full h-8 text-xs">
+                      View Profile
                     </Button>
-                    </RouterLink>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+                  </RouterLink>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </TabsContent>
 
       <TabsContent value="top-teamkillers">
         <Card>
-          <CardHeader>
-            <CardTitle>Top 10 Teamkillers</CardTitle>
-            <CardDescription>Players with most teamkills</CardDescription>
+          <CardHeader class="pb-2 sm:pb-3">
+            <CardTitle class="text-base sm:text-lg">Top 10 Teamkillers</CardTitle>
+            <CardDescription class="text-xs sm:text-sm">Players with most teamkills</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Rank</TableHead>
-                  <TableHead>Player</TableHead>
-                  <TableHead class="text-right">Teamkills</TableHead>
-                  <TableHead class="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow
-                  v-for="(player, index) in stats.top_teamkillers"
-                  :key="player.steam_id || player.eos_id"
-                  class="cursor-pointer hover:bg-muted/50"
-                  @click="viewPlayerProfile(player)"
-                >
-                  <TableCell>{{ index + 1 }}</TableCell>
-                  <TableCell class="font-medium">{{ player.player_name }}</TableCell>
-                  <TableCell class="text-right font-bold text-destructive">{{ player.teamkills }}</TableCell>
-                  <TableCell class="text-right">
-                    <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
-                      <Button size="sm" variant="ghost">
-                      View
+            <!-- Desktop Table View -->
+            <div class="hidden md:block w-full overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="text-xs sm:text-sm">Rank</TableHead>
+                    <TableHead class="text-xs sm:text-sm">Player</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">Teamkills</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow
+                    v-for="(player, index) in stats.top_teamkillers"
+                    :key="player.steam_id || player.eos_id"
+                    class="cursor-pointer hover:bg-muted/50"
+                    @click="viewPlayerProfile(player)"
+                  >
+                    <TableCell class="text-xs sm:text-sm">{{ index + 1 }}</TableCell>
+                    <TableCell class="font-medium text-sm sm:text-base">{{ player.player_name }}</TableCell>
+                    <TableCell class="text-right font-bold text-destructive text-xs sm:text-sm">{{ player.teamkills }}</TableCell>
+                    <TableCell class="text-right">
+                      <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
+                        <Button size="sm" variant="ghost" class="text-xs">
+                        View
+                      </Button>
+                      </RouterLink>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+
+            <!-- Mobile Card View -->
+            <div class="md:hidden space-y-3">
+              <div
+                v-for="(player, index) in stats.top_teamkillers"
+                :key="player.steam_id || player.eos_id"
+                class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors cursor-pointer"
+                @click="viewPlayerProfile(player)"
+              >
+                <div class="flex items-start justify-between gap-2 mb-2">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="text-xs text-muted-foreground">#{{ index + 1 }}</span>
+                      <span class="font-semibold text-sm sm:text-base">{{ player.player_name }}</span>
+                    </div>
+                    <div>
+                      <span class="text-xs text-muted-foreground">Teamkills: </span>
+                      <span class="text-xs sm:text-sm font-bold text-destructive">{{ player.teamkills }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                  <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" class="w-full">
+                    <Button size="sm" variant="ghost" class="w-full h-8 text-xs">
+                      View Profile
                     </Button>
-                    </RouterLink>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+                  </RouterLink>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </TabsContent>
 
       <TabsContent value="top-medics">
         <Card>
-          <CardHeader>
-            <CardTitle>Top 10 Medics</CardTitle>
-            <CardDescription>Players with most revives</CardDescription>
+          <CardHeader class="pb-2 sm:pb-3">
+            <CardTitle class="text-base sm:text-lg">Top 10 Medics</CardTitle>
+            <CardDescription class="text-xs sm:text-sm">Players with most revives</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Rank</TableHead>
-                  <TableHead>Player</TableHead>
-                  <TableHead class="text-right">Revives</TableHead>
-                  <TableHead class="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow
-                  v-for="(player, index) in stats.top_medics"
-                  :key="player.steam_id || player.eos_id"
-                  class="cursor-pointer hover:bg-muted/50"
-                  @click="viewPlayerProfile(player)"
-                >
-                  <TableCell>
-                    <Badge v-if="index === 0" variant="default">🥇</Badge>
-                    <Badge v-else-if="index === 1" variant="secondary">🥈</Badge>
-                    <Badge v-else-if="index === 2" variant="outline">🥉</Badge>
-                    <span v-else class="text-muted-foreground">{{ index + 1 }}</span>
-                  </TableCell>
-                  <TableCell class="font-medium">{{ player.player_name }}</TableCell>
-                  <TableCell class="text-right font-bold text-green-500">{{ player.revives }}</TableCell>
-                  <TableCell class="text-right">
-                    <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
-                      <Button size="sm" variant="ghost">
-                      View
+            <!-- Desktop Table View -->
+            <div class="hidden md:block w-full overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="text-xs sm:text-sm">Rank</TableHead>
+                    <TableHead class="text-xs sm:text-sm">Player</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">Revives</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow
+                    v-for="(player, index) in stats.top_medics"
+                    :key="player.steam_id || player.eos_id"
+                    class="cursor-pointer hover:bg-muted/50"
+                    @click="viewPlayerProfile(player)"
+                  >
+                    <TableCell>
+                      <Badge v-if="index === 0" variant="default" class="text-xs">🥇</Badge>
+                      <Badge v-else-if="index === 1" variant="secondary" class="text-xs">🥈</Badge>
+                      <Badge v-else-if="index === 2" variant="outline" class="text-xs">🥉</Badge>
+                      <span v-else class="text-xs sm:text-sm text-muted-foreground">{{ index + 1 }}</span>
+                    </TableCell>
+                    <TableCell class="font-medium text-sm sm:text-base">{{ player.player_name }}</TableCell>
+                    <TableCell class="text-right font-bold text-green-500 text-xs sm:text-sm">{{ player.revives }}</TableCell>
+                    <TableCell class="text-right">
+                      <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
+                        <Button size="sm" variant="ghost" class="text-xs">
+                        View
+                      </Button>
+                      </RouterLink>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+
+            <!-- Mobile Card View -->
+            <div class="md:hidden space-y-3">
+              <div
+                v-for="(player, index) in stats.top_medics"
+                :key="player.steam_id || player.eos_id"
+                class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors cursor-pointer"
+                @click="viewPlayerProfile(player)"
+              >
+                <div class="flex items-start justify-between gap-2 mb-2">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                      <Badge v-if="index === 0" variant="default" class="text-xs">🥇</Badge>
+                      <Badge v-else-if="index === 1" variant="secondary" class="text-xs">🥈</Badge>
+                      <Badge v-else-if="index === 2" variant="outline" class="text-xs">🥉</Badge>
+                      <span v-else class="text-xs text-muted-foreground">{{ index + 1 }}</span>
+                      <span class="font-semibold text-sm sm:text-base">{{ player.player_name }}</span>
+                    </div>
+                    <div>
+                      <span class="text-xs text-muted-foreground">Revives: </span>
+                      <span class="text-xs sm:text-sm font-bold text-green-500">{{ player.revives }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                  <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" class="w-full">
+                    <Button size="sm" variant="ghost" class="w-full h-8 text-xs">
+                      View Profile
                     </Button>
-                    </RouterLink>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+                  </RouterLink>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </TabsContent>
 
       <TabsContent value="recent">
         <Card>
-          <CardHeader>
-            <CardTitle>Most Recent Players</CardTitle>
-            <CardDescription>Last 10 players seen on servers</CardDescription>
+          <CardHeader class="pb-2 sm:pb-3">
+            <CardTitle class="text-base sm:text-lg">Most Recent Players</CardTitle>
+            <CardDescription class="text-xs sm:text-sm">Last 10 players seen on servers</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Player</TableHead>
-                  <TableHead>Last Seen</TableHead>
-                  <TableHead class="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow
-                  v-for="player in stats.most_recent_players"
-                  :key="player.steam_id || player.eos_id"
-                  class="cursor-pointer hover:bg-muted/50"
-                  @click="viewPlayerProfile(player)"
-                >
-                  <TableCell class="font-medium">{{ player.player_name }}</TableCell>
-                  <TableCell>
-                    <div class="text-sm">{{ getTimeAgo(player.last_seen) }}</div>
-                    <div class="text-xs text-muted-foreground">{{ formatDate(player.last_seen) }}</div>
-                  </TableCell>
-                  <TableCell class="text-right">
-                    <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
-                      <Button size="sm" variant="ghost">
-                      View
+            <!-- Desktop Table View -->
+            <div class="hidden md:block w-full overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="text-xs sm:text-sm">Player</TableHead>
+                    <TableHead class="text-xs sm:text-sm">Last Seen</TableHead>
+                    <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow
+                    v-for="player in stats.most_recent_players"
+                    :key="player.steam_id || player.eos_id"
+                    class="cursor-pointer hover:bg-muted/50"
+                    @click="viewPlayerProfile(player)"
+                  >
+                    <TableCell class="font-medium text-sm sm:text-base">{{ player.player_name }}</TableCell>
+                    <TableCell>
+                      <div class="text-xs sm:text-sm">{{ getTimeAgo(player.last_seen) }}</div>
+                      <div class="text-xs text-muted-foreground">{{ formatDate(player.last_seen) }}</div>
+                    </TableCell>
+                    <TableCell class="text-right">
+                      <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" as-child>
+                        <Button size="sm" variant="ghost" class="text-xs">
+                        View
+                      </Button>
+                      </RouterLink>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+
+            <!-- Mobile Card View -->
+            <div class="md:hidden space-y-3">
+              <div
+                v-for="player in stats.most_recent_players"
+                :key="player.steam_id || player.eos_id"
+                class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors cursor-pointer"
+                @click="viewPlayerProfile(player)"
+              >
+                <div class="flex items-start justify-between gap-2 mb-2">
+                  <div class="flex-1 min-w-0">
+                    <div class="font-semibold text-sm sm:text-base mb-1">
+                      {{ player.player_name }}
+                    </div>
+                    <div>
+                      <div class="text-xs sm:text-sm">{{ getTimeAgo(player.last_seen) }}</div>
+                      <div class="text-xs text-muted-foreground">{{ formatDate(player.last_seen) }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                  <RouterLink :to="`/players/${player.steam_id || player.eos_id}`" class="w-full">
+                    <Button size="sm" variant="ghost" class="w-full h-8 text-xs">
+                      View Profile
                     </Button>
-                    </RouterLink>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+                  </RouterLink>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </TabsContent>
     </Tabs>
 
     <!-- Loading State for Stats -->
-    <div v-if="statsLoading" class="mb-6">
+    <div v-if="statsLoading" class="mb-4 sm:mb-6">
       <Card>
-        <CardContent class="py-12">
+        <CardContent class="py-8 sm:py-12">
           <div class="flex justify-center items-center">
             <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
-          <p class="text-center text-muted-foreground mt-4">Loading player statistics...</p>
+          <p class="text-center text-xs sm:text-sm text-muted-foreground mt-4">Loading player statistics...</p>
         </CardContent>
       </Card>
     </div>
 
     <!-- Search Section -->
-    <Card class="mb-6">
-      <CardHeader>
-        <CardTitle>Search Players</CardTitle>
+    <Card class="mb-4 sm:mb-6">
+      <CardHeader class="pb-2 sm:pb-3">
+        <CardTitle class="text-base sm:text-lg">Search Players</CardTitle>
       </CardHeader>
       <CardContent>
-        <div class="flex gap-4">
+        <div class="flex flex-col sm:flex-row gap-2 sm:gap-4">
           <Input
             v-model="searchQuery"
             placeholder="Search by player name, Steam ID, or EOS ID..."
-            class="flex-1"
+            class="flex-1 text-sm sm:text-base"
             @keypress="handleKeyPress"
           />
-          <Button @click="searchPlayers" :disabled="loading">
+          <Button @click="searchPlayers" :disabled="loading" class="w-full sm:w-auto text-sm sm:text-base">
             {{ loading ? "Searching..." : "Search" }}
           </Button>
         </div>
-        <p class="text-sm text-muted-foreground mt-2">
+        <p class="text-xs sm:text-sm text-muted-foreground mt-2">
           Enter a player name, Steam ID, or EOS ID to search for players
         </p>
       </CardContent>
     </Card>
 
-    <div v-if="error" class="mb-4 p-4 bg-destructive/15 text-destructive rounded-md">
+    <div v-if="error" class="mb-3 sm:mb-4 p-3 sm:p-4 bg-destructive/15 text-destructive rounded-md text-sm sm:text-base">
       {{ error }}
     </div>
 
     <Card v-if="players.length > 0">
-      <CardHeader>
-        <CardTitle>Search Results ({{ players.length }})</CardTitle>
+      <CardHeader class="pb-2 sm:pb-3">
+        <CardTitle class="text-base sm:text-lg">Search Results ({{ players.length }})</CardTitle>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Player Name</TableHead>
-              <TableHead>Steam ID</TableHead>
-              <TableHead>EOS ID</TableHead>
-              <TableHead>Last Seen</TableHead>
-              <TableHead>First Seen</TableHead>
-              <TableHead class="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow
-              v-for="player in players"
-              :key="player.steam_id || player.eos_id"
-              class="cursor-pointer hover:bg-muted/50"
-              @click="viewPlayerProfile(player)"
-            >
-              <TableCell class="font-medium">
-                {{ player.player_name || "Unknown" }}
-              </TableCell>
-              <TableCell>
-                <code class="text-xs bg-muted px-2 py-1 rounded">
-                  {{ player.steam_id || "N/A" }}
-                </code>
-              </TableCell>
-              <TableCell>
-                <code class="text-xs bg-muted px-2 py-1 rounded">
-                  {{ player.eos_id || "N/A" }}
-                </code>
-              </TableCell>
-              <TableCell>
-                <div v-if="player.last_seen">
-                  <div class="text-sm">{{ getTimeAgo(player.last_seen) }}</div>
-                  <div class="text-xs text-muted-foreground">
-                    {{ formatDate(player.last_seen) }}
+        <!-- Desktop Table View -->
+        <div class="hidden md:block w-full overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="text-xs sm:text-sm">Player Name</TableHead>
+                <TableHead class="text-xs sm:text-sm">Steam ID</TableHead>
+                <TableHead class="text-xs sm:text-sm">EOS ID</TableHead>
+                <TableHead class="text-xs sm:text-sm">Last Seen</TableHead>
+                <TableHead class="text-xs sm:text-sm">First Seen</TableHead>
+                <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow
+                v-for="player in players"
+                :key="player.steam_id || player.eos_id"
+                class="cursor-pointer hover:bg-muted/50"
+                @click="viewPlayerProfile(player)"
+              >
+                <TableCell class="font-medium text-sm sm:text-base">
+                  {{ player.player_name || "Unknown" }}
+                </TableCell>
+                <TableCell>
+                  <code class="text-xs bg-muted px-2 py-1 rounded">
+                    {{ player.steam_id || "N/A" }}
+                  </code>
+                </TableCell>
+                <TableCell>
+                  <code class="text-xs bg-muted px-2 py-1 rounded">
+                    {{ player.eos_id || "N/A" }}
+                  </code>
+                </TableCell>
+                <TableCell>
+                  <div v-if="player.last_seen">
+                    <div class="text-xs sm:text-sm">{{ getTimeAgo(player.last_seen) }}</div>
+                    <div class="text-xs text-muted-foreground">
+                      {{ formatDate(player.last_seen) }}
+                    </div>
+                  </div>
+                  <span v-else class="text-xs sm:text-sm text-muted-foreground">N/A</span>
+                </TableCell>
+                <TableCell>
+                  <div v-if="player.first_seen">
+                    <div class="text-xs sm:text-sm">{{ formatDate(player.first_seen) }}</div>
+                  </div>
+                  <span v-else class="text-xs sm:text-sm text-muted-foreground">N/A</span>
+                </TableCell>
+                <TableCell class="text-right">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    @click.stop="viewPlayerProfile(player)"
+                    class="text-xs"
+                  >
+                    View Profile
+                  </Button>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <!-- Mobile Card View -->
+        <div class="md:hidden space-y-3">
+          <div
+            v-for="player in players"
+            :key="player.steam_id || player.eos_id"
+            class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors cursor-pointer"
+            @click="viewPlayerProfile(player)"
+          >
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-sm sm:text-base mb-1">
+                  {{ player.player_name || "Unknown" }}
+                </div>
+                <div class="space-y-1.5">
+                  <div>
+                    <span class="text-xs text-muted-foreground">Steam ID: </span>
+                    <code class="text-xs bg-muted px-1.5 py-0.5 rounded">
+                      {{ player.steam_id || "N/A" }}
+                    </code>
+                  </div>
+                  <div>
+                    <span class="text-xs text-muted-foreground">EOS ID: </span>
+                    <code class="text-xs bg-muted px-1.5 py-0.5 rounded">
+                      {{ player.eos_id || "N/A" }}
+                    </code>
+                  </div>
+                  <div v-if="player.last_seen">
+                    <span class="text-xs text-muted-foreground">Last Seen: </span>
+                    <span class="text-xs sm:text-sm">{{ getTimeAgo(player.last_seen) }}</span>
+                    <div class="text-xs text-muted-foreground">{{ formatDate(player.last_seen) }}</div>
+                  </div>
+                  <div v-if="player.first_seen">
+                    <span class="text-xs text-muted-foreground">First Seen: </span>
+                    <span class="text-xs sm:text-sm">{{ formatDate(player.first_seen) }}</span>
                   </div>
                 </div>
-                <span v-else class="text-muted-foreground">N/A</span>
-              </TableCell>
-              <TableCell>
-                <div v-if="player.first_seen">
-                  <div class="text-sm">{{ formatDate(player.first_seen) }}</div>
-                </div>
-                <span v-else class="text-muted-foreground">N/A</span>
-              </TableCell>
-              <TableCell class="text-right">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  @click.stop="viewPlayerProfile(player)"
-                >
-                  View Profile
-                </Button>
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
+              </div>
+            </div>
+            <div class="flex items-center justify-end gap-2 pt-2 border-t">
+              <Button
+                size="sm"
+                variant="outline"
+                @click.stop="viewPlayerProfile(player)"
+                class="w-full h-8 text-xs"
+              >
+                View Profile
+              </Button>
+            </div>
+          </div>
+        </div>
       </CardContent>
     </Card>
 
     <Card v-else-if="!loading && searchQuery && players.length === 0">
-      <CardContent class="py-12">
+      <CardContent class="py-8 sm:py-12">
         <div class="text-center text-muted-foreground">
-          <p class="text-lg mb-2">No players found</p>
-          <p class="text-sm">Try searching with a different query</p>
+          <p class="text-base sm:text-lg mb-2">No players found</p>
+          <p class="text-xs sm:text-sm">Try searching with a different query</p>
         </div>
       </CardContent>
     </Card>
 
     <Card v-else-if="!searchQuery">
-      <CardContent class="py-12">
+      <CardContent class="py-8 sm:py-12">
         <div class="text-center text-muted-foreground">
-          <p class="text-lg mb-2">Search for Players</p>
-          <p class="text-sm">
+          <p class="text-base sm:text-lg mb-2">Search for Players</p>
+          <p class="text-xs sm:text-sm">
             Enter a player name, Steam ID, or EOS ID above to get started
           </p>
         </div>

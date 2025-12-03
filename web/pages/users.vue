@@ -383,10 +383,10 @@ function refreshData() {
 </script>
 
 <template>
-  <div class="p-4">
-    <div class="flex justify-between items-center mb-4">
-      <h1 class="text-2xl font-bold">Users</h1>
-      <div class="flex gap-2">
+  <div class="p-3 sm:p-4">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0 mb-3 sm:mb-4">
+      <h1 class="text-xl sm:text-2xl font-bold">Users</h1>
+      <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
         <Form
           v-slot="{ handleSubmit }"
           as=""
@@ -402,14 +402,14 @@ function refreshData() {
         >
           <Dialog v-model:open="showAddUserDialog" v-if="authStore.user?.super_admin">
             <DialogTrigger asChild>
-              <Button>Add User</Button>
+              <Button class="w-full sm:w-auto text-sm sm:text-base">Add User</Button>
             </DialogTrigger>
             <DialogContent
-              class="sm:max-w-[425px] max-h-[90vh] overflow-y-auto"
+              class="w-[95vw] sm:max-w-[425px] max-h-[90vh] overflow-y-auto p-4 sm:p-6"
             >
               <DialogHeader>
-                <DialogTitle>Add New User</DialogTitle>
-                <DialogDescription>
+                <DialogTitle class="text-base sm:text-lg">Add New User</DialogTitle>
+                <DialogDescription class="text-xs sm:text-sm">
                   Enter the details of the user you want to add.
                 </DialogDescription>
               </DialogHeader>
@@ -504,10 +504,10 @@ function refreshData() {
 
         <!-- Edit User Dialog -->
         <Dialog v-model:open="showEditUserDialog">
-          <DialogContent class="sm:max-w-[425px] max-h-[90vh] overflow-y-auto">
+          <DialogContent class="w-[95vw] sm:max-w-[425px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
-              <DialogTitle>Edit User</DialogTitle>
-              <DialogDescription>
+              <DialogTitle class="text-base sm:text-lg">Edit User</DialogTitle>
+              <DialogDescription class="text-xs sm:text-sm">
                 Update the user's information.
               </DialogDescription>
             </DialogHeader>
@@ -577,122 +577,186 @@ function refreshData() {
           </DialogContent>
         </Dialog>
 
-        <Button @click="refreshData" :disabled="loading" variant="outline">
+        <Button @click="refreshData" :disabled="loading" variant="outline" class="w-full sm:w-auto text-sm sm:text-base">
           {{ loading ? "Refreshing..." : "Refresh" }}
         </Button>
       </div>
     </div>
 
-    <div v-if="error" class="bg-red-500 text-white p-4 rounded mb-4">
+    <div v-if="error" class="bg-red-500 text-white p-3 sm:p-4 rounded mb-3 sm:mb-4 text-sm sm:text-base">
       {{ error }}
     </div>
 
-    <Card class="mb-4">
-      <CardHeader class="pb-2">
-        <CardTitle>User List</CardTitle>
-        <p class="text-sm text-muted-foreground">
+    <Card class="mb-3 sm:mb-4">
+      <CardHeader class="pb-2 sm:pb-3">
+        <CardTitle class="text-base sm:text-lg">User List</CardTitle>
+        <p class="text-xs sm:text-sm text-muted-foreground">
           View and manage users. Data refreshes automatically every 60 seconds.
         </p>
       </CardHeader>
       <CardContent>
-        <div class="flex items-center space-x-2 mb-4">
+        <div class="flex items-center space-x-2 mb-3 sm:mb-4">
           <Input
             v-model="searchQuery"
             placeholder="Search by name, username, or Steam ID..."
-            class="flex-grow"
+            class="flex-grow text-sm sm:text-base"
           />
         </div>
 
-        <div class="text-sm text-muted-foreground mb-2">
+        <div class="text-xs sm:text-sm text-muted-foreground mb-2">
           Showing {{ filteredUsers.length }} of {{ users.length }} users
         </div>
 
-        <div v-if="loading && users.length === 0" class="text-center py-8">
+        <div v-if="loading && users.length === 0" class="text-center py-6 sm:py-8">
           <div
             class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
           ></div>
-          <p>Loading users...</p>
+          <p class="text-sm sm:text-base">Loading users...</p>
         </div>
 
-        <div v-else-if="users.length === 0" class="text-center py-8">
-          <p>No users found</p>
+        <div v-else-if="users.length === 0" class="text-center py-6 sm:py-8">
+          <p class="text-sm sm:text-base">No users found</p>
         </div>
 
-        <div v-else-if="filteredUsers.length === 0" class="text-center py-8">
-          <p>No users match your search</p>
+        <div v-else-if="filteredUsers.length === 0" class="text-center py-6 sm:py-8">
+          <p class="text-sm sm:text-base">No users match your search</p>
         </div>
 
-        <div v-else class="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Username</TableHead>
-                <TableHead>Steam ID</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead class="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow
-                v-for="user in filteredUsers"
-                :key="user.id"
-                class="hover:bg-muted/50"
-              >
-                <TableCell>
-                  <div class="font-medium">
+        <template v-else>
+          <!-- Desktop Table View -->
+          <div class="hidden md:block w-full overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="text-xs sm:text-sm">Name</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Username</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Steam ID</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Created</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Role</TableHead>
+                  <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow
+                  v-for="user in filteredUsers"
+                  :key="user.id"
+                  class="hover:bg-muted/50"
+                >
+                  <TableCell>
+                    <div class="font-medium text-sm sm:text-base">
+                      {{ user.name }}
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-xs sm:text-sm">{{ user.username }}</TableCell>
+                  <TableCell class="text-xs sm:text-sm">{{ user.steam_id }}</TableCell>
+                  <TableCell class="text-xs sm:text-sm">{{ formatDate(user.created_at) }}</TableCell>
+                  <TableCell>
+                    <Badge :variant="user.super_admin ? 'default' : 'outline'" class="text-xs">
+                      {{ user.super_admin ? "Super Admin" : "User" }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="text-right">
+                    <div class="flex gap-2 justify-end" v-if="authStore.user?.super_admin">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        @click="openEditDialog(user)"
+                        :disabled="loading"
+                        class="text-xs"
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        @click="deleteUser(user.id)"
+                        :disabled="loading"
+                        class="text-xs"
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                    <div v-else class="text-xs sm:text-sm text-muted-foreground">
+                      No actions available
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+
+          <!-- Mobile Card View -->
+          <div class="md:hidden space-y-3">
+            <div
+              v-for="user in filteredUsers"
+              :key="user.id"
+              class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+            >
+              <div class="flex items-start justify-between gap-2 mb-2">
+                <div class="flex-1 min-w-0">
+                  <div class="font-semibold text-sm sm:text-base mb-1">
                     {{ user.name }}
                   </div>
-                </TableCell>
-                <TableCell>{{ user.username }}</TableCell>
-                <TableCell>{{ user.steam_id }}</TableCell>
-                <TableCell>{{ formatDate(user.created_at) }}</TableCell>
-                <TableCell>
-                  <Badge :variant="user.super_admin ? 'default' : 'outline'">
-                    {{ user.super_admin ? "Super Admin" : "User" }}
-                  </Badge>
-                </TableCell>
-                <TableCell class="text-right">
-                  <div class="flex gap-2 justify-end" v-if="authStore.user?.super_admin">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      @click="openEditDialog(user)"
-                      :disabled="loading"
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      @click="deleteUser(user.id)"
-                      :disabled="loading"
-                    >
-                      Delete
-                    </Button>
+                  <div class="space-y-1.5">
+                    <div>
+                      <span class="text-xs text-muted-foreground">Username: </span>
+                      <span class="text-xs sm:text-sm">{{ user.username }}</span>
+                    </div>
+                    <div>
+                      <span class="text-xs text-muted-foreground">Steam ID: </span>
+                      <span class="text-xs sm:text-sm">{{ user.steam_id }}</span>
+                    </div>
+                    <div>
+                      <span class="text-xs text-muted-foreground">Created: </span>
+                      <span class="text-xs sm:text-sm">{{ formatDate(user.created_at) }}</span>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                      <Badge :variant="user.super_admin ? 'default' : 'outline'" class="text-xs">
+                        {{ user.super_admin ? "Super Admin" : "User" }}
+                      </Badge>
+                    </div>
                   </div>
-                  <div v-else class="text-sm text-muted-foreground">
-                    No actions available
-                  </div>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
+                </div>
+              </div>
+              <div class="flex items-center justify-end gap-2 pt-2 border-t" v-if="authStore.user?.super_admin">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  @click="openEditDialog(user)"
+                  :disabled="loading"
+                  class="h-8 text-xs flex-1"
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  @click="deleteUser(user.id)"
+                  :disabled="loading"
+                  class="h-8 text-xs flex-1"
+                >
+                  Delete
+                </Button>
+              </div>
+              <div v-else class="text-xs text-muted-foreground pt-2 border-t">
+                No actions available
+              </div>
+            </div>
+          </div>
+        </template>
       </CardContent>
     </Card>
 
     <Card>
       <CardHeader>
-        <CardTitle>About Users</CardTitle>
+        <CardTitle class="text-base sm:text-lg">About Users</CardTitle>
       </CardHeader>
       <CardContent>
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs sm:text-sm text-muted-foreground">
           This page shows all users registered in Squad Aegis. You can add new
           users or delete existing ones.
         </p>
-        <p class="text-sm text-muted-foreground mt-2">
+        <p class="text-xs sm:text-sm text-muted-foreground mt-2">
           Super Admin users have full access to all features and servers in the
           system.
         </p>

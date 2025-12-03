@@ -358,63 +358,63 @@ onMounted(async () => {
 </script>
 
 <template>
-    <div class="container mx-auto p-6">
-        <div class="flex items-center gap-4 mb-6">
-            <Button variant="outline" @click="router.push('/players')">
+    <div class="container mx-auto p-3 sm:p-4 lg:p-6">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <Button variant="outline" @click="router.push('/players')" class="w-full sm:w-auto text-sm sm:text-base">
                 ← Back to Search
             </Button>
-            <h1 class="text-3xl font-bold">Player Profile</h1>
+            <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Player Profile</h1>
         </div>
 
-        <div v-if="loading" class="flex justify-center items-center py-12">
+        <div v-if="loading" class="flex justify-center items-center py-8 sm:py-12">
             <div class="text-center">
                 <div
                     class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"
                 ></div>
-                <p class="text-muted-foreground">Loading player profile...</p>
+                <p class="text-sm sm:text-base text-muted-foreground">Loading player profile...</p>
             </div>
         </div>
 
         <div
             v-else-if="error"
-            class="p-4 bg-destructive/15 text-destructive rounded-md"
+            class="p-3 sm:p-4 bg-destructive/15 text-destructive rounded-md text-sm sm:text-base"
         >
             {{ error }}
         </div>
 
         <div v-else-if="player">
             <!-- Player Header -->
-            <Card class="mb-6">
-                <CardHeader>
-                    <CardTitle class="text-2xl">{{
+            <Card class="mb-4 sm:mb-6">
+                <CardHeader class="pb-2 sm:pb-3">
+                    <CardTitle class="text-xl sm:text-2xl">{{
                         player.player_name
                     }}</CardTitle>
                 </CardHeader>
                 <CardContent>
                     <div
-                        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4"
+                        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-3 sm:mb-4"
                     >
                         <div>
-                            <div class="text-sm text-muted-foreground">
+                            <div class="text-xs sm:text-sm text-muted-foreground">
                                 Steam ID
                             </div>
-                            <code class="text-sm bg-muted px-2 py-1 rounded">
+                            <code class="text-xs sm:text-sm bg-muted px-2 py-1 rounded">
                                 {{ player.steam_id || "N/A" }}
                             </code>
                         </div>
                         <div>
-                            <div class="text-sm text-muted-foreground">
+                            <div class="text-xs sm:text-sm text-muted-foreground">
                                 EOS ID
                             </div>
-                            <code class="text-sm bg-muted px-2 py-1 rounded">
+                            <code class="text-xs sm:text-sm bg-muted px-2 py-1 rounded">
                                 {{ player.eos_id || "N/A" }}
                             </code>
                         </div>
                         <div>
-                            <div class="text-sm text-muted-foreground">
+                            <div class="text-xs sm:text-sm text-muted-foreground">
                                 Last Seen
                             </div>
-                            <div class="text-sm font-medium">
+                            <div class="text-xs sm:text-sm font-medium">
                                 {{ getTimeAgo(player.last_seen) }}
                             </div>
                             <div class="text-xs text-muted-foreground">
@@ -422,18 +422,18 @@ onMounted(async () => {
                             </div>
                         </div>
                         <div>
-                            <div class="text-sm text-muted-foreground">
+                            <div class="text-xs sm:text-sm text-muted-foreground">
                                 First Seen
                             </div>
-                            <div class="text-sm font-medium">
+                            <div class="text-xs sm:text-sm font-medium">
                                 {{ formatDate(player.first_seen) }}
                             </div>
                         </div>
                     </div>
 
                     <!-- External Links -->
-                    <div class="pt-4 border-t">
-                        <div class="text-sm text-muted-foreground mb-3">
+                    <div class="pt-3 sm:pt-4 border-t">
+                        <div class="text-xs sm:text-sm text-muted-foreground mb-2 sm:mb-3">
                             External Links
                         </div>
                         <div class="flex flex-wrap gap-2">
@@ -442,9 +442,9 @@ onMounted(async () => {
                                 :href="`https://steamcommunity.com/profiles/${player.steam_id}`"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#171a21] hover:bg-[#1b2838] text-white rounded-md transition-colors"
+                                class="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 text-xs bg-[#171a21] hover:bg-[#1b2838] text-white rounded-md transition-colors"
                             >
-                                <ExternalLink :size="14" />
+                                <ExternalLink :size="12" class="sm:w-3.5 sm:h-3.5" />
                                 <span>Steam</span>
                             </a>
                             <a
@@ -452,9 +452,9 @@ onMounted(async () => {
                                 :href="`https://www.battlemetrics.com/players?filter[search]=${player.player_name}`"
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#f26a21] hover:bg-[#d85a15] text-white rounded-md transition-colors"
+                                class="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 text-xs bg-[#f26a21] hover:bg-[#d85a15] text-white rounded-md transition-colors"
                             >
-                                <ExternalLink :size="14" />
+                                <ExternalLink :size="12" class="sm:w-3.5 sm:h-3.5" />
                                 <span>Battlemetrics</span>
                             </a>
                         </div>
@@ -463,20 +463,20 @@ onMounted(async () => {
             </Card>
 
             <!-- CBL Reputation Card -->
-            <Card v-if="player.steam_id" class="mb-6">
-                <CardHeader>
-                    <div class="flex items-center justify-between">
-                        <CardTitle class="text-lg"
+            <Card v-if="player.steam_id" class="mb-4 sm:mb-6">
+                <CardHeader class="pb-2 sm:pb-3">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0">
+                        <CardTitle class="text-base sm:text-lg"
                             >Community Ban List Reputation</CardTitle
                         >
                         <a
                             :href="`https://communitybanlist.com/search/${player.steam_id}`"
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                            class="text-xs sm:text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
                         >
                             <span>View Full Profile</span>
-                            <ExternalLink :size="14" />
+                            <ExternalLink :size="12" class="sm:w-3.5 sm:h-3.5" />
                         </a>
                     </div>
                 </CardHeader>
@@ -488,14 +488,14 @@ onMounted(async () => {
                     </div>
                     <div
                         v-else-if="cblData"
-                        class="grid grid-cols-1 md:grid-cols-3 gap-4"
+                        class="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4"
                     >
-                        <div class="text-center p-4 bg-muted/50 rounded-lg">
-                            <div class="text-sm text-muted-foreground mb-1">
+                        <div class="text-center p-3 sm:p-4 bg-muted/50 rounded-lg">
+                            <div class="text-xs sm:text-sm text-muted-foreground mb-1">
                                 Reputation Points
                             </div>
                             <div
-                                class="text-3xl font-bold"
+                                class="text-2xl sm:text-3xl font-bold"
                                 :class="{
                                     'text-destructive':
                                         cblData.reputationPoints >= 6,
@@ -526,12 +526,12 @@ onMounted(async () => {
                                 month
                             </div>
                         </div>
-                        <div class="text-center p-4 bg-muted/50 rounded-lg">
-                            <div class="text-sm text-muted-foreground mb-1">
+                        <div class="text-center p-3 sm:p-4 bg-muted/50 rounded-lg">
+                            <div class="text-xs sm:text-sm text-muted-foreground mb-1">
                                 Risk Rating
                             </div>
                             <div
-                                class="text-3xl font-bold"
+                                class="text-2xl sm:text-3xl font-bold"
                                 :class="
                                     getRiskRatingInfo(cblData.riskRating)
                                         .colorClass
@@ -544,18 +544,18 @@ onMounted(async () => {
                                     getRiskRatingInfo(cblData.riskRating)
                                         .variant
                                 "
-                                class="mt-2"
+                                class="mt-2 text-xs"
                             >
                                 {{
                                     getRiskRatingInfo(cblData.riskRating).label
                                 }}
                             </Badge>
                         </div>
-                        <div class="text-center p-4 bg-muted/50 rounded-lg">
-                            <div class="text-sm text-muted-foreground mb-1">
+                        <div class="text-center p-3 sm:p-4 bg-muted/50 rounded-lg">
+                            <div class="text-xs sm:text-sm text-muted-foreground mb-1">
                                 Reputation Rank
                             </div>
-                            <div class="text-3xl font-bold">
+                            <div class="text-2xl sm:text-3xl font-bold">
                                 #{{ cblData.reputationRank.toLocaleString() }}
                             </div>
                             <div class="text-xs text-muted-foreground mt-1">
@@ -563,7 +563,7 @@ onMounted(async () => {
                             </div>
                         </div>
                     </div>
-                    <div v-else class="text-center py-4 text-muted-foreground">
+                    <div v-else class="text-center py-4 text-xs sm:text-sm text-muted-foreground">
                         <p>No Community Ban List data available</p>
                         <p class="text-xs mt-1">
                             Player may not be in the CBL database
@@ -574,17 +574,17 @@ onMounted(async () => {
 
             <!-- Statistics Overview -->
             <div
-                class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
+                class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6"
             >
                 <Card>
                     <CardHeader class="pb-2">
                         <CardTitle
-                            class="text-sm font-medium text-muted-foreground"
+                            class="text-xs sm:text-sm font-medium text-muted-foreground"
                             >K/D Ratio</CardTitle
                         >
                     </CardHeader>
                     <CardContent>
-                        <div class="text-2xl font-bold">
+                        <div class="text-xl sm:text-2xl font-bold">
                             {{ player.statistics.kd_ratio.toFixed(2) }}
                         </div>
                         <div class="text-xs text-muted-foreground">
@@ -597,12 +597,12 @@ onMounted(async () => {
                 <Card>
                     <CardHeader class="pb-2">
                         <CardTitle
-                            class="text-sm font-medium text-muted-foreground"
+                            class="text-xs sm:text-sm font-medium text-muted-foreground"
                             >Teamkills</CardTitle
                         >
                     </CardHeader>
                     <CardContent>
-                        <div class="text-2xl font-bold text-destructive">
+                        <div class="text-xl sm:text-2xl font-bold text-destructive">
                             {{ player.statistics.teamkills }}
                         </div>
                     </CardContent>
@@ -611,12 +611,12 @@ onMounted(async () => {
                 <Card>
                     <CardHeader class="pb-2">
                         <CardTitle
-                            class="text-sm font-medium text-muted-foreground"
+                            class="text-xs sm:text-sm font-medium text-muted-foreground"
                             >Revives</CardTitle
                         >
                     </CardHeader>
                     <CardContent>
-                        <div class="text-2xl font-bold text-green-500">
+                        <div class="text-xl sm:text-2xl font-bold text-green-500">
                             {{ player.statistics.revives }}
                         </div>
                         <div class="text-xs text-muted-foreground">
@@ -628,12 +628,12 @@ onMounted(async () => {
                 <Card>
                     <CardHeader class="pb-2">
                         <CardTitle
-                            class="text-sm font-medium text-muted-foreground"
+                            class="text-xs sm:text-sm font-medium text-muted-foreground"
                             >Total Sessions</CardTitle
                         >
                     </CardHeader>
                     <CardContent>
-                        <div class="text-2xl font-bold">
+                        <div class="text-xl sm:text-2xl font-bold">
                             {{ player.total_sessions }}
                         </div>
                         <div class="text-xs text-muted-foreground">
@@ -645,20 +645,20 @@ onMounted(async () => {
             </div>
 
             <!-- Detailed Information Tabs -->
-            <Tabs default-value="activity" class="space-y-4">
-                <TabsList>
-                    <TabsTrigger value="activity">Recent Activity</TabsTrigger>
-                    <TabsTrigger value="chat">Chat History</TabsTrigger>
-                    <TabsTrigger value="violations">Violations</TabsTrigger>
-                    <TabsTrigger value="servers">Recent Servers</TabsTrigger>
-                    <TabsTrigger value="statistics">Statistics</TabsTrigger>
+            <Tabs default-value="activity" class="space-y-3 sm:space-y-4">
+                <TabsList class="grid grid-cols-2 sm:grid-cols-5 w-full">
+                    <TabsTrigger value="activity" class="text-xs sm:text-sm">Recent Activity</TabsTrigger>
+                    <TabsTrigger value="chat" class="text-xs sm:text-sm">Chat History</TabsTrigger>
+                    <TabsTrigger value="violations" class="text-xs sm:text-sm">Violations</TabsTrigger>
+                    <TabsTrigger value="servers" class="text-xs sm:text-sm">Recent Servers</TabsTrigger>
+                    <TabsTrigger value="statistics" class="text-xs sm:text-sm">Statistics</TabsTrigger>
                 </TabsList>
 
                 <!-- Recent Activity Tab -->
                 <TabsContent value="activity">
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Recent Activity</CardTitle>
+                        <CardHeader class="pb-2 sm:pb-3">
+                            <CardTitle class="text-base sm:text-lg">Recent Activity</CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div
@@ -670,7 +670,7 @@ onMounted(async () => {
                                         activity, index
                                     ) in player.recent_activity"
                                     :key="index"
-                                    class="flex items-start gap-3 p-3 rounded-md hover:bg-muted/50 transition-colors"
+                                    class="flex items-start gap-2 sm:gap-3 p-2 sm:p-3 rounded-md hover:bg-muted/50 transition-colors"
                                 >
                                     <Badge
                                         :variant="
@@ -678,11 +678,12 @@ onMounted(async () => {
                                                 activity.event_type,
                                             )
                                         "
+                                        class="text-xs"
                                     >
                                         {{ activity.event_type }}
                                     </Badge>
-                                    <div class="flex-1">
-                                        <div class="text-sm">
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-xs sm:text-sm break-words">
                                             {{ activity.description }}
                                         </div>
                                         <div
@@ -700,7 +701,7 @@ onMounted(async () => {
                             </div>
                             <div
                                 v-else
-                                class="text-center py-8 text-muted-foreground"
+                                class="text-center py-6 sm:py-8 text-xs sm:text-sm text-muted-foreground"
                             >
                                 No recent activity
                             </div>
@@ -711,8 +712,8 @@ onMounted(async () => {
                 <!-- Chat History Tab -->
                 <TabsContent value="chat">
                     <Card>
-                        <CardHeader>
-                            <CardTitle
+                        <CardHeader class="pb-2 sm:pb-3">
+                            <CardTitle class="text-base sm:text-lg"
                                 >Chat History (Last 50 messages)</CardTitle
                             >
                         </CardHeader>
@@ -724,14 +725,15 @@ onMounted(async () => {
                                 <div
                                     v-for="(chat, index) in player.chat_history"
                                     :key="index"
-                                    class="p-3 rounded-md hover:bg-muted/50 transition-colors"
+                                    class="p-2 sm:p-3 rounded-md hover:bg-muted/50 transition-colors"
                                 >
-                                    <div class="flex items-center gap-2 mb-1">
+                                    <div class="flex flex-wrap items-center gap-2 mb-1">
                                         <Badge
                                             variant="outline"
                                             :class="
                                                 getChatTypeColor(chat.chat_type)
                                             "
+                                            class="text-xs"
                                         >
                                             {{ chat.chat_type }}
                                         </Badge>
@@ -741,14 +743,14 @@ onMounted(async () => {
                                             {{ formatDate(chat.sent_at) }}
                                         </span>
                                     </div>
-                                    <div class="text-sm">
+                                    <div class="text-xs sm:text-sm break-words">
                                         {{ chat.message }}
                                     </div>
                                 </div>
                             </div>
                             <div
                                 v-else
-                                class="text-center py-8 text-muted-foreground"
+                                class="text-center py-6 sm:py-8 text-xs sm:text-sm text-muted-foreground"
                             >
                                 No chat history
                             </div>
@@ -759,109 +761,161 @@ onMounted(async () => {
                 <!-- Violations Tab -->
                 <TabsContent value="violations">
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Rule Violations</CardTitle>
+                        <CardHeader class="pb-2 sm:pb-3">
+                            <CardTitle class="text-base sm:text-lg">Rule Violations</CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div v-if="player.violations?.length > 0">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Date</TableHead>
-                                            <TableHead>Action</TableHead>
-                                            <TableHead>Rule</TableHead>
-                                            <TableHead>Server</TableHead>
-                                            <TableHead>Admin</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        <TableRow
-                                            v-for="violation in player.violations"
-                                            :key="violation.violation_id"
-                                        >
-                                            <TableCell>
-                                                <div class="text-sm">
-                                                    {{
-                                                        formatDate(
-                                                            violation.created_at,
-                                                        )
-                                                    }}
-                                                </div>
-                                                <div
-                                                    class="text-xs text-muted-foreground"
-                                                >
-                                                    {{
-                                                        getTimeAgo(
-                                                            violation.created_at,
-                                                        )
-                                                    }}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>
+                                <!-- Desktop Table View -->
+                                <div class="hidden md:block w-full overflow-x-auto">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead class="text-xs sm:text-sm">Date</TableHead>
+                                                <TableHead class="text-xs sm:text-sm">Action</TableHead>
+                                                <TableHead class="text-xs sm:text-sm">Rule</TableHead>
+                                                <TableHead class="text-xs sm:text-sm">Server</TableHead>
+                                                <TableHead class="text-xs sm:text-sm">Admin</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            <TableRow
+                                                v-for="violation in player.violations"
+                                                :key="violation.violation_id"
+                                                class="hover:bg-muted/50"
+                                            >
+                                                <TableCell>
+                                                    <div class="text-xs sm:text-sm">
+                                                        {{
+                                                            formatDate(
+                                                                violation.created_at,
+                                                            )
+                                                        }}
+                                                    </div>
+                                                    <div
+                                                        class="text-xs text-muted-foreground"
+                                                    >
+                                                        {{
+                                                            getTimeAgo(
+                                                                violation.created_at,
+                                                            )
+                                                        }}
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Badge
+                                                        :variant="
+                                                            getViolationBadgeVariant(
+                                                                violation.action_type,
+                                                            )
+                                                        "
+                                                        class="text-xs"
+                                                    >
+                                                        {{ violation.action_type }}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div
+                                                        v-if="violation.rule_name"
+                                                        class="text-xs sm:text-sm"
+                                                    >
+                                                        {{ violation.rule_name }}
+                                                    </div>
+                                                    <div
+                                                        v-else
+                                                        class="text-xs sm:text-sm text-muted-foreground"
+                                                    >
+                                                        No rule specified
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div class="text-xs sm:text-sm">
+                                                        {{
+                                                            violation.server_name ||
+                                                            "Unknown Server"
+                                                        }}
+                                                    </div>
+                                                    <code
+                                                        class="text-xs text-muted-foreground"
+                                                        >{{
+                                                            violation.server_id
+                                                        }}</code
+                                                    >
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div class="text-xs sm:text-sm">
+                                                        {{
+                                                            violation.admin_name ||
+                                                            "System"
+                                                        }}
+                                                    </div>
+                                                    <div
+                                                        v-if="
+                                                            violation.admin_user_id
+                                                        "
+                                                        class="text-xs text-muted-foreground"
+                                                    >
+                                                        ID:
+                                                        {{
+                                                            violation.admin_user_id
+                                                        }}
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        </TableBody>
+                                    </Table>
+                                </div>
+
+                                <!-- Mobile Card View -->
+                                <div class="md:hidden space-y-3">
+                                    <div
+                                        v-for="violation in player.violations"
+                                        :key="violation.violation_id"
+                                        class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                                    >
+                                        <div class="space-y-2">
+                                            <div class="flex items-center gap-2">
                                                 <Badge
                                                     :variant="
                                                         getViolationBadgeVariant(
                                                             violation.action_type,
                                                         )
                                                     "
+                                                    class="text-xs"
                                                 >
                                                     {{ violation.action_type }}
                                                 </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div
-                                                    v-if="violation.rule_name"
-                                                    class="text-sm"
-                                                >
-                                                    {{ violation.rule_name }}
-                                                </div>
-                                                <div
-                                                    v-else
-                                                    class="text-sm text-muted-foreground"
-                                                >
-                                                    No rule specified
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div class="text-sm">
-                                                    {{
-                                                        violation.server_name ||
-                                                        "Unknown Server"
-                                                    }}
-                                                </div>
-                                                <code
-                                                    class="text-xs text-muted-foreground"
-                                                    >{{
-                                                        violation.server_id
-                                                    }}</code
-                                                >
-                                            </TableCell>
-                                            <TableCell>
-                                                <div class="text-sm">
-                                                    {{
-                                                        violation.admin_name ||
-                                                        "System"
-                                                    }}
-                                                </div>
-                                                <div
-                                                    v-if="
-                                                        violation.admin_user_id
-                                                    "
-                                                    class="text-xs text-muted-foreground"
-                                                >
-                                                    ID:
-                                                    {{
-                                                        violation.admin_user_id
-                                                    }}
-                                                </div>
-                                            </TableCell>
-                                        </TableRow>
-                                    </TableBody>
-                                </Table>
+                                                <span class="text-xs text-muted-foreground">
+                                                    {{ getTimeAgo(violation.created_at) }}
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <span class="text-xs text-muted-foreground">Date: </span>
+                                                <span class="text-xs sm:text-sm">{{ formatDate(violation.created_at) }}</span>
+                                            </div>
+                                            <div v-if="violation.rule_name">
+                                                <span class="text-xs text-muted-foreground">Rule: </span>
+                                                <span class="text-xs sm:text-sm">{{ violation.rule_name }}</span>
+                                            </div>
+                                            <div>
+                                                <span class="text-xs text-muted-foreground">Server: </span>
+                                                <span class="text-xs sm:text-sm">{{ violation.server_name || "Unknown Server" }}</span>
+                                                <code class="text-xs text-muted-foreground ml-1">{{ violation.server_id }}</code>
+                                            </div>
+                                            <div>
+                                                <span class="text-xs text-muted-foreground">Admin: </span>
+                                                <span class="text-xs sm:text-sm">{{ violation.admin_name || "System" }}</span>
+                                                <span v-if="violation.admin_user_id" class="text-xs text-muted-foreground ml-1">
+                                                    (ID: {{ violation.admin_user_id }})
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <div
                                 v-else
-                                class="text-center py-8 text-muted-foreground"
+                                class="text-center py-6 sm:py-8 text-xs sm:text-sm text-muted-foreground"
                             >
                                 No violations found
                             </div>
@@ -872,55 +926,83 @@ onMounted(async () => {
                 <!-- Recent Servers Tab -->
                 <TabsContent value="servers">
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Recent Servers</CardTitle>
+                        <CardHeader class="pb-2 sm:pb-3">
+                            <CardTitle class="text-base sm:text-lg">Recent Servers</CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div v-if="player.recent_servers?.length > 0">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Server Name</TableHead>
-                                            <TableHead>Last Seen</TableHead>
-                                            <TableHead>Sessions</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        <TableRow
-                                            v-for="server in player.recent_servers"
-                                            :key="server.server_id"
-                                        >
-                                            <TableCell class="font-medium">{{
-                                                server.server_name
-                                            }}</TableCell>
-                                            <TableCell>
-                                                <div class="text-sm">
-                                                    {{
-                                                        getTimeAgo(
-                                                            server.last_seen,
-                                                        )
-                                                    }}
-                                                </div>
-                                                <div
-                                                    class="text-xs text-muted-foreground"
-                                                >
-                                                    {{
-                                                        formatDate(
-                                                            server.last_seen,
-                                                        )
-                                                    }}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>{{
-                                                server.sessions
-                                            }}</TableCell>
-                                        </TableRow>
-                                    </TableBody>
-                                </Table>
+                                <!-- Desktop Table View -->
+                                <div class="hidden md:block w-full overflow-x-auto">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead class="text-xs sm:text-sm">Server Name</TableHead>
+                                                <TableHead class="text-xs sm:text-sm">Last Seen</TableHead>
+                                                <TableHead class="text-xs sm:text-sm">Sessions</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            <TableRow
+                                                v-for="server in player.recent_servers"
+                                                :key="server.server_id"
+                                                class="hover:bg-muted/50"
+                                            >
+                                                <TableCell class="font-medium text-sm sm:text-base">{{
+                                                    server.server_name
+                                                }}</TableCell>
+                                                <TableCell>
+                                                    <div class="text-xs sm:text-sm">
+                                                        {{
+                                                            getTimeAgo(
+                                                                server.last_seen,
+                                                            )
+                                                        }}
+                                                    </div>
+                                                    <div
+                                                        class="text-xs text-muted-foreground"
+                                                    >
+                                                        {{
+                                                            formatDate(
+                                                                server.last_seen,
+                                                            )
+                                                        }}
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell class="text-xs sm:text-sm">{{
+                                                    server.sessions
+                                                }}</TableCell>
+                                            </TableRow>
+                                        </TableBody>
+                                    </Table>
+                                </div>
+
+                                <!-- Mobile Card View -->
+                                <div class="md:hidden space-y-3">
+                                    <div
+                                        v-for="server in player.recent_servers"
+                                        :key="server.server_id"
+                                        class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                                    >
+                                        <div class="font-semibold text-sm sm:text-base mb-1">
+                                            {{ server.server_name }}
+                                        </div>
+                                        <div class="space-y-1">
+                                            <div>
+                                                <span class="text-xs text-muted-foreground">Last Seen: </span>
+                                                <span class="text-xs sm:text-sm">{{ getTimeAgo(server.last_seen) }}</span>
+                                                <div class="text-xs text-muted-foreground">{{ formatDate(server.last_seen) }}</div>
+                                            </div>
+                                            <div>
+                                                <span class="text-xs text-muted-foreground">Sessions: </span>
+                                                <span class="text-xs sm:text-sm">{{ server.sessions }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <div
                                 v-else
-                                class="text-center py-8 text-muted-foreground"
+                                class="text-center py-6 sm:py-8 text-xs sm:text-sm text-muted-foreground"
                             >
                                 No server history
                             </div>
@@ -931,48 +1013,48 @@ onMounted(async () => {
                 <!-- Statistics Tab -->
                 <TabsContent value="statistics">
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Combat Statistics</CardTitle>
+                        <CardHeader class="pb-2 sm:pb-3">
+                            <CardTitle class="text-base sm:text-lg">Combat Statistics</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                                 <div>
-                                    <h3 class="text-lg font-semibold mb-4">
+                                    <h3 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4">
                                         Combat
                                     </h3>
-                                    <div class="space-y-3">
+                                    <div class="space-y-2 sm:space-y-3">
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >Kills</span
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="text-xs sm:text-sm font-medium">{{
                                                 player.statistics.kills
                                             }}</span>
                                         </div>
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >Deaths</span
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="text-xs sm:text-sm font-medium">{{
                                                 player.statistics.deaths
                                             }}</span>
                                         </div>
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >K/D Ratio</span
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="text-xs sm:text-sm font-medium">{{
                                                 player.statistics.kd_ratio.toFixed(
                                                     2,
                                                 )
                                             }}</span>
                                         </div>
                                         <div class="flex justify-between">
-                                            <span class="text-destructive"
+                                            <span class="text-xs sm:text-sm text-destructive"
                                                 >Teamkills</span
                                             >
                                             <span
-                                                class="font-medium text-destructive"
+                                                class="text-xs sm:text-sm font-medium text-destructive"
                                                 >{{
                                                     player.statistics.teamkills
                                                 }}</span
@@ -982,26 +1064,26 @@ onMounted(async () => {
                                 </div>
 
                                 <div>
-                                    <h3 class="text-lg font-semibold mb-4">
+                                    <h3 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4">
                                         Support
                                     </h3>
-                                    <div class="space-y-3">
+                                    <div class="space-y-2 sm:space-y-3">
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >Revives Given</span
                                             >
                                             <span
-                                                class="font-medium text-green-500"
+                                                class="text-xs sm:text-sm font-medium text-green-500"
                                                 >{{
                                                     player.statistics.revives
                                                 }}</span
                                             >
                                         </div>
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >Times Revived</span
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="text-xs sm:text-sm font-medium">{{
                                                 player.statistics.times_revived
                                             }}</span>
                                         </div>
@@ -1009,25 +1091,25 @@ onMounted(async () => {
                                 </div>
 
                                 <div>
-                                    <h3 class="text-lg font-semibold mb-4">
+                                    <h3 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4">
                                         Damage
                                     </h3>
-                                    <div class="space-y-3">
+                                    <div class="space-y-2 sm:space-y-3">
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >Damage Dealt</span
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="text-xs sm:text-sm font-medium">{{
                                                 player.statistics.damage_dealt.toFixed(
                                                     0,
                                                 )
                                             }}</span>
                                         </div>
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >Damage Taken</span
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="text-xs sm:text-sm font-medium">{{
                                                 player.statistics.damage_taken.toFixed(
                                                     0,
                                                 )
@@ -1037,23 +1119,23 @@ onMounted(async () => {
                                 </div>
 
                                 <div>
-                                    <h3 class="text-lg font-semibold mb-4">
+                                    <h3 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4">
                                         Activity
                                     </h3>
-                                    <div class="space-y-3">
+                                    <div class="space-y-2 sm:space-y-3">
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >Total Sessions</span
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="text-xs sm:text-sm font-medium">{{
                                                 player.total_sessions
                                             }}</span>
                                         </div>
                                         <div class="flex justify-between">
-                                            <span class="text-muted-foreground"
+                                            <span class="text-xs sm:text-sm text-muted-foreground"
                                                 >Play Time</span
                                             >
-                                            <span class="font-medium">{{
+                                            <span class="text-xs sm:text-sm font-medium">{{
                                                 formatPlayTime(
                                                     player.total_play_time,
                                                 )
