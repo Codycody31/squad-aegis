@@ -658,28 +658,29 @@ definePageMeta({
 </script>
 
 <template>
-    <div class="p-4">
+    <div class="p-3 sm:p-4 lg:p-6 overflow-x-hidden">
         <div
-            class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4"
+            class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3 sm:mb-4"
         >
             <div>
-                <h1 class="text-3xl font-bold">Workflows</h1>
-                <p class="text-muted-foreground">
+                <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Workflows</h1>
+                <p class="text-xs sm:text-sm text-muted-foreground">
                     Automate server actions with event-driven workflows
                 </p>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <Button
                     @click="openImportDialog"
                     variant="outline"
-                    class="flex items-center gap-2"
+                    class="flex items-center gap-2 w-full sm:w-auto text-sm sm:text-base"
                 >
                     <Upload class="w-4 h-4" />
-                    Import Workflow
+                    <span class="hidden sm:inline">Import Workflow</span>
+                    <span class="sm:hidden">Import</span>
                 </Button>
                 <Button
                     @click="showCreateDialog = true"
-                    class="flex items-center gap-2"
+                    class="flex items-center gap-2 w-full sm:w-auto text-sm sm:text-base"
                 >
                     <Plus class="w-4 h-4" />
                     Create Workflow
@@ -688,18 +689,18 @@ definePageMeta({
         </div>
 
         <!-- Statistics Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6 lg:mb-8">
             <Card>
                 <CardHeader
                     class="flex flex-row items-center justify-between space-y-0 pb-2"
                 >
-                    <CardTitle class="text-sm font-medium"
+                    <CardTitle class="text-xs sm:text-sm font-medium"
                         >Total Workflows</CardTitle
                     >
-                    <Activity class="w-4 h-4 text-muted-foreground" />
+                    <Activity class="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                    <div class="text-2xl font-bold">{{ workflows.length }}</div>
+                    <div class="text-xl sm:text-2xl font-bold">{{ workflows.length }}</div>
                 </CardContent>
             </Card>
 
@@ -707,13 +708,13 @@ definePageMeta({
                 <CardHeader
                     class="flex flex-row items-center justify-between space-y-0 pb-2"
                 >
-                    <CardTitle class="text-sm font-medium"
+                    <CardTitle class="text-xs sm:text-sm font-medium"
                         >Active Workflows</CardTitle
                     >
-                    <Zap class="w-4 h-4 text-green-600" />
+                    <Zap class="w-3 h-3 sm:w-4 sm:h-4 text-green-600" />
                 </CardHeader>
                 <CardContent>
-                    <div class="text-2xl font-bold text-green-600">
+                    <div class="text-xl sm:text-2xl font-bold text-green-600">
                         {{ activeWorkflows.length }}
                     </div>
                 </CardContent>
@@ -723,13 +724,13 @@ definePageMeta({
                 <CardHeader
                     class="flex flex-row items-center justify-between space-y-0 pb-2"
                 >
-                    <CardTitle class="text-sm font-medium"
+                    <CardTitle class="text-xs sm:text-sm font-medium"
                         >Total Triggers</CardTitle
                     >
-                    <Activity class="w-4 h-4 text-muted-foreground" />
+                    <Activity class="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                    <div class="text-2xl font-bold">{{ totalTriggers }}</div>
+                    <div class="text-xl sm:text-2xl font-bold">{{ totalTriggers }}</div>
                 </CardContent>
             </Card>
 
@@ -737,40 +738,41 @@ definePageMeta({
                 <CardHeader
                     class="flex flex-row items-center justify-between space-y-0 pb-2"
                 >
-                    <CardTitle class="text-sm font-medium"
+                    <CardTitle class="text-xs sm:text-sm font-medium"
                         >Total Steps</CardTitle
                     >
-                    <GitBranch class="w-4 h-4 text-muted-foreground" />
+                    <GitBranch class="w-3 h-3 sm:w-4 sm:h-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                    <div class="text-2xl font-bold">{{ totalSteps }}</div>
+                    <div class="text-xl sm:text-2xl font-bold">{{ totalSteps }}</div>
                 </CardContent>
             </Card>
         </div>
 
         <!-- Loading State -->
-        <div v-if="loading" class="flex justify-center py-8">
+        <div v-if="loading" class="flex justify-center py-6 sm:py-8">
             <div
-                class="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"
+                class="animate-spin rounded-full h-16 w-16 sm:h-32 sm:w-32 border-b-2 border-gray-900"
             ></div>
         </div>
 
         <!-- Error State -->
-        <div v-else-if="error" class="text-center py-8">
-            <p class="text-red-600">{{ error }}</p>
-            <Button @click="fetchWorkflows" variant="outline" class="mt-4">
+        <div v-else-if="error" class="text-center py-6 sm:py-8">
+            <p class="text-sm sm:text-base text-red-600 break-words px-2">{{ error }}</p>
+            <Button @click="fetchWorkflows" variant="outline" class="mt-3 sm:mt-4 w-full sm:w-auto text-sm sm:text-base">
                 Retry
             </Button>
         </div>
 
         <!-- Workflows Table -->
-        <div v-else>
+        <div v-else class="overflow-x-hidden">
             <Card>
                 <CardHeader>
-                    <CardTitle>Workflows</CardTitle>
+                    <CardTitle class="text-base sm:text-lg">Workflows</CardTitle>
                 </CardHeader>
-                <CardContent>
-                    <Table v-if="workflows.length > 0">
+                <CardContent class="overflow-x-hidden">
+                    <!-- Desktop Table View -->
+                    <Table v-if="workflows.length > 0" class="hidden md:table">
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Name</TableHead>
@@ -814,7 +816,7 @@ definePageMeta({
                                 <TableCell>{{
                                     workflow.definition.steps.length
                                 }}</TableCell>
-                                <TableCell>{{
+                                <TableCell class="text-xs sm:text-sm">{{
                                     formatDate(workflow.updated_at)
                                 }}</TableCell>
                                 <TableCell>
@@ -870,10 +872,117 @@ definePageMeta({
                         </TableBody>
                     </Table>
 
-                    <div v-else class="text-center py-8 text-muted-foreground">
-                        <Activity class="w-16 h-16 mx-auto mb-4 opacity-25" />
-                        <p>No workflows found</p>
-                        <p class="text-sm">
+                    <!-- Mobile Card View -->
+                    <div v-if="workflows.length > 0" class="md:hidden space-y-3 -mx-1 px-1">
+                        <Card
+                            v-for="workflow in workflows"
+                            :key="workflow.id"
+                            class="p-3 sm:p-4"
+                        >
+                            <div class="space-y-3">
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="flex-1 min-w-0">
+                                        <h3 class="font-medium text-sm sm:text-base truncate">
+                                            {{ workflow.name }}
+                                        </h3>
+                                        <p class="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                            {{ workflow.description || "No description" }}
+                                        </p>
+                                    </div>
+                                    <Badge
+                                        :variant="
+                                            workflow.enabled
+                                                ? 'default'
+                                                : 'secondary'
+                                        "
+                                        class="shrink-0 text-xs"
+                                    >
+                                        {{
+                                            workflow.enabled
+                                                ? "Active"
+                                                : "Inactive"
+                                        }}
+                                    </Badge>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-xs sm:text-sm">
+                                    <div>
+                                        <span class="text-muted-foreground">Triggers:</span>
+                                        <span class="ml-1 font-medium">{{
+                                            workflow.definition.triggers.length
+                                        }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-muted-foreground">Steps:</span>
+                                        <span class="ml-1 font-medium">{{
+                                            workflow.definition.steps.length
+                                        }}</span>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-muted-foreground">
+                                    Updated: {{ formatDate(workflow.updated_at) }}
+                                </div>
+                                <div class="flex items-center gap-1 pt-2 border-t overflow-x-auto pb-1">
+                                    <Button
+                                        @click="openExecutionDialog(workflow)"
+                                        variant="ghost"
+                                        size="sm"
+                                        class="h-8 w-8 p-0 shrink-0"
+                                        title="View Executions"
+                                    >
+                                        <BookText class="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                        @click="openKVStoreSheet(workflow)"
+                                        variant="ghost"
+                                        size="sm"
+                                        class="h-8 w-8 p-0 shrink-0"
+                                        title="Manage KV Store"
+                                    >
+                                        <Database class="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                        @click="toggleWorkflow(workflow)"
+                                        variant="ghost"
+                                        size="sm"
+                                        class="h-8 w-8 p-0 shrink-0"
+                                        :title="workflow.enabled ? 'Pause' : 'Resume'"
+                                    >
+                                        <component
+                                            :is="
+                                                workflow.enabled
+                                                    ? Pause
+                                                    : Play
+                                            "
+                                            class="h-3 w-3"
+                                        />
+                                    </Button>
+                                    <Button
+                                        @click="openEditDialog(workflow)"
+                                        variant="ghost"
+                                        size="sm"
+                                        class="h-8 w-8 p-0 shrink-0"
+                                        title="Edit"
+                                    >
+                                        <Edit class="h-3 w-3" />
+                                    </Button>
+                                    <Button
+                                        @click="deleteWorkflow(workflow.id)"
+                                        variant="ghost"
+                                        size="sm"
+                                        class="h-8 w-8 p-0 shrink-0"
+                                        title="Delete"
+                                    >
+                                        <Trash2 class="h-3 w-3" />
+                                    </Button>
+                                </div>
+                            </div>
+                        </Card>
+                    </div>
+
+                    <div v-else class="text-center py-6 sm:py-8 text-muted-foreground">
+                        <Activity class="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-3 sm:mb-4 opacity-25" />
+                        <p class="text-sm sm:text-base">No workflows found</p>
+                        <p class="text-xs sm:text-sm mt-1">
                             Create your first workflow to automate server
                             actions
                         </p>
@@ -884,7 +993,7 @@ definePageMeta({
 
         <!-- Create Workflow Dialog -->
         <Dialog v-model:open="showCreateDialog">
-            <DialogContent class="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogContent class="w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
                     <DialogTitle>Create New Workflow</DialogTitle>
                     <DialogDescription>
@@ -893,23 +1002,24 @@ definePageMeta({
                 </DialogHeader>
 
                 <div class="space-y-4">
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div class="space-y-2">
-                            <Label for="name">Name</Label>
+                            <Label for="name" class="text-xs sm:text-sm">Name</Label>
                             <Input
                                 id="name"
                                 v-model="newWorkflow.name"
                                 placeholder="Enter workflow name"
+                                class="text-sm sm:text-base"
                             />
                         </div>
                         <div class="space-y-2">
-                            <Label for="enabled">Status</Label>
+                            <Label for="enabled" class="text-xs sm:text-sm">Status</Label>
                             <div class="flex items-center space-x-2">
                                 <Switch
                                     id="enabled"
                                     v-model:checked="newWorkflow.enabled"
                                 />
-                                <Label for="enabled">{{
+                                <Label for="enabled" class="text-xs sm:text-sm">{{
                                     newWorkflow.enabled ? "Active" : "Inactive"
                                 }}</Label>
                             </div>
@@ -917,12 +1027,13 @@ definePageMeta({
                     </div>
 
                     <div class="space-y-2">
-                        <Label for="description">Description</Label>
+                        <Label for="description" class="text-xs sm:text-sm">Description</Label>
                         <Textarea
                             id="description"
                             v-model="newWorkflow.description"
                             placeholder="Enter workflow description"
                             rows="3"
+                            class="text-sm sm:text-base"
                         />
                     </div>
 
@@ -949,7 +1060,7 @@ definePageMeta({
 
         <!-- Import Workflow Dialog -->
         <Dialog v-model:open="showImportDialog">
-            <DialogContent class="max-w-3xl max-h-[80vh]">
+            <DialogContent class="w-[95vw] sm:max-w-3xl max-h-[80vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
                     <DialogTitle>Import Workflow</DialogTitle>
                     <DialogDescription>
@@ -1039,7 +1150,7 @@ definePageMeta({
         <Dialog v-model:open="showEditDialog">
             <DialogContent
                 v-if="selectedWorkflow"
-                class="max-w-4xl max-h-[90vh] overflow-y-auto"
+                class="w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6"
             >
                 <DialogHeader>
                     <DialogTitle>Edit Workflow</DialogTitle>
@@ -1049,16 +1160,17 @@ definePageMeta({
                 </DialogHeader>
 
                 <div class="space-y-4">
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div class="space-y-2">
-                            <Label for="edit-name">Name</Label>
+                            <Label for="edit-name" class="text-xs sm:text-sm">Name</Label>
                             <Input
                                 id="edit-name"
                                 v-model="selectedWorkflow.name"
+                                class="text-sm sm:text-base"
                             />
                         </div>
                         <div class="space-y-2">
-                            <Label for="edit-enabled">Status</Label>
+                            <Label for="edit-enabled" class="text-xs sm:text-sm">Status</Label>
                             <div class="flex items-center space-x-2">
                                 <Switch
                                     id="edit-enabled"
@@ -1069,7 +1181,7 @@ definePageMeta({
                                             (selectedWorkflow.enabled = val)
                                     "
                                 />
-                                <Label for="edit-enabled">{{
+                                <Label for="edit-enabled" class="text-xs sm:text-sm">{{
                                     selectedWorkflow.enabled
                                         ? "Active"
                                         : "Inactive"
@@ -1079,11 +1191,12 @@ definePageMeta({
                     </div>
 
                     <div class="space-y-2">
-                        <Label for="edit-description">Description</Label>
+                        <Label for="edit-description" class="text-xs sm:text-sm">Description</Label>
                         <Textarea
                             id="edit-description"
                             v-model="selectedWorkflow.description"
                             rows="3"
+                            class="text-sm sm:text-base"
                         />
                     </div>
 
@@ -1118,7 +1231,7 @@ definePageMeta({
         <Dialog v-model:open="showExecutionDialog">
             <DialogContent
                 v-if="selectedWorkflow"
-                class="max-w-4xl max-h-[90vh] overflow-y-auto"
+                class="w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6"
             >
                 <WorkflowExecutions
                     :workflow-id="selectedWorkflow.id"
@@ -1137,7 +1250,7 @@ definePageMeta({
 
         <!-- KV Store Sheet -->
         <Sheet v-model:open="showKVStoreSheet">
-            <SheetContent class="sm:max-w-4xl overflow-y-auto">
+            <SheetContent class="w-[95vw] sm:max-w-4xl overflow-y-auto p-4 sm:p-6">
                 <SheetHeader>
                     <SheetTitle>KV Store Management</SheetTitle>
                     <SheetDescription>

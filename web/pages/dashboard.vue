@@ -126,31 +126,31 @@ fetchServers();
 </script>
 
 <template>
-    <div class="p-4">
-        <h1 class="text-2xl font-bold mb-6">Dashboard</h1>
+    <div class="p-3 sm:p-4">
+        <h1 class="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Dashboard</h1>
 
         <!-- Stats Overview -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
             <!-- Total Servers Card -->
             <Card>
-                <CardContent class="p-6">
+                <CardContent class="p-4 sm:p-6">
                     <div class="flex items-center justify-between">
                         <div>
                             <p
-                                class="text-sm font-medium text-muted-foreground"
+                                class="text-xs sm:text-sm font-medium text-muted-foreground"
                             >
                                 Total Servers
                             </p>
-                            <h3 class="text-3xl font-bold mt-1">
+                            <h3 class="text-2xl sm:text-3xl font-bold mt-1">
                                 {{ stats.totalServers }}
                             </h3>
                         </div>
                         <div
-                            class="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center"
+                            class="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-primary/10 flex items-center justify-center"
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-6 w-6 text-primary"
+                                class="h-5 w-5 sm:h-6 sm:w-6 text-primary"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -164,8 +164,8 @@ fetchServers();
                             </svg>
                         </div>
                     </div>
-                    <div class="mt-4">
-                        <p class="text-sm text-muted-foreground">
+                    <div class="mt-3 sm:mt-4">
+                        <p class="text-xs sm:text-sm text-muted-foreground">
                             <span class="text-green-500">{{
                                 stats.activeServers
                             }}</span>
@@ -177,24 +177,24 @@ fetchServers();
 
             <!-- Total Players Card -->
             <Card>
-                <CardContent class="p-6">
+                <CardContent class="p-4 sm:p-6">
                     <div class="flex items-center justify-between">
                         <div>
                             <p
-                                class="text-sm font-medium text-muted-foreground"
+                                class="text-xs sm:text-sm font-medium text-muted-foreground"
                             >
                                 Total Players
                             </p>
-                            <h3 class="text-3xl font-bold mt-1">
+                            <h3 class="text-2xl sm:text-3xl font-bold mt-1">
                                 {{ stats.totalPlayers }}
                             </h3>
                         </div>
                         <div
-                            class="h-12 w-12 rounded-full bg-blue-500/10 flex items-center justify-center"
+                            class="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-blue-500/10 flex items-center justify-center"
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-6 w-6 text-blue-500"
+                                class="h-5 w-5 sm:h-6 sm:w-6 text-blue-500"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -208,8 +208,8 @@ fetchServers();
                             </svg>
                         </div>
                     </div>
-                    <div class="mt-4">
-                        <p class="text-sm text-muted-foreground">
+                    <div class="mt-3 sm:mt-4">
+                        <p class="text-xs sm:text-sm text-muted-foreground">
                             Currently connected across all servers
                         </p>
                     </div>
@@ -218,24 +218,24 @@ fetchServers();
 
             <!-- Total Bans Card -->
             <Card>
-                <CardContent class="p-6">
+                <CardContent class="p-4 sm:p-6">
                     <div class="flex items-center justify-between">
                         <div>
                             <p
-                                class="text-sm font-medium text-muted-foreground"
+                                class="text-xs sm:text-sm font-medium text-muted-foreground"
                             >
                                 Total Bans
                             </p>
-                            <h3 class="text-3xl font-bold mt-1">
+                            <h3 class="text-2xl sm:text-3xl font-bold mt-1">
                                 {{ stats.totalBans }}
                             </h3>
                         </div>
                         <div
-                            class="h-12 w-12 rounded-full bg-red-500/10 flex items-center justify-center"
+                            class="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-red-500/10 flex items-center justify-center"
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-6 w-6 text-red-500"
+                                class="h-5 w-5 sm:h-6 sm:w-6 text-red-500"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -249,8 +249,8 @@ fetchServers();
                             </svg>
                         </div>
                     </div>
-                    <div class="mt-4">
-                        <p class="text-sm text-muted-foreground">
+                    <div class="mt-3 sm:mt-4">
+                        <p class="text-xs sm:text-sm text-muted-foreground">
                             Banned players across all servers
                         </p>
                     </div>
@@ -259,15 +259,15 @@ fetchServers();
 
             <!-- System Status Card -->
             <Card>
-                <CardContent class="p-6">
+                <CardContent class="p-4 sm:p-6">
                     <div class="flex items-center justify-between">
                         <div>
                             <p
-                                class="text-sm font-medium text-muted-foreground"
+                                class="text-xs sm:text-sm font-medium text-muted-foreground"
                             >
                                 System Status
                             </p>
-                            <h3 class="text-3xl font-bold mt-1 text-green-500">
+                            <h3 class="text-2xl sm:text-3xl font-bold mt-1 text-green-500">
                                 {{
                                     Object.values(serverStatus).every(
                                         (status) => status.rcon,
@@ -278,11 +278,11 @@ fetchServers();
                             </h3>
                         </div>
                         <div
-                            class="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center"
+                            class="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-green-500/10 flex items-center justify-center"
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-6 w-6 text-green-500"
+                                class="h-5 w-5 sm:h-6 sm:w-6 text-green-500"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -301,7 +301,7 @@ fetchServers();
                             </svg>
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-6 w-6 text-red-500"
+                                class="h-5 w-5 sm:h-6 sm:w-6 text-red-500"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -316,8 +316,8 @@ fetchServers();
                             </svg>
                         </div>
                     </div>
-                    <div class="mt-4">
-                        <p class="text-sm text-muted-foreground">
+                    <div class="mt-3 sm:mt-4">
+                        <p class="text-xs sm:text-sm text-muted-foreground">
                             {{
                                 Object.values(serverStatus).some(
                                     (status) => !status.rcon,
@@ -333,68 +333,133 @@ fetchServers();
 
         <!-- Servers Table -->
         <Card>
-            <CardHeader>
-                <h2 class="text-xl font-semibold">Servers</h2>
+            <CardHeader class="pb-2 sm:pb-3">
+                <h2 class="text-base sm:text-lg font-semibold">Servers</h2>
             </CardHeader>
             <CardContent>
-                <div v-if="loading" class="py-8 text-center">
+                <div v-if="loading" class="py-6 sm:py-8 text-center">
                     <div
                         class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
                     ></div>
-                    <p>Loading server information...</p>
+                    <p class="text-sm sm:text-base">Loading server information...</p>
                 </div>
-                <div v-else-if="servers.length === 0" class="py-8 text-center">
-                    <p class="text-muted-foreground">No servers available</p>
+                <div v-else-if="servers.length === 0" class="py-6 sm:py-8 text-center">
+                    <p class="text-sm sm:text-base text-muted-foreground">No servers available</p>
                 </div>
-                <Table v-else>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Server Name</TableHead>
-                            <TableHead>IP Address</TableHead>
-                            <TableHead>Game Port</TableHead>
-                            <TableHead>RCON IP Address</TableHead>
-                            <TableHead>RCON Port</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead class="text-right">Actions</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        <TableRow v-for="server in servers" :key="server.id">
-                            <TableCell class="font-medium">{{
-                                server.name
-                            }}</TableCell>
-                            <TableCell>{{ server.ip_address }}</TableCell>
-                            <TableCell>{{ server.game_port }}</TableCell>
-                            <TableCell>{{ server.rcon_ip_address || "Unknown" }}</TableCell>
-                            <TableCell>{{ server.rcon_port }}</TableCell>
-                            <TableCell>
-                                <span
-                                    class="px-2 py-1 rounded-full text-xs font-medium"
-                                    :class="
-                                        serverStatus[server.id]?.rcon
-                                            ? 'bg-green-100 text-green-800'
-                                            : 'bg-red-100 text-red-800'
-                                    "
-                                >
-                                    {{
-                                        serverStatus[server.id]?.rcon
-                                            ? "Online"
-                                            : "Offline"
-                                    }}
-                                </span>
-                            </TableCell>
-                            <TableCell class="text-right">
-                                <NuxtLink :to="`/servers/${server.id}`">
+                <template v-else>
+                    <!-- Desktop Table View -->
+                    <div class="hidden md:block w-full overflow-x-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead class="text-xs sm:text-sm">Server Name</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">IP Address</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Game Port</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">RCON IP Address</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">RCON Port</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Status</TableHead>
+                                    <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                <TableRow v-for="server in servers" :key="server.id" class="hover:bg-muted/50">
+                                    <TableCell class="font-medium text-sm sm:text-base">{{
+                                        server.name
+                                    }}</TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{ server.ip_address }}</TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{ server.game_port }}</TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{ server.rcon_ip_address || "Unknown" }}</TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{ server.rcon_port }}</TableCell>
+                                    <TableCell>
+                                        <span
+                                            class="px-2 py-1 rounded-full text-xs font-medium"
+                                            :class="
+                                                serverStatus[server.id]?.rcon
+                                                    ? 'bg-green-100 text-green-800'
+                                                    : 'bg-red-100 text-red-800'
+                                            "
+                                        >
+                                            {{
+                                                serverStatus[server.id]?.rcon
+                                                    ? "Online"
+                                                    : "Offline"
+                                            }}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell class="text-right">
+                                        <NuxtLink :to="`/servers/${server.id}`">
+                                            <button
+                                                class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-xs sm:text-sm"
+                                            >
+                                                Manage
+                                            </button>
+                                        </NuxtLink>
+                                    </TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </div>
+
+                    <!-- Mobile Card View -->
+                    <div class="md:hidden space-y-3">
+                        <div
+                            v-for="server in servers"
+                            :key="server.id"
+                            class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                        >
+                            <div class="flex items-start justify-between gap-2 mb-2">
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-semibold text-sm sm:text-base mb-1">
+                                        {{ server.name }}
+                                    </div>
+                                    <div class="space-y-1.5">
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">IP: </span>
+                                            <span class="text-xs sm:text-sm">{{ server.ip_address }}</span>
+                                        </div>
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">Game Port: </span>
+                                            <span class="text-xs sm:text-sm">{{ server.game_port }}</span>
+                                        </div>
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">RCON IP: </span>
+                                            <span class="text-xs sm:text-sm">{{ server.rcon_ip_address || "Unknown" }}</span>
+                                        </div>
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">RCON Port: </span>
+                                            <span class="text-xs sm:text-sm">{{ server.rcon_port }}</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 mt-2">
+                                            <span
+                                                class="px-2 py-1 rounded-full text-xs font-medium"
+                                                :class="
+                                                    serverStatus[server.id]?.rcon
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : 'bg-red-100 text-red-800'
+                                                "
+                                            >
+                                                {{
+                                                    serverStatus[server.id]?.rcon
+                                                        ? "Online"
+                                                        : "Offline"
+                                                }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                                <NuxtLink :to="`/servers/${server.id}`" class="w-full">
                                     <button
-                                        class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-xs"
+                                        class="w-full px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-xs sm:text-sm"
                                     >
                                         Manage
                                     </button>
                                 </NuxtLink>
-                            </TableCell>
-                        </TableRow>
-                    </TableBody>
-                </Table>
+                            </div>
+                        </div>
+                    </div>
+                </template>
             </CardContent>
         </Card>
     </div>

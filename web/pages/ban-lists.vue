@@ -574,17 +574,17 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="p-6 space-y-6">
+    <div class="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
         <!-- Header -->
-        <div class="flex justify-between items-center">
+        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
             <div>
-                <h1 class="text-3xl font-bold">Ban Lists Management</h1>
-                <p class="text-gray-600 mt-2">
+                <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Ban Lists Management</h1>
+                <p class="text-xs sm:text-sm text-muted-foreground mt-1 sm:mt-2">
                     Manage ban lists, remote sources, and ignored Steam IDs for
                     shared ban coordination.
                 </p>
             </div>
-            <Button @click="loadData" :disabled="loading">
+            <Button @click="loadData" :disabled="loading" class="w-full sm:w-auto text-sm sm:text-base">
                 <Download class="h-4 w-4 mr-2" />
                 {{ loading ? "Loading..." : "Refresh" }}
             </Button>
@@ -592,29 +592,29 @@ onMounted(() => {
 
         <!-- Ban Lists Section -->
         <Card>
-            <CardHeader>
-                <div class="flex justify-between items-center">
+            <CardHeader class="pb-2 sm:pb-3">
+                <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
                     <div>
-                        <CardTitle class="flex items-center gap-2">
-                            <Shield class="h-5 w-5" />
+                        <CardTitle class="flex items-center gap-2 text-base sm:text-lg">
+                            <Shield class="h-4 w-4 sm:h-5 sm:w-5" />
                             Ban Lists
                         </CardTitle>
-                        <CardDescription>
+                        <CardDescription class="text-xs sm:text-sm">
                             Manage local and remote ban lists that can be shared
                             across servers.
                         </CardDescription>
                     </div>
                     <Dialog v-model:open="showCreateDialog">
                         <DialogTrigger asChild>
-                            <Button>
+                            <Button class="w-full sm:w-auto text-sm sm:text-base">
                                 <Plus class="h-4 w-4 mr-2" />
                                 Create Ban List
                             </Button>
                         </DialogTrigger>
-                        <DialogContent>
+                        <DialogContent class="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                             <DialogHeader>
-                                <DialogTitle>Create New Ban List</DialogTitle>
-                                <DialogDescription>
+                                <DialogTitle class="text-base sm:text-lg">Create New Ban List</DialogTitle>
+                                <DialogDescription class="text-xs sm:text-sm">
                                     Create a new ban list that can be shared
                                     with other servers.
                                 </DialogDescription>
@@ -690,129 +690,212 @@ onMounted(() => {
             <CardContent>
                 <div
                     v-if="loading && banLists.length === 0"
-                    class="text-center py-8"
+                    class="text-center py-6 sm:py-8"
                 >
                     <div
                         class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
                     ></div>
-                    <p>Loading ban lists...</p>
+                    <p class="text-sm sm:text-base">Loading ban lists...</p>
                 </div>
-                <div v-else-if="banLists.length === 0" class="text-center py-8">
-                    <p class="text-gray-500">
+                <div v-else-if="banLists.length === 0" class="text-center py-6 sm:py-8">
+                    <p class="text-sm sm:text-base text-muted-foreground">
                         No ban lists found. Create your first ban list to get
                         started.
                     </p>
                 </div>
-                <div v-else>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Name</TableHead>
-                                <TableHead>Description</TableHead>
-                                <TableHead>Type</TableHead>
-                                <TableHead>Created</TableHead>
-                                <TableHead class="text-right"
-                                    >Actions</TableHead
+                <template v-else>
+                    <!-- Desktop Table View -->
+                    <div class="hidden md:block w-full overflow-x-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead class="text-xs sm:text-sm">Name</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Description</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Type</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Created</TableHead>
+                                    <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                <TableRow
+                                    v-for="banList in banLists"
+                                    :key="banList.id"
+                                    class="hover:bg-muted/50"
                                 >
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            <TableRow
-                                v-for="banList in banLists"
-                                :key="banList.id"
-                            >
-                                <TableCell class="font-medium">{{
-                                    banList.name
-                                }}</TableCell>
-                                <TableCell>{{
-                                    banList.description || "No description"
-                                }}</TableCell>
-                                <TableCell>
-                                    <Badge
-                                        :variant="
-                                            banList.is_remote
-                                                ? 'secondary'
-                                                : 'default'
-                                        "
-                                    >
-                                        {{
-                                            banList.is_remote
-                                                ? "Remote"
-                                                : "Local"
-                                        }}
-                                    </Badge>
-                                </TableCell>
-                                <TableCell>{{
-                                    new Date(
-                                        banList.created_at,
-                                    ).toLocaleDateString()
-                                }}</TableCell>
-                                <TableCell class="text-right">
-                                    <div class="flex gap-2 justify-end">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            @click="viewCfg(banList.id)"
-                                            title="View CFG"
+                                    <TableCell class="font-medium text-sm sm:text-base">{{
+                                        banList.name
+                                    }}</TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{
+                                        banList.description || "No description"
+                                    }}</TableCell>
+                                    <TableCell>
+                                        <Badge
+                                            :variant="
+                                                banList.is_remote
+                                                    ? 'secondary'
+                                                    : 'default'
+                                            "
+                                            class="text-xs"
                                         >
-                                            <Eye class="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            @click="copyCfgUrl(banList.id)"
-                                            title="Copy CFG URL"
-                                        >
-                                            <Link class="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            @click="editBanList(banList)"
-                                        >
-                                            <Edit class="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="destructive"
-                                            size="sm"
-                                            @click="deleteBanList(banList)"
-                                        >
-                                            <Trash2 class="h-4 w-4" />
-                                        </Button>
+                                            {{
+                                                banList.is_remote
+                                                    ? "Remote"
+                                                    : "Local"
+                                            }}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{
+                                        new Date(
+                                            banList.created_at,
+                                        ).toLocaleDateString()
+                                    }}</TableCell>
+                                    <TableCell class="text-right">
+                                        <div class="flex gap-2 justify-end">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                @click="viewCfg(banList.id)"
+                                                title="View CFG"
+                                                class="text-xs"
+                                            >
+                                                <Eye class="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                @click="copyCfgUrl(banList.id)"
+                                                title="Copy CFG URL"
+                                                class="text-xs"
+                                            >
+                                                <Link class="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                @click="editBanList(banList)"
+                                                class="text-xs"
+                                            >
+                                                <Edit class="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="destructive"
+                                                size="sm"
+                                                @click="deleteBanList(banList)"
+                                                class="text-xs"
+                                            >
+                                                <Trash2 class="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </div>
+
+                    <!-- Mobile Card View -->
+                    <div class="md:hidden space-y-3">
+                        <div
+                            v-for="banList in banLists"
+                            :key="banList.id"
+                            class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                        >
+                            <div class="flex items-start justify-between gap-2 mb-2">
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-semibold text-sm sm:text-base mb-1">
+                                        {{ banList.name }}
                                     </div>
-                                </TableCell>
-                            </TableRow>
-                        </TableBody>
-                    </Table>
-                </div>
+                                    <div class="space-y-1.5">
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">Description: </span>
+                                            <span class="text-xs sm:text-sm">{{ banList.description || "No description" }}</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 mt-2">
+                                            <Badge
+                                                :variant="
+                                                    banList.is_remote
+                                                        ? 'secondary'
+                                                        : 'default'
+                                                "
+                                                class="text-xs"
+                                            >
+                                                {{
+                                                    banList.is_remote
+                                                        ? "Remote"
+                                                        : "Local"
+                                                }}
+                                            </Badge>
+                                            <span class="text-xs text-muted-foreground">
+                                                Created: {{ new Date(banList.created_at).toLocaleDateString() }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="viewCfg(banList.id)"
+                                    class="h-8 text-xs"
+                                >
+                                    <Eye class="h-3 w-3" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="copyCfgUrl(banList.id)"
+                                    class="h-8 text-xs"
+                                >
+                                    <Link class="h-3 w-3" />
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    @click="editBanList(banList)"
+                                    class="h-8 text-xs"
+                                >
+                                    <Edit class="h-3 w-3" />
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    @click="deleteBanList(banList)"
+                                    class="h-8 text-xs"
+                                >
+                                    <Trash2 class="h-3 w-3" />
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
             </CardContent>
         </Card>
 
         <!-- Remote Sources Section -->
         <Card>
-            <CardHeader>
-                <div class="flex justify-between items-center">
+            <CardHeader class="pb-2 sm:pb-3">
+                <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
                     <div>
-                        <CardTitle class="flex items-center gap-2">
-                            <ExternalLink class="h-5 w-5" />
+                        <CardTitle class="flex items-center gap-2 text-base sm:text-lg">
+                            <ExternalLink class="h-4 w-4 sm:h-5 sm:w-5" />
                             Remote Ban Sources
                         </CardTitle>
-                        <CardDescription>
+                        <CardDescription class="text-xs sm:text-sm">
                             Configure external ban list sources to automatically
                             sync bans from other communities.
                         </CardDescription>
                     </div>
                     <Dialog v-model:open="showRemoteSourceDialog">
                         <DialogTrigger asChild>
-                            <Button>
+                            <Button class="w-full sm:w-auto text-sm sm:text-base">
                                 <Plus class="h-4 w-4 mr-2" />
                                 Add Remote Source
                             </Button>
                         </DialogTrigger>
-                        <DialogContent>
+                        <DialogContent class="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                             <DialogHeader>
-                                <DialogTitle>Add Remote Ban Source</DialogTitle>
-                                <DialogDescription>
+                                <DialogTitle class="text-base sm:text-lg">Add Remote Ban Source</DialogTitle>
+                                <DialogDescription class="text-xs sm:text-sm">
                                     Add a remote ban source to automatically
                                     sync bans from other communities.
                                 </DialogDescription>
@@ -879,118 +962,179 @@ onMounted(() => {
             <CardContent>
                 <div
                     v-if="loading && remoteSources.length === 0"
-                    class="text-center py-8"
+                    class="text-center py-6 sm:py-8"
                 >
                     <div
                         class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
                     ></div>
-                    <p>Loading remote sources...</p>
+                    <p class="text-sm sm:text-base">Loading remote sources...</p>
                 </div>
                 <div
                     v-else-if="remoteSources.length === 0"
-                    class="text-center py-8"
+                    class="text-center py-6 sm:py-8"
                 >
-                    <p class="text-gray-500">
+                    <p class="text-sm sm:text-base text-muted-foreground">
                         No remote sources configured. Add remote sources to sync
                         bans from other communities.
                     </p>
                 </div>
-                <div v-else>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Name</TableHead>
-                                <TableHead>URL</TableHead>
-                                <TableHead>Sync Status</TableHead>
-                                <TableHead>Interval</TableHead>
-                                <TableHead>Last Sync</TableHead>
-                                <TableHead class="text-right"
-                                    >Actions</TableHead
+                <template v-else>
+                    <!-- Desktop Table View -->
+                    <div class="hidden md:block w-full overflow-x-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead class="text-xs sm:text-sm">Name</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">URL</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Sync Status</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Interval</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Last Sync</TableHead>
+                                    <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                <TableRow
+                                    v-for="source in remoteSources"
+                                    :key="source.id"
+                                    class="hover:bg-muted/50"
                                 >
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            <TableRow
-                                v-for="source in remoteSources"
-                                :key="source.id"
-                            >
-                                <TableCell class="font-medium">{{
-                                    source.name
-                                }}</TableCell>
-                                <TableCell class="font-mono text-sm">{{
-                                    source.url
-                                }}</TableCell>
-                                <TableCell>
-                                    <Badge
-                                        :variant="
-                                            source.sync_enabled
-                                                ? 'default'
-                                                : 'secondary'
-                                        "
-                                    >
-                                        {{
-                                            source.sync_enabled
-                                                ? "Enabled"
-                                                : "Disabled"
-                                        }}
-                                    </Badge>
-                                </TableCell>
-                                <TableCell
-                                    >{{
+                                    <TableCell class="font-medium text-sm sm:text-base">{{
+                                        source.name
+                                    }}</TableCell>
+                                    <TableCell class="font-mono text-xs sm:text-sm break-all">{{
+                                        source.url
+                                    }}</TableCell>
+                                    <TableCell>
+                                        <Badge
+                                            :variant="
+                                                source.sync_enabled
+                                                    ? 'default'
+                                                    : 'secondary'
+                                            "
+                                            class="text-xs"
+                                        >
+                                            {{
+                                                source.sync_enabled
+                                                    ? "Enabled"
+                                                    : "Disabled"
+                                            }}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{
                                         source.sync_interval_minutes
                                     }}
-                                    min</TableCell
+                                    min</TableCell>
+                                    <TableCell class="text-xs sm:text-sm">
+                                        {{
+                                            source.last_synced_at
+                                                ? new Date(
+                                                      source.last_synced_at,
+                                                  ).toLocaleString()
+                                                : "Never"
+                                        }}
+                                    </TableCell>
+                                    <TableCell class="text-right">
+                                        <Button
+                                            variant="destructive"
+                                            size="sm"
+                                            @click="deleteRemoteSource(source)"
+                                            class="text-xs"
+                                        >
+                                            <Trash2 class="h-4 w-4" />
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </div>
+
+                    <!-- Mobile Card View -->
+                    <div class="md:hidden space-y-3">
+                        <div
+                            v-for="source in remoteSources"
+                            :key="source.id"
+                            class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                        >
+                            <div class="flex items-start justify-between gap-2 mb-2">
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-semibold text-sm sm:text-base mb-1">
+                                        {{ source.name }}
+                                    </div>
+                                    <div class="space-y-1.5">
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">URL: </span>
+                                            <span class="text-xs sm:text-sm break-all">{{ source.url }}</span>
+                                        </div>
+                                        <div class="flex items-center gap-2 mt-2">
+                                            <Badge
+                                                :variant="
+                                                    source.sync_enabled
+                                                        ? 'default'
+                                                        : 'secondary'
+                                                "
+                                                class="text-xs"
+                                            >
+                                                {{
+                                                    source.sync_enabled
+                                                        ? "Enabled"
+                                                        : "Disabled"
+                                                }}
+                                            </Badge>
+                                            <span class="text-xs text-muted-foreground">
+                                                {{ source.sync_interval_minutes }} min
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">Last Sync: </span>
+                                            <span class="text-xs sm:text-sm">
+                                                {{ source.last_synced_at ? new Date(source.last_synced_at).toLocaleString() : "Never" }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                                <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    @click="deleteRemoteSource(source)"
+                                    class="h-8 text-xs"
                                 >
-                                <TableCell>
-                                    {{
-                                        source.last_synced_at
-                                            ? new Date(
-                                                  source.last_synced_at,
-                                              ).toLocaleString()
-                                            : "Never"
-                                    }}
-                                </TableCell>
-                                <TableCell class="text-right">
-                                    <Button
-                                        variant="destructive"
-                                        size="sm"
-                                        @click="deleteRemoteSource(source)"
-                                    >
-                                        <Trash2 class="h-4 w-4" />
-                                    </Button>
-                                </TableCell>
-                            </TableRow>
-                        </TableBody>
-                    </Table>
-                </div>
+                                    <Trash2 class="h-3 w-3 mr-1" />
+                                    Delete
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
             </CardContent>
         </Card>
 
         <!-- Ignored Steam IDs Section -->
         <Card>
-            <CardHeader>
-                <div class="flex justify-between items-center">
+            <CardHeader class="pb-2 sm:pb-3">
+                <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0">
                     <div>
-                        <CardTitle class="flex items-center gap-2">
-                            <Users class="h-5 w-5" />
+                        <CardTitle class="flex items-center gap-2 text-base sm:text-lg">
+                            <Users class="h-4 w-4 sm:h-5 sm:w-5" />
                             Ignored Steam IDs
                         </CardTitle>
-                        <CardDescription>
+                        <CardDescription class="text-xs sm:text-sm">
                             Manage Steam IDs that should be ignored when syncing
                             from remote ban sources.
                         </CardDescription>
                     </div>
                     <Dialog v-model:open="showIgnoredSteamIDDialog">
                         <DialogTrigger asChild>
-                            <Button>
+                            <Button class="w-full sm:w-auto text-sm sm:text-base">
                                 <Plus class="h-4 w-4 mr-2" />
                                 Add Ignored Steam ID
                             </Button>
                         </DialogTrigger>
-                        <DialogContent>
+                        <DialogContent class="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                             <DialogHeader>
-                                <DialogTitle>Add Ignored Steam ID</DialogTitle>
-                                <DialogDescription>
+                                <DialogTitle class="text-base sm:text-lg">Add Ignored Steam ID</DialogTitle>
+                                <DialogDescription class="text-xs sm:text-sm">
                                     Add a Steam ID to ignore when syncing bans
                                     from remote sources.
                                 </DialogDescription>
@@ -1031,72 +1175,113 @@ onMounted(() => {
             <CardContent>
                 <div
                     v-if="loading && ignoredSteamIDs.length === 0"
-                    class="text-center py-8"
+                    class="text-center py-6 sm:py-8"
                 >
                     <div
                         class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
                     ></div>
-                    <p>Loading ignored Steam IDs...</p>
+                    <p class="text-sm sm:text-base">Loading ignored Steam IDs...</p>
                 </div>
                 <div
                     v-else-if="ignoredSteamIDs.length === 0"
-                    class="text-center py-8"
+                    class="text-center py-6 sm:py-8"
                 >
-                    <p class="text-gray-500">
+                    <p class="text-sm sm:text-base text-muted-foreground">
                         No Steam IDs are currently ignored. Add Steam IDs to
                         prevent them from being banned via remote sources.
                     </p>
                 </div>
-                <div v-else>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead>Steam ID</TableHead>
-                                <TableHead>Reason</TableHead>
-                                <TableHead>Added</TableHead>
-                                <TableHead class="text-right"
-                                    >Actions</TableHead
+                <template v-else>
+                    <!-- Desktop Table View -->
+                    <div class="hidden md:block w-full overflow-x-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead class="text-xs sm:text-sm">Steam ID</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Reason</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Added</TableHead>
+                                    <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                <TableRow
+                                    v-for="ignoredID in ignoredSteamIDs"
+                                    :key="ignoredID.id"
+                                    class="hover:bg-muted/50"
                                 >
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            <TableRow
-                                v-for="ignoredID in ignoredSteamIDs"
-                                :key="ignoredID.id"
-                            >
-                                <TableCell class="font-mono">{{
-                                    ignoredID.steam_id
-                                }}</TableCell>
-                                <TableCell>{{
-                                    ignoredID.reason || "No reason provided"
-                                }}</TableCell>
-                                <TableCell>{{
-                                    new Date(
-                                        ignoredID.created_at,
-                                    ).toLocaleDateString()
-                                }}</TableCell>
-                                <TableCell class="text-right">
-                                    <Button
-                                        variant="destructive"
-                                        size="sm"
-                                        @click="deleteIgnoredSteamID(ignoredID)"
-                                    >
-                                        <Trash2 class="h-4 w-4" />
-                                    </Button>
-                                </TableCell>
-                            </TableRow>
-                        </TableBody>
-                    </Table>
-                </div>
+                                    <TableCell class="font-mono text-xs sm:text-sm">{{
+                                        ignoredID.steam_id
+                                    }}</TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{
+                                        ignoredID.reason || "No reason provided"
+                                    }}</TableCell>
+                                    <TableCell class="text-xs sm:text-sm">{{
+                                        new Date(
+                                            ignoredID.created_at,
+                                        ).toLocaleDateString()
+                                    }}</TableCell>
+                                    <TableCell class="text-right">
+                                        <Button
+                                            variant="destructive"
+                                            size="sm"
+                                            @click="deleteIgnoredSteamID(ignoredID)"
+                                            class="text-xs"
+                                        >
+                                            <Trash2 class="h-4 w-4" />
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </div>
+
+                    <!-- Mobile Card View -->
+                    <div class="md:hidden space-y-3">
+                        <div
+                            v-for="ignoredID in ignoredSteamIDs"
+                            :key="ignoredID.id"
+                            class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                        >
+                            <div class="flex items-start justify-between gap-2 mb-2">
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-mono text-sm sm:text-base mb-1">
+                                        {{ ignoredID.steam_id }}
+                                    </div>
+                                    <div class="space-y-1.5">
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">Reason: </span>
+                                            <span class="text-xs sm:text-sm">{{ ignoredID.reason || "No reason provided" }}</span>
+                                        </div>
+                                        <div>
+                                            <span class="text-xs text-muted-foreground">Added: </span>
+                                            <span class="text-xs sm:text-sm">{{ new Date(ignoredID.created_at).toLocaleDateString() }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                                <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    @click="deleteIgnoredSteamID(ignoredID)"
+                                    class="h-8 text-xs"
+                                >
+                                    <Trash2 class="h-3 w-3 mr-1" />
+                                    Delete
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
             </CardContent>
         </Card>
 
         <!-- Edit Ban List Dialog -->
         <Dialog v-model:open="showEditDialog">
-            <DialogContent>
+            <DialogContent class="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
                 <DialogHeader>
-                    <DialogTitle>Edit Ban List</DialogTitle>
-                    <DialogDescription>
+                    <DialogTitle class="text-base sm:text-lg">Edit Ban List</DialogTitle>
+                    <DialogDescription class="text-xs sm:text-sm">
                         Update the ban list details.
                     </DialogDescription>
                 </DialogHeader>

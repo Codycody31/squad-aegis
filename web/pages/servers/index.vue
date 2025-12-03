@@ -324,10 +324,10 @@ function refreshData() {
 </script>
 
 <template>
-  <div class="p-4">
-    <div class="flex justify-between items-center mb-4">
-      <h1 class="text-2xl font-bold">Servers</h1>
-      <div class="flex gap-2">
+  <div class="p-3 sm:p-4">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0 mb-3 sm:mb-4">
+      <h1 class="text-xl sm:text-2xl font-bold">Servers</h1>
+      <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
         <Form
           v-if="isSuperAdmin"
           v-slot="{ handleSubmit }"
@@ -352,14 +352,14 @@ function refreshData() {
         >
           <Dialog v-model:open="showAddServerDialog">
             <DialogTrigger asChild>
-              <Button>Add Server</Button>
+              <Button class="w-full sm:w-auto text-sm sm:text-base">Add Server</Button>
             </DialogTrigger>
             <DialogContent
-              class="sm:max-w-[425px] max-h-[90vh] overflow-y-auto"
+              class="w-[95vw] sm:max-w-[425px] max-h-[90vh] overflow-y-auto p-4 sm:p-6"
             >
               <DialogHeader>
-                <DialogTitle>Add New Server</DialogTitle>
-                <DialogDescription>
+                <DialogTitle class="text-base sm:text-lg">Add New Server</DialogTitle>
+                <DialogDescription class="text-xs sm:text-sm">
                   Enter the details of the Squad server you want to add.
                 </DialogDescription>
               </DialogHeader>
@@ -627,118 +627,182 @@ function refreshData() {
             </DialogContent>
           </Dialog>
         </Form>
-        <Button @click="refreshData" :disabled="loading" variant="outline">
+        <Button @click="refreshData" :disabled="loading" variant="outline" class="w-full sm:w-auto text-sm sm:text-base">
           {{ loading ? "Refreshing..." : "Refresh" }}
         </Button>
       </div>
     </div>
 
-    <div v-if="error" class="bg-red-500 text-white p-4 rounded mb-4">
+    <div v-if="error" class="bg-red-500 text-white p-3 sm:p-4 rounded mb-3 sm:mb-4 text-sm sm:text-base">
       {{ error }}
     </div>
 
-    <Card class="mb-4">
-      <CardHeader class="pb-2">
-        <CardTitle>Server List</CardTitle>
-        <p class="text-sm text-muted-foreground">
+    <Card class="mb-3 sm:mb-4">
+      <CardHeader class="pb-2 sm:pb-3">
+        <CardTitle class="text-base sm:text-lg">Server List</CardTitle>
+        <p class="text-xs sm:text-sm text-muted-foreground">
           View and manage Squad servers. Data refreshes automatically every 60
           seconds.
         </p>
       </CardHeader>
       <CardContent>
-        <div class="flex items-center space-x-2 mb-4">
+        <div class="flex items-center space-x-2 mb-3 sm:mb-4">
           <Input
             v-model="searchQuery"
             placeholder="Search by name or IP address..."
-            class="flex-grow"
+            class="flex-grow text-sm sm:text-base"
           />
         </div>
 
-        <div class="text-sm text-muted-foreground mb-2">
+        <div class="text-xs sm:text-sm text-muted-foreground mb-2">
           Showing {{ filteredServers.length }} of {{ servers.length }} servers
         </div>
 
-        <div v-if="loading && servers.length === 0" class="text-center py-8">
+        <div v-if="loading && servers.length === 0" class="text-center py-6 sm:py-8">
           <div
             class="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4"
           ></div>
-          <p>Loading servers...</p>
+          <p class="text-sm sm:text-base">Loading servers...</p>
         </div>
 
-        <div v-else-if="servers.length === 0" class="text-center py-8">
-          <p>No servers found</p>
+        <div v-else-if="servers.length === 0" class="text-center py-6 sm:py-8">
+          <p class="text-sm sm:text-base">No servers found</p>
         </div>
 
-        <div v-else-if="filteredServers.length === 0" class="text-center py-8">
-          <p>No servers match your search</p>
+        <div v-else-if="filteredServers.length === 0" class="text-center py-6 sm:py-8">
+          <p class="text-sm sm:text-base">No servers match your search</p>
         </div>
 
-        <div v-else class="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>IP Address</TableHead>
-                <TableHead>Game Port</TableHead>
-                <TableHead>RCON IP Address</TableHead>
-                <TableHead>RCON Port</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead class="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow
-                v-for="server in filteredServers"
-                :key="server.id"
-                class="hover:bg-muted/50"
-              >
-                <TableCell>
-                  <div class="font-medium">
+        <template v-else>
+          <!-- Desktop Table View -->
+          <div class="hidden md:block w-full overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="text-xs sm:text-sm">Name</TableHead>
+                  <TableHead class="text-xs sm:text-sm">IP Address</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Game Port</TableHead>
+                  <TableHead class="text-xs sm:text-sm">RCON IP Address</TableHead>
+                  <TableHead class="text-xs sm:text-sm">RCON Port</TableHead>
+                  <TableHead class="text-xs sm:text-sm">Created</TableHead>
+                  <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow
+                  v-for="server in filteredServers"
+                  :key="server.id"
+                  class="hover:bg-muted/50"
+                >
+                  <TableCell>
+                    <div class="font-medium text-sm sm:text-base">
+                      {{ server.name }}
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-xs sm:text-sm">{{ server.ip_address }}</TableCell>
+                  <TableCell class="text-xs sm:text-sm">{{ server.game_port }}</TableCell>
+                  <TableCell class="text-xs sm:text-sm">{{ server.rcon_ip_address || "Unknown" }}</TableCell>
+                  <TableCell class="text-xs sm:text-sm">{{ server.rcon_port }}</TableCell>
+                  <TableCell class="text-xs sm:text-sm">{{ formatDate(server.created_at) }}</TableCell>
+                  <TableCell class="text-right">
+                    <div class="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        @click="navigateTo(`/servers/${server.id}`)"
+                        class="text-xs"
+                      >
+                        Manage
+                      </Button>
+                      <Button
+                        v-if="isSuperAdmin"
+                        variant="destructive"
+                        size="sm"
+                        @click="deleteServer(server.id)"
+                        :disabled="loading"
+                        class="text-xs"
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+
+          <!-- Mobile Card View -->
+          <div class="md:hidden space-y-3">
+            <div
+              v-for="server in filteredServers"
+              :key="server.id"
+              class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+            >
+              <div class="flex items-start justify-between gap-2 mb-2">
+                <div class="flex-1 min-w-0">
+                  <div class="font-semibold text-sm sm:text-base mb-1">
                     {{ server.name }}
                   </div>
-                </TableCell>
-                <TableCell>{{ server.ip_address }}</TableCell>
-                <TableCell>{{ server.game_port }}</TableCell>
-                <TableCell>{{ server.rcon_ip_address || "Unknown" }}</TableCell>
-                <TableCell>{{ server.rcon_port }}</TableCell>
-                <TableCell>{{ formatDate(server.created_at) }}</TableCell>
-                <TableCell class="text-right">
-                  <div class="flex justify-end gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      @click="navigateTo(`/servers/${server.id}`)"
-                    >
-                      Manage
-                    </Button>
-                    <Button
-                      v-if="isSuperAdmin"
-                      variant="destructive"
-                      size="sm"
-                      @click="deleteServer(server.id)"
-                      :disabled="loading"
-                    >
-                      Delete
-                    </Button>
+                  <div class="space-y-1.5">
+                    <div>
+                      <span class="text-xs text-muted-foreground">IP: </span>
+                      <span class="text-xs sm:text-sm">{{ server.ip_address }}</span>
+                    </div>
+                    <div>
+                      <span class="text-xs text-muted-foreground">Game Port: </span>
+                      <span class="text-xs sm:text-sm">{{ server.game_port }}</span>
+                    </div>
+                    <div>
+                      <span class="text-xs text-muted-foreground">RCON IP: </span>
+                      <span class="text-xs sm:text-sm">{{ server.rcon_ip_address || "Unknown" }}</span>
+                    </div>
+                    <div>
+                      <span class="text-xs text-muted-foreground">RCON Port: </span>
+                      <span class="text-xs sm:text-sm">{{ server.rcon_port }}</span>
+                    </div>
+                    <div>
+                      <span class="text-xs text-muted-foreground">Created: </span>
+                      <span class="text-xs sm:text-sm">{{ formatDate(server.created_at) }}</span>
+                    </div>
                   </div>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
+                </div>
+              </div>
+              <div class="flex items-center justify-end gap-2 pt-2 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  @click="navigateTo(`/servers/${server.id}`)"
+                  class="h-8 text-xs flex-1"
+                >
+                  Manage
+                </Button>
+                <Button
+                  v-if="isSuperAdmin"
+                  variant="destructive"
+                  size="sm"
+                  @click="deleteServer(server.id)"
+                  :disabled="loading"
+                  class="h-8 text-xs flex-1"
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          </div>
+        </template>
       </CardContent>
     </Card>
 
     <Card>
       <CardHeader>
-        <CardTitle>About Servers</CardTitle>
+        <CardTitle class="text-base sm:text-lg">About Servers</CardTitle>
       </CardHeader>
       <CardContent>
-        <p class="text-sm text-muted-foreground">
+        <p class="text-xs sm:text-sm text-muted-foreground">
           This page shows all Squad servers registered in Squad Aegis. Super
           admins can add new servers or delete existing ones.
         </p>
-        <p class="text-sm text-muted-foreground mt-2">
+        <p class="text-xs sm:text-sm text-muted-foreground mt-2">
           Click on "Manage" to access server-specific features like player
           management, bans, and admin configuration.
         </p>
