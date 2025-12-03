@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><style>
+    #light-icon {
+      display: inline;
+    }
+    #dark-icon {
+      display: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      #light-icon {
+        display: none;
+      }
+      #dark-icon {
+        display: inline;
+      }
+    }
+  </style><g id="light-icon"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><g clip-path="url(#SvgjsClipPath1020)"><rect width="1000" height="1000" fill="#ffffff"></rect><g transform="matrix(14.0625,0,0,14.0625,50,50)"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64"><svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer shield -->
+  <path d="M32 6
+       L14 14
+       V30
+       C14 43.5 21.5 55.8 32 60
+       C42.5 55.8 50 43.5 50 30
+       V14
+       Z" fill="none" stroke="#FF6A32" stroke-width="3" stroke-linejoin="round"></path>
+
+  <!-- Inner 'A' -->
+  <path d="M32 18
+       L22 40
+       H26
+       L30 32
+       L34 40
+       H38
+       Z" fill="none" stroke="#FF6A32" stroke-width="3" stroke-linejoin="round"></path>
+
+  <!-- Crossbar -->
+  <line x1="27" y1="30" x2="37" y2="30" stroke="#FF6A32" stroke-width="3" stroke-linecap="round"></line>
+
+  <!-- Squad dots -->
+  <circle cx="24" cy="16" r="2.3" fill="#FF6A32"></circle>
+  <circle cx="32" cy="13" r="2.3" fill="#FF6A32"></circle>
+  <circle cx="40" cy="16" r="2.3" fill="#FF6A32"></circle>
+</svg></svg></g></g><defs><clipPath id="SvgjsClipPath1020"><rect width="1000" height="1000" x="0" y="0" rx="350" ry="350"></rect></clipPath></defs></svg></g><g id="dark-icon"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><g clip-path="url(#SvgjsClipPath1021)"><rect width="1000" height="1000" fill="#ffffff"></rect><g transform="matrix(14.0625,0,0,14.0625,50,50)"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64"><svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer shield -->
+  <path d="M32 6
+       L14 14
+       V30
+       C14 43.5 21.5 55.8 32 60
+       C42.5 55.8 50 43.5 50 30
+       V14
+       Z" fill="none" stroke="#FF6A32" stroke-width="3" stroke-linejoin="round"></path>
+
+  <!-- Inner 'A' -->
+  <path d="M32 18
+       L22 40
+       H26
+       L30 32
+       L34 40
+       H38
+       Z" fill="none" stroke="#FF6A32" stroke-width="3" stroke-linejoin="round"></path>
+
+  <!-- Crossbar -->
+  <line x1="27" y1="30" x2="37" y2="30" stroke="#FF6A32" stroke-width="3" stroke-linecap="round"></line>
+
+  <!-- Squad dots -->
+  <circle cx="24" cy="16" r="2.3" fill="#FF6A32"></circle>
+  <circle cx="32" cy="13" r="2.3" fill="#FF6A32"></circle>
+  <circle cx="40" cy="16" r="2.3" fill="#FF6A32"></circle>
+</svg></svg></g></g><defs><clipPath id="SvgjsClipPath1021"><rect width="1000" height="1000" x="0" y="0" rx="350" ry="350"></rect></clipPath></defs></svg></g></svg>
