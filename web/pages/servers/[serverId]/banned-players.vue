@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, nextTick } from "vue";
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import {
@@ -18,6 +18,8 @@ import {
     TableRow,
 } from "~/components/ui/table";
 import { Badge } from "~/components/ui/badge";
+import { Switch } from "~/components/ui/switch";
+import { Label } from "~/components/ui/label";
 import {
     Dialog,
     DialogContent,
@@ -74,6 +76,7 @@ const playerHistory = ref<any[]>([]);
 const suggestedDuration = ref<number>(24);
 const isLoadingHistory = ref(false);
 const searchQuery = ref("");
+const hideExpiredBans = ref(false);
 const showAddBanDialog = ref(false);
 const showEditBanDialog = ref(false);
 const showBanListDialog = ref(false);
@@ -186,19 +189,46 @@ const form = useForm({
     },
 });
 
+// Helper function to check if a ban is expired
+function isBanExpired(ban: BannedPlayer): boolean {
+    // Permanent bans never expire
+    if (ban.permanent) {
+        return false;
+    }
+    
+    // Check if expires_at exists and is in the past
+    if (ban.expires_at) {
+        const expiresAt = new Date(ban.expires_at);
+        const now = new Date();
+        return expiresAt < now;
+    }
+    
+    // If no expires_at and not permanent, consider it expired
+    // (shouldn't happen in normal cases, but handle it)
+    return false;
+}
+
 // Computed property for filtered banned players
 const filteredBannedPlayers = computed(() => {
-    if (!searchQuery.value.trim()) {
-        return bannedPlayers.value;
+    let filtered = bannedPlayers.value;
+    
+    // Filter out expired bans if the switch is enabled
+    if (hideExpiredBans.value) {
+        filtered = filtered.filter((player) => !isBanExpired(player));
     }
-
-    const query = searchQuery.value.toLowerCase();
-    return bannedPlayers.value.filter(
-        (player) =>
-            player.name.toLowerCase().includes(query) ||
-            player.steam_id.includes(query) ||
-            player.reason.toLowerCase().includes(query),
-    );
+    
+    // Apply search query filter
+    if (searchQuery.value.trim()) {
+        const query = searchQuery.value.toLowerCase();
+        filtered = filtered.filter(
+            (player) =>
+                player.name.toLowerCase().includes(query) ||
+                player.steam_id.includes(query) ||
+                player.reason.toLowerCase().includes(query),
+        );
+    }
+    
+    return filtered;
 });
 
 // Function to fetch banned players data
@@ -1122,6 +1152,10 @@ async function searchEvidenceInline(steamId: string) {
     }
 }
 
+// Watch for evidence search type changes and clear results
+watch(evidenceSearchType, () => {
+    evidenceSearchResults.value = [];
+});
 
 // Function to toggle evidence selection
 function toggleEvidenceSelection(event: any) {
@@ -2519,12 +2553,24 @@ function copyBanCfgUrl() {
                 </p>
             </CardHeader>
             <CardContent>
-                <div class="flex items-center space-x-2 mb-3 sm:mb-4">
+                <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-3 sm:mb-4">
                     <Input
                         v-model="searchQuery"
                         placeholder="Search by Steam ID, or reason..."
                         class="flex-grow text-sm sm:text-base"
                     />
+                    <div class="flex items-center space-x-2">
+                        <Switch
+                            id="hide-expired-bans"
+                            v-model="hideExpiredBans"
+                        />
+                        <Label
+                            for="hide-expired-bans"
+                            class="text-sm cursor-pointer"
+                        >
+                            Hide expired bans
+                        </Label>
+                    </div>
                 </div>
 
                 <div class="text-xs sm:text-sm text-muted-foreground mb-2">
