@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-12-02
+## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-12-03
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -17,6 +17,7 @@
 
 ### 📈 Enhancement
 
+- refactor: add option to hide expired bans in banned players list [[#120](https://github.com/Codycody31/squad-aegis/pull/120)]
 - refactor(ui): add demote commander btn [[#116](https://github.com/Codycody31/squad-aegis/pull/116)]
 - refactor: add CBL info + steam & battlemetrics links to player profile [[#115](https://github.com/Codycody31/squad-aegis/pull/115)]
 - refactor: improve player violations tab [[#109](https://github.com/Codycody31/squad-aegis/pull/109)]
