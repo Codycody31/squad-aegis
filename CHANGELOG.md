@@ -36,6 +36,10 @@
 
 - chore(deps): update fumadocs and tailwind dependencies to latest vers… [[#106](https://github.com/Codycody31/squad-aegis/pull/106)]
 
+### Misc
+
+- chore: update squad aegis icon [[#121](https://github.com/Codycody31/squad-aegis/pull/121)]
+
 ## [0.3.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.3.1) - 2025-11-08
 
 ### ❤️ Thanks to all contributors! ❤️
