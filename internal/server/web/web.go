@@ -64,10 +64,6 @@ func New(db *sql.DB) (*gin.Engine, error) {
 	}
 	f := &prefixFS{httpFS, rootPath}
 
-	// Serve favicon files
-	e.GET(rootPath+"/favicon.svg", serveFile(f))
-	e.GET(rootPath+"/favicon.ico", serveFile(f))
-
 	// Keep existing routes
 	e.GET(rootPath+"/assets/*filepath", serveFile(f))
 
