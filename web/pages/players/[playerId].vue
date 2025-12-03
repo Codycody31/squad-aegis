@@ -449,7 +449,7 @@ onMounted(async () => {
                             </a>
                             <a
                                 v-if="player.steam_id"
-                                :href="`https://www.battlemetrics.com/players?filter[search]=${player.steam_id}`"
+                                :href="`https://www.battlemetrics.com/players?filter[search]=${player.player_name}`"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[#f26a21] hover:bg-[#d85a15] text-white rounded-md transition-colors"
