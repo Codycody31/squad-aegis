@@ -152,7 +152,7 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 		return
 	}
 
-	if err := es.client.Set(es.ctx, key, string(mergedData), 0); err != nil {
+	if err := es.client.Set(es.ctx, key, string(mergedData), 0); err != nil && err != valkey.Nil && err != context.Canceled {
 		log.Error().Err(err).Str("key", key).Msg("failed to store player data in valkey")
 	}
 }
@@ -165,7 +165,7 @@ func (es *EventStore) GetPlayerData(playerID string) (*PlayerData, bool) {
 	key := es.playerKey(playerID)
 	data, err := es.client.Get(es.ctx, key)
 	if err != nil {
-		if err != valkey.Nil {
+		if err != valkey.Nil && err != context.Canceled {
 			log.Error().Err(err).Str("key", key).Msg("failed to get player data from valkey")
 		}
 		return nil, false
@@ -254,7 +254,7 @@ func (es *EventStore) StoreSessionData(key string, data *SessionData) {
 		return
 	}
 
-	if err := es.client.Set(es.ctx, valkeyKey, string(mergedData), 24*time.Hour); err != nil {
+	if err := es.client.Set(es.ctx, valkeyKey, string(mergedData), 24*time.Hour); err != nil && err != valkey.Nil && err != context.Canceled {
 		log.Error().Err(err).Str("key", valkeyKey).Msg("failed to store session data in valkey")
 	}
 }

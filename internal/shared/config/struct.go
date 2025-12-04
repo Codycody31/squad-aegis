@@ -2,8 +2,8 @@ package config
 
 type Struct struct {
 	App struct {
-		IsDevelopment bool   `default:"true"`
-		WebUiProxy    string `default:""`
+		IsDevelopment bool `default:"true"`
+		WebUiProxy    string
 		Port          string `default:"3113"`
 		Url           string `default:"http://localhost:3113"`
 		InContainer   bool   `default:"false"`
@@ -35,29 +35,31 @@ type Struct struct {
 	Valkey struct {
 		Host     string `default:"localhost"`
 		Port     int    `default:"6379"`
-		Password string `default:""`
-		Database int    `default:"0"`
+		Password string
+		Database int `default:"0"`
 	}
 	Log struct {
 		Level          string `default:"info"`
 		ShowGin        bool   `default:"false"`
 		ShowPluginLogs bool   `default:"true"`
-		File           string `default:""`
+		File           string
 	}
 	Debug struct {
 		Pretty  bool `default:"true"`
 		NoColor bool `default:"false"`
 	}
 	Storage struct {
-		Type      string `default:"local"` // "local" or "s3"
-		LocalPath string `default:"storage"`
-		S3        struct {
+		Type string `default:"local"` // "local" or "s3"
+		S3   struct {
 			Region          string `default:"us-east-1"`
-			Bucket          string `default:""`
-			AccessKeyID     string `default:""`
-			SecretAccessKey string `default:""`
-			Endpoint        string `default:""` // Optional: for S3-compatible services (MinIO, etc.)
-			UseSSL          bool   `default:"true"`
+			Bucket          string
+			AccessKeyID     string
+			SecretAccessKey string
+			Endpoint        string
+			UseSSL          bool `default:"true"`
+		}
+		Local struct {
+			Path string `default:"storage"`
 		}
 	}
 }

@@ -10,7 +10,7 @@ import (
 func NewStorage(cfg config.Struct) (Storage, error) {
 	switch cfg.Storage.Type {
 	case "local":
-		basePath := cfg.Storage.LocalPath
+		basePath := cfg.Storage.Local.Path
 		if basePath == "" {
 			basePath = "storage"
 		}
@@ -21,4 +21,3 @@ func NewStorage(cfg config.Struct) (Storage, error) {
 		return nil, fmt.Errorf("unsupported storage type: %s (supported: local, s3)", cfg.Storage.Type)
 	}
 }
-
