@@ -286,12 +286,11 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Server Rules
 				rulesGroup := serverGroup.Group("/rules")
 				{
-					rulesGroup.Use(server.AuthHasServerPermission("manageserver"))
 					rulesGroup.GET("", server.listServerRules)
-					rulesGroup.POST("", server.createServerRule)
-					rulesGroup.PUT("/:ruleId", server.updateServerRule)
-					rulesGroup.DELETE("/:ruleId", server.AuthIsSuperAdmin(), server.deleteServerRule)
-					rulesGroup.PUT("/bulk", server.bulkUpdateServerRules) // Bulk update endpoint
+					rulesGroup.POST("", server.AuthHasServerPermission("manageserver"), server.createServerRule)
+					rulesGroup.PUT("/:ruleId", server.AuthHasServerPermission("manageserver"), server.updateServerRule)
+					rulesGroup.DELETE("/:ruleId", server.AuthHasServerPermission("manageserver"), server.deleteServerRule)
+					rulesGroup.PUT("/bulk", server.AuthHasServerPermission("manageserver"), server.bulkUpdateServerRules) // Bulk update endpoint
 				}
 
 				// Server Workflows
