@@ -6,6 +6,7 @@ import RuleComponent from '~/components/RuleComponent.vue'
 import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card"
 import { useToast } from "~/components/ui/toast"
+import { useAuthStore } from "~/stores/auth"
 
 interface ServerRuleAction {
   id: string;
@@ -37,6 +38,24 @@ interface ServerRule {
 const route = useRoute();
 const serverId = route.params.serverId as string;
 const { toast } = useToast();
+const authStore = useAuthStore();
+
+// Check if user has manageserver permission
+const canManage = computed(() => {
+  const user = authStore.user;
+  // Super admins have all permissions
+  if (user?.super_admin) {
+    return true;
+  }
+  
+  const serverPerms = authStore.getServerPermissions(serverId);
+  if (!serverPerms || serverPerms.length === 0) {
+    return false;
+  }
+  
+  // Check if user has manageserver permission or wildcard permission
+  return serverPerms.includes('manageserver') || serverPerms.includes('*');
+});
 
 // state
 const loading = ref<boolean>(true);
@@ -791,7 +810,7 @@ onUnmounted(() => {
         
         <div class="flex items-center gap-2">
           <!-- Import Button -->
-          <div class="relative">
+          <div v-if="canManage" class="relative">
             <input
               type="file"
               ref="fileInput"
@@ -812,6 +831,7 @@ onUnmounted(() => {
           
           <!-- Save Button -->
           <Button
+            v-if="canManage"
             @click="saveAllRules"
             :disabled="isSaving || (!hasUnsavedChanges && deletedRuleIds.length === 0)"
             :variant="(hasUnsavedChanges || deletedRuleIds.length > 0) ? 'default' : 'outline'"
@@ -901,6 +921,7 @@ onUnmounted(() => {
             <div class="flex items-center gap-2">
               <!-- Add Rule Button -->
               <Button
+                v-if="canManage"
                 @click="addNewRule('rule')"
                 variant="outline"
                 size="sm"
@@ -946,6 +967,7 @@ onUnmounted(() => {
                 :depth="0"
                 :section-number="index + 1"
                 :force-collapsed="rulesCollapsed ? true : undefined"
+                :read-only="!canManage"
                 @update="updateRule"
                 @delete="deleteRule"
                 @add-sub-rule="addSubRule"
