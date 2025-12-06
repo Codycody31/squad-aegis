@@ -36,6 +36,7 @@ const props = defineProps<{
   sectionNumber?: number;
   subRuleIndex?: number;
   forceCollapsed?: boolean;
+  readOnly?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -61,6 +62,9 @@ watch(() => props.rule, (newRule) => {
 }, { deep: true });
 
 const emitUpdate = () => {
+  if (props.readOnly) {
+    return;
+  }
   emit('update', localRule.value);
 }
 
@@ -116,6 +120,11 @@ const isDragOver = ref(false);
 const dragPosition = ref<'above' | 'below' | 'nested'>('above');
 
 const handleDragStart = (event: DragEvent) => {
+  if (props.readOnly) {
+    event.preventDefault();
+    return;
+  }
+  
   console.log('Drag start triggered for rule:', localRule.value.id);
   isDragging.value = true;
   
@@ -254,18 +263,19 @@ const getNumberColor = () => {
       getRuleClasses(),
       { 'ml-3': depth > 0 },
       { 'opacity-50': isDragging },
-      { 'ring-2 ring-primary': isDragOver && dragPosition === 'nested' },
-      { 'border-t-4 border-t-primary': isDragOver && dragPosition === 'above' },
-      { 'border-b-4 border-b-primary': isDragOver && dragPosition === 'below' }
+      { 'ring-2 ring-primary': isDragOver && dragPosition === 'nested' && !props.readOnly },
+      { 'border-t-4 border-t-primary': isDragOver && dragPosition === 'above' && !props.readOnly },
+      { 'border-b-4 border-b-primary': isDragOver && dragPosition === 'below' && !props.readOnly }
     ]"
-    @dragover="handleDragOver"
-    @dragleave="handleDragLeave"
-    @drop="handleDrop"
+    @dragover="props.readOnly ? undefined : handleDragOver"
+    @dragleave="props.readOnly ? undefined : handleDragLeave"
+    @drop="props.readOnly ? undefined : handleDrop"
   >
     <div class="flex items-start justify-between mb-2">
       <div class="flex items-center" style="width: 100%;">
         <!-- Drag handle: only this element is draggable so text inputs remain editable -->
         <div
+          v-if="!props.readOnly"
           class="drag-handle cursor-grab active:cursor-grabbing hover:bg-muted/50 p-1 rounded transition-colors"
           title="Drag to reorder or nest"
           draggable="true"
@@ -294,14 +304,15 @@ const getNumberColor = () => {
           <input
             v-model="localRule.title"
             @input="emitUpdate"
+            :readonly="props.readOnly"
             class="font-medium bg-transparent border-none outline-none flex-1 min-w-0 text-sm"
-            :class="getTextColor()"
+            :class="[getTextColor(), props.readOnly ? 'cursor-default' : '']"
             placeholder="Rule title..."
           />
         </div>
       </div>
       
-      <div class="flex items-center gap-1">
+      <div v-if="!props.readOnly" class="flex items-center gap-1">
         <Button
           @click="$emit('add-sub-rule', rule.id)"
           variant="ghost"
@@ -342,7 +353,9 @@ const getNumberColor = () => {
         <textarea
           v-model="localRule.description"
           @input="emitUpdate"
+          :readonly="props.readOnly"
           class="w-full p-2 border border-input bg-background rounded text-xs"
+          :class="props.readOnly ? 'cursor-default opacity-75' : ''"
           rows="2"
           placeholder="Describe this rule..."
         />
@@ -378,6 +391,7 @@ const getNumberColor = () => {
               <span class="font-medium">Action</span>
             </div>
             <Button
+              v-if="!props.readOnly"
               @click="deleteAction(action.id)"
               variant="destructive"
               size="icon"
@@ -394,9 +408,11 @@ const getNumberColor = () => {
               <input
                 v-model.number="action.violation_count"
                 @input="emitUpdate"
+                :readonly="props.readOnly"
                 type="number"
                 min="1"
                 class="w-full p-1 border border-input bg-background rounded text-sm"
+                :class="props.readOnly ? 'cursor-default opacity-75' : ''"
                 placeholder="Number of violations"
               />
             </div>
@@ -406,7 +422,9 @@ const getNumberColor = () => {
               <select
                 v-model="action.action_type"
                 @change="emitUpdate"
+                :disabled="props.readOnly"
                 class="w-full p-1 border border-input bg-background rounded text-sm"
+                :class="props.readOnly ? 'cursor-default opacity-75' : ''"
               >
                 <option value="WARN">Warning</option>
                 <option value="KICK">Kick</option>
@@ -419,9 +437,11 @@ const getNumberColor = () => {
               <input
                 v-model.number="action.duration_days"
                 @input="emitUpdate"
+                :readonly="props.readOnly"
                 type="number"
                 min="0"
                 class="w-full p-1 border border-input bg-background rounded text-sm"
+                :class="props.readOnly ? 'cursor-default opacity-75' : ''"
                 placeholder="0 for permanent"
               />
             </div>
@@ -431,7 +451,9 @@ const getNumberColor = () => {
               <input
                 v-model="action.message"
                 @input="emitUpdate"
+                :readonly="props.readOnly"
                 class="w-full p-1 border border-input bg-background rounded text-sm"
+                :class="props.readOnly ? 'cursor-default opacity-75' : ''"
                 placeholder="Violation message..."
               />
             </div>
@@ -450,6 +472,7 @@ const getNumberColor = () => {
         :section-number="sectionNumber"
         :sub-rule-index="index + 1"
         :force-collapsed="props.forceCollapsed"
+        :read-only="props.readOnly"
         @update="updateChild"
         @delete="deleteChild"
         @add-sub-rule="addChildSubRule"
