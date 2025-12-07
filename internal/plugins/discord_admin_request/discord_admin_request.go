@@ -275,8 +275,11 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 	}
 
 	permittedRoles := plug_config_schema.GetArrayStringValue(p.config, "admin_roles")
+	// Trim whitespace from the permitted roles
+	for i, role := range permittedRoles {
+		permittedRoles[i] = strings.TrimSpace(role)
+	}
 	onlineAdmins := 0
-	// trim whitespace from the admin roles
 	for _, admin := range admins {
 		if admin.SteamID != event.SteamID {
 			// If no permitted roles specified, count all admins
@@ -287,7 +290,7 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 				hasPermittedRole := false
 				for _, role := range permittedRoles {
 					for _, adminRole := range admin.Roles {
-						if role == adminRole.RoleName && admin.IsOnline {
+						if role == strings.TrimSpace(adminRole.RoleName) && admin.IsOnline {
 							hasPermittedRole = true
 							break
 						}
