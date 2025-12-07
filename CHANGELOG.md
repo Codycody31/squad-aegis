@@ -12,6 +12,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix(discord-admin-requests): trim whitespace from permit and admin ro… [[#127](https://github.com/Codycody31/squad-aegis/pull/127)]
 - fix(discord-admin-requests): update online admin count logic with rol… [[#126](https://github.com/Codycody31/squad-aegis/pull/126)]
 
 ### Misc
