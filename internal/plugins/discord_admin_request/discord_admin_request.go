@@ -274,19 +274,32 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 		admins = []*plugin_manager.AdminInfo{}
 	}
 
+	permittedRoles := plug_config_schema.GetArrayStringValue(p.config, "admin_roles")
 	onlineAdmins := 0
+	// trim whitespace from the admin roles
 	for _, admin := range admins {
-		if admin.SteamID == event.SteamID {
-			permittedRoles := plug_config_schema.GetArrayStringValue(p.config, "admin_roles")
-			for _, role := range permittedRoles {
-				for _, adminRole := range admin.Roles {
-					if role == adminRole.RoleName {
-						onlineAdmins++
+		if admin.SteamID != event.SteamID {
+			// If no permitted roles specified, count all admins
+			if len(permittedRoles) == 0 && admin.IsOnline {
+				onlineAdmins++
+			} else {
+				// Check if admin has any of the permitted roles
+				hasPermittedRole := false
+				for _, role := range permittedRoles {
+					for _, adminRole := range admin.Roles {
+						if role == adminRole.RoleName && admin.IsOnline {
+							hasPermittedRole = true
+							break
+						}
+					}
+					if hasPermittedRole {
 						break
 					}
 				}
+				if hasPermittedRole {
+					onlineAdmins++
+				}
 			}
-			break
 		}
 	}
 
@@ -451,7 +464,7 @@ func (p *DiscordAdminRequestPlugin) sendInGameResponse(playerSteamID string, onl
 
 // warnInGameAdmins sends a warning to in-game admins
 func (p *DiscordAdminRequestPlugin) warnInGameAdmins(playerName, message string) error {
-	adminMessage := fmt.Sprintf("AdminWarn [%s] %s", playerName, message)
+	adminMessage := fmt.Sprintf("[%s] %s", playerName, message)
 
 	// Get online admins and send them individual messages
 	admins, err := p.apis.ServerAPI.GetAdmins()
