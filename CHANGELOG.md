@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-06
+## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-07
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -9,6 +9,10 @@
 ### 📈 Enhancement
 
 - refactor: enforce manageserver permission on server rules actions [[#125](https://github.com/Codycody31/squad-aegis/pull/125)]
+
+### 🐛 Bug Fixes
+
+- fix(discord-admin-requests): update online admin count logic with rol… [[#126](https://github.com/Codycody31/squad-aegis/pull/126)]
 
 ### Misc
 
