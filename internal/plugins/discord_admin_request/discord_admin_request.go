@@ -279,12 +279,12 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 	for i, role := range permittedRoles {
 		permittedRoles[i] = strings.TrimSpace(role)
 	}
-	onlineAdmins := 0
+	onlineAdmins := []string{}
 	for _, admin := range admins {
 		if admin.SteamID != event.SteamID {
 			// If no permitted roles specified, count all admins
 			if len(permittedRoles) == 0 && admin.IsOnline {
-				onlineAdmins++
+				onlineAdmins = append(onlineAdmins, admin.SteamID)
 			} else {
 				// Check if admin has any of the permitted roles
 				hasPermittedRole := false
@@ -300,17 +300,24 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 					}
 				}
 				if hasPermittedRole {
-					onlineAdmins++
+					onlineAdmins = append(onlineAdmins, admin.SteamID)
 				}
 			}
 		}
 	}
 
+	// Extract reason from message (remove "!admin" prefix and trim whitespace)
+	reason := event.Message
+	if len(event.Message) >= 6 {
+		reason = event.Message[6:]
+	}
+	reason = strings.TrimSpace(reason)
+
 	// Send Discord notification
-	if err := p.sendAdminRequestNotification(serverInfo, event.PlayerName, event.SteamID, event.Message, onlineAdmins); err != nil {
+	if err := p.sendAdminRequestNotification(serverInfo, event.PlayerName, event.SteamID, reason, onlineAdmins); err != nil {
 		p.apis.LogAPI.Error("Failed to send Discord notification", err, map[string]interface{}{
 			"player":  event.PlayerName,
-			"message": event.Message,
+			"message": reason,
 		})
 		return err
 	}
@@ -324,7 +331,7 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 
 	// Warn in-game admins if configured
 	if p.getBoolConfig("warn_in_game_admins") {
-		if err := p.warnInGameAdmins(event.PlayerName, event.Message); err != nil {
+		if err := p.warnInGameAdmins(event.PlayerName, reason, onlineAdmins); err != nil {
 			p.apis.LogAPI.Error("Failed to warn in-game admins", err, map[string]interface{}{
 				"player": event.PlayerName,
 			})
@@ -334,7 +341,7 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 	p.apis.LogAPI.Info("Processed admin request", map[string]interface{}{
 		"player":       event.PlayerName,
 		"message":      event.Message,
-		"onlineAdmins": onlineAdmins,
+		"onlineAdmins": len(onlineAdmins),
 	})
 
 	return nil
@@ -343,7 +350,7 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 // isAdminRequest checks if a message is an admin request
 func (p *DiscordAdminRequestPlugin) isAdminRequest(message string) bool {
 	message = strings.ToLower(strings.TrimSpace(message))
-	return strings.HasPrefix(message, "!admin") || strings.Contains(message, "admin help") || strings.Contains(message, "need admin")
+	return strings.HasPrefix(message, "!admin")
 }
 
 // shouldIgnoreChat checks if we should ignore this chat type
@@ -358,7 +365,7 @@ func (p *DiscordAdminRequestPlugin) shouldIgnoreChat(chatType string) bool {
 }
 
 // sendAdminRequestNotification sends the Discord notification
-func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plugin_manager.ServerInfo, playerName, steamID, message string, onlineAdmins int) error {
+func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plugin_manager.ServerInfo, playerName, steamID, message string, onlineAdmins []string) error {
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
 		return fmt.Errorf("channel_id not configured")
@@ -408,12 +415,12 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 			},
 			{
 				Name:   "Reason",
-				Value:  strings.ReplaceAll(message, "!admin", ""),
+				Value:  message,
 				Inline: false,
 			},
 			{
 				Name:   "Online Admins",
-				Value:  fmt.Sprintf("%d", onlineAdmins),
+				Value:  fmt.Sprintf("%d", len(onlineAdmins)),
 				Inline: false,
 			},
 		},
@@ -453,38 +460,28 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 }
 
 // sendInGameResponse sends a response to the player in-game
-func (p *DiscordAdminRequestPlugin) sendInGameResponse(playerSteamID string, onlineAdmins int) error {
+func (p *DiscordAdminRequestPlugin) sendInGameResponse(playerSteamID string, onlineAdmins []string) error {
 	if !p.getBoolConfig("show_in_game_admins") {
 		return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, "An admin has been notified. Please wait for us to get back to you.")
 	}
 
-	if onlineAdmins == 0 {
+	if len(onlineAdmins) == 0 {
 		return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, "There are no in-game admins, however, an admin has been notified via Discord. Please wait for us to get back to you.")
 	}
 
-	return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, fmt.Sprintf("There are %d in-game admin(s). Please wait for us to get back to you.", onlineAdmins))
+	return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, fmt.Sprintf("There are %d in-game admin(s). Please wait for us to get back to you.", len(onlineAdmins)))
 }
 
 // warnInGameAdmins sends a warning to in-game admins
-func (p *DiscordAdminRequestPlugin) warnInGameAdmins(playerName, message string) error {
+func (p *DiscordAdminRequestPlugin) warnInGameAdmins(playerName, message string, onlineAdminSteamIDs []string) error {
 	adminMessage := fmt.Sprintf("[%s] %s", playerName, message)
 
-	// Get online admins and send them individual messages
-	admins, err := p.apis.ServerAPI.GetAdmins()
-	if err != nil {
-		p.apis.LogAPI.Error("Failed to get admins", err, nil)
-		return nil
-	}
-
-	// Send to each online admin individually
-	for _, admin := range admins {
-		if admin.IsOnline {
-			if err := p.apis.RconAPI.SendWarningToPlayer(admin.SteamID, adminMessage); err != nil {
-				p.apis.LogAPI.Error("Failed to send warning to admin", err, map[string]interface{}{
-					"adminID":   admin.SteamID,
-					"adminName": admin.Name,
-				})
-			}
+	// Send to each online admin individually using their Steam IDs
+	for _, steamID := range onlineAdminSteamIDs {
+		if err := p.apis.RconAPI.SendWarningToPlayer(steamID, adminMessage); err != nil {
+			p.apis.LogAPI.Error("Failed to send warning to admin", err, map[string]interface{}{
+				"adminID": steamID,
+			})
 		}
 	}
 
