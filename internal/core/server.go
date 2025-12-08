@@ -174,9 +174,6 @@ func GetServerRoles(ctx context.Context, database db.Executor, serverId uuid.UUI
 			return nil, err
 		}
 		role.Permissions = strings.Split(permissionsStr, ",")
-		if err != nil {
-			return nil, err
-		}
 		roles = append(roles, &role)
 	}
 
@@ -210,9 +207,6 @@ func GetServerAdminRoles(ctx context.Context, database db.Executor, serverId uui
 			return nil, err
 		}
 		role.Permissions = strings.Split(permissionsStr, ",")
-		if err != nil {
-			return nil, err
-		}
 		roles = append(roles, &role)
 	}
 

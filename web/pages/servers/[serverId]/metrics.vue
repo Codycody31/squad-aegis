@@ -7,25 +7,44 @@
           Performance metrics, player statistics, and server analytics
         </p>
       </div>
-      <div class="flex items-center space-x-2">
-        <Select
-          :model-value="selectedPeriod"
-          @update:model-value="(value: AcceptableValue) => { if (typeof value === 'string') { selectedPeriod = value; fetchMetrics(); } }"
-          class="px-3 py-2 border rounded-md"
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Select a period" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="1h">Last 1 Hour</SelectItem>
-              <SelectItem value="6h">Last 6 Hours</SelectItem>
-              <SelectItem value="24h">Last 24 Hours</SelectItem>
-              <SelectItem value="7d">Last 7 Days</SelectItem>
-              <SelectItem value="30d">Last 30 Days</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:space-x-2">
+        <div class="flex items-center space-x-2">
+          <Select
+            v-if="!useCustomRange"
+            :model-value="selectedPeriod"
+            @update:model-value="(value: AcceptableValue) => { if (typeof value === 'string') { selectedPeriod = value; fetchMetrics(); } }"
+            class="px-3 py-2 border rounded-md"
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select a period" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="1h">Last 1 Hour</SelectItem>
+                <SelectItem value="6h">Last 6 Hours</SelectItem>
+                <SelectItem value="24h">Last 24 Hours</SelectItem>
+                <SelectItem value="7d">Last 7 Days</SelectItem>
+                <SelectItem value="30d">Last 30 Days</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <DateRangePicker
+            v-if="useCustomRange"
+            v-model="customDateRange"
+            @update:model-value="(value) => { customDateRange = value; if (value?.start && value?.end) { fetchMetrics(); } }"
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="useCustomRange = !useCustomRange"
+            :title="useCustomRange ? 'Switch to period selector' : 'Switch to custom date range'"
+          >
+            <Icon
+              :name="useCustomRange ? 'mdi:calendar-clock' : 'mdi:calendar-range'"
+              class="h-4 w-4"
+            />
+          </Button>
+        </div>
         <Button variant="outline" size="sm" @click="fetchMetrics">
           <Icon name="mdi:refresh" class="h-4 w-4 mr-2" />
           Refresh
@@ -434,6 +453,7 @@ import {
   SelectGroup,
   SelectItem,
 } from "~/components/ui/select";
+import { DateRangePicker } from "~/components/ui/date-range-picker";
 
 // Simple chart components (placeholder implementations)
 import PlayerCountChart from "~/components/charts/PlayerCountChart.vue";
@@ -461,6 +481,8 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const metrics = ref<any>(null);
 const selectedPeriod = ref("24h");
+const useCustomRange = ref(false);
+const customDateRange = ref<{ start: Date | null; end: Date | null } | null>(null);
 
 // Computed data
 const recentMaps = computed(() => {
@@ -503,28 +525,62 @@ const fetchMetrics = async () => {
       throw new Error("Authentication required");
     }
 
-    // Calculate appropriate interval based on period for higher fidelity
-    let interval = 15; // default
-    switch (selectedPeriod.value) {
-      case "1h":
-        interval = 1; // 1 minute intervals for 1 hour
-        break;
-      case "6h":
-        interval = 5; // 5 minute intervals for 6 hours
-        break;
-      case "24h":
-        interval = 15; // 15 minute intervals for 24 hours
-        break;
-      case "7d":
-        interval = 120; // 2 hour intervals for 7 days
-        break;
-      case "30d":
-        interval = 720; // 12 hour intervals for 30 days
-        break;
+    // Build query parameters
+    let url = `${runtimeConfig.public.backendApi}/servers/${serverId}/metrics/history`;
+    const params = new URLSearchParams();
+
+    if (useCustomRange.value && customDateRange.value?.start && customDateRange.value?.end) {
+      // Use custom date range
+      const startTime = customDateRange.value.start.toISOString();
+      const endTime = customDateRange.value.end.toISOString();
+      params.append("startTime", startTime);
+      params.append("endTime", endTime);
+
+      // Calculate interval based on date range duration
+      const daysDiff = (customDateRange.value.end.getTime() - customDateRange.value.start.getTime()) / (1000 * 60 * 60 * 24);
+      let interval = 15; // default
+      if (daysDiff <= 1) {
+        interval = 1; // 1 minute intervals for <= 1 day
+      } else if (daysDiff <= 7) {
+        interval = 5; // 5 minute intervals for <= 7 days
+      } else if (daysDiff <= 30) {
+        interval = 15; // 15 minute intervals for <= 30 days
+      } else if (daysDiff <= 60) {
+        interval = 120; // 2 hour intervals for <= 60 days
+      } else {
+        interval = 720; // 12 hour intervals for > 60 days
+      }
+      params.append("interval", interval.toString());
+    } else {
+      // Use period selector
+      params.append("period", selectedPeriod.value);
+      
+      // Calculate appropriate interval based on period for higher fidelity
+      let interval = 15; // default
+      switch (selectedPeriod.value) {
+        case "1h":
+          interval = 1; // 1 minute intervals for 1 hour
+          break;
+        case "6h":
+          interval = 5; // 5 minute intervals for 6 hours
+          break;
+        case "24h":
+          interval = 15; // 15 minute intervals for 24 hours
+          break;
+        case "7d":
+          interval = 120; // 2 hour intervals for 7 days
+          break;
+        case "30d":
+          interval = 720; // 12 hour intervals for 30 days
+          break;
+      }
+      params.append("interval", interval.toString());
     }
 
+    url += `?${params.toString()}`;
+
     const { data, error: fetchError } = await useFetch(
-      `${runtimeConfig.public.backendApi}/servers/${serverId}/metrics/history?period=${selectedPeriod.value}&interval=${interval}`,
+      url,
       {
         method: "GET",
         headers: {
