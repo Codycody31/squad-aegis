@@ -17,6 +17,9 @@
 
 ### Misc
 
+- refactor(metrics): implement custom date range selection for server metrics and enhance metrics fetching logic ([2564a05](https://github.com/Codycody31/squad-aegis/commit/2564a05e0937df7a1802fae565d4dc83b940d7dd))
+- feat(server-roles): add is_admin flag to server roles and update role management functionality ([d3807b2](https://github.com/Codycody31/squad-aegis/commit/d3807b23a1c4d379db1b05c3dcfee91821ccf3d0))
+- docs(plugins): add auto-warn-sl-wrong-kit & kill-broadcast ([e72171a](https://github.com/Codycody31/squad-aegis/commit/e72171a54f19ea6cd0daac6719a9649b0a1651a4))
 - feat(plugin): add Kill Broadcast plugin to announce player kills ([d2be527](https://github.com/Codycody31/squad-aegis/commit/d2be527ee7a72b3a52c96f9fdfd8f1d7c934cc20))
 - feat(plugin): add functionality to remove players from squad without kicking ([c491995](https://github.com/Codycody31/squad-aegis/commit/c491995a9d534edf789083a041e7fe4de6cf9ca4))
 - feat(plugin): add Auto Kick SL Wrong Kit plugin and enhance PlayerInfo structure ([d00f111](https://github.com/Codycody31/squad-aegis/commit/d00f1116c758b66cbde7425e51a249dc0ffb8819))
