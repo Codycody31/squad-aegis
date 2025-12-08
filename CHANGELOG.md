@@ -1,10 +1,10 @@
 # Changelog
 
-## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-07
+## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-08
 
 ### ❤️ Thanks to all contributors! ❤️
 
-@Codycody31
+@Codycody31, @Insidious Fiddler
 
 ### 📈 Enhancement
 
@@ -17,6 +17,7 @@
 
 ### Misc
 
+- refactor(discord-admin-requests): improve admin request handling ([54e1ae4](https://github.com/Codycody31/squad-aegis/commit/54e1ae4ad2684cb53837256f094931e4f9d07224))
 - chore: make pages mobile & desktop friendly [[#122](https://github.com/Codycody31/squad-aegis/pull/122)]
 
 ## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-12-03
