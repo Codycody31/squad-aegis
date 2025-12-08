@@ -21,6 +21,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_squad_created"
 	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
+	"go.codycody31.dev/squad-aegis/internal/plugins/kill_broadcast"
 	"go.codycody31.dev/squad-aegis/internal/plugins/rule_lookup"
 	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
 	"go.codycody31.dev/squad-aegis/internal/plugins/server_seeder_whitelist"
@@ -168,6 +169,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Rule Lookup plugin
 	if err := pm.RegisterPlugin(rule_lookup.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Rule Lookup plugin")
+		return err
+	}
+
+	// Register Kill Broadcast plugin
+	if err := pm.RegisterPlugin(kill_broadcast.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Kill Broadcast plugin")
 		return err
 	}
 
