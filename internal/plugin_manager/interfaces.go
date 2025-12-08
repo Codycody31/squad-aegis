@@ -347,6 +347,7 @@ type PlayerInfo struct {
 	EOSID         string `json:"eos_id"`
 	TeamID        int    `json:"team_id"`
 	SquadID       int    `json:"squad_id"`
+	Role          string `json:"role"`
 	IsSquadLeader bool   `json:"is_squad_leader"`
 	IsAdmin       bool   `json:"is_admin"`
 	IsOnline      bool   `json:"is_online"`

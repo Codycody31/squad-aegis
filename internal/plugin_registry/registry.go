@@ -6,6 +6,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugins/auto_kick_unassigned"
 	"go.codycody31.dev/squad-aegis/internal/plugins/auto_tk_warn"
+	"go.codycody31.dev/squad-aegis/internal/plugins/auto_warn_sl_wrong_kit"
 	"go.codycody31.dev/squad-aegis/internal/plugins/cbl_info"
 	"go.codycody31.dev/squad-aegis/internal/plugins/chat_commands"
 	"go.codycody31.dev/squad-aegis/internal/plugins/command_scheduler"
@@ -41,6 +42,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Auto Kick Unassigned plugin
 	if err := pm.RegisterPlugin(auto_kick_unassigned.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Auto Kick Unassigned plugin")
+		return err
+	}
+
+	// Register Auto Kick SL Wrong Kit plugin
+	if err := pm.RegisterPlugin(auto_warn_sl_wrong_kit.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Auto Kick SL Wrong Kit plugin")
 		return err
 	}
 
