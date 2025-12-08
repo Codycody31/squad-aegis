@@ -610,6 +610,24 @@ func (api *rconAPI) KickPlayer(playerID string, reason string) error {
 	return nil
 }
 
+func (api *rconAPI) RemovePlayerFromSquad(playerID string) error {
+	command := fmt.Sprintf("AdminRemovePlayerFromSquad \"%s\"", playerID)
+	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
+	if err != nil {
+		return fmt.Errorf("failed to remove player from squad: %w", err)
+	}
+	return nil
+}
+
+func (api *rconAPI) RemovePlayerFromSquadById(playerID string) error {
+	command := fmt.Sprintf("AdminRemovePlayerFromSquadById \"%s\"", playerID)
+	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
+	if err != nil {
+		return fmt.Errorf("failed to remove player from squad: %w", err)
+	}
+	return nil
+}
+
 func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Duration) error {
 	// Convert duration to days for Squad's ban system
 	durationDays := int(duration.Hours() / 24)

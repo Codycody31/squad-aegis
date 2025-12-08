@@ -246,6 +246,12 @@ type RconAPI interface {
 
 	// BanPlayer bans a player (admin only)
 	BanPlayer(playerID string, reason string, duration time.Duration) error
+
+	// RemovePlayerFromSquad removes a player from their squad without kicking them
+	RemovePlayerFromSquad(playerID string) error
+
+	// RemovePlayerFromSquadById removes a player from their squad by player ID without kicking them
+	RemovePlayerFromSquadById(playerID string) error
 }
 
 // AdminAPI provides admin management functionality to plugins

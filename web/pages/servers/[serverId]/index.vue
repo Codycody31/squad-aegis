@@ -815,7 +815,31 @@ refresh();
                                         : ""
                                 }}
                             </h3>
-                            <p class="text-sm text-muted-foreground">
+                            <div
+                                v-if="
+                                    serverInfo.metrics?.current?.factions
+                                "
+                                class="text-sm text-muted-foreground mt-2 space-y-1"
+                            >
+                                <div
+                                    v-if="serverInfo.metrics?.current?.factions[0]"
+                                    class="flex items-center justify-center gap-2"
+                                >
+                                    <Badge variant="outline">
+                                        {{ serverInfo.metrics.current.factions[0] }}
+                                    </Badge>
+                                    <span class="text-xs">vs</span>
+                                    <Badge
+                                        v-if="
+                                            serverInfo.metrics?.current?.factions[1]
+                                        "
+                                        variant="outline"
+                                    >
+                                        {{ serverInfo.metrics.current.factions[1] }}
+                                    </Badge>
+                                </div>
+                            </div>
+                            <p class="text-sm text-muted-foreground mt-2">
                                 <template
                                     v-if="
                                         rconServerInfo?.match_timeout * 60 -

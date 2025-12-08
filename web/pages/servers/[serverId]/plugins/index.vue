@@ -1145,8 +1145,8 @@ onMounted(async () => {
                                             class="flex items-center space-x-2"
                                         >
                                             <Switch
-                                                :checked="!!item"
-                                                @update:checked="
+                                                :modelValue="!!item"
+                                                @update:modelValue="
                                                     (checked: boolean) =>
                                                         updateArrayBool(
                                                             field.name,
@@ -1275,14 +1275,14 @@ onMounted(async () => {
                                             >
                                                 <Switch
                                                     :id="`config-${field.name}-${nestedField.name}`"
-                                                    :checked="
+                                                    :modelValue="
                                                         !!(pluginConfig[
                                                             field.name
                                                         ] || {})[
                                                             nestedField.name
                                                         ]
                                                     "
-                                                    @update:checked="
+                                                    @update:modelValue="
                                                         (checked: boolean) => {
                                                             pluginConfig[
                                                                 field.name
@@ -1402,12 +1402,12 @@ onMounted(async () => {
                                                 >
                                                     <Switch
                                                         :id="`config-${field.name}-${index}-${nestedField.name}`"
-                                                        :checked="
+                                                        :modelValue="
                                                             !!item[
                                                                 nestedField.name
                                                             ]
                                                         "
-                                                        @update:checked="
+                                                        @update:modelValue="
                                                             (
                                                                 checked: boolean,
                                                             ) =>
@@ -1525,9 +1525,8 @@ onMounted(async () => {
                                 </TableCell>
                                 <TableCell class="hidden md:table-cell">
                                     <Switch
-                                        :checked="plugin.enabled"
-                                        :model-value="plugin.enabled"
-                                        @update:model-value="
+                                        :modelValue="plugin.enabled"
+                                        @update:modelValue="
                                             (newState: boolean) =>
                                                 togglePlugin(plugin, newState)
                                         "
@@ -1797,8 +1796,8 @@ onMounted(async () => {
                                 class="flex items-center space-x-2"
                             >
                                 <Switch
-                                    :checked="!!item"
-                                    @update:checked="
+                                    :modelValue="!!item"
+                                    @update:modelValue="
                                         (checked: boolean) =>
                                             updateArrayBool(
                                                 field.name,
@@ -1890,12 +1889,12 @@ onMounted(async () => {
                                 >
                                     <Switch
                                         :id="`edit-config-${field.name}-${nestedField.name}`"
-                                        :checked="
+                                        :modelValue="
                                             !!(pluginConfig[field.name] || {})[
                                                 nestedField.name
                                             ]
                                         "
-                                        @update:checked="
+                                        @update:modelValue="
                                             (checked: boolean) => {
                                                 pluginConfig[field.name] =
                                                     pluginConfig[field.name] ||
@@ -1964,6 +1963,12 @@ onMounted(async () => {
                                             >*</span
                                         >
                                     </Label>
+                                    <p
+                                        v-if="nestedField.description"
+                                        class="text-sm text-muted-foreground"
+                                    >
+                                        {{ nestedField.description }}
+                                    </p>
 
                                     <Input
                                         v-if="nestedField.type === 'string'"
@@ -1983,8 +1988,8 @@ onMounted(async () => {
                                     >
                                         <Switch
                                             :id="`edit-config-${field.name}-${index}-${nestedField.name}`"
-                                            :checked="!!item[nestedField.name]"
-                                            @update:checked="
+                                            :modelValue="!!item[nestedField.name]"
+                                            @update:modelValue="
                                                 (checked: boolean) =>
                                                     (item[nestedField.name] =
                                                         checked)
@@ -1998,6 +2003,93 @@ onMounted(async () => {
                                                 )
                                             }}</Label
                                         >
+                                    </div>
+                                    <!-- Array of strings within nested object -->
+                                    <div
+                                        v-else-if="
+                                            nestedField.type === 'arraystring' ||
+                                            nestedField.type === 'array_string'
+                                        "
+                                        class="space-y-2"
+                                    >
+                                        <div
+                                            v-for="(arrayItem, arrayIndex) in (item[nestedField.name] || [])"
+                                            :key="arrayIndex"
+                                            class="flex items-center gap-2"
+                                        >
+                                            <Input
+                                                :id="`edit-config-${field.name}-${index}-${nestedField.name}-${arrayIndex}`"
+                                                v-model="item[nestedField.name][arrayIndex]"
+                                                type="text"
+                                                :placeholder="`${normalizeFieldName(nestedField.name)} ${arrayIndex + 1}`"
+                                                class="flex-1"
+                                            />
+                                            <Button
+                                                variant="outline"
+                                                size="icon"
+                                                @click="
+                                                    item[nestedField.name].splice(arrayIndex, 1)
+                                                "
+                                            >
+                                                <X class="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            @click="
+                                                if (!item[nestedField.name]) {
+                                                    item[nestedField.name] = [];
+                                                }
+                                                item[nestedField.name].push('');
+                                            "
+                                            class="w-full"
+                                        >
+                                            <Plus class="w-4 h-4 mr-2" />
+                                            Add {{ normalizeFieldName(nestedField.name) }}
+                                        </Button>
+                                    </div>
+                                    <!-- Array of integers within nested object -->
+                                    <div
+                                        v-else-if="nestedField.type === 'arrayint'"
+                                        class="space-y-2"
+                                    >
+                                        <div
+                                            v-for="(arrayItem, arrayIndex) in (item[nestedField.name] || [])"
+                                            :key="arrayIndex"
+                                            class="flex items-center gap-2"
+                                        >
+                                            <Input
+                                                :id="`edit-config-${field.name}-${index}-${nestedField.name}-${arrayIndex}`"
+                                                v-model.number="item[nestedField.name][arrayIndex]"
+                                                type="number"
+                                                :placeholder="`${normalizeFieldName(nestedField.name)} ${arrayIndex + 1}`"
+                                                class="flex-1"
+                                            />
+                                            <Button
+                                                variant="outline"
+                                                size="icon"
+                                                @click="
+                                                    item[nestedField.name].splice(arrayIndex, 1)
+                                                "
+                                            >
+                                                <X class="w-4 h-4" />
+                                            </Button>
+                                        </div>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            @click="
+                                                if (!item[nestedField.name]) {
+                                                    item[nestedField.name] = [];
+                                                }
+                                                item[nestedField.name].push(0);
+                                            "
+                                            class="w-full"
+                                        >
+                                            <Plus class="w-4 h-4 mr-2" />
+                                            Add {{ normalizeFieldName(nestedField.name) }}
+                                        </Button>
                                     </div>
                                 </div>
                             </div>
