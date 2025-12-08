@@ -139,6 +139,7 @@ func (api *serverAPI) GetPlayers() ([]*PlayerInfo, error) {
 			TeamID:        player.TeamId,
 			SquadID:       player.SquadId,
 			IsSquadLeader: player.IsSquadLeader,
+			Role:          player.Role,
 			IsAdmin:       false, // We'll determine this separately
 			IsOnline:      true,
 		})
