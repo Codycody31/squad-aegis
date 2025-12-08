@@ -573,10 +573,6 @@ async function executeDisbandSquad() {
                                                 </Button>
                                             </div>
                                         </CardTitle>
-                                        <div class="text-sm opacity-70">
-                                            Leader:
-                                            {{ getSquadLeaderName(squad) }}
-                                        </div>
                                         <div class="mt-2">
                                             <Progress
                                                 :modelValue="

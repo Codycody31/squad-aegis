@@ -228,6 +228,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				serverGroup.GET("/roles", server.ServerRolesList)
 				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)
+				serverGroup.PUT("/roles/:roleId", server.AuthIsSuperAdmin(), server.ServerRolesUpdate)
 				serverGroup.DELETE("/roles/:roleId", server.AuthIsSuperAdmin(), server.ServerRolesRemove)
 
 				serverGroup.GET("/admins", server.ServerAdminsList)

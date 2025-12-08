@@ -85,8 +85,40 @@ func (s *Server) ServerMetricsHistory(c *gin.Context) {
 		interval = 60
 	}
 
+	// Parse optional startTime and endTime query parameters (ISO 8601 format)
+	var startTime, endTime time.Time
+	startTimeStr := c.Query("startTime")
+	endTimeStr := c.Query("endTime")
+
+	if startTimeStr != "" && endTimeStr != "" {
+		// Parse ISO 8601 format
+		startTime, err = time.Parse(time.RFC3339, startTimeStr)
+		if err != nil {
+			responses.BadRequest(c, "Invalid startTime format", &gin.H{"error": "startTime must be in RFC3339 format (e.g., 2024-01-01T00:00:00Z)"})
+			return
+		}
+
+		endTime, err = time.Parse(time.RFC3339, endTimeStr)
+		if err != nil {
+			responses.BadRequest(c, "Invalid endTime format", &gin.H{"error": "endTime must be in RFC3339 format (e.g., 2024-01-01T00:00:00Z)"})
+			return
+		}
+
+		// Validate that endTime is after startTime
+		if endTime.Before(startTime) || endTime.Equal(startTime) {
+			responses.BadRequest(c, "Invalid time range", &gin.H{"error": "endTime must be after startTime"})
+			return
+		}
+
+		// Validate that the range is not too large (max 1 year)
+		if endTime.Sub(startTime) > 365*24*time.Hour {
+			responses.BadRequest(c, "Time range too large", &gin.H{"error": "Time range cannot exceed 1 year"})
+			return
+		}
+	}
+
 	// Get real metrics from ClickHouse
-	metricsData, err := s.getMetricsFromClickHouse(c.Request.Context(), serverId, period, interval)
+	metricsData, err := s.getMetricsFromClickHouse(c.Request.Context(), serverId, period, interval, startTime, endTime)
 	if err != nil {
 		responses.BadRequest(c, "Failed to fetch metrics", &gin.H{"error": err.Error()})
 		return
@@ -98,7 +130,7 @@ func (s *Server) ServerMetricsHistory(c *gin.Context) {
 }
 
 // getMetricsFromClickHouse retrieves real metrics data from ClickHouse
-func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUID, period string, interval int) (ServerMetricsData, error) {
+func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUID, period string, interval int, customStartTime, customEndTime time.Time) (ServerMetricsData, error) {
 	// Access ClickHouse client through PluginManager
 	if s.Dependencies.PluginManager == nil {
 		return s.generateSampleMetrics(period, interval), nil
@@ -109,22 +141,31 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		return s.generateSampleMetrics(period, interval), nil
 	}
 
-	// Calculate time range based on period
+	// Calculate time range - use custom times if provided, otherwise use period
 	now := time.Now()
-	var startTime time.Time
-	switch period {
-	case "1h":
-		startTime = now.Add(-1 * time.Hour)
-	case "6h":
-		startTime = now.Add(-6 * time.Hour)
-	case "24h":
-		startTime = now.Add(-24 * time.Hour)
-	case "7d":
-		startTime = now.Add(-7 * 24 * time.Hour)
-	case "30d":
-		startTime = now.Add(-30 * 24 * time.Hour)
-	default:
-		startTime = now.Add(-24 * time.Hour)
+	var startTime, endTime time.Time
+
+	if !customStartTime.IsZero() && !customEndTime.IsZero() {
+		// Use custom time range
+		startTime = customStartTime
+		endTime = customEndTime
+	} else {
+		// Calculate time range based on period
+		endTime = now
+		switch period {
+		case "1h":
+			startTime = now.Add(-1 * time.Hour)
+		case "6h":
+			startTime = now.Add(-6 * time.Hour)
+		case "24h":
+			startTime = now.Add(-24 * time.Hour)
+		case "7d":
+			startTime = now.Add(-7 * 24 * time.Hour)
+		case "30d":
+			startTime = now.Add(-30 * 24 * time.Hour)
+		default:
+			startTime = now.Add(-24 * time.Hour)
+		}
 	}
 
 	// Query ClickHouse for real metrics data
@@ -194,7 +235,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		}
 	}
 
-	rows, err := clickhouseClient.Query(ctx, playerCountQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err := clickhouseClient.Query(ctx, playerCountQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player count metrics from ClickHouse")
 		return s.generateSampleMetrics(period, interval), nil
@@ -232,7 +273,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
-	rows, err = clickhouseClient.Query(ctx, queueCountQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, queueCountQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query queue count metrics from ClickHouse")
 	} else {
@@ -264,7 +305,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		ORDER BY timestamp ASC
 	`
 
-	rows, err = clickhouseClient.Query(ctx, tickRateQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, tickRateQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query tick rate metrics from ClickHouse")
 	} else {
@@ -298,7 +339,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store chat activity data
 	chatDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, chatQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, chatQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query chat activity metrics from ClickHouse")
 	} else {
@@ -315,7 +356,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the chat activity data with 0s for missing intervals
-	metricsData.ChatActivity = fillTimeSeriesGaps(startTime, now, intervalMinutes, chatDataMap)
+	metricsData.ChatActivity = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, chatDataMap)
 
 	// Query connection metrics - combine both connected and disconnected events
 	connectionQuery := `
@@ -355,8 +396,8 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	// Create a map to store connection data
 	connectionDataMap := make(map[int64]int)
 	rows, err = clickhouseClient.Query(ctx, connectionQuery,
-		intervalMinutes, serverId, startTime, now, intervalMinutes,
-		intervalMinutes, serverId, startTime, now, intervalMinutes)
+		intervalMinutes, serverId, startTime, endTime, intervalMinutes,
+		intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query connection metrics from ClickHouse")
 	} else {
@@ -374,7 +415,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the connection data with 0s for missing intervals
-	metricsData.ConnectionStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, connectionDataMap)
+	metricsData.ConnectionStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, connectionDataMap)
 
 	// Query teamkill metrics
 	teamkillQuery := `
@@ -392,7 +433,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store teamkill data
 	teamkillDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, teamkillQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, teamkillQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query teamkill metrics from ClickHouse")
 	} else {
@@ -409,7 +450,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the teamkill data with 0s for missing intervals
-	metricsData.TeamkillStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, teamkillDataMap)
+	metricsData.TeamkillStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, teamkillDataMap)
 
 	// Query player wounded metrics
 	playerWoundedQuery := `
@@ -426,7 +467,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store player wounded data
 	playerWoundedDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, playerWoundedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, playerWoundedQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player wounded metrics from ClickHouse")
 	} else {
@@ -443,7 +484,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the player wounded data with 0s for missing intervals
-	metricsData.PlayerWoundedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerWoundedDataMap)
+	metricsData.PlayerWoundedStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, playerWoundedDataMap)
 
 	// Query player revived metrics
 	playerRevivedQuery := `
@@ -460,7 +501,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store player revived data
 	playerRevivedDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, playerRevivedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, playerRevivedQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player revived metrics from ClickHouse")
 	} else {
@@ -477,7 +518,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the player revived data with 0s for missing intervals
-	metricsData.PlayerRevivedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerRevivedDataMap)
+	metricsData.PlayerRevivedStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, playerRevivedDataMap)
 
 	// Query player possess metrics
 	playerPossessQuery := `
@@ -494,7 +535,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store player possess data
 	playerPossessDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, playerPossessQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, playerPossessQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player possess metrics from ClickHouse")
 	} else {
@@ -511,7 +552,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the player possess data with 0s for missing intervals
-	metricsData.PlayerPossessStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerPossessDataMap)
+	metricsData.PlayerPossessStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, playerPossessDataMap)
 
 	// Query player died metrics (non-teamkill deaths)
 	playerDiedQuery := `
@@ -528,7 +569,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store player died data
 	playerDiedDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, playerDiedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, playerDiedQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player died metrics from ClickHouse")
 	} else {
@@ -545,7 +586,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the player died data with 0s for missing intervals
-	metricsData.PlayerDiedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerDiedDataMap)
+	metricsData.PlayerDiedStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, playerDiedDataMap)
 
 	// Query player damaged metrics
 	playerDamagedQuery := `
@@ -562,7 +603,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store player damaged data
 	playerDamagedDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, playerDamagedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, playerDamagedQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query player damaged metrics from ClickHouse")
 	} else {
@@ -579,7 +620,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the player damaged data with 0s for missing intervals
-	metricsData.PlayerDamagedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, playerDamagedDataMap)
+	metricsData.PlayerDamagedStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, playerDamagedDataMap)
 
 	// Query deployable damaged metrics
 	deployableDamagedQuery := `
@@ -596,7 +637,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store deployable damaged data
 	deployableDamagedDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, deployableDamagedQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, deployableDamagedQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query deployable damaged metrics from ClickHouse")
 	} else {
@@ -613,7 +654,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the deployable damaged data with 0s for missing intervals
-	metricsData.DeployableDamagedStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, deployableDamagedDataMap)
+	metricsData.DeployableDamagedStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, deployableDamagedDataMap)
 
 	// Query admin broadcast metrics
 	adminBroadcastQuery := `
@@ -630,7 +671,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store admin broadcast data
 	adminBroadcastDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, adminBroadcastQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, adminBroadcastQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query admin broadcast metrics from ClickHouse")
 	} else {
@@ -647,7 +688,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the admin broadcast data with 0s for missing intervals
-	metricsData.AdminBroadcastStats = fillTimeSeriesGaps(startTime, now, intervalMinutes, adminBroadcastDataMap)
+	metricsData.AdminBroadcastStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, adminBroadcastDataMap)
 
 	// Query rounds data from unified game events (ROUND_ENDED events)
 	roundsQuery := `
@@ -665,7 +706,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 
 	// Create a map to store rounds data
 	roundsDataMap := make(map[int64]int)
-	rows, err = clickhouseClient.Query(ctx, roundsQuery, intervalMinutes, serverId, startTime, now, intervalMinutes)
+	rows, err = clickhouseClient.Query(ctx, roundsQuery, intervalMinutes, serverId, startTime, endTime, intervalMinutes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query rounds metrics from ClickHouse")
 	} else {
@@ -682,7 +723,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	}
 
 	// Fill in the rounds data with 0s for missing intervals
-	metricsData.Rounds = fillTimeSeriesGaps(startTime, now, intervalMinutes, roundsDataMap)
+	metricsData.Rounds = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, roundsDataMap)
 
 	// Query map data from ROUND_ENDED events to get completed games
 	mapsQuery := `
@@ -701,7 +742,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		LIMIT 10
 	`
 
-	rows, err = clickhouseClient.Query(ctx, mapsQuery, serverId, startTime, now)
+	rows, err = clickhouseClient.Query(ctx, mapsQuery, serverId, startTime, endTime)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query maps data from ClickHouse")
 	} else {

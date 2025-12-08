@@ -153,7 +153,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 
 func GetServerRoles(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]*models.ServerRole, error) {
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-	sql, args, err := psql.Select("*").From("server_roles").Where(squirrel.Eq{"server_id": serverId}).ToSql()
+	sql, args, err := psql.Select("id", "server_id", "name", "permissions", "is_admin", "created_at").From("server_roles").Where(squirrel.Eq{"server_id": serverId}).ToSql()
 	if err != nil {
 		return nil, err
 	}
@@ -169,14 +169,44 @@ func GetServerRoles(ctx context.Context, database db.Executor, serverId uuid.UUI
 	for rows.Next() {
 		var role models.ServerRole
 		var permissionsStr string
-		err = rows.Scan(&role.Id, &role.ServerId, &role.Name, &permissionsStr, &role.CreatedAt)
+		err = rows.Scan(&role.Id, &role.ServerId, &role.Name, &permissionsStr, &role.IsAdmin, &role.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
 		role.Permissions = strings.Split(permissionsStr, ",")
+		roles = append(roles, &role)
+	}
+
+	return roles, nil
+}
+
+// GetServerAdminRoles retrieves only roles where is_admin = true
+func GetServerAdminRoles(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]*models.ServerRole, error) {
+	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+	sql, args, err := psql.Select("id", "server_id", "name", "permissions", "is_admin", "created_at").
+		From("server_roles").
+		Where(squirrel.Eq{"server_id": serverId, "is_admin": true}).
+		ToSql()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := database.QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	roles := []*models.ServerRole{}
+
+	for rows.Next() {
+		var role models.ServerRole
+		var permissionsStr string
+		err = rows.Scan(&role.Id, &role.ServerId, &role.Name, &permissionsStr, &role.IsAdmin, &role.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
+		role.Permissions = strings.Split(permissionsStr, ",")
 		roles = append(roles, &role)
 	}
 
@@ -324,14 +354,16 @@ func CleanupExpiredAdmins(ctx context.Context, database db.Executor) (int64, err
 }
 
 // GetActiveServerAdmins retrieves all active (non-expired) admins for a server
+// Only includes admins with roles where is_admin = true
 func GetActiveServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]*models.ServerAdmin, error) {
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-	sql, args, err := psql.Select("id", "server_id", "user_id", "steam_id", "server_role_id", "expires_at", "notes", "created_at").
-		From("server_admins").
-		Where(squirrel.Eq{"server_id": serverId}).
+	sql, args, err := psql.Select("sa.id", "sa.server_id", "sa.user_id", "sa.steam_id", "sa.server_role_id", "sa.expires_at", "sa.notes", "sa.created_at").
+		From("server_admins sa").
+		Join("server_roles sr ON sa.server_role_id = sr.id").
+		Where(squirrel.Eq{"sa.server_id": serverId, "sr.is_admin": true}).
 		Where(squirrel.Or{
-			squirrel.Eq{"expires_at": nil},
-			squirrel.Gt{"expires_at": time.Now()},
+			squirrel.Eq{"sa.expires_at": nil},
+			squirrel.Gt{"sa.expires_at": time.Now()},
 		}).ToSql()
 	if err != nil {
 		return nil, err
