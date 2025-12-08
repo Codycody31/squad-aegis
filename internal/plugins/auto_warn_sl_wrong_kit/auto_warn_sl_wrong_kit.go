@@ -71,6 +71,13 @@ func Define() plugin_manager.PluginDefinition {
 					Default:     "Squad Leader with wrong kit - automatically removed",
 				},
 				{
+					Name:        "should_kick",
+					Description: "If true, kick the player. If false, remove them from the squad.",
+					Required:    false,
+					Type:        plug_config_schema.FieldTypeBool,
+					Default:     false,
+				},
+				{
 					Name:        "frequency_of_warnings",
 					Description: "How often in seconds should we warn the Squad Leader about having the wrong kit?",
 					Required:    false,
@@ -567,25 +574,44 @@ func (p *AutoWarnSLWrongKitPlugin) kickLoop(tracker *PlayerTracker) {
 		p.mu.Lock()
 		stillTracked := p.trackedPlayers[tracker.Player.SteamID] != nil
 		kickMessage := p.getStringConfig("kick_message")
+		shouldKick := p.getBoolConfig("should_kick")
 		p.mu.Unlock()
 
 		if !stillTracked {
 			return // Player was removed from tracking (changed kit or left)
 		}
 
-		// Kick the player
-		if err := p.apis.RconAPI.KickPlayer(tracker.Player.SteamID, kickMessage); err != nil {
-			p.apis.LogAPI.Error("Failed to kick squad leader with wrong kit", err, map[string]interface{}{
-				"player":   tracker.Player.Name,
-				"steam_id": tracker.Player.SteamID,
-			})
+		// Take action based on configuration
+		if shouldKick {
+			// Kick the player
+			if err := p.apis.RconAPI.KickPlayer(tracker.Player.SteamID, kickMessage); err != nil {
+				p.apis.LogAPI.Error("Failed to kick squad leader with wrong kit", err, map[string]interface{}{
+					"player":   tracker.Player.Name,
+					"steam_id": tracker.Player.SteamID,
+				})
+			} else {
+				p.apis.LogAPI.Info("Kicked squad leader with wrong kit", map[string]interface{}{
+					"player":   tracker.Player.Name,
+					"steam_id": tracker.Player.SteamID,
+					"warnings": tracker.Warnings,
+					"duration": time.Since(tracker.StartTime),
+				})
+			}
 		} else {
-			p.apis.LogAPI.Info("Kicked squad leader with wrong kit", map[string]interface{}{
-				"player":   tracker.Player.Name,
-				"steam_id": tracker.Player.SteamID,
-				"warnings": tracker.Warnings,
-				"duration": time.Since(tracker.StartTime),
-			})
+			// Remove from squad
+			if err := p.apis.RconAPI.RemovePlayerFromSquadById(tracker.Player.ID); err != nil {
+				p.apis.LogAPI.Error("Failed to remove squad leader from squad", err, map[string]interface{}{
+					"player":   tracker.Player.Name,
+					"steam_id": tracker.Player.SteamID,
+				})
+			} else {
+				p.apis.LogAPI.Info("Removed squad leader from squad (wrong kit)", map[string]interface{}{
+					"player":   tracker.Player.Name,
+					"steam_id": tracker.Player.SteamID,
+					"warnings": tracker.Warnings,
+					"duration": time.Since(tracker.StartTime),
+				})
+			}
 		}
 
 		// Remove from tracking
