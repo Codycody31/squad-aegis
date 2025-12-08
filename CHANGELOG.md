@@ -17,6 +17,7 @@
 
 ### Misc
 
+- feat(plugin): add Auto Kick SL Wrong Kit plugin and enhance PlayerInfo structure ([d00f111](https://github.com/Codycody31/squad-aegis/commit/d00f1116c758b66cbde7425e51a249dc0ffb8819))
 - refactor(discord-admin-requests): improve admin request handling ([54e1ae4](https://github.com/Codycody31/squad-aegis/commit/54e1ae4ad2684cb53837256f094931e4f9d07224))
 - chore: make pages mobile & desktop friendly [[#122](https://github.com/Codycody31/squad-aegis/pull/122)]
 
