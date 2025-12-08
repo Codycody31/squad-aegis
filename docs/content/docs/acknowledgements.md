@@ -13,3 +13,5 @@ From plugin developers, rcon libraries, to log parsers, we appreciate the hard w
 - [Team-Silver-Sphere/SquadJS](https://github.com/Team-Silver-Sphere/SquadJS/tree/v4.2.0): Big thanks to Team Silver Sphere for their SquadJS project which provided a solid foundation for our log parsing logic along plenty of designs for plugins! We do our best to be feature compat with SquadJS to make a easy and simple switch.
   - License: [BSL-1.0 License](https://github.com/Team-Silver-Sphere/SquadJS/tree/v4.2.0/LICENSE)
 - [mikebjoyce/squadjs-squadlead-whitelister](https://github.com/mikebjoyce/squadjs-squadlead-whitelister): For the Squad Lead Whitelister plugin which we used as a base for our Server Seeder Whitelist plugin.
+- [magicoflolis/SquadJS-Knife-Broadcast](https://github.com/magicoflolis/SquadJS-Knife-Broadcast): For the Knife Broadcast plugin which we used as a base for our Knife Broadcast plugin.
+  - License: [MIT License](https://github.com/magicoflolis/SquadJS-Knife-Broadcast/blob/main/LICENSE)
