@@ -17,6 +17,8 @@
 
 ### Misc
 
+- feat(plugin): add Kill Broadcast plugin to announce player kills ([d2be527](https://github.com/Codycody31/squad-aegis/commit/d2be527ee7a72b3a52c96f9fdfd8f1d7c934cc20))
+- feat(plugin): add functionality to remove players from squad without kicking ([c491995](https://github.com/Codycody31/squad-aegis/commit/c491995a9d534edf789083a041e7fe4de6cf9ca4))
 - feat(plugin): add Auto Kick SL Wrong Kit plugin and enhance PlayerInfo structure ([d00f111](https://github.com/Codycody31/squad-aegis/commit/d00f1116c758b66cbde7425e51a249dc0ffb8819))
 - refactor(discord-admin-requests): improve admin request handling ([54e1ae4](https://github.com/Codycody31/squad-aegis/commit/54e1ae4ad2684cb53837256f094931e4f9d07224))
 - chore: make pages mobile & desktop friendly [[#122](https://github.com/Codycody31/squad-aegis/pull/122)]
