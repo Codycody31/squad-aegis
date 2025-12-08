@@ -51,13 +51,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeString,
 					Default:     "rule",
 				},
-				{
-					Name:        "admin_roles",
-					Description: "Array of role names that are considered admins for public broadcast (empty array allows all admin roles)",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeArrayString,
-					Default:     []interface{}{},
-				},
 			},
 		},
 
@@ -249,15 +242,7 @@ func (p *RuleLookupPlugin) lookupAndSendRule(event *event_manager.RconChatMessag
 	isAdmin := false
 	for _, admin := range admins {
 		if admin.SteamID == event.SteamID {
-			permittedRoles := plug_config_schema.GetArrayStringValue(p.config, "admin_roles")
-			for _, role := range permittedRoles {
-				for _, adminRole := range admin.Roles {
-					if role == adminRole.RoleName {
-						isAdmin = true
-						break
-					}
-				}
-			}
+			isAdmin = true
 			break
 		}
 	}

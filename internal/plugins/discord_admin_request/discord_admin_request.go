@@ -99,13 +99,6 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeBool,
 					Default:     true,
 				},
-				{
-					Name:        "admin_roles",
-					Description: "Array of role names that are considered admins for public broadcast (empty array allows all admin roles)",
-					Required:    false,
-					Type:        plug_config_schema.FieldTypeArrayString,
-					Default:     []interface{}{},
-				},
 			},
 		},
 
@@ -274,35 +267,11 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 		admins = []*plugin_manager.AdminInfo{}
 	}
 
-	permittedRoles := plug_config_schema.GetArrayStringValue(p.config, "admin_roles")
-	// Trim whitespace from the permitted roles
-	for i, role := range permittedRoles {
-		permittedRoles[i] = strings.TrimSpace(role)
-	}
 	onlineAdmins := []string{}
 	for _, admin := range admins {
-		if admin.SteamID != event.SteamID {
-			// If no permitted roles specified, count all admins
-			if len(permittedRoles) == 0 && admin.IsOnline {
-				onlineAdmins = append(onlineAdmins, admin.SteamID)
-			} else {
-				// Check if admin has any of the permitted roles
-				hasPermittedRole := false
-				for _, role := range permittedRoles {
-					for _, adminRole := range admin.Roles {
-						if role == strings.TrimSpace(adminRole.RoleName) && admin.IsOnline {
-							hasPermittedRole = true
-							break
-						}
-					}
-					if hasPermittedRole {
-						break
-					}
-				}
-				if hasPermittedRole {
-					onlineAdmins = append(onlineAdmins, admin.SteamID)
-				}
-			}
+		// Exclude the requesting player from notifications
+		if admin.SteamID != event.SteamID && admin.IsOnline {
+			onlineAdmins = append(onlineAdmins, admin.SteamID)
 		}
 	}
 

@@ -150,6 +150,7 @@ func (api *serverAPI) GetPlayers() ([]*PlayerInfo, error) {
 
 func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	// Get admins that have either a user account or are defined by steam ID only
+	// Only include admins with roles where is_admin = true
 	query := `
 		SELECT sa.id,
 		       COALESCE(u.name, 'Steam ID: ' || sa.steam_id) as name,
@@ -161,7 +162,7 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 		FROM server_admins sa
 		LEFT JOIN users u ON sa.user_id = u.id
 		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
-		WHERE sa.server_id = $1
+		WHERE sa.server_id = $1 AND sr.is_admin = true
 		ORDER BY COALESCE(u.name, 'Steam ID: ' || sa.steam_id), sr.name
 	`
 
@@ -383,12 +384,12 @@ func (api *adminAPI) GetPlayerAdminStatus(steamID string) (*PlayerAdminStatus, e
 		return nil, fmt.Errorf("invalid steam ID format: %w", err)
 	}
 
-	// Query admin roles for this player
+	// Query admin roles for this player - only include roles where is_admin = true
 	rows, err := api.db.Query(`
 		SELECT sa.id, sr.name, sa.notes, sa.expires_at, sa.created_at
 		FROM server_admins sa
 		JOIN server_roles sr ON sa.server_role_id = sr.id
-		WHERE sa.server_id = $1 AND sa.steam_id = $2
+		WHERE sa.server_id = $1 AND sa.steam_id = $2 AND sr.is_admin = true
 	`, api.serverID, steamIDInt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query admin status: %w", err)
