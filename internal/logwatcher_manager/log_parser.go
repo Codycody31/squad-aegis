@@ -269,6 +269,11 @@ func GetLogParsers() []LogParser {
 						eventManagerData.VictimTeam = victim.TeamID
 						eventManagerData.VictimSquad = victim.SquadID
 						eventManagerData.VictimName = victim.PlayerSuffix
+
+						if strings.TrimSpace(eventManagerData.VictimName) == "" {
+							eventManagerData.VictimName = victim.Name
+							eventManagerData.Victim.PlayerSuffix = victim.Name
+						}
 					}
 
 					// Get attacker by EOS ID using PlayerTracker
@@ -288,6 +293,11 @@ func GetLogParsers() []LogParser {
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
+
+						if strings.TrimSpace(eventManagerData.AttackerName) == "" {
+							eventManagerData.AttackerName = attacker.Name
+							eventManagerData.Attacker.PlayerSuffix = attacker.Name
+						}
 
 						// Update attacker's playercontroller if missing
 						if attacker.PlayerController == "" && args[8] != "" {
@@ -403,6 +413,11 @@ func GetLogParsers() []LogParser {
 						eventManagerData.VictimTeam = victim.TeamID
 						eventManagerData.VictimSquad = victim.SquadID
 						eventManagerData.VictimName = victim.PlayerSuffix
+
+						if strings.TrimSpace(eventManagerData.VictimName) == "" {
+							eventManagerData.VictimName = victim.Name
+							eventManagerData.Victim.PlayerSuffix = victim.Name
+						}
 					}
 
 					// Get attacker by EOS ID first, then by controller if not found using PlayerTracker
@@ -422,6 +437,12 @@ func GetLogParsers() []LogParser {
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
+
+						// if AttackerName is empty, try attacker.Name
+						if strings.TrimSpace(eventManagerData.AttackerName) == "" {
+							eventManagerData.AttackerName = attacker.Name
+							eventManagerData.Attacker.PlayerSuffix = attacker.Name
+						}
 					} else if attacker, exists := playerTracker.GetPlayerByController(args[5]); exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Attacker = &event_manager.PlayerInfo{
@@ -438,6 +459,12 @@ func GetLogParsers() []LogParser {
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
+
+						// if AttackerName is empty, try attacker.Name
+						if strings.TrimSpace(eventManagerData.AttackerName) == "" {
+							eventManagerData.AttackerName = attacker.Name
+							eventManagerData.Attacker.PlayerSuffix = attacker.Name
+						}
 					}
 				}
 
@@ -639,6 +666,11 @@ func GetLogParsers() []LogParser {
 						eventManagerData.VictimTeam = victim.TeamID
 						eventManagerData.VictimSquad = victim.SquadID
 						eventManagerData.VictimName = victim.PlayerSuffix
+
+						if strings.TrimSpace(eventManagerData.VictimName) == "" {
+							eventManagerData.VictimName = victim.Name
+							eventManagerData.Victim.PlayerSuffix = victim.Name
+						}
 					}
 
 					// Get attacker by EOS ID first, then by controller if not found using PlayerTracker
@@ -654,10 +686,17 @@ func GetLogParsers() []LogParser {
 							TeamID:           attacker.TeamID,
 							SquadID:          attacker.SquadID,
 						}
+
 						// Populate explicit attacker fields
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
+
+						// if AttackerName is empty, try attacker.Name
+						if strings.TrimSpace(eventManagerData.AttackerName) == "" {
+							eventManagerData.AttackerName = attacker.Name
+							eventManagerData.Attacker.PlayerSuffix = attacker.Name
+						}
 					} else if attacker, exists := playerTracker.GetPlayerByController(args[5]); exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Attacker = &event_manager.PlayerInfo{
@@ -674,6 +713,12 @@ func GetLogParsers() []LogParser {
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
+
+						// if AttackerName is empty, try attacker.Name
+						if strings.TrimSpace(eventManagerData.AttackerName) == "" {
+							eventManagerData.AttackerName = attacker.Name
+							eventManagerData.Attacker.PlayerSuffix = attacker.Name
+						}
 					}
 				}
 
