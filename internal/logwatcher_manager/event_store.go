@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
@@ -19,16 +20,19 @@ type EventStore struct {
 	mu       sync.RWMutex
 	serverID uuid.UUID
 	client   *valkeyClient.Client
-	ctx      context.Context
 }
 
 // NewEventStore creates a new Valkey-backed event store for a specific server
-func NewEventStore(ctx context.Context, serverID uuid.UUID, client *valkeyClient.Client) *EventStore {
+func NewEventStore(serverID uuid.UUID, client *valkeyClient.Client) *EventStore {
 	return &EventStore{
 		serverID: serverID,
 		client:   client,
-		ctx:      ctx,
 	}
+}
+
+// sanitizeKey URL-encodes a key component to prevent special characters from breaking the key structure
+func sanitizeKey(key string) string {
+	return url.QueryEscape(key)
 }
 
 // Key generators for different data types
@@ -37,11 +41,11 @@ func (es *EventStore) playerKey(playerID string) string {
 }
 
 func (es *EventStore) sessionKey(sessionKey string) string {
-	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:session:%s", es.serverID.String(), sessionKey)
+	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:session:%s", es.serverID.String(), sanitizeKey(sessionKey))
 }
 
 func (es *EventStore) joinRequestKey(chainID string) string {
-	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:join-request:%s", es.serverID.String(), chainID)
+	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:join-request:%s", es.serverID.String(), sanitizeKey(chainID))
 }
 
 func (es *EventStore) disconnectedKey(playerID string) string {
@@ -76,7 +80,7 @@ func (es *EventStore) StoreJoinRequest(chainID string, playerData *JoinRequestDa
 	}
 
 	// Store with 1 hour expiration
-	if err := es.client.Set(es.ctx, key, string(data), time.Hour); err != nil {
+	if err := es.client.Set(context.Background(), key, string(data), time.Hour); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store join request in valkey")
 	}
 }
@@ -84,7 +88,7 @@ func (es *EventStore) StoreJoinRequest(chainID string, playerData *JoinRequestDa
 // GetJoinRequest retrieves and removes a join request by chainID
 func (es *EventStore) GetJoinRequest(chainID string) (*JoinRequestData, bool) {
 	key := es.joinRequestKey(chainID)
-	data, err := es.client.Get(es.ctx, key)
+	data, err := es.client.Get(context.Background(), key)
 	if err != nil {
 		if err != valkey.Nil {
 			log.Error().Err(err).Str("key", key).Msg("failed to get join request from valkey")
@@ -99,7 +103,7 @@ func (es *EventStore) GetJoinRequest(chainID string) (*JoinRequestData, bool) {
 	}
 
 	// Remove the key after retrieving
-	if err := es.client.Del(es.ctx, key); err != nil {
+	if err := es.client.Del(context.Background(), key); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to delete join request from valkey")
 	}
 
@@ -108,7 +112,6 @@ func (es *EventStore) GetJoinRequest(chainID string) (*JoinRequestData, bool) {
 
 // StorePlayerData stores persistent player data by playerID
 func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
-
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
@@ -116,7 +119,7 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 
 	// Get existing data first to merge
 	existing := &PlayerData{}
-	if existingData, err := es.client.Get(es.ctx, key); err == nil {
+	if existingData, err := es.client.Get(context.Background(), key); err == nil {
 		if err := json.Unmarshal([]byte(existingData), existing); err != nil {
 			log.Error().Err(err).Str("key", key).Msg("failed to unmarshal existing player data")
 		}
@@ -152,7 +155,7 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 		return
 	}
 
-	if err := es.client.Set(es.ctx, key, string(mergedData), 0); err != nil {
+	if err := es.client.Set(context.Background(), key, string(mergedData), 0); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store player data in valkey")
 	}
 }
@@ -163,7 +166,7 @@ func (es *EventStore) GetPlayerData(playerID string) (*PlayerData, bool) {
 	defer es.mu.RUnlock()
 
 	key := es.playerKey(playerID)
-	data, err := es.client.Get(es.ctx, key)
+	data, err := es.client.Get(context.Background(), key)
 	if err != nil {
 		if err != valkey.Nil {
 			log.Error().Err(err).Str("key", key).Msg("failed to get player data from valkey")
@@ -186,7 +189,7 @@ func (es *EventStore) RemovePlayerData(playerID string) error {
 	defer es.mu.Unlock()
 
 	key := es.playerKey(playerID)
-	if err := es.client.Del(es.ctx, key); err != nil {
+	if err := es.client.Del(context.Background(), key); err != nil {
 		return err
 	}
 
@@ -203,7 +206,7 @@ func (es *EventStore) StoreSessionData(key string, data *SessionData) {
 
 	// Get existing data first to merge
 	existing := &SessionData{}
-	if existingData, err := es.client.Get(es.ctx, valkeyKey); err == nil {
+	if existingData, err := es.client.Get(context.Background(), valkeyKey); err == nil {
 		if err := json.Unmarshal([]byte(existingData), existing); err != nil {
 			log.Error().Err(err).Str("key", valkeyKey).Msg("failed to unmarshal existing session data")
 		}
@@ -254,7 +257,7 @@ func (es *EventStore) StoreSessionData(key string, data *SessionData) {
 		return
 	}
 
-	if err := es.client.Set(es.ctx, valkeyKey, string(mergedData), 24*time.Hour); err != nil {
+	if err := es.client.Set(context.Background(), valkeyKey, string(mergedData), 24*time.Hour); err != nil {
 		log.Error().Err(err).Str("key", valkeyKey).Msg("failed to store session data in valkey")
 	}
 }
@@ -265,7 +268,7 @@ func (es *EventStore) GetSessionData(key string) (*SessionData, bool) {
 	defer es.mu.RUnlock()
 
 	valkeyKey := es.sessionKey(key)
-	data, err := es.client.Get(es.ctx, valkeyKey)
+	data, err := es.client.Get(context.Background(), valkeyKey)
 	if err != nil {
 		if err != valkey.Nil {
 			log.Error().Err(err).Str("key", valkeyKey).Msg("failed to get session data from valkey")
@@ -293,7 +296,7 @@ func (es *EventStore) StoreRoundWinner(data *RoundWinnerData) {
 	}
 
 	// Store with 2 hour expiration
-	if err := es.client.Set(es.ctx, key, string(dataBytes), 2*time.Hour); err != nil {
+	if err := es.client.Set(context.Background(), key, string(dataBytes), 2*time.Hour); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store round winner in valkey")
 	}
 }
@@ -309,7 +312,7 @@ func (es *EventStore) StoreRoundLoser(data *RoundLoserData) {
 	}
 
 	// Store with 2 hour expiration
-	if err := es.client.Set(es.ctx, key, string(dataBytes), 2*time.Hour); err != nil {
+	if err := es.client.Set(context.Background(), key, string(dataBytes), 2*time.Hour); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store round loser in valkey")
 	}
 }
@@ -317,7 +320,7 @@ func (es *EventStore) StoreRoundLoser(data *RoundLoserData) {
 // GetRoundWinner retrieves and optionally removes round winner data
 func (es *EventStore) GetRoundWinner(remove bool) (*RoundWinnerData, bool) {
 	key := es.roundWinnerKey()
-	data, err := es.client.Get(es.ctx, key)
+	data, err := es.client.Get(context.Background(), key)
 	if err != nil {
 		if err != valkey.Nil {
 			log.Error().Err(err).Str("key", key).Msg("failed to get round winner from valkey")
@@ -332,7 +335,7 @@ func (es *EventStore) GetRoundWinner(remove bool) (*RoundWinnerData, bool) {
 	}
 
 	if remove {
-		if err := es.client.Del(es.ctx, key); err != nil {
+		if err := es.client.Del(context.Background(), key); err != nil {
 			log.Error().Err(err).Str("key", key).Msg("failed to delete round winner from valkey")
 		}
 	}
@@ -343,7 +346,7 @@ func (es *EventStore) GetRoundWinner(remove bool) (*RoundWinnerData, bool) {
 // GetRoundLoser retrieves and optionally removes round loser data
 func (es *EventStore) GetRoundLoser(remove bool) (*RoundLoserData, bool) {
 	key := es.roundLoserKey()
-	data, err := es.client.Get(es.ctx, key)
+	data, err := es.client.Get(context.Background(), key)
 	if err != nil {
 		if err != valkey.Nil {
 			log.Error().Err(err).Str("key", key).Msg("failed to get round loser from valkey")
@@ -358,7 +361,7 @@ func (es *EventStore) GetRoundLoser(remove bool) (*RoundLoserData, bool) {
 	}
 
 	if remove {
-		if err := es.client.Del(es.ctx, key); err != nil {
+		if err := es.client.Del(context.Background(), key); err != nil {
 			log.Error().Err(err).Str("key", key).Msg("failed to delete round loser from valkey")
 		}
 	}
@@ -372,7 +375,7 @@ func (es *EventStore) StoreWonData(data *WonData) {
 	key := es.wonKey()
 
 	// Check if WON already exists
-	if existingData, err := es.client.Get(es.ctx, key); err == nil && existingData != "" {
+	if existingData, err := es.client.Get(context.Background(), key); err == nil && existingData != "" {
 		// If WON exists, store with null winner
 		nullWinnerData := &WonData{
 			Time:       data.Time,
@@ -396,7 +399,7 @@ func (es *EventStore) StoreWonData(data *WonData) {
 	}
 
 	// Store with 2 hour expiration
-	if err := es.client.Set(es.ctx, key, string(dataBytes), 2*time.Hour); err != nil {
+	if err := es.client.Set(context.Background(), key, string(dataBytes), 2*time.Hour); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store won data in valkey")
 	}
 }
@@ -404,7 +407,7 @@ func (es *EventStore) StoreWonData(data *WonData) {
 // GetWonData retrieves and removes WON data
 func (es *EventStore) GetWonData() (*WonData, bool) {
 	key := es.wonKey()
-	data, err := es.client.Get(es.ctx, key)
+	data, err := es.client.Get(context.Background(), key)
 	if err != nil {
 		if err != valkey.Nil {
 			log.Error().Err(err).Str("key", key).Msg("failed to get won data from valkey")
@@ -419,7 +422,7 @@ func (es *EventStore) GetWonData() (*WonData, bool) {
 	}
 
 	// Remove the key after retrieving
-	if err := es.client.Del(es.ctx, key); err != nil {
+	if err := es.client.Del(context.Background(), key); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to delete won data from valkey")
 	}
 
@@ -431,16 +434,16 @@ func (es *EventStore) ClearNewGameData() {
 
 	// Clear session data
 	sessionPattern := fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:session:*", es.serverID.String())
-	if keys, err := es.client.Keys(es.ctx, sessionPattern); err == nil && len(keys) > 0 {
-		if err := es.client.Del(es.ctx, keys...); err != nil {
+	if keys, err := es.client.Keys(context.Background(), sessionPattern); err == nil && len(keys) > 0 {
+		if err := es.client.Del(context.Background(), keys...); err != nil {
 			log.Error().Err(err).Msg("failed to clear session data from valkey")
 		}
 	}
 
 	// Clear disconnected data
 	disconnectedPattern := fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:disconnected:*", es.serverID.String())
-	if keys, err := es.client.Keys(es.ctx, disconnectedPattern); err == nil && len(keys) > 0 {
-		if err := es.client.Del(es.ctx, keys...); err != nil {
+	if keys, err := es.client.Keys(context.Background(), disconnectedPattern); err == nil && len(keys) > 0 {
+		if err := es.client.Del(context.Background(), keys...); err != nil {
 			log.Error().Err(err).Msg("failed to clear disconnected data from valkey")
 		}
 	}
@@ -493,9 +496,9 @@ func (es *EventStore) GetPlayerInfoByName(name string) (*event_manager.PlayerInf
 
 	// Check if any player data has this name by searching all player keys
 	playerPattern := fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player:*", es.serverID.String())
-	if keys, err := es.client.Keys(es.ctx, playerPattern); err == nil {
+	if keys, err := es.client.Keys(context.Background(), playerPattern); err == nil {
 		for _, key := range keys {
-			if data, err := es.client.Get(es.ctx, key); err == nil {
+			if data, err := es.client.Get(context.Background(), key); err == nil {
 				var playerData PlayerData
 				if err := json.Unmarshal([]byte(data), &playerData); err == nil {
 					if playerData.PlayerSuffix == name {
@@ -560,9 +563,9 @@ func (es *EventStore) GetPlayerInfoByController(controllerID string) (*event_man
 
 	// Check all players for matching controller ID by searching all player keys
 	playerPattern := fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player:*", es.serverID.String())
-	if keys, err := es.client.Keys(es.ctx, playerPattern); err == nil {
+	if keys, err := es.client.Keys(context.Background(), playerPattern); err == nil {
 		for _, key := range keys {
-			if data, err := es.client.Get(es.ctx, key); err == nil {
+			if data, err := es.client.Get(context.Background(), key); err == nil {
 				var playerData PlayerData
 				if err := json.Unmarshal([]byte(data), &playerData); err == nil {
 					if playerData.Controller == controllerID || playerData.PlayerController == controllerID {

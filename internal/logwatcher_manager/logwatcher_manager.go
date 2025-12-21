@@ -147,7 +147,7 @@ func (m *LogwatcherManager) ConnectToServer(serverID uuid.UUID, config LogSource
 		ServerID:          serverID,
 		LogSource:         logSource,
 		Config:            config,
-		EventStore:        NewEventStore(ctx, serverID, m.valkeyClient),
+		EventStore:        NewEventStore(serverID, m.valkeyClient),
 		Metrics:           NewLogParsingMetrics(),
 		Connected:         true,
 		LastUsed:          time.Now(),
