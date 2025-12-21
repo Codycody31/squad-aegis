@@ -1,4 +1,4 @@
-package cbl_info
+package cbl
 
 import (
 	"bytes"
@@ -21,7 +21,7 @@ type CBLUser struct {
 	Name                          string  `json:"name"`
 	AvatarFull                    string  `json:"avatarFull"`
 	ReputationPoints              int     `json:"reputationPoints"`
-	RiskRating                    int     `json:"riskRating"`
+	RiskRating                    float64 `json:"riskRating"`
 	ReputationRank                int     `json:"reputationRank"`
 	LastRefreshedInfo             string  `json:"lastRefreshedInfo"`
 	LastRefreshedReputationPoints string  `json:"lastRefreshedReputationPoints"`
@@ -63,8 +63,8 @@ type GraphQLResponse struct {
 	} `json:"errors"`
 }
 
-// CBLInfoPlugin alerts admins when a harmful player is detected joining their server based on Community Ban List data
-type CBLInfoPlugin struct {
+// CBLPlugin alerts admins when a harmful player is detected joining their server based on Community Ban List data
+type CBLPlugin struct {
 	// Plugin configuration
 	config map[string]interface{}
 	apis   *plugin_manager.PluginAPIs
@@ -85,9 +85,9 @@ type CBLInfoPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "cbl_info",
-		Name:                   "Community Ban List Info",
-		Description:            "The CBL Info plugin alerts admins when a harmful player is detected joining their server based on data from the Community Ban List.",
+		ID:                     "cbl",
+		Name:                   "Community Ban List",
+		Description:            "The CBL plugin alerts admins when a harmful player is detected joining their server based on data from the Community Ban List.",
 		Version:                "1.0.0",
 		Author:                 "Squad Aegis",
 		AllowMultipleInstances: false,
@@ -117,6 +117,13 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeInt,
 					Default:     10,
 				},
+				{
+					Name:        "kick_threshold",
+					Description: "Automatically kick players when their reputation points exceed this threshold. Set to 0 to disable auto-kick.",
+					Required:    false,
+					Type:        plug_config_schema.FieldTypeInt,
+					Default:     0,
+				},
 			},
 		},
 
@@ -125,18 +132,18 @@ func Define() plugin_manager.PluginDefinition {
 		},
 
 		CreateInstance: func() plugin_manager.Plugin {
-			return &CBLInfoPlugin{}
+			return &CBLPlugin{}
 		},
 	}
 }
 
 // GetDefinition returns the plugin definition
-func (p *CBLInfoPlugin) GetDefinition() plugin_manager.PluginDefinition {
+func (p *CBLPlugin) GetDefinition() plugin_manager.PluginDefinition {
 	return Define()
 }
 
 // Initialize initializes the plugin with its configuration and dependencies
-func (p *CBLInfoPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
+func (p *CBLPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -181,7 +188,7 @@ func (p *CBLInfoPlugin) Initialize(config map[string]interface{}, apis *plugin_m
 }
 
 // Start begins plugin execution (for long-running plugins)
-func (p *CBLInfoPlugin) Start(ctx context.Context) error {
+func (p *CBLPlugin) Start(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -202,7 +209,7 @@ func (p *CBLInfoPlugin) Start(ctx context.Context) error {
 }
 
 // Stop gracefully stops the plugin
-func (p *CBLInfoPlugin) Stop() error {
+func (p *CBLPlugin) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -222,7 +229,7 @@ func (p *CBLInfoPlugin) Stop() error {
 }
 
 // HandleEvent processes an event if the plugin is subscribed to it
-func (p *CBLInfoPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
+func (p *CBLPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
 	if event.Type != "LOG_PLAYER_CONNECTED" {
 		return nil // Not interested in this event
 	}
@@ -231,21 +238,21 @@ func (p *CBLInfoPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
 }
 
 // GetStatus returns the current plugin status
-func (p *CBLInfoPlugin) GetStatus() plugin_manager.PluginStatus {
+func (p *CBLPlugin) GetStatus() plugin_manager.PluginStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.status
 }
 
 // GetConfig returns the current plugin configuration
-func (p *CBLInfoPlugin) GetConfig() map[string]interface{} {
+func (p *CBLPlugin) GetConfig() map[string]interface{} {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.config
 }
 
 // UpdateConfig updates the plugin configuration
-func (p *CBLInfoPlugin) UpdateConfig(config map[string]interface{}) error {
+func (p *CBLPlugin) UpdateConfig(config map[string]interface{}) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -276,7 +283,7 @@ func (p *CBLInfoPlugin) UpdateConfig(config map[string]interface{}) error {
 }
 
 // handlePlayerConnected processes player connected events
-func (p *CBLInfoPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEvent) error {
+func (p *CBLPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.LogPlayerConnectedData)
 	if !ok {
 		return fmt.Errorf("invalid event data type")
@@ -293,7 +300,7 @@ func (p *CBLInfoPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEve
 		ctx, cancel := context.WithTimeout(parentCtx, p.httpClient.Timeout)
 		defer cancel()
 
-		if err := p.checkPlayerAndAlert(ctx, event); err != nil {
+		if err := p.checkPlayerAndAlertAutoKickIfNeeded(ctx, event); err != nil {
 			p.apis.LogAPI.Error("Failed to check player against Community Ban List", err, map[string]interface{}{
 				"steam_id": event.SteamID,
 			})
@@ -303,8 +310,8 @@ func (p *CBLInfoPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEve
 	return nil
 }
 
-// checkPlayerAndAlert queries the CBL API and sends Discord alert if needed
-func (p *CBLInfoPlugin) checkPlayerAndAlert(ctx context.Context, event *event_manager.LogPlayerConnectedData) error {
+// checkPlayerAndAlertAutoKickIfNeeded queries the CBL API and sends Discord alert if needed
+func (p *CBLPlugin) checkPlayerAndAlertAutoKickIfNeeded(ctx context.Context, event *event_manager.LogPlayerConnectedData) error {
 	user, err := p.queryCBLAPI(ctx, event.SteamID)
 	if err != nil {
 		return fmt.Errorf("failed to query CBL API: %w", err)
@@ -328,11 +335,34 @@ func (p *CBLInfoPlugin) checkPlayerAndAlert(ctx context.Context, event *event_ma
 	}
 
 	// Send Discord alert
-	return p.sendDiscordAlert(user, event)
+	err = p.sendDiscordAlert(user, event)
+	if err != nil {
+		return fmt.Errorf("failed to send Discord alert: %w", err)
+	}
+
+	// Check for auto-kick
+	kickThreshold := p.getIntConfig("kick_threshold")
+	if kickThreshold > 0 && user.ReputationPoints >= kickThreshold {
+		if err := p.apis.RconAPI.KickPlayer(event.SteamID, "Kicked via https://communitybanlist.com"); err != nil {
+			p.apis.LogAPI.Error("Failed to kick player", err, map[string]interface{}{
+				"steam_id":          event.SteamID,
+				"reputation_points": user.ReputationPoints,
+				"kick_threshold":    kickThreshold,
+			})
+		} else {
+			p.apis.LogAPI.Info("Kicked player due to high reputation points", map[string]interface{}{
+				"steam_id":          event.SteamID,
+				"reputation_points": user.ReputationPoints,
+				"kick_threshold":    kickThreshold,
+			})
+		}
+	}
+
+	return nil
 }
 
 // queryCBLAPI queries the Community Ban List GraphQL API
-func (p *CBLInfoPlugin) queryCBLAPI(ctx context.Context, steamID string) (*CBLUser, error) {
+func (p *CBLPlugin) queryCBLAPI(ctx context.Context, steamID string) (*CBLUser, error) {
 	query := `
 		query Search($id: String!) {
 			steamUser(id: $id) {
@@ -409,7 +439,7 @@ func (p *CBLInfoPlugin) queryCBLAPI(ctx context.Context, steamID string) (*CBLUs
 }
 
 // sendDiscordAlert sends a Discord embed alert about the harmful player
-func (p *CBLInfoPlugin) sendDiscordAlert(user *CBLUser, event *event_manager.LogPlayerConnectedData) error {
+func (p *CBLPlugin) sendDiscordAlert(user *CBLUser, event *event_manager.LogPlayerConnectedData) error {
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
 		return fmt.Errorf("channel_id not configured")
@@ -490,14 +520,14 @@ func (p *CBLInfoPlugin) sendDiscordAlert(user *CBLUser, event *event_manager.Log
 
 // Helper methods for config access
 
-func (p *CBLInfoPlugin) getStringConfig(key string) string {
+func (p *CBLPlugin) getStringConfig(key string) string {
 	if value, ok := p.config[key].(string); ok {
 		return value
 	}
 	return ""
 }
 
-func (p *CBLInfoPlugin) getIntConfig(key string) int {
+func (p *CBLPlugin) getIntConfig(key string) int {
 	if value, ok := p.config[key].(int); ok {
 		return value
 	}
@@ -507,7 +537,7 @@ func (p *CBLInfoPlugin) getIntConfig(key string) int {
 	return 0
 }
 
-func (p *CBLInfoPlugin) getBoolConfig(key string) bool {
+func (p *CBLPlugin) getBoolConfig(key string) bool {
 	if value, ok := p.config[key].(bool); ok {
 		return value
 	}
