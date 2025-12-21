@@ -284,7 +284,13 @@ func (p *CBLInfoPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEve
 
 	// Query Community Ban List API in a goroutine to avoid blocking
 	go func() {
-		ctx, cancel := context.WithTimeout(p.ctx, p.httpClient.Timeout)
+		// Use p.ctx if available, otherwise use background context
+		parentCtx := p.ctx
+		if parentCtx == nil {
+			parentCtx = context.Background()
+		}
+
+		ctx, cancel := context.WithTimeout(parentCtx, p.httpClient.Timeout)
 		defer cancel()
 
 		if err := p.checkPlayerAndAlert(ctx, event); err != nil {
