@@ -17,6 +17,7 @@
 
 ### Misc
 
+- chore(logwatcher): add error handling for player data removal on disconnect ([2f5a5bd](https://github.com/Codycody31/squad-aegis/commit/2f5a5bd92d03b2529c0fcb9ff909735f81605658))
 - chore(logwatcher): attempt to imrpove event data by populating attacker and victim names from player data ([db1be0c](https://github.com/Codycody31/squad-aegis/commit/db1be0c2fe37c5eb0af64bdabc1213562ff55ab1))
 - enhance(logwatcher): event store and log parser to include player names for attackers and victims ([23d4939](https://github.com/Codycody31/squad-aegis/commit/23d49394d993000b6a32536d2e13c2f332a550e0))
 - refactor(metrics): implement custom date range selection for server metrics and enhance metrics fetching logic ([2564a05](https://github.com/Codycody31/squad-aegis/commit/2564a05e0937df7a1802fae565d4dc83b940d7dd))
