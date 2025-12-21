@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-08
+## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-21
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -17,6 +17,7 @@
 
 ### Misc
 
+- enhance(logwatcher): event store and log parser to include player names for attackers and victims ([23d4939](https://github.com/Codycody31/squad-aegis/commit/23d49394d993000b6a32536d2e13c2f332a550e0))
 - refactor(metrics): implement custom date range selection for server metrics and enhance metrics fetching logic ([2564a05](https://github.com/Codycody31/squad-aegis/commit/2564a05e0937df7a1802fae565d4dc83b940d7dd))
 - feat(server-roles): add is_admin flag to server roles and update role management functionality ([d3807b2](https://github.com/Codycody31/squad-aegis/commit/d3807b23a1c4d379db1b05c3dcfee91821ccf3d0))
 - docs(plugins): add auto-warn-sl-wrong-kit & kill-broadcast ([e72171a](https://github.com/Codycody31/squad-aegis/commit/e72171a54f19ea6cd0daac6719a9649b0a1651a4))
