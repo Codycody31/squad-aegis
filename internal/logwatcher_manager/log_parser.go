@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/player_tracker"
 )
@@ -762,8 +763,14 @@ func GetLogParsers() []LogParser {
 						EOSID:            args[5],
 					}, args[0])
 				} else {
-					_ = eventStore.RemovePlayerData(player.EOSID)
-					_ = eventStore.RemovePlayerData(player.SteamID)
+					err := eventStore.RemovePlayerData(player.EOSID)
+					if err != nil {
+						log.Error().Err(err).Msg("Failed to remove player data by EOS ID on disconnect")
+					}
+					err = eventStore.RemovePlayerData(player.SteamID)
+					if err != nil {
+						log.Error().Err(err).Msg("Failed to remove player data by Steam ID on disconnect")
+					}
 					eventManager.PublishEvent(serverID, &event_manager.LogPlayerDisconnectedData{
 						Time:             args[1],
 						ChainID:          strings.TrimSpace(args[2]),
