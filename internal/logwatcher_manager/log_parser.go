@@ -268,6 +268,7 @@ func GetLogParsers() []LogParser {
 						eventManagerData.VictimSteam = victim.SteamID
 						eventManagerData.VictimTeam = victim.TeamID
 						eventManagerData.VictimSquad = victim.SquadID
+						eventManagerData.VictimName = victim.PlayerSuffix
 					}
 
 					// Get attacker by EOS ID using PlayerTracker
@@ -286,6 +287,7 @@ func GetLogParsers() []LogParser {
 						// Populate explicit attacker fields
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
+						eventManagerData.AttackerName = attacker.PlayerSuffix
 
 						// Update attacker's playercontroller if missing
 						if attacker.PlayerController == "" && args[8] != "" {
@@ -309,6 +311,7 @@ func GetLogParsers() []LogParser {
 									// Update explicit attacker fields
 									eventManagerData.AttackerTeam = updatedAttacker.TeamID
 									eventManagerData.AttackerSquad = updatedAttacker.SquadID
+									eventManagerData.AttackerName = updatedAttacker.PlayerSuffix
 								}
 							}
 						}
@@ -399,6 +402,7 @@ func GetLogParsers() []LogParser {
 						eventManagerData.VictimSteam = victim.SteamID
 						eventManagerData.VictimTeam = victim.TeamID
 						eventManagerData.VictimSquad = victim.SquadID
+						eventManagerData.VictimName = victim.PlayerSuffix
 					}
 
 					// Get attacker by EOS ID first, then by controller if not found using PlayerTracker
@@ -417,6 +421,7 @@ func GetLogParsers() []LogParser {
 						// Populate explicit attacker fields
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
+						eventManagerData.AttackerName = attacker.PlayerSuffix
 					} else if attacker, exists := playerTracker.GetPlayerByController(args[5]); exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Attacker = &event_manager.PlayerInfo{
@@ -432,6 +437,7 @@ func GetLogParsers() []LogParser {
 						// Populate explicit attacker fields
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
+						eventManagerData.AttackerName = attacker.PlayerSuffix
 					}
 				}
 
@@ -632,6 +638,7 @@ func GetLogParsers() []LogParser {
 						eventManagerData.VictimSteam = victim.SteamID
 						eventManagerData.VictimTeam = victim.TeamID
 						eventManagerData.VictimSquad = victim.SquadID
+						eventManagerData.VictimName = victim.PlayerSuffix
 					}
 
 					// Get attacker by EOS ID first, then by controller if not found using PlayerTracker
@@ -650,6 +657,7 @@ func GetLogParsers() []LogParser {
 						// Populate explicit attacker fields
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
+						eventManagerData.AttackerName = attacker.PlayerSuffix
 					} else if attacker, exists := playerTracker.GetPlayerByController(args[5]); exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Attacker = &event_manager.PlayerInfo{
@@ -665,6 +673,7 @@ func GetLogParsers() []LogParser {
 						// Populate explicit attacker fields
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
+						eventManagerData.AttackerName = attacker.PlayerSuffix
 					}
 				}
 
