@@ -336,19 +336,11 @@ func (p *CBLPlugin) checkPlayerAndAlertAutoKickIfNeeded(ctx context.Context, eve
 	}
 
 	if user == nil {
-		p.apis.LogAPI.Debug("Player not found in Community Ban List", map[string]interface{}{
-			"steam_id": event.SteamID,
-		})
 		return nil
 	}
 
 	threshold := p.getIntConfig("threshold")
 	if user.ReputationPoints < threshold {
-		p.apis.LogAPI.Debug("Player reputation below threshold", map[string]interface{}{
-			"steam_id":          event.SteamID,
-			"reputation_points": user.ReputationPoints,
-			"threshold":         threshold,
-		})
 		return nil
 	}
 
