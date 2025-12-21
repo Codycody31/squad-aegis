@@ -124,6 +124,13 @@ func Define() plugin_manager.PluginDefinition {
 					Type:        plug_config_schema.FieldTypeInt,
 					Default:     0,
 				},
+				{
+					Name:        "ignored_steam_ids",
+					Description: "Array of Steam IDs to ignore from CBL checks. Players in this list will not be checked, alerted, or kicked.",
+					Required:    false,
+					Type:        plug_config_schema.FieldTypeArrayString,
+					Default:     []interface{}{},
+				},
 			},
 		},
 
@@ -312,6 +319,17 @@ func (p *CBLPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEvent) 
 
 // checkPlayerAndAlertAutoKickIfNeeded queries the CBL API and sends Discord alert if needed
 func (p *CBLPlugin) checkPlayerAndAlertAutoKickIfNeeded(ctx context.Context, event *event_manager.LogPlayerConnectedData) error {
+	// Check if Steam ID is in the ignore list
+	ignoredSteamIDs := p.getArrayStringConfig("ignored_steam_ids")
+	for _, ignoredID := range ignoredSteamIDs {
+		if ignoredID == event.SteamID {
+			p.apis.LogAPI.Debug("Player is in CBL ignore list, skipping check", map[string]interface{}{
+				"steam_id": event.SteamID,
+			})
+			return nil
+		}
+	}
+
 	user, err := p.queryCBLAPI(ctx, event.SteamID)
 	if err != nil {
 		return fmt.Errorf("failed to query CBL API: %w", err)
@@ -542,4 +560,17 @@ func (p *CBLPlugin) getBoolConfig(key string) bool {
 		return value
 	}
 	return false
+}
+
+func (p *CBLPlugin) getArrayStringConfig(key string) []string {
+	if value, ok := p.config[key].([]interface{}); ok {
+		result := make([]string, 0, len(value))
+		for _, v := range value {
+			if str, ok := v.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	}
+	return []string{}
 }
