@@ -17,6 +17,7 @@
 
 ### Misc
 
+- refactor: add context menu for selecting multiple players ([e0addfa](https://github.com/Codycody31/squad-aegis/commit/e0addfaa9876c276885feb4a47d37625a85069b6))
 - docs(plugins): update auto warn & kick sl wrong kit and cbl ([7f72b12](https://github.com/Codycody31/squad-aegis/commit/7f72b122493baaf2e6ff108962b1be3957b44478))
 - feat(plugins): introduce Team Balancer plugin for tracking win streaks and managing team scrambles to ensure balanced matches ([f61238d](https://github.com/Codycody31/squad-aegis/commit/f61238d31ec67391f01613465f03e2acf40dddb1))
 - feat(plugins): add log level configuration for plugin instances with database migrations and API updates ([06e6457](https://github.com/Codycody31/squad-aegis/commit/06e64574e9ba1e9403a0a903a1b33fcfe0406722))
