@@ -257,6 +257,60 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	return admins, nil
 }
 
+func (api *serverAPI) GetSquads() ([]*SquadInfo, error) {
+	// Create squad-rcon instance to get squad data
+	squadRconInstance := squadRcon.NewSquadRcon(api.rconManager, api.serverID)
+
+	// Get squad data via RCON
+	squadsData, _, err := squadRconInstance.GetServerSquads()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get squads via RCON: %w", err)
+	}
+
+	// Get all players to enrich squad data
+	players, err := api.GetPlayers()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get players: %w", err)
+	}
+
+	// Create map of players by team and squad for quick lookup
+	playersBySquad := make(map[string][]*PlayerInfo)
+	for _, player := range players {
+		if player.SquadID > 0 {
+			key := fmt.Sprintf("T%d-S%d", player.TeamID, player.SquadID)
+			playersBySquad[key] = append(playersBySquad[key], player)
+		}
+	}
+
+	// Convert squad-rcon squads to plugin API format with enriched player data
+	squads := make([]*SquadInfo, 0, len(squadsData))
+	for _, squad := range squadsData {
+		squadKey := fmt.Sprintf("T%d-S%d", squad.TeamId, squad.ID)
+		squadPlayers := playersBySquad[squadKey]
+
+		// Find squad leader
+		var leader *PlayerInfo
+		for _, player := range squadPlayers {
+			if player.IsSquadLeader {
+				leader = player
+				break
+			}
+		}
+
+		squads = append(squads, &SquadInfo{
+			ID:      squad.ID,
+			TeamID:  squad.TeamId,
+			Name:    squad.Name,
+			Size:    squad.Size,
+			Locked:  squad.Locked,
+			Leader:  leader,
+			Players: squadPlayers,
+		})
+	}
+
+	return squads, nil
+}
+
 // adminAPI implements AdminAPI interface
 type adminAPI struct {
 	serverID         uuid.UUID
