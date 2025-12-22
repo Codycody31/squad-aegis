@@ -214,6 +214,9 @@ type ServerAPI interface {
 
 	// GetAdmins returns current admin list
 	GetAdmins() ([]*AdminInfo, error)
+
+	// GetSquads returns current squad list with enriched player data
+	GetSquads() ([]*SquadInfo, error)
 }
 
 // DatabaseAPI provides limited database access to plugins
@@ -367,6 +370,17 @@ type AdminInfo struct {
 	SteamID  string             `json:"steam_id"`
 	IsOnline bool               `json:"is_online"`
 	Roles    []*PlayerAdminRole `json:"roles"`
+}
+
+// SquadInfo contains squad information with enriched player data
+type SquadInfo struct {
+	ID      int           `json:"id"`
+	TeamID  int           `json:"team_id"`
+	Name    string        `json:"name"`
+	Size    int           `json:"size"`
+	Locked  bool          `json:"locked"`
+	Leader  *PlayerInfo   `json:"leader"`
+	Players []*PlayerInfo `json:"players"`
 }
 
 // PluginRegistry manages available plugin definitions
