@@ -17,6 +17,7 @@
 
 ### Misc
 
+- fix(discord_teamkill): update attacker and victim data extraction in teamkill embed ([4df9a00](https://github.com/Codycody31/squad-aegis/commit/4df9a00c5085926785ea35fde34ae58d726cbfdf))
 - feat(plugins): add Discord Teamkill plugin for logging teamkill events ([bd72796](https://github.com/Codycody31/squad-aegis/commit/bd72796a7cfe5ca3739250fe28bffa515946842a))
 - fix(cbl): remove unnecessary debug logs for player checks in CBL ([bfed345](https://github.com/Codycody31/squad-aegis/commit/bfed345efe027b61264d33d1e515641e630713a1))
 - refactor(cbl): add configuration option to ignore specific Steam IDs from CBL checks ([2e91b7a](https://github.com/Codycody31/squad-aegis/commit/2e91b7a3685efff4c019759c32ce9e0225d22c6c))
