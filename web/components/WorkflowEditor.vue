@@ -1405,7 +1405,7 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
                 </div>
 
                 <div
-                    v-if="definition.triggers.length === 0"
+                    v-if="!definition.triggers || definition.triggers.length === 0"
                     class="text-center py-8 text-muted-foreground"
                 >
                     <Zap class="w-16 h-16 mx-auto mb-4 opacity-25" />
@@ -1415,7 +1415,7 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
                     </p>
                 </div>
 
-                <div v-else class="space-y-3">
+                <div v-else-if="definition.triggers && definition.triggers.length > 0" class="space-y-3">
                     <Card
                         v-for="(trigger, index) in definition.triggers"
                         :key="trigger.id"
@@ -1509,7 +1509,7 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
                 </div>
 
                 <div
-                    v-if="definition.steps.length === 0"
+                    v-if="!definition.steps || definition.steps.length === 0"
                     class="text-center py-8 text-muted-foreground"
                 >
                     <Play class="w-16 h-16 mx-auto mb-4 opacity-25" />
@@ -1520,7 +1520,7 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
                     </p>
                 </div>
 
-                <div v-else class="space-y-3">
+                <div v-else-if="definition.steps && definition.steps.length > 0" class="space-y-3">
                     <template v-for="(step, index) in definition.steps" :key="step.id">
                         <Card class="relative">
                             <CardHeader class="pb-3">
@@ -1569,7 +1569,7 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
                                                 class="text-sm text-muted-foreground mt-1"
                                             >
                                                 Step {{ index + 1 }} of
-                                                {{ definition.steps.length }}
+                                                {{ definition.steps?.length || 0 }}
                                                 <span
                                                     v-if="step.config.action_type"
                                                     class="ml-2"
@@ -1603,7 +1603,7 @@ function moveNestedStepDown(stepsArray: any[], index: number) {
                                             size="sm"
                                             :disabled="
                                                 index ===
-                                                definition.steps.length - 1
+                                                (definition.steps?.length || 0) - 1
                                             "
                                         >
                                             ↓
