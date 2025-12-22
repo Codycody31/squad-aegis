@@ -5,17 +5,13 @@ import {
     Play,
     Pause,
     Trash2,
-    Edit,
     Eye,
     Clock,
     Activity,
     Zap,
     GitBranch,
     ExternalLink,
-    CirclePlay,
-    BookText,
     Upload,
-    Database,
 } from "lucide-vue-next";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -37,15 +33,6 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "~/components/ui/dialog";
-import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetFooter,
-    SheetHeader,
-    SheetTitle,
-    SheetTrigger,
-} from "~/components/ui/sheet";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
@@ -101,15 +88,6 @@ interface Workflow {
     variables?: any[];
 }
 
-interface WorkflowExecution {
-    id: string;
-    workflow_id: string;
-    execution_id: string;
-    status: "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
-    started_at: string;
-    completed_at?: string;
-    error_message?: string;
-}
 
 const route = useRoute();
 const serverId = route.params.serverId as string;
@@ -118,15 +96,9 @@ const { toast } = useToast();
 // State
 const loading = ref<boolean>(true);
 const workflows = ref<Workflow[]>([]);
-const selectedWorkflow = ref<Workflow | null>(null);
-const executions = ref<WorkflowExecution[]>([]);
 const error = ref<string | null>(null);
 const showCreateDialog = ref<boolean>(false);
-const showEditDialog = ref<boolean>(false);
-const showExecutionDialog = ref<boolean>(false);
 const showImportDialog = ref<boolean>(false);
-const showKVStoreSheet = ref<boolean>(false);
-const selectedWorkflowForKV = ref<Workflow | null>(null);
 const isCreating = ref<boolean>(false);
 const isUpdating = ref<boolean>(false);
 const isExecuting = ref<boolean>(false);
@@ -442,52 +414,10 @@ async function deleteWorkflow(workflowId: string) {
     }
 }
 
-// Fetch workflow executions
-async function fetchExecutions(workflowId: string) {
-    const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
 
-    try {
-        const { data } = await $fetch<{ executions: WorkflowExecution[] }>(
-            `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}/executions`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
-        );
-
-        if (data && data.executions) {
-            executions.value = data.executions;
-        }
-    } catch (err: any) {
-        toast({
-            title: "Error",
-            description: "Failed to fetch workflow executions",
-            variant: "destructive",
-        });
-    }
-}
-
-// Open edit dialog
-function openEditDialog(workflow: Workflow) {
-    selectedWorkflow.value = { ...workflow };
-    showEditDialog.value = true;
-}
-
-// Open execution history dialog
-async function openExecutionDialog(workflow: Workflow) {
-    selectedWorkflow.value = workflow;
-    showExecutionDialog.value = true;
-    await fetchExecutions(workflow.id);
-}
-
-function openKVStoreSheet(workflow: Workflow) {
-    selectedWorkflowForKV.value = workflow;
-    showKVStoreSheet.value = true;
+// Navigate to workflow detail page
+function navigateToWorkflow(workflowId: string) {
+    navigateTo(`/servers/${serverId}/workflows/${workflowId}`);
 }
 
 // Reset form
@@ -618,21 +548,6 @@ function formatDate(dateString: string) {
     return new Date(dateString).toLocaleString();
 }
 
-// Get status badge variant
-function getStatusVariant(status: string) {
-    switch (status) {
-        case "COMPLETED":
-            return "default";
-        case "RUNNING":
-            return "secondary";
-        case "FAILED":
-            return "destructive";
-        case "CANCELLED":
-            return "outline";
-        default:
-            return "secondary";
-    }
-}
 
 // Computed properties
 const activeWorkflows = computed(() =>
@@ -642,10 +557,10 @@ const inactiveWorkflows = computed(() =>
     workflows.value.filter((w) => !w.enabled),
 );
 const totalTriggers = computed(() =>
-    workflows.value.reduce((acc, w) => acc + w.definition.triggers.length, 0),
+    workflows.value.reduce((acc, w) => acc + (w.definition?.triggers?.length || 0), 0),
 );
 const totalSteps = computed(() =>
-    workflows.value.reduce((acc, w) => acc + w.definition.steps.length, 0),
+    workflows.value.reduce((acc, w) => acc + (w.definition?.steps?.length || 0), 0),
 );
 
 onMounted(() => {
@@ -788,10 +703,15 @@ definePageMeta({
                             <TableRow
                                 v-for="workflow in workflows"
                                 :key="workflow.id"
+                                class="cursor-pointer hover:bg-muted/50"
+                                @click="navigateToWorkflow(workflow.id)"
                             >
-                                <TableCell class="font-medium">{{
-                                    workflow.name
-                                }}</TableCell>
+                                <TableCell class="font-medium">
+                                    <div class="flex items-center gap-2">
+                                        <span>{{ workflow.name }}</span>
+                                        <ExternalLink class="w-3 h-3 text-muted-foreground" />
+                                    </div>
+                                </TableCell>
                                 <TableCell>{{
                                     workflow.description || "No description"
                                 }}</TableCell>
@@ -811,10 +731,10 @@ definePageMeta({
                                     </Badge>
                                 </TableCell>
                                 <TableCell>{{
-                                    workflow.definition.triggers.length
+                                    workflow.definition?.triggers?.length || 0
                                 }}</TableCell>
                                 <TableCell>{{
-                                    workflow.definition.steps.length
+                                    workflow.definition?.steps?.length || 0
                                 }}</TableCell>
                                 <TableCell class="text-xs sm:text-sm">{{
                                     formatDate(workflow.updated_at)
@@ -822,26 +742,18 @@ definePageMeta({
                                 <TableCell>
                                     <div class="flex items-center gap-2">
                                         <Button
-                                            @click="
-                                                openExecutionDialog(workflow)
-                                            "
+                                            @click.stop="navigateToWorkflow(workflow.id)"
                                             variant="ghost"
                                             size="sm"
+                                            title="View Details"
                                         >
-                                            <BookText class="w-4 h-4" />
+                                            <Eye class="w-4 h-4" />
                                         </Button>
                                         <Button
-                                            @click="openKVStoreSheet(workflow)"
+                                            @click.stop="toggleWorkflow(workflow)"
                                             variant="ghost"
                                             size="sm"
-                                            title="Manage KV Store"
-                                        >
-                                            <Database class="w-4 h-4" />
-                                        </Button>
-                                        <Button
-                                            @click="toggleWorkflow(workflow)"
-                                            variant="ghost"
-                                            size="sm"
+                                            title="Toggle Enable/Disable"
                                         >
                                             <component
                                                 :is="
@@ -853,16 +765,10 @@ definePageMeta({
                                             />
                                         </Button>
                                         <Button
-                                            @click="openEditDialog(workflow)"
+                                            @click.stop="deleteWorkflow(workflow.id)"
                                             variant="ghost"
                                             size="sm"
-                                        >
-                                            <Edit class="w-4 h-4" />
-                                        </Button>
-                                        <Button
-                                            @click="deleteWorkflow(workflow.id)"
-                                            variant="ghost"
-                                            size="sm"
+                                            title="Delete Workflow"
                                         >
                                             <Trash2 class="w-4 h-4" />
                                         </Button>
@@ -877,7 +783,8 @@ definePageMeta({
                         <Card
                             v-for="workflow in workflows"
                             :key="workflow.id"
-                            class="p-3 sm:p-4"
+                            class="p-3 sm:p-4 cursor-pointer hover:bg-muted/50"
+                            @click="navigateToWorkflow(workflow.id)"
                         >
                             <div class="space-y-3">
                                 <div class="flex items-start justify-between gap-2">
@@ -908,13 +815,13 @@ definePageMeta({
                                     <div>
                                         <span class="text-muted-foreground">Triggers:</span>
                                         <span class="ml-1 font-medium">{{
-                                            workflow.definition.triggers.length
+                                            workflow.definition?.triggers?.length || 0
                                         }}</span>
                                     </div>
                                     <div>
                                         <span class="text-muted-foreground">Steps:</span>
                                         <span class="ml-1 font-medium">{{
-                                            workflow.definition.steps.length
+                                            workflow.definition?.steps?.length || 0
                                         }}</span>
                                     </div>
                                 </div>
@@ -923,25 +830,16 @@ definePageMeta({
                                 </div>
                                 <div class="flex items-center gap-1 pt-2 border-t overflow-x-auto pb-1">
                                     <Button
-                                        @click="openExecutionDialog(workflow)"
+                                        @click.stop="navigateToWorkflow(workflow.id)"
                                         variant="ghost"
                                         size="sm"
                                         class="h-8 w-8 p-0 shrink-0"
-                                        title="View Executions"
+                                        title="View Details"
                                     >
-                                        <BookText class="h-3 w-3" />
+                                        <Eye class="h-3 w-3" />
                                     </Button>
                                     <Button
-                                        @click="openKVStoreSheet(workflow)"
-                                        variant="ghost"
-                                        size="sm"
-                                        class="h-8 w-8 p-0 shrink-0"
-                                        title="Manage KV Store"
-                                    >
-                                        <Database class="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                        @click="toggleWorkflow(workflow)"
+                                        @click.stop="toggleWorkflow(workflow)"
                                         variant="ghost"
                                         size="sm"
                                         class="h-8 w-8 p-0 shrink-0"
@@ -957,16 +855,7 @@ definePageMeta({
                                         />
                                     </Button>
                                     <Button
-                                        @click="openEditDialog(workflow)"
-                                        variant="ghost"
-                                        size="sm"
-                                        class="h-8 w-8 p-0 shrink-0"
-                                        title="Edit"
-                                    >
-                                        <Edit class="h-3 w-3" />
-                                    </Button>
-                                    <Button
-                                        @click="deleteWorkflow(workflow.id)"
+                                        @click.stop="deleteWorkflow(workflow.id)"
                                         variant="ghost"
                                         size="sm"
                                         class="h-8 w-8 p-0 shrink-0"

@@ -76,13 +76,14 @@ type WorkflowErrorAction struct {
 
 // ServerWorkflowExecution tracks workflow executions
 type ServerWorkflowExecution struct {
-	ID           uuid.UUID  `json:"id"`
-	WorkflowID   uuid.UUID  `json:"workflow_id"`
-	ExecutionID  uuid.UUID  `json:"execution_id"` // Links to ClickHouse logs
-	Status       string     `json:"status"`       // "RUNNING", "COMPLETED", "FAILED", "CANCELLED"
-	StartedAt    time.Time  `json:"started_at"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
-	ErrorMessage *string    `json:"error_message,omitempty"`
+	ID           uuid.UUID              `json:"id"`
+	WorkflowID   uuid.UUID              `json:"workflow_id"`
+	ExecutionID  uuid.UUID              `json:"execution_id"`  // Links to ClickHouse logs
+	Status       string                 `json:"status"`        // "RUNNING", "COMPLETED", "FAILED", "CANCELLED"
+	TriggerData  map[string]interface{} `json:"trigger_data"`  // Event data that triggered the workflow
+	StartedAt    time.Time              `json:"started_at"`
+	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
+	ErrorMessage *string                `json:"error_message,omitempty"`
 }
 
 // ServerWorkflowVariable stores dynamic variables for workflows

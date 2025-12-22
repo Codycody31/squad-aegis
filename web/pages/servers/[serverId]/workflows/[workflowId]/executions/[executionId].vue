@@ -1,26 +1,52 @@
 <template>
     <div class="p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
-        <!-- Header -->
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
-            <RouterLink :to="`/servers/${serverId}/workflows`" class="w-full sm:w-auto">
-                <Button variant="outline" size="sm" class="w-full sm:w-auto text-sm sm:text-base">
-                    <ArrowLeft class="w-4 h-4 mr-2" />
-                    Back
-                </Button>
-            </RouterLink>
-            <div class="flex-1 text-center sm:text-left">
-                <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Workflow Execution</h1>
-                <p class="text-xs sm:text-sm text-muted-foreground">
-                    Execution ID: {{ executionId }}
-                </p>
+        <!-- Header with Breadcrumbs -->
+        <div class="flex flex-col gap-3 sm:gap-4">
+            <!-- Breadcrumbs -->
+            <nav class="flex items-center gap-2 text-sm text-muted-foreground overflow-x-auto">
+                <RouterLink 
+                    :to="`/servers/${serverId}/workflows`"
+                    class="hover:text-foreground transition-colors whitespace-nowrap"
+                >
+                    Workflows
+                </RouterLink>
+                <span>/</span>
+                <RouterLink 
+                    :to="`/servers/${serverId}/workflows/${workflowId}`"
+                    class="hover:text-foreground transition-colors whitespace-nowrap"
+                >
+                    Workflow
+                </RouterLink>
+                <span>/</span>
+                <span class="text-foreground font-medium truncate">
+                    Execution {{ executionId.substring(0, 8) }}
+                </span>
+            </nav>
+
+            <!-- Header Actions -->
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div class="flex-1 min-w-0">
+                    <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Workflow Execution</h1>
+                    <p class="text-xs sm:text-sm text-muted-foreground break-all">
+                        {{ executionId }}
+                    </p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <RouterLink :to="`/servers/${serverId}/workflows/${workflowId}`">
+                        <Button variant="outline" size="sm" class="text-sm sm:text-base">
+                            <ArrowLeft class="w-4 h-4 mr-2" />
+                            Back to Workflow
+                        </Button>
+                    </RouterLink>
+                    <Button @click="refreshData" :disabled="loading" size="sm" class="text-sm sm:text-base">
+                        <RefreshCw
+                            class="h-4 w-4 mr-2"
+                            :class="{ 'animate-spin': loading }"
+                        />
+                        Refresh
+                    </Button>
+                </div>
             </div>
-            <Button @click="refreshData" :disabled="loading" class="w-full sm:w-auto text-sm sm:text-base">
-                <RefreshCw
-                    class="h-4 w-4 mr-2"
-                    :class="{ 'animate-spin': loading }"
-                />
-                Refresh
-            </Button>
         </div>
 
         <!-- Loading State -->
@@ -411,28 +437,6 @@
                                             ></div>
                                         </div>
 
-                                        <!-- Trigger Event Data -->
-                                        <div
-                                            v-if="log.trigger_event_data"
-                                            class="space-y-2"
-                                        >
-                                            <Label class="text-xs font-medium"
-                                                >Trigger Event</Label
-                                            >
-                                            <div
-                                                class="bg-muted p-2 rounded text-xs overflow-auto max-h-32 whitespace-pre-wrap break-words font-mono"
-                                                v-html="
-                                                    syntaxHighlight(
-                                                        JSON.stringify(
-                                                            log.trigger_event_data,
-                                                            null,
-                                                            2,
-                                                        ),
-                                                    )
-                                                "
-                                            ></div>
-                                        </div>
-
                                         <!-- Variables -->
                                         <div
                                             v-if="
@@ -495,7 +499,7 @@
                                     >
                                         <!-- Step Output -->
                                         <div
-                                            v-if="log.step_output"
+                                            v-if="log.step_output && Object.keys(log.step_output).length > 0"
                                             class="space-y-2"
                                         >
                                             <Label class="text-xs font-medium"
