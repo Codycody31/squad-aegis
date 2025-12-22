@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-21
+## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-22
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -17,6 +17,7 @@
 
 ### Misc
 
+- feat(plugins): add Discord Teamkill plugin for logging teamkill events ([bd72796](https://github.com/Codycody31/squad-aegis/commit/bd72796a7cfe5ca3739250fe28bffa515946842a))
 - fix(cbl): remove unnecessary debug logs for player checks in CBL ([bfed345](https://github.com/Codycody31/squad-aegis/commit/bfed345efe027b61264d33d1e515641e630713a1))
 - refactor(cbl): add configuration option to ignore specific Steam IDs from CBL checks ([2e91b7a](https://github.com/Codycody31/squad-aegis/commit/2e91b7a3685efff4c019759c32ce9e0225d22c6c))
 - refactor(cbl): implement Community Ban List plugin for player monitoring and alerts ([65b426a](https://github.com/Codycody31/squad-aegis/commit/65b426a3a54a6947831fedab0b9113589ea04a9b))
