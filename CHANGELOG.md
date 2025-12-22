@@ -17,6 +17,8 @@
 
 ### Misc
 
+- fix(workflow): add trigger_data field to ServerWorkflowExecution and update related database queries and migrations ([584a842](https://github.com/Codycody31/squad-aegis/commit/584a8425eddc0c00df2913421d83de9cbd4df48a))
+- feat(workflow): add Workflow Execution Timeline component and enhance WorkflowEditor with null checks for triggers and steps ([d49870d](https://github.com/Codycody31/squad-aegis/commit/d49870d9a5cf47f66421ca069cc14e127a366069))
 - fix(discord_teamkill): update attacker and victim data extraction in teamkill embed ([4df9a00](https://github.com/Codycody31/squad-aegis/commit/4df9a00c5085926785ea35fde34ae58d726cbfdf))
 - feat(plugins): add Discord Teamkill plugin for logging teamkill events ([bd72796](https://github.com/Codycody31/squad-aegis/commit/bd72796a7cfe5ca3739250fe28bffa515946842a))
 - fix(cbl): remove unnecessary debug logs for player checks in CBL ([bfed345](https://github.com/Codycody31/squad-aegis/commit/bfed345efe027b61264d33d1e515641e630713a1))
