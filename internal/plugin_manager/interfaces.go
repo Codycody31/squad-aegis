@@ -103,6 +103,7 @@ type PluginInstance struct {
 	Config     map[string]interface{} `json:"config"`
 	Status     PluginStatus           `json:"status"`
 	Enabled    bool                   `json:"enabled"`
+	LogLevel   string                 `json:"log_level"` // debug, info, warn, error
 	Plugin     Plugin                 `json:"-"`
 	Context    context.Context        `json:"-"`
 	Cancel     context.CancelFunc     `json:"-"`

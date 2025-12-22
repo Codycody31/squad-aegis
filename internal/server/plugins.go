@@ -204,7 +204,7 @@ func (s *Server) ServerPluginGet(c *gin.Context) {
 	responses.Success(c, "Plugin instance fetched successfully", &gin.H{"plugin": instance})
 }
 
-// ServerPluginUpdate updates a plugin instance's configuration
+// ServerPluginUpdate updates a plugin instance's configuration and settings
 func (s *Server) ServerPluginUpdate(c *gin.Context) {
 	if s.Dependencies.PluginManager == nil {
 		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
@@ -224,7 +224,8 @@ func (s *Server) ServerPluginUpdate(c *gin.Context) {
 	}
 
 	var request struct {
-		Config map[string]interface{} `json:"config" binding:"required"`
+		Config   map[string]interface{} `json:"config"`
+		LogLevel *string                `json:"log_level"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -232,9 +233,26 @@ func (s *Server) ServerPluginUpdate(c *gin.Context) {
 		return
 	}
 
-	if err := s.Dependencies.PluginManager.UpdatePluginConfig(serverID, instanceID, request.Config); err != nil {
-		responses.BadRequest(c, "Failed to update plugin instance", &gin.H{"error": err.Error()})
+	// At least one field must be provided
+	if request.Config == nil && request.LogLevel == nil {
+		responses.BadRequest(c, "At least one of config or log_level must be provided", &gin.H{})
 		return
+	}
+
+	// Update config if provided
+	if request.Config != nil {
+		if err := s.Dependencies.PluginManager.UpdatePluginConfig(serverID, instanceID, request.Config); err != nil {
+			responses.BadRequest(c, "Failed to update plugin instance config", &gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	// Update log level if provided
+	if request.LogLevel != nil {
+		if err := s.Dependencies.PluginManager.UpdatePluginLogLevel(serverID, instanceID, *request.LogLevel); err != nil {
+			responses.BadRequest(c, "Failed to update plugin instance log level", &gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	log.Info().Str("server_id", serverID.String()).Str("plugin_id", instanceID.String()).Msg("Updated plugin instance configuration")

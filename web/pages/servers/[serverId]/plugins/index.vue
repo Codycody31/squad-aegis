@@ -97,6 +97,7 @@ const showAddDialog = ref(false);
 const showConfigDialog = ref(false);
 const currentPlugin = ref<any>(null);
 const pluginConfig = ref<Record<string, any>>({});
+const pluginLogLevel = ref<string>("info");
 const showDataDialog = ref(false);
 const pluginData = ref<any[]>([]);
 const loadingPluginData = ref(false);
@@ -338,6 +339,7 @@ const configurePlugin = (plugin: any) => {
     }
 
     pluginConfig.value = config;
+    pluginLogLevel.value = plugin.log_level || "info";
     showConfigDialog.value = true;
 };
 
@@ -438,6 +440,7 @@ const savePluginConfig = async () => {
                 },
                 body: {
                     config: pluginConfig.value,
+                    log_level: pluginLogLevel.value,
                 },
             },
         );
@@ -1492,6 +1495,9 @@ onMounted(async () => {
                                 <TableHead class="hidden md:table-cell"
                                     >Enabled</TableHead
                                 >
+                                <TableHead class="hidden xl:table-cell"
+                                    >Log Level</TableHead
+                                >
                                 <TableHead class="hidden lg:table-cell"
                                     >Last Error</TableHead
                                 >
@@ -1531,6 +1537,11 @@ onMounted(async () => {
                                                 togglePlugin(plugin, newState)
                                         "
                                     />
+                                </TableCell>
+                                <TableCell class="hidden xl:table-cell">
+                                    <Badge variant="outline" class="capitalize">
+                                        {{ plugin.log_level || "info" }}
+                                    </Badge>
                                 </TableCell>
                                 <TableCell class="hidden lg:table-cell">
                                     <span
@@ -1660,6 +1671,30 @@ onMounted(async () => {
                     v-if="currentPlugin"
                     class="space-y-4 overflow-y-auto flex-1 pr-2"
                 >
+                    <!-- Log Level Configuration -->
+                    <div class="space-y-2 p-4 border rounded-lg bg-muted/30">
+                        <Label for="edit-log-level">
+                            Log Level
+                        </Label>
+                        <p class="text-sm text-muted-foreground">
+                            Only logs at or above this level will be stored. All logs are always published to the event bus for live viewing.
+                        </p>
+                        <Select
+                            v-model="pluginLogLevel"
+                            @update:model-value="(value) => (pluginLogLevel = value)"
+                        >
+                            <SelectTrigger id="edit-log-level">
+                                <SelectValue placeholder="Select log level" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="debug">Debug (All Logs)</SelectItem>
+                                <SelectItem value="info">Info (Info, Warn, Error)</SelectItem>
+                                <SelectItem value="warn">Warn (Warn, Error)</SelectItem>
+                                <SelectItem value="error">Error (Error Only)</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
                     <div
                         v-for="field in availablePlugins.find(
                             (p) => p.id === currentPlugin.plugin_id,

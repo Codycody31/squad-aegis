@@ -781,21 +781,44 @@ type logAPI struct {
 	instanceID       uuid.UUID
 	pluginName       string
 	pluginID         string
+	logLevel         string
 	clickhouseClient *clickhouse.Client
 	db               *sql.DB
 	eventManager     *event_manager.EventManager
 }
 
-func NewLogAPI(serverID, instanceID uuid.UUID, pluginName, pluginID string, clickhouseClient *clickhouse.Client, db *sql.DB, eventManager *event_manager.EventManager) LogAPI {
+func NewLogAPI(serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string, clickhouseClient *clickhouse.Client, db *sql.DB, eventManager *event_manager.EventManager) LogAPI {
 	return &logAPI{
 		serverID:         serverID,
 		instanceID:       instanceID,
 		pluginName:       pluginName,
 		pluginID:         pluginID,
+		logLevel:         logLevel,
 		clickhouseClient: clickhouseClient,
 		db:               db,
 		eventManager:     eventManager,
 	}
+}
+
+// getLogLevelPriority returns the priority of a log level (higher = more severe)
+func getLogLevelPriority(level string) int {
+	switch level {
+	case "debug":
+		return 0
+	case "info":
+		return 1
+	case "warn":
+		return 2
+	case "error":
+		return 3
+	default:
+		return 1 // default to info
+	}
+}
+
+// shouldStoreLog determines if a log should be stored based on configured log level
+func (api *logAPI) shouldStoreLog(logLevel string) bool {
+	return getLogLevelPriority(logLevel) >= getLogLevelPriority(api.logLevel)
 }
 
 // Helper function to write log to ClickHouse
@@ -810,30 +833,33 @@ func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fi
 
 	timestamp := time.Now().UTC()
 
-	// Insert into ClickHouse
-	insertQuery := `
-		INSERT INTO squad_aegis.plugin_logs (
-			timestamp, server_id, plugin_instance_id,
-			level, message, error_message, fields
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`
+	// Only store to ClickHouse if log level is high enough
+	if api.shouldStoreLog(level) {
+		// Insert into ClickHouse
+		insertQuery := `
+			INSERT INTO squad_aegis.plugin_logs (
+				timestamp, server_id, plugin_instance_id,
+				level, message, error_message, fields
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+		`
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	if err := api.clickhouseClient.Exec(ctx, insertQuery,
-		timestamp,
-		api.serverID,
-		api.instanceID,
-		level,
-		message,
-		errorMsg,
-		fieldsJSON,
-	); err != nil {
-		log.Error().Err(err).Msg("Failed to write plugin log to ClickHouse")
+		if err := api.clickhouseClient.Exec(ctx, insertQuery,
+			timestamp,
+			api.serverID,
+			api.instanceID,
+			level,
+			message,
+			errorMsg,
+			fieldsJSON,
+		); err != nil {
+			log.Error().Err(err).Msg("Failed to write plugin log to ClickHouse")
+		}
 	}
 
-	// Publish event to event manager
+	// Always publish event to event manager (for live viewing)
 	if api.eventManager != nil {
 		eventData := event_manager.PluginLogEventData{
 			PluginInstanceID: api.instanceID.String(),

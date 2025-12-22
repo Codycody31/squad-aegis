@@ -233,6 +233,7 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 		Config:    config,
 		Status:    PluginStatusStopped,
 		Enabled:   true,
+		LogLevel:  "info", // Default log level
 		Plugin:    plugin,
 		Context:   ctx,
 		Cancel:    cancel,
@@ -404,6 +405,56 @@ func (pm *PluginManager) UpdatePluginConfig(serverID, instanceID uuid.UUID, conf
 	// Save to database
 	if err := pm.updatePluginInstanceInDatabase(instance); err != nil {
 		return fmt.Errorf("failed to update plugin instance in database: %w", err)
+	}
+
+	return nil
+}
+
+// UpdatePluginLogLevel updates a plugin's log level
+func (pm *PluginManager) UpdatePluginLogLevel(serverID, instanceID uuid.UUID, logLevel string) error {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	// Validate log level
+	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+	if !validLevels[logLevel] {
+		return fmt.Errorf("invalid log level: %s (must be one of: debug, info, warn, error)", logLevel)
+	}
+
+	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
+	if err != nil {
+		return err
+	}
+
+	// Update instance record
+	instance.LogLevel = logLevel
+	instance.UpdatedAt = time.Now()
+
+	// Save to database
+	if err := pm.updatePluginInstanceInDatabase(instance); err != nil {
+		return fmt.Errorf("failed to update plugin instance in database: %w", err)
+	}
+
+	// Restart plugin to apply new log level
+	if instance.Enabled && instance.Status == PluginStatusRunning {
+		if err := pm.stopPluginInstance(instance); err != nil {
+			log.Error().
+				Str("serverID", serverID.String()).
+				Str("instanceID", instanceID.String()).
+				Err(err).
+				Msg("Failed to stop plugin instance after log level update")
+		}
+
+		if err := pm.initializePluginInstance(instance); err != nil {
+			log.Error().
+				Str("serverID", serverID.String()).
+				Str("instanceID", instanceID.String()).
+				Err(err).
+				Msg("Failed to restart plugin instance after log level update")
+			instance.Status = PluginStatusError
+			instance.LastError = err.Error()
+			return fmt.Errorf("failed to restart plugin instance: %w", err)
+		}
 	}
 
 	return nil
@@ -658,7 +709,7 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 	instance.Status = PluginStatusStarting
 
 	// Create plugin APIs
-	apis := pm.createPluginAPIs(instance.ServerID, instance.ID, instance.PluginName, instance.PluginID)
+	apis := pm.createPluginAPIs(instance.ServerID, instance.ID, instance.PluginName, instance.PluginID, instance.LogLevel)
 
 	// Initialize plugin
 	if err := instance.Plugin.Initialize(instance.Config, apis); err != nil {
@@ -724,7 +775,7 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 	}
 }
 
-func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, pluginName, pluginID string) *PluginAPIs {
+func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string) *PluginAPIs {
 	return &PluginAPIs{
 		ServerAPI:    NewServerAPI(serverID, pm.db, pm.rconManager),
 		DatabaseAPI:  NewDatabaseAPI(instanceID, pm.db),
@@ -732,7 +783,7 @@ func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, plugin
 		AdminAPI:     NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
 		EventAPI:     NewEventAPI(serverID, instanceID, pluginName, pm.eventManager),
 		ConnectorAPI: NewConnectorAPI(pm),
-		LogAPI:       NewLogAPI(serverID, instanceID, pluginName, pluginID, pm.clickhouseClient, pm.db, pm.eventManager),
+		LogAPI:       NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager),
 	}
 }
 
