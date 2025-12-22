@@ -437,28 +437,6 @@
                                             ></div>
                                         </div>
 
-                                        <!-- Trigger Event Data -->
-                                        <div
-                                            v-if="log.trigger_event_data"
-                                            class="space-y-2"
-                                        >
-                                            <Label class="text-xs font-medium"
-                                                >Trigger Event</Label
-                                            >
-                                            <div
-                                                class="bg-muted p-2 rounded text-xs overflow-auto max-h-32 whitespace-pre-wrap break-words font-mono"
-                                                v-html="
-                                                    syntaxHighlight(
-                                                        JSON.stringify(
-                                                            log.trigger_event_data,
-                                                            null,
-                                                            2,
-                                                        ),
-                                                    )
-                                                "
-                                            ></div>
-                                        </div>
-
                                         <!-- Variables -->
                                         <div
                                             v-if="
@@ -521,7 +499,7 @@
                                     >
                                         <!-- Step Output -->
                                         <div
-                                            v-if="log.step_output"
+                                            v-if="log.step_output && Object.keys(log.step_output).length > 0"
                                             class="space-y-2"
                                         >
                                             <Label class="text-xs font-medium"

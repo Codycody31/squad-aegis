@@ -253,6 +253,7 @@ func (wm *WorkflowManager) handleEvent(event event_manager.Event) {
 	// Execute triggered workflows
 	for _, workflow := range triggeredWorkflows {
 		eventDataMap := wm.convertEventDataToMap(event.Data)
+		eventDataMap["event_type"] = string(event.Type)
 		log.Debug().
 			Str("workflow_id", workflow.ID.String()).
 			Str("workflow_name", workflow.Name).
@@ -543,6 +544,7 @@ func (wm *WorkflowManager) executeWorkflow(workflow *models.ServerWorkflow, trig
 		WorkflowID:  workflow.ID,
 		ExecutionID: executionID,
 		Status:      "RUNNING",
+		TriggerData: triggerEvent,
 		StartedAt:   context.StartedAt,
 	}
 

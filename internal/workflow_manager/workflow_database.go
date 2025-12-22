@@ -318,7 +318,7 @@ func (wd *WorkflowDatabase) loadWorkflowVariables(workflow *models.ServerWorkflo
 // GetExecutionsByWorkflowID retrieves workflow executions for a workflow
 func (wd *WorkflowDatabase) GetExecutionsByWorkflowID(workflowID uuid.UUID, limit, offset int) ([]models.ServerWorkflowExecution, error) {
 	query := `
-		SELECT id, workflow_id, execution_id, status, started_at, completed_at, error_message
+		SELECT id, workflow_id, execution_id, status, trigger_data, started_at, completed_at, error_message
 		FROM server_workflow_executions
 		WHERE workflow_id = $1
 		ORDER BY started_at DESC
@@ -337,12 +337,14 @@ func (wd *WorkflowDatabase) GetExecutionsByWorkflowID(workflowID uuid.UUID, limi
 		var execution models.ServerWorkflowExecution
 		var completedAt sql.NullTime
 		var errorMessage sql.NullString
+		var triggerDataJSON []byte
 
 		err := rows.Scan(
 			&execution.ID,
 			&execution.WorkflowID,
 			&execution.ExecutionID,
 			&execution.Status,
+			&triggerDataJSON,
 			&execution.StartedAt,
 			&completedAt,
 			&errorMessage,
@@ -350,6 +352,12 @@ func (wd *WorkflowDatabase) GetExecutionsByWorkflowID(workflowID uuid.UUID, limi
 
 		if err != nil {
 			return nil, err
+		}
+
+		if len(triggerDataJSON) > 0 {
+			if err := json.Unmarshal(triggerDataJSON, &execution.TriggerData); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal trigger_data: %w", err)
+			}
 		}
 
 		if completedAt.Valid {
@@ -369,7 +377,7 @@ func (wd *WorkflowDatabase) GetExecutionsByWorkflowID(workflowID uuid.UUID, limi
 // GetExecutionsByServerID retrieves workflow executions for a server
 func (wd *WorkflowDatabase) GetExecutionsByServerID(serverID uuid.UUID, limit, offset int) ([]models.ServerWorkflowExecution, error) {
 	query := `
-		SELECT e.id, e.workflow_id, e.execution_id, e.status, e.started_at, e.completed_at, e.error_message
+		SELECT e.id, e.workflow_id, e.execution_id, e.status, e.trigger_data, e.started_at, e.completed_at, e.error_message
 		FROM server_workflow_executions e
 		JOIN server_workflows w ON e.workflow_id = w.id
 		WHERE w.server_id = $1
@@ -389,12 +397,14 @@ func (wd *WorkflowDatabase) GetExecutionsByServerID(serverID uuid.UUID, limit, o
 		var execution models.ServerWorkflowExecution
 		var completedAt sql.NullTime
 		var errorMessage sql.NullString
+		var triggerDataJSON []byte
 
 		err := rows.Scan(
 			&execution.ID,
 			&execution.WorkflowID,
 			&execution.ExecutionID,
 			&execution.Status,
+			&triggerDataJSON,
 			&execution.StartedAt,
 			&completedAt,
 			&errorMessage,
@@ -402,6 +412,12 @@ func (wd *WorkflowDatabase) GetExecutionsByServerID(serverID uuid.UUID, limit, o
 
 		if err != nil {
 			return nil, err
+		}
+
+		if len(triggerDataJSON) > 0 {
+			if err := json.Unmarshal(triggerDataJSON, &execution.TriggerData); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal trigger_data: %w", err)
+			}
 		}
 
 		if completedAt.Valid {
@@ -421,15 +437,21 @@ func (wd *WorkflowDatabase) GetExecutionsByServerID(serverID uuid.UUID, limit, o
 // CreateWorkflowExecution creates a new workflow execution record
 func (wd *WorkflowDatabase) CreateWorkflowExecution(execution *models.ServerWorkflowExecution) error {
 	query := `
-		INSERT INTO server_workflow_executions (id, workflow_id, execution_id, status, started_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO server_workflow_executions (id, workflow_id, execution_id, status, trigger_data, started_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`
 
-	_, err := wd.db.Exec(query,
+	triggerDataJSON, err := json.Marshal(execution.TriggerData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal trigger_data: %w", err)
+	}
+
+	_, err = wd.db.Exec(query,
 		execution.ID,
 		execution.WorkflowID,
 		execution.ExecutionID,
 		execution.Status,
+		triggerDataJSON,
 		execution.StartedAt,
 	)
 
@@ -457,7 +479,7 @@ func (wd *WorkflowDatabase) UpdateWorkflowExecution(execution *models.ServerWork
 // GetWorkflowExecution retrieves a workflow execution by execution ID
 func (wd *WorkflowDatabase) GetWorkflowExecution(executionID uuid.UUID) (*models.ServerWorkflowExecution, error) {
 	query := `
-		SELECT id, workflow_id, execution_id, status, started_at, completed_at, error_message
+		SELECT id, workflow_id, execution_id, status, trigger_data, started_at, completed_at, error_message
 		FROM server_workflow_executions
 		WHERE execution_id = $1
 	`
@@ -465,12 +487,14 @@ func (wd *WorkflowDatabase) GetWorkflowExecution(executionID uuid.UUID) (*models
 	var execution models.ServerWorkflowExecution
 	var completedAt sql.NullTime
 	var errorMessage sql.NullString
+	var triggerDataJSON []byte
 
 	err := wd.db.QueryRow(query, executionID).Scan(
 		&execution.ID,
 		&execution.WorkflowID,
 		&execution.ExecutionID,
 		&execution.Status,
+		&triggerDataJSON,
 		&execution.StartedAt,
 		&completedAt,
 		&errorMessage,
@@ -478,6 +502,12 @@ func (wd *WorkflowDatabase) GetWorkflowExecution(executionID uuid.UUID) (*models
 
 	if err != nil {
 		return nil, err
+	}
+
+	if len(triggerDataJSON) > 0 {
+		if err := json.Unmarshal(triggerDataJSON, &execution.TriggerData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal trigger_data: %w", err)
+		}
 	}
 
 	if completedAt.Valid {
