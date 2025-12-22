@@ -4,16 +4,10 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "~/components/ui/dialog";
 import { useToast } from "~/components/ui/toast";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
+import SquadActionMenu from "~/components/SquadActionMenu.vue";
+import BulkPlayerActionMenu from "~/components/BulkPlayerActionMenu.vue";
 import type { Player } from "~/types";
 import { Progress } from "~/components/ui/progress";
 import { Switch } from "~/components/ui/switch";
@@ -32,15 +26,9 @@ const searchQuery = ref("");
 const isAutoRefreshEnabled = ref(true);
 const lastUpdated = ref<number | null>(null);
 
-// Action dialog state for disband squad (this can't be done through PlayerActionMenu)
-const showDisbandDialog = ref(false);
-const selectedSquad = ref<Squad | null>(null);
-const isDisbandLoading = ref(false);
-
-// Action dialog state for demote commander
-const showDemoteCommanderDialog = ref(false);
-const selectedCommandSquad = ref<{ squad: Squad; teamId: number } | null>(null);
-const isDemoteCommanderLoading = ref(false);
+// Multi-select state
+const selectedPlayers = ref<Set<string>>(new Set());
+const isSelectionMode = ref(false);
 
 interface Squad {
     id: number;
@@ -219,7 +207,14 @@ const lastUpdatedText = computed(() => {
     return `${hours}h ago`;
 });
 
-// Setup auto-refresh
+// Handle keyboard shortcuts
+function handleKeyDown(event: KeyboardEvent) {
+    if (event.key === "Escape" && isSelectionMode.value) {
+        clearSelection();
+    }
+}
+
+// Setup auto-refresh and keyboard listeners
 onMounted(() => {
     fetchTeamsData();
 
@@ -228,6 +223,9 @@ onMounted(() => {
             fetchTeamsData();
         }, 30000);
     }
+
+    // Add keyboard event listener
+    window.addEventListener("keydown", handleKeyDown);
 });
 
 watch(isAutoRefreshEnabled, (enabled) => {
@@ -242,11 +240,14 @@ watch(isAutoRefreshEnabled, (enabled) => {
     }
 });
 
-// Clear interval on component unmount
+// Clear interval and remove keyboard listener on component unmount
 onUnmounted(() => {
     if (refreshInterval.value) {
         clearInterval(refreshInterval.value);
     }
+    
+    // Remove keyboard event listener
+    window.removeEventListener("keydown", handleKeyDown);
 });
 
 // Manual refresh function
@@ -254,208 +255,117 @@ function refreshData() {
     fetchTeamsData();
 }
 
-function openDisbandSquadDialog(squad: Squad) {
-    selectedSquad.value = squad;
-    showDisbandDialog.value = true;
-}
-
-function closeDisbandDialog() {
-    showDisbandDialog.value = false;
-    selectedSquad.value = null;
-}
-
-function openDemoteCommanderDialog(squad: Squad, teamId: number) {
-    selectedCommandSquad.value = { squad, teamId };
-    showDemoteCommanderDialog.value = true;
-}
-
-function closeDemoteCommanderDialog() {
-    showDemoteCommanderDialog.value = false;
-    selectedCommandSquad.value = null;
-}
-
-async function executeDemoteCommander() {
-    if (!selectedCommandSquad.value) return;
-
-    const squad = selectedCommandSquad.value.squad;
-    const leaderName = getSquadLeaderName(squad);
-
-    if (!leaderName || leaderName === "N/A") {
-        toast({
-            title: "Error",
-            description: "No squad leader found to demote",
-            variant: "destructive",
-        });
-        closeDemoteCommanderDialog();
-        return;
-    }
-
-    isDemoteCommanderLoading.value = true;
-    const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Authentication Error",
-            description: "You must be logged in to perform this action",
-            variant: "destructive",
-        });
-        isDemoteCommanderLoading.value = false;
-        closeDemoteCommanderDialog();
-        return;
-    }
-
-    try {
-        const endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
-        const payload = {
-            command: `AdminDemoteCommander ${leaderName}`,
-        };
-
-        const { data, error: fetchError } = await useFetch(endpoint, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-        });
-
-        if (fetchError.value) {
-            throw new Error(
-                fetchError.value.message || "Failed to demote commander",
-            );
+// Multi-select functions
+function togglePlayerSelection(player: Player, event: MouseEvent) {
+    if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        isSelectionMode.value = true;
+        
+        if (selectedPlayers.value.has(player.steam_id)) {
+            selectedPlayers.value.delete(player.steam_id);
+        } else {
+            selectedPlayers.value.add(player.steam_id);
         }
-
-        toast({
-            title: "Success",
-            description: `Commander ${leaderName} has been demoted`,
-            variant: "default",
-        });
-
-        // Refresh data
-        fetchTeamsData();
-    } catch (err: any) {
-        console.error(err);
-        toast({
-            title: "Error",
-            description: err.message || "Failed to demote commander",
-            variant: "destructive",
-        });
-    } finally {
-        isDemoteCommanderLoading.value = false;
-        closeDemoteCommanderDialog();
+        
+        // Exit selection mode if no players selected
+        if (selectedPlayers.value.size === 0) {
+            isSelectionMode.value = false;
+        }
     }
 }
 
-async function executeDisbandSquad() {
-    if (!selectedSquad.value) return;
+function isPlayerSelected(player: Player): boolean {
+    return selectedPlayers.value.has(player.steam_id);
+}
 
-    isDisbandLoading.value = true;
-    const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
+function clearSelection() {
+    selectedPlayers.value.clear();
+    isSelectionMode.value = false;
+}
 
-    if (!token) {
-        toast({
-            title: "Authentication Error",
-            description: "You must be logged in to perform this action",
-            variant: "destructive",
+function getSelectedPlayerObjects(): Player[] {
+    const players: Player[] = [];
+    teams.value.forEach((team) => {
+        // Check unassigned players
+        team.players.forEach((player) => {
+            if (selectedPlayers.value.has(player.steam_id)) {
+                players.push(player);
+            }
         });
-        isDisbandLoading.value = false;
-        closeDisbandDialog();
-        return;
-    }
-
-    try {
-        const endpoint = `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`;
-        const payload = {
-            command: `AdminDisbandSquad ${selectedSquad.value.teamId} ${selectedSquad.value.id}`,
-        };
-
-        const { data, error: fetchError } = await useFetch(endpoint, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
+        // Check squad players
+        team.squads.forEach((squad) => {
+            squad.players.forEach((player) => {
+                if (selectedPlayers.value.has(player.steam_id)) {
+                    players.push(player);
+                }
+            });
         });
-
-        if (fetchError.value) {
-            throw new Error(
-                fetchError.value.message || "Failed to disband squad",
-            );
-        }
-
-        toast({
-            title: "Success",
-            description: `Squad ${selectedSquad.value.id}: ${selectedSquad.value.name} has been disbanded`,
-            variant: "default",
-        });
-
-        // Refresh data
-        fetchTeamsData();
-    } catch (err: any) {
-        console.error(err);
-        toast({
-            title: "Error",
-            description: err.message || "Failed to disband squad",
-            variant: "destructive",
-        });
-    } finally {
-        isDisbandLoading.value = false;
-        closeDisbandDialog();
-    }
+    });
+    return players;
 }
 </script>
 
 <template>
-    <div class="p-4">
-        <div
-            class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4"
-        >
-            <div>
-                <h1 class="text-2xl font-bold">Teams & Squads</h1>
-                <div class="text-xs opacity-60 mt-1">
-                    Updated {{ lastUpdatedText }}
+    <BulkPlayerActionMenu
+        :selectedPlayers="getSelectedPlayerObjects()"
+        :serverId="serverId as string"
+        @action-completed="refreshData"
+        @clear-selection="clearSelection"
+    >
+        <div class="p-4">
+            <div
+                class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4"
+            >
+                <div>
+                    <h1 class="text-2xl font-bold">Teams & Squads</h1>
+                    <div class="text-xs opacity-60 mt-1">
+                        Updated {{ lastUpdatedText }}
+                        <span v-if="isSelectionMode" class="ml-2 text-primary font-semibold">
+                            • {{ selectedPlayers.size }} player{{
+                                selectedPlayers.size !== 1 ? "s" : ""
+                            }}
+                            selected (Right-click for actions)
+                        </span>
+                    </div>
                 </div>
-            </div>
-            <div class="flex gap-2 items-center w-full md:w-auto">
-                <div class="relative flex-1 md:flex-none md:w-72">
-                    <Icon
-                        name="lucide:search"
-                        class="absolute left-2 top-2.5 h-4 w-4 opacity-60"
-                    />
-                    <Input
-                        v-model="searchQuery"
-                        placeholder="Search players, roles, squads"
-                        class="pl-8"
-                    />
-                </div>
-                <div class="flex items-center gap-2">
-                    <Label for="autorefresh" class="text-sm whitespace-nowrap"
-                        >Auto-refresh</Label
+                <div class="flex gap-2 items-center w-full md:w-auto">
+                    <div class="relative flex-1 md:flex-none md:w-72">
+                        <Icon
+                            name="lucide:search"
+                            class="absolute left-2 top-2.5 h-4 w-4 opacity-60"
+                        />
+                        <Input
+                            v-model="searchQuery"
+                            placeholder="Search players, roles, squads"
+                            class="pl-8"
+                        />
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <Label for="autorefresh" class="text-sm whitespace-nowrap"
+                            >Auto-refresh</Label
+                        >
+                        <Switch
+                            id="autorefresh"
+                            v-model:checked="isAutoRefreshEnabled"
+                        />
+                    </div>
+                    <Button
+                        v-if="isSelectionMode"
+                        @click="clearSelection"
+                        variant="outline"
                     >
-                    <Switch
-                        id="autorefresh"
-                        v-model:checked="isAutoRefreshEnabled"
-                    />
+                        Clear Selection
+                    </Button>
+                    <Button @click="refreshData" :disabled="loading">
+                        <Icon
+                            v-if="loading"
+                            name="lucide:loader-2"
+                            class="h-4 w-4 mr-2 animate-spin"
+                        />
+                        {{ loading ? "Refreshing..." : "Refresh" }}
+                    </Button>
                 </div>
-                <Button @click="refreshData" :disabled="loading">
-                    <Icon
-                        v-if="loading"
-                        name="lucide:loader-2"
-                        class="h-4 w-4 mr-2 animate-spin"
-                    />
-                    {{ loading ? "Refreshing..." : "Refresh" }}
-                </Button>
             </div>
-        </div>
 
         <div v-if="error" class="bg-red-500 text-white p-4 rounded mb-4">
             {{ error }}
@@ -535,42 +445,12 @@ async function executeDisbandSquad() {
                                                         squad.players.length
                                                     }}/9</span
                                                 >
-                                                <Button
-                                                    v-if="
-                                                        squad.name ===
-                                                        'COMMAND SQUAD'
-                                                    "
-                                                    size="sm"
-                                                    variant="outline"
-                                                    @click="
-                                                        openDemoteCommanderDialog(
-                                                            squad,
-                                                            team.id,
-                                                        )
-                                                    "
-                                                    class="ml-2"
-                                                    title="Demote Commander"
-                                                >
-                                                    <Icon
-                                                        name="lucide:user-minus"
-                                                        size="medium"
-                                                    />
-                                                </Button>
-                                                <Button
-                                                    size="sm"
-                                                    variant="destructive"
-                                                    @click="
-                                                        openDisbandSquadDialog(
-                                                            squad,
-                                                        )
-                                                    "
-                                                    class="ml-2"
-                                                >
-                                                    <Icon
-                                                        name="lucide:x-circle"
-                                                        size="medium"
-                                                    />
-                                                </Button>
+                                                <SquadActionMenu
+                                                    :squad="{ ...squad, teamId: team.id }"
+                                                    :teamId="team.id"
+                                                    :serverId="serverId as string"
+                                                    @action-completed="refreshData"
+                                                />
                                             </div>
                                         </CardTitle>
                                         <div class="mt-2">
@@ -590,47 +470,85 @@ async function executeDisbandSquad() {
                                         </div>
                                     </CardHeader>
                                     <CardContent>
-                                        <table class="w-full text-sm">
-                                            <thead>
-                                                <tr
-                                                    class="border-b border-gray-700"
-                                                >
-                                                    <th class="text-left py-1">
-                                                        Player
-                                                    </th>
-                                                    <th class="text-left py-1">
-                                                        Role
-                                                    </th>
-                                                    <th class="text-right py-1">
-                                                        Actions
-                                                    </th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <tr
-                                                    v-for="player in getSortedSquadPlayers(
-                                                        squad,
-                                                    )"
-                                                    :key="player.steam_id"
-                                                    class="border-b border-gray-800"
-                                                >
-                                                    <td class="py-1">
-                                                        <div
-                                                            class="flex items-center"
-                                                        >
-                                                            <span
-                                                                v-if="
-                                                                    player.isSquadLeader
-                                                                "
-                                                                :class="
-                                                                    isSquadLeaderWithIncorrectRole(
-                                                                        player,
-                                                                    )
-                                                                        ? 'mr-1 text-red-500'
-                                                                        : 'mr-1 text-yellow-500'
-                                                                "
-                                                                >★</span
+                                        <div class="overflow-x-auto">
+                                            <table class="w-full text-sm">
+                                                <thead>
+                                                    <tr
+                                                        class="border-b border-gray-700"
+                                                    >
+                                                        <th class="text-left py-1 min-w-[200px]">
+                                                            Player
+                                                        </th>
+                                                        <th class="text-left py-1 whitespace-nowrap">
+                                                            Role
+                                                        </th>
+                                                        <th class="text-right py-1 whitespace-nowrap">
+                                                            Actions
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr
+                                                        v-for="player in getSortedSquadPlayers(
+                                                            squad,
+                                                        )"
+                                                        :key="player.steam_id"
+                                                        class="border-b border-gray-800 cursor-pointer hover:bg-muted/50 transition-colors"
+                                                        :class="{
+                                                            'bg-primary/20': isPlayerSelected(player),
+                                                        }"
+                                                        @click="togglePlayerSelection(player, $event)"
+                                                    >
+                                                        <td class="py-2 min-w-[200px]">
+                                                            <div
+                                                                class="flex items-start gap-1"
                                                             >
+                                                                <Icon
+                                                                    v-if="isPlayerSelected(player)"
+                                                                    name="lucide:check-circle"
+                                                                    class="h-4 w-4 text-primary flex-shrink-0 mt-0.5"
+                                                                />
+                                                                <span
+                                                                    v-if="
+                                                                        player.isSquadLeader
+                                                                    "
+                                                                    :class="
+                                                                        isSquadLeaderWithIncorrectRole(
+                                                                            player,
+                                                                        )
+                                                                            ? 'text-red-500 flex-shrink-0'
+                                                                            : 'text-yellow-500 flex-shrink-0'
+                                                                    "
+                                                                    >★</span
+                                                                >
+                                                                <div class="flex flex-col flex-1">
+                                                                    <span
+                                                                        :class="
+                                                                            isSquadLeaderWithIncorrectRole(
+                                                                                player,
+                                                                            )
+                                                                                ? 'text-red-500 font-semibold break-words'
+                                                                                : 'break-words'
+                                                                        "
+                                                                    >
+                                                                        {{
+                                                                            player.name
+                                                                        }}
+                                                                    </span>
+                                                                    <span
+                                                                        v-if="
+                                                                            isSquadLeaderWithIncorrectRole(
+                                                                                player,
+                                                                            )
+                                                                        "
+                                                                        class="text-[10px] text-red-500 bg-red-100 dark:bg-red-900 px-1 rounded w-fit mt-0.5"
+                                                                    >
+                                                                        WRONG ROLE
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td class="py-2 whitespace-nowrap">
                                                             <span
                                                                 :class="
                                                                     isSquadLeaderWithIncorrectRole(
@@ -641,64 +559,39 @@ async function executeDisbandSquad() {
                                                                 "
                                                             >
                                                                 {{
-                                                                    player.name
+                                                                    player.role ||
+                                                                    "Rifleman"
                                                                 }}
                                                             </span>
-                                                            <span
-                                                                v-if="
-                                                                    isSquadLeaderWithIncorrectRole(
-                                                                        player,
-                                                                    )
+                                                        </td>
+                                                        <td class="py-2 text-right whitespace-nowrap" @click.stop>
+                                                            <PlayerActionMenu
+                                                                :player="player"
+                                                                :serverId="
+                                                                    serverId as string
                                                                 "
-                                                                class="ml-2 text-xs text-red-500 bg-red-100 dark:bg-red-900 px-1 rounded"
-                                                            >
-                                                                WRONG ROLE
-                                                            </span>
-                                                        </div>
-                                                    </td>
-                                                    <td class="py-1">
-                                                        <span
-                                                            :class="
-                                                                isSquadLeaderWithIncorrectRole(
-                                                                    player,
-                                                                )
-                                                                    ? 'text-red-500 font-semibold'
-                                                                    : ''
-                                                            "
-                                                        >
-                                                            {{
-                                                                player.role ||
-                                                                "Rifleman"
-                                                            }}
-                                                        </span>
-                                                    </td>
-                                                    <td class="py-1 text-right">
-                                                        <PlayerActionMenu
-                                                            :player="player"
-                                                            :serverId="
-                                                                serverId as string
-                                                            "
-                                                            @action-completed="
-                                                                refreshData
-                                                            "
-                                                        />
-                                                    </td>
-                                                </tr>
-                                                <tr
-                                                    v-if="
-                                                        squad.players.length ===
-                                                        0
-                                                    "
-                                                >
-                                                    <td
-                                                        colspan="3"
-                                                        class="text-center py-2 opacity-70"
+                                                                @action-completed="
+                                                                    refreshData
+                                                                "
+                                                            />
+                                                        </td>
+                                                    </tr>
+                                                    <tr
+                                                        v-if="
+                                                            squad.players.length ===
+                                                            0
+                                                        "
                                                     >
-                                                        No players in squad
-                                                    </td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
+                                                        <td
+                                                            colspan="3"
+                                                            class="text-center py-2 opacity-70"
+                                                        >
+                                                            No players in squad
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </CardContent>
                                 </Card>
                             </div>
@@ -719,25 +612,36 @@ async function executeDisbandSquad() {
                                         <div
                                             v-for="player in team.players"
                                             :key="player.steam_id"
-                                            class="p-2 border border-gray-700 rounded flex items-center justify-between"
+                                            class="p-2 border border-gray-700 rounded flex items-center justify-between cursor-pointer hover:bg-muted/50 transition-colors"
+                                            :class="{
+                                                'bg-primary/20 border-primary': isPlayerSelected(player),
+                                            }"
+                                            @click="togglePlayerSelection(player, $event)"
                                         >
-                                            <div>
-                                                <div
-                                                    class="font-medium flex items-center gap-2"
-                                                >
-                                                    <span
-                                                        class="truncate max-w-[12rem]"
-                                                        >{{ player.name }}</span
+                                            <div class="flex items-center gap-2">
+                                                <Icon
+                                                    v-if="isPlayerSelected(player)"
+                                                    name="lucide:check-circle"
+                                                    class="h-4 w-4 text-primary flex-shrink-0"
+                                                />
+                                                <div>
+                                                    <div
+                                                        class="font-medium flex items-center gap-2"
                                                     >
-                                                </div>
-                                                <div class="text-xs opacity-70">
-                                                    <span>{{
-                                                        player.role ||
-                                                        "Rifleman"
-                                                    }}</span>
+                                                        <span
+                                                            class="truncate max-w-[12rem]"
+                                                            >{{ player.name }}</span
+                                                        >
+                                                    </div>
+                                                    <div class="text-xs opacity-70">
+                                                        <span>{{
+                                                            player.role ||
+                                                            "Rifleman"
+                                                        }}</span>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div>
+                                            <div @click.stop>
                                                 <PlayerActionMenu
                                                     :player="player"
                                                     :serverId="
@@ -757,96 +661,8 @@ async function executeDisbandSquad() {
                 </div>
             </Tabs>
         </div>
-    </div>
-
-    <!-- Disband Squad Dialog (kept separate as it's squad-specific) -->
-    <Dialog v-model:open="showDisbandDialog">
-        <DialogContent class="sm:max-w-[425px]">
-            <DialogHeader>
-                <DialogTitle
-                    >Disband Squad {{ selectedSquad?.id }}:
-                    {{ selectedSquad?.name }}</DialogTitle
-                >
-                <DialogDescription>
-                    Disband this squad and remove all players from it. This
-                    action cannot be undone.
-                </DialogDescription>
-            </DialogHeader>
-
-            <div class="grid gap-4 py-4">
-                <div class="text-sm text-muted-foreground">
-                    Are you sure you want to disband Squad
-                    {{ selectedSquad?.id }}: {{ selectedSquad?.name }}? All
-                    {{ selectedSquad?.players.length }} players will be removed
-                    from the squad.
-                </div>
-            </div>
-
-            <DialogFooter>
-                <Button variant="outline" @click="closeDisbandDialog"
-                    >Cancel</Button
-                >
-                <Button
-                    variant="destructive"
-                    @click="executeDisbandSquad"
-                    :disabled="isDisbandLoading"
-                >
-                    <span v-if="isDisbandLoading" class="mr-2">
-                        <Icon
-                            name="lucide:loader-2"
-                            class="h-4 w-4 animate-spin"
-                        />
-                    </span>
-                    Disband Squad
-                </Button>
-            </DialogFooter>
-        </DialogContent>
-    </Dialog>
-
-    <!-- Demote Commander Dialog -->
-    <Dialog v-model:open="showDemoteCommanderDialog">
-        <DialogContent class="sm:max-w-[425px]">
-            <DialogHeader>
-                <DialogTitle>Demote Commander</DialogTitle>
-                <DialogDescription>
-                    Demote the current commander from Squad
-                    {{ selectedCommandSquad?.squad.id }}:
-                    {{ selectedCommandSquad?.squad.name }}
-                </DialogDescription>
-            </DialogHeader>
-
-            <div class="grid gap-4 py-4">
-                <div class="text-sm text-muted-foreground">
-                    <template v-if="selectedCommandSquad?.squad">
-                        Are you sure you want to demote
-                        <strong>{{
-                            getSquadLeaderName(selectedCommandSquad.squad)
-                        }}</strong>
-                        from commander?
-                    </template>
-                </div>
-            </div>
-
-            <DialogFooter>
-                <Button variant="outline" @click="closeDemoteCommanderDialog"
-                    >Cancel</Button
-                >
-                <Button
-                    variant="destructive"
-                    @click="executeDemoteCommander"
-                    :disabled="isDemoteCommanderLoading"
-                >
-                    <span v-if="isDemoteCommanderLoading" class="mr-2">
-                        <Icon
-                            name="lucide:loader-2"
-                            class="h-4 w-4 animate-spin"
-                        />
-                    </span>
-                    Demote Commander
-                </Button>
-            </DialogFooter>
-        </DialogContent>
-    </Dialog>
+        </div>
+    </BulkPlayerActionMenu>
 </template>
 
 <style scoped>
