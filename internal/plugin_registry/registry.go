@@ -19,6 +19,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_round_ended"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_round_winner"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_squad_created"
+	"go.codycody31.dev/squad-aegis/internal/plugins/discord_teamkill"
 	"go.codycody31.dev/squad-aegis/internal/plugins/fog_of_war"
 	"go.codycody31.dev/squad-aegis/internal/plugins/intervalled_broadcasts"
 	"go.codycody31.dev/squad-aegis/internal/plugins/kill_broadcast"
@@ -175,6 +176,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Kill Broadcast plugin
 	if err := pm.RegisterPlugin(kill_broadcast.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Kill Broadcast plugin")
+		return err
+	}
+
+	// Register Kill Broadcast plugin
+	if err := pm.RegisterPlugin(discord_teamkill.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Discord Teamkill plugin")
 		return err
 	}
 
