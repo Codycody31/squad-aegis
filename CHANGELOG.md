@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-22
+## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-23
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -17,6 +17,8 @@
 
 ### Misc
 
+- feat(sudo): implement semi-okay admin dashboard with metrics, system health, storage management, and session control features ([3103225](https://github.com/Codycody31/squad-aegis/commit/3103225ae2eb2376ecb3ca0c93ed1409b2dccef1))
+- feat(plugins): implement Squad Creation Blocker plugin to prevent custom squad creation during specified periods with rate limiting and cooldown features ([b9818ab](https://github.com/Codycody31/squad-aegis/commit/b9818abe811e2c808cf9c00a7021f1c63b4da970))
 - refactor: add context menu for selecting multiple players ([e0addfa](https://github.com/Codycody31/squad-aegis/commit/e0addfaa9876c276885feb4a47d37625a85069b6))
 - docs(plugins): update auto warn & kick sl wrong kit and cbl ([7f72b12](https://github.com/Codycody31/squad-aegis/commit/7f72b122493baaf2e6ff108962b1be3957b44478))
 - feat(plugins): introduce Team Balancer plugin for tracking win streaks and managing team scrambles to ensure balanced matches ([f61238d](https://github.com/Codycody31/squad-aegis/commit/f61238d31ec67391f01613465f03e2acf40dddb1))
