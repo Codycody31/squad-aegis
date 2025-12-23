@@ -333,6 +333,12 @@ await fetchServers();
               <DropdownMenuSeparator />
 
               <DropdownMenuGroup>
+                <DropdownMenuItem v-if="authStore.user?.super_admin" as-child>
+                  <RouterLink to="/sudo" @click="closeSidebarOnMobile">
+                    <Icon name="mdi:shield-crown" />
+                    Super
+                  </RouterLink>
+                </DropdownMenuItem>
                 <DropdownMenuItem as-child>
                   <RouterLink to="/settings" @click="closeSidebarOnMobile">
                     <Icon name="lucide:settings" />

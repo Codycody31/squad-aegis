@@ -17,6 +17,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/server/web"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 	"go.codycody31.dev/squad-aegis/internal/storage"
+	"go.codycody31.dev/squad-aegis/internal/valkey"
 	"go.codycody31.dev/squad-aegis/internal/workflow_manager"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,7 @@ type Server struct {
 type Dependencies struct {
 	DB                   *sql.DB
 	Clickhouse           *clickhouse.Client
+	Valkey               *valkey.Client
 	RconManager          *rcon_manager.RconManager
 	EventManager         *event_manager.EventManager
 	LogwatcherManager    *logwatcher_manager.LogwatcherManager
@@ -368,6 +370,48 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			playersGroup.GET("", server.PlayersList)
 			playersGroup.GET("/stats", server.PlayersStats)
 			playersGroup.GET("/:playerId", server.PlayerGet)
+		}
+
+		// Sudo/Superadmin management routes
+		sudoGroup := apiGroup.Group("/sudo")
+		{
+			sudoGroup.Use(server.AuthSession)
+			sudoGroup.Use(server.AuthIsSuperAdmin())
+
+			// Storage management
+			sudoGroup.GET("/storage/summary", server.GetStorageSummary)
+			sudoGroup.GET("/storage/files", server.GetStorageFiles)
+			sudoGroup.GET("/storage/files/*path", server.DownloadStorageFile)
+			sudoGroup.DELETE("/storage/files/*path", server.DeleteStorageFile)
+			sudoGroup.POST("/storage/files/bulk-delete", server.BulkDeleteStorageFiles)
+
+			// Metrics and analytics
+			sudoGroup.GET("/metrics/overview", server.GetMetricsOverview)
+			sudoGroup.GET("/metrics/timeline", server.GetMetricsTimeline)
+			sudoGroup.GET("/metrics/servers", server.GetServerActivities)
+			sudoGroup.GET("/metrics/top-servers", server.GetTopServers)
+
+			// System health and configuration
+			sudoGroup.GET("/system/health", server.GetSystemHealth)
+			sudoGroup.GET("/system/config", server.GetSystemConfig)
+
+			// Global audit logs
+			sudoGroup.GET("/audit/logs", server.GetGlobalAuditLogs)
+			sudoGroup.GET("/audit/stats", server.GetGlobalAuditStats)
+			sudoGroup.GET("/audit/export", server.ExportGlobalAuditLogs)
+
+			// Session management
+			sudoGroup.GET("/sessions", server.GetAllSessions)
+			sudoGroup.GET("/sessions/stats", server.GetSessionStats)
+			sudoGroup.DELETE("/sessions/:sessionId", server.DeleteSession)
+			sudoGroup.DELETE("/sessions/user/:userId", server.DeleteUserSessions)
+			sudoGroup.POST("/sessions/cleanup", server.CleanupExpiredSessions)
+
+			// Database statistics
+			sudoGroup.GET("/database/overview", server.GetDatabaseOverview)
+			sudoGroup.GET("/database/postgresql", server.GetPostgreSQLStats)
+			sudoGroup.GET("/database/clickhouse", server.GetClickHouseStats)
+			sudoGroup.POST("/database/optimize/:type", server.OptimizeDatabase)
 		}
 
 		// Public Routes for the server

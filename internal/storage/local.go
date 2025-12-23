@@ -93,3 +93,82 @@ func (s *LocalStorage) GetURL(ctx context.Context, path string) (string, error) 
 	return path, nil
 }
 
+// List lists files in storage with optional prefix filter
+func (s *LocalStorage) List(ctx context.Context, prefix string) ([]FileInfo, error) {
+	var files []FileInfo
+	searchPath := filepath.Join(s.basePath, prefix)
+
+	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			// Skip files we can't access
+			return nil
+		}
+
+		// Get relative path from base
+		relPath, err := filepath.Rel(s.basePath, path)
+		if err != nil {
+			return nil
+		}
+
+		// Skip the base directory itself
+		if relPath == "." {
+			return nil
+		}
+
+		files = append(files, FileInfo{
+			Path:         relPath,
+			Size:         info.Size(),
+			ModifiedTime: info.ModTime(),
+			IsDir:        info.IsDir(),
+		})
+
+		return nil
+	})
+
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to list files: %w", err)
+	}
+
+	return files, nil
+}
+
+// Stat returns metadata about a specific file
+func (s *LocalStorage) Stat(ctx context.Context, path string) (*FileInfo, error) {
+	fullPath := filepath.Join(s.basePath, path)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	return &FileInfo{
+		Path:         path,
+		Size:         info.Size(),
+		ModifiedTime: info.ModTime(),
+		IsDir:        info.IsDir(),
+	}, nil
+}
+
+// GetStats returns aggregate storage statistics
+func (s *LocalStorage) GetStats(ctx context.Context) (*StorageStats, error) {
+	stats := &StorageStats{}
+
+	err := filepath.Walk(s.basePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip files we can't access
+		}
+
+		if !info.IsDir() {
+			stats.TotalSize += info.Size()
+			stats.TotalFiles++
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate stats: %w", err)
+	}
+
+	return stats, nil
+}
+

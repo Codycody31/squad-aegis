@@ -158,3 +158,73 @@ func (s *S3Storage) getKey(path string) string {
 	return path
 }
 
+// List lists files in S3 storage with optional prefix filter
+func (s *S3Storage) List(ctx context.Context, prefix string) ([]FileInfo, error) {
+	var files []FileInfo
+	searchPrefix := s.getKey(prefix)
+
+	objectCh := s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{
+		Prefix:    searchPrefix,
+		Recursive: true,
+	})
+
+	for object := range objectCh {
+		if object.Err != nil {
+			return nil, fmt.Errorf("error listing objects: %w", object.Err)
+		}
+
+		// Remove base path to get relative path
+		relPath := object.Key
+		if s.basePath != "" && len(object.Key) > len(s.basePath)+1 {
+			relPath = object.Key[len(s.basePath)+1:]
+		}
+
+		files = append(files, FileInfo{
+			Path:         relPath,
+			Size:         object.Size,
+			ModifiedTime: object.LastModified,
+			IsDir:        false, // S3 doesn't have directories, only keys
+		})
+	}
+
+	return files, nil
+}
+
+// Stat returns metadata about a specific file in S3
+func (s *S3Storage) Stat(ctx context.Context, path string) (*FileInfo, error) {
+	key := s.getKey(path)
+
+	objInfo, err := s.client.StatObject(ctx, s.bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat object: %w", err)
+	}
+
+	return &FileInfo{
+		Path:         path,
+		Size:         objInfo.Size,
+		ModifiedTime: objInfo.LastModified,
+		IsDir:        false,
+	}, nil
+}
+
+// GetStats returns aggregate storage statistics for S3
+func (s *S3Storage) GetStats(ctx context.Context) (*StorageStats, error) {
+	stats := &StorageStats{}
+
+	objectCh := s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{
+		Prefix:    s.basePath,
+		Recursive: true,
+	})
+
+	for object := range objectCh {
+		if object.Err != nil {
+			return nil, fmt.Errorf("error listing objects: %w", object.Err)
+		}
+
+		stats.TotalSize += object.Size
+		stats.TotalFiles++
+	}
+
+	return stats, nil
+}
+
