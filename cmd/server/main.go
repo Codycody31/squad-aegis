@@ -288,6 +288,7 @@ func run(ctx context.Context) error {
 		deps := &server.Dependencies{
 			DB:                   database,
 			Clickhouse:           clickhouseClient,
+			Valkey:               valkeyClient,
 			RconManager:          rconManager,
 			EventManager:         eventManager,
 			LogwatcherManager:    logwatcherManager,

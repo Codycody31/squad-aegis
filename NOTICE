@@ -1,0 +1,8 @@
+This repository is primarily licensed under the Elastic License 2.0.
+
+However, the following components are licensed under the
+GNU Affero General Public License v3.0 (AGPL-3.0):
+
+- internal/plugins/squad_creation_blocker
+
+Each such component contains its own LICENSE file and copyright notices.
