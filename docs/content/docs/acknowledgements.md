@@ -15,3 +15,5 @@ From plugin developers, rcon libraries, to log parsers, we appreciate the hard w
 - [mikebjoyce/squadjs-squadlead-whitelister](https://github.com/mikebjoyce/squadjs-squadlead-whitelister): For the Squad Lead Whitelister plugin which we used as a base for our Server Seeder Whitelist plugin.
 - [magicoflolis/SquadJS-Knife-Broadcast](https://github.com/magicoflolis/SquadJS-Knife-Broadcast): For the Knife Broadcast plugin which we used as a base for our Knife Broadcast plugin.
   - License: [MIT License](https://github.com/magicoflolis/SquadJS-Knife-Broadcast/blob/main/LICENSE)
+- [lbzepoqo/squadjs-squad-creation-blocker](https://github.com/lbzepoqo/squadjs-squad-creation-blocker): For the Squad Creation Blocker plugin which we used as a base for our Squad Creation Blocker plugin.
+  - License: [AGPL-3.0 License](https://github.com/lbzepoqo/squadjs-squad-creation-blocker/blob/main/LICENSE)

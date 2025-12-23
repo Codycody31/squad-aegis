@@ -26,6 +26,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/rule_lookup"
 	"go.codycody31.dev/squad-aegis/internal/plugins/seeding_mode"
 	"go.codycody31.dev/squad-aegis/internal/plugins/server_seeder_whitelist"
+	"go.codycody31.dev/squad-aegis/internal/plugins/squad_creation_blocker"
 	"go.codycody31.dev/squad-aegis/internal/plugins/squad_leader_whitelist"
 	"go.codycody31.dev/squad-aegis/internal/plugins/switch_teams"
 	"go.codycody31.dev/squad-aegis/internal/plugins/team_balancer"
@@ -189,6 +190,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register Kill Broadcast plugin
 	if err := pm.RegisterPlugin(discord_teamkill.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register Discord Teamkill plugin")
+		return err
+	}
+
+	// Register Squad Creation Blocker plugin
+	if err := pm.RegisterPlugin(squad_creation_blocker.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Squad Creation Blocker plugin")
 		return err
 	}
 
