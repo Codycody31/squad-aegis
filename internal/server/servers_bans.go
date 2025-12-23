@@ -577,10 +577,36 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 
 	// Update evidence records if provided (including empty array to clear evidence)
 	if request.Evidence != nil {
-		// Delete evidence files from storage before deleting database records
-		if err := s.deleteBanEvidenceFiles(c.Request.Context(), banId.String()); err != nil {
-			log.Warn().Err(err).Str("banId", banId.String()).Msg("Failed to delete some evidence files from storage, continuing with database deletion")
-			// Continue with deletion even if file deletion fails
+		// First, get the list of existing evidence files to determine which ones to delete
+		existingFiles, err := s.getExistingEvidenceFiles(c.Request.Context(), banId.String())
+		if err != nil {
+			log.Error().Err(err).Str("banId", banId.String()).Msg("Failed to query existing evidence files")
+			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to query existing evidence"})
+			return
+		}
+
+		// Build a set of file paths from the new evidence that should be kept
+		newFilePaths := make(map[string]bool)
+		for _, ev := range *request.Evidence {
+			if ev.EvidenceType == "file_upload" && ev.FilePath != nil && *ev.FilePath != "" {
+				newFilePaths[*ev.FilePath] = true
+			}
+		}
+
+		// Determine which files need to be deleted (files that exist but are NOT in the new evidence)
+		filesToDelete := []string{}
+		for _, existingFile := range existingFiles {
+			if !newFilePaths[existingFile] {
+				filesToDelete = append(filesToDelete, existingFile)
+			}
+		}
+
+		// Delete only the files that are being removed
+		if len(filesToDelete) > 0 {
+			if err := s.deleteSpecificEvidenceFiles(c.Request.Context(), banId.String(), filesToDelete); err != nil {
+				log.Warn().Err(err).Str("banId", banId.String()).Msg("Failed to delete some evidence files from storage, continuing with database update")
+				// Continue with update even if file deletion fails
+			}
 		}
 
 		// Use a transaction to ensure atomicity - if insert fails, rollback the delete
@@ -592,7 +618,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		}
 		defer tx.Rollback()
 
-		// Delete existing evidence
+		// Delete existing evidence records from database
 		_, delErr := tx.ExecContext(c.Request.Context(), `
 			DELETE FROM ban_evidence WHERE ban_id = $1
 		`, banId)
@@ -1095,7 +1121,7 @@ func (s *Server) createBanEvidence(ctx context.Context, banID string, serverID u
 	for _, ev := range evidence {
 		// Convert metadata to JSON - always ensure we have valid JSON (empty object if nil)
 		var metadataJSON []byte
-		if ev.Metadata != nil && len(ev.Metadata) > 0 {
+		if len(ev.Metadata) > 0 {
 			var marshalErr error
 			metadataJSON, marshalErr = json.Marshal(ev.Metadata)
 			if marshalErr != nil {
@@ -1141,6 +1167,65 @@ func (s *Server) createBanEvidence(ctx context.Context, banID string, serverID u
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// getExistingEvidenceFiles returns a list of file paths for all file_upload evidence for a ban
+func (s *Server) getExistingEvidenceFiles(ctx context.Context, banID string) ([]string, error) {
+	rows, err := s.Dependencies.DB.QueryContext(ctx, `
+		SELECT file_path
+		FROM ban_evidence
+		WHERE ban_id = $1 AND evidence_type = 'file_upload' AND file_path IS NOT NULL
+	`, banID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query evidence files: %w", err)
+	}
+	defer rows.Close()
+
+	var filePaths []string
+	for rows.Next() {
+		var filePath sql.NullString
+		if err := rows.Scan(&filePath); err != nil {
+			log.Warn().Err(err).Str("banId", banID).Msg("Failed to scan file path")
+			continue
+		}
+
+		if filePath.Valid && filePath.String != "" {
+			filePaths = append(filePaths, filePath.String)
+		}
+	}
+
+	return filePaths, nil
+}
+
+// deleteSpecificEvidenceFiles deletes specific evidence files from storage
+func (s *Server) deleteSpecificEvidenceFiles(ctx context.Context, banID string, filePaths []string) error {
+	var deleteErrors []error
+	for _, filePath := range filePaths {
+		if filePath == "" {
+			continue
+		}
+
+		// Delete the file from storage
+		if err := s.Dependencies.Storage.Delete(ctx, filePath); err != nil {
+			log.Warn().Err(err).
+				Str("banId", banID).
+				Str("filePath", filePath).
+				Msg("Failed to delete evidence file from storage")
+			deleteErrors = append(deleteErrors, fmt.Errorf("failed to delete file %s: %w", filePath, err))
+			// Continue deleting other files even if one fails
+		} else {
+			log.Info().
+				Str("banId", banID).
+				Str("filePath", filePath).
+				Msg("Deleted evidence file from storage")
+		}
+	}
+
+	if len(deleteErrors) > 0 {
+		return fmt.Errorf("failed to delete %d file(s): %v", len(deleteErrors), deleteErrors[0])
 	}
 
 	return nil
@@ -1213,7 +1298,7 @@ func (s *Server) createBanEvidenceWithTx(ctx context.Context, tx *sql.Tx, banID 
 	for _, ev := range evidence {
 		// Convert metadata to JSON - always ensure we have valid JSON (empty object if nil)
 		var metadataJSON []byte
-		if ev.Metadata != nil && len(ev.Metadata) > 0 {
+		if len(ev.Metadata) > 0 {
 			var marshalErr error
 			metadataJSON, marshalErr = json.Marshal(ev.Metadata)
 			if marshalErr != nil {
