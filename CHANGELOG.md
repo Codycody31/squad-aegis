@@ -17,6 +17,7 @@
 
 ### Misc
 
+- fix(bans): missing selective file deletion and querying existing evidence files resulting in large unexpected deletions ([df619c8](https://github.com/Codycody31/squad-aegis/commit/df619c8ffa824f6a5ce721a7110a12c7e956cf9a))
 - feat(sudo): implement semi-okay admin dashboard with metrics, system health, storage management, and session control features ([3103225](https://github.com/Codycody31/squad-aegis/commit/3103225ae2eb2376ecb3ca0c93ed1409b2dccef1))
 - feat(plugins): implement Squad Creation Blocker plugin to prevent custom squad creation during specified periods with rate limiting and cooldown features ([b9818ab](https://github.com/Codycody31/squad-aegis/commit/b9818abe811e2c808cf9c00a7021f1c63b4da970))
 - refactor: add context menu for selecting multiple players ([e0addfa](https://github.com/Codycody31/squad-aegis/commit/e0addfaa9876c276885feb4a47d37625a85069b6))
