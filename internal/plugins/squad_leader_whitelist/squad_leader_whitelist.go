@@ -213,6 +213,18 @@ func (p *SquadLeaderWhitelistPlugin) GetDefinition() plugin_manager.PluginDefini
 	return Define()
 }
 
+func (p *SquadLeaderWhitelistPlugin) GetCommands() []plugin_manager.PluginCommand {
+	return []plugin_manager.PluginCommand{}
+}
+
+func (p *SquadLeaderWhitelistPlugin) ExecuteCommand(commandID string, params map[string]interface{}) (*plugin_manager.CommandResult, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
+func (p *SquadLeaderWhitelistPlugin) GetCommandExecutionStatus(executionID string) (*plugin_manager.CommandExecutionStatus, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
 // Initialize initializes the plugin with its configuration and dependencies
 func (p *SquadLeaderWhitelistPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()

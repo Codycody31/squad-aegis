@@ -1001,10 +1001,10 @@ func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int
 		// Parse fields JSON
 		if fieldsJSON != "" {
 			var fields map[string]interface{}
-			if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
-				logItem.Fields = map[string]interface{}{"raw": fieldsJSON, "error": "failed to parse json"}
-			} else {
+			if err := json.Unmarshal([]byte(fieldsJSON), &fields); err == nil {
 				logItem.Fields = fields
+			} else {
+				logItem.Fields = map[string]interface{}{"raw": fieldsJSON, "error": "failed to parse json"}
 			}
 		}
 
@@ -1142,10 +1142,10 @@ func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, befo
 		// Parse fields JSON
 		if fieldsJSON != "" {
 			var fields map[string]interface{}
-			if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
-				logItem.Fields = map[string]interface{}{"raw": fieldsJSON, "error": "failed to parse json"}
-			} else {
+			if err := json.Unmarshal([]byte(fieldsJSON), &fields); err == nil {
 				logItem.Fields = fields
+			} else {
+				logItem.Fields = map[string]interface{}{"raw": fieldsJSON, "error": "failed to parse json"}
 			}
 		}
 
@@ -1179,4 +1179,114 @@ func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, befo
 	}
 
 	return logs, nil
+}
+
+// GetPluginCommands returns available commands for a plugin instance
+func (pm *PluginManager) GetPluginCommands(serverID, instanceID uuid.UUID) ([]PluginCommand, error) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
+	if err != nil {
+		return nil, err
+	}
+
+	if instance.Plugin == nil {
+		return nil, fmt.Errorf("plugin instance not initialized")
+	}
+
+	// Get commands from plugin
+	commands := instance.Plugin.GetCommands()
+	return commands, nil
+}
+
+// ExecutePluginCommand executes a command on a plugin instance
+func (pm *PluginManager) ExecutePluginCommand(serverID, instanceID uuid.UUID, commandID string, params map[string]interface{}) (*CommandResult, error) {
+	pm.mu.RLock()
+	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
+	pm.mu.RUnlock()
+
+	if err != nil {
+		return nil, err
+	}
+
+	if instance.Plugin == nil {
+		return nil, fmt.Errorf("plugin instance not initialized")
+	}
+
+	if instance.Status != PluginStatusRunning || !instance.Enabled {
+		return nil, fmt.Errorf("plugin instance is not running")
+	}
+
+	// Validate command exists
+	commands := instance.Plugin.GetCommands()
+	var command *PluginCommand
+	for i := range commands {
+		if commands[i].ID == commandID {
+			command = &commands[i]
+			break
+		}
+	}
+
+	if command == nil {
+		return nil, fmt.Errorf("command %s not found", commandID)
+	}
+
+	// Validate parameters if schema is defined
+	if len(command.Parameters.Fields) > 0 {
+		if err := command.Parameters.Validate(params); err != nil {
+			return nil, fmt.Errorf("parameter validation failed: %w", err)
+		}
+	}
+
+	// Execute command with panic recovery
+	var result *CommandResult
+	var execErr error
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().
+					Str("serverID", serverID.String()).
+					Str("instanceID", instanceID.String()).
+					Str("pluginID", instance.PluginID).
+					Str("commandID", commandID).
+					Interface("panic", r).
+					Msg("Plugin panicked while executing command")
+
+				execErr = fmt.Errorf("plugin panicked: %v", r)
+			}
+		}()
+
+		result, execErr = instance.Plugin.ExecuteCommand(commandID, params)
+	}()
+
+	if execErr != nil {
+		return nil, execErr
+	}
+
+	return result, nil
+}
+
+// GetCommandExecutionStatus gets the status of an async command execution
+func (pm *PluginManager) GetCommandExecutionStatus(serverID, instanceID uuid.UUID, executionID string) (*CommandExecutionStatus, error) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
+	if err != nil {
+		return nil, err
+	}
+
+	if instance.Plugin == nil {
+		return nil, fmt.Errorf("plugin instance not initialized")
+	}
+
+	// Get execution status from plugin
+	status, err := instance.Plugin.GetCommandExecutionStatus(executionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return status, nil
 }

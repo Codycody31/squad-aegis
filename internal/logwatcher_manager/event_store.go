@@ -22,6 +22,17 @@ type EventStore struct {
 	client   *valkeyClient.Client
 }
 
+const (
+	// playerTTL is how long we keep player metadata (EOS/Steam IDs, etc.)
+	playerTTL = 6 * time.Hour
+	// sessionTTL is how long we keep session-specific data (damage, team, etc.)
+	sessionTTL = 6 * time.Hour
+	// joinRequestTTL is how long we keep join request metadata
+	joinRequestTTL = 1 * time.Hour
+	// roundDataTTL is how long we keep round result data
+	roundDataTTL = 2 * time.Hour
+)
+
 // NewEventStore creates a new Valkey-backed event store for a specific server
 func NewEventStore(serverID uuid.UUID, client *valkeyClient.Client) *EventStore {
 	return &EventStore{
@@ -79,8 +90,8 @@ func (es *EventStore) StoreJoinRequest(chainID string, playerData *JoinRequestDa
 		return
 	}
 
-	// Store with 1 hour expiration
-	if err := es.client.Set(context.Background(), key, string(data), time.Hour); err != nil {
+	// Store with joinRequestTTL expiration
+	if err := es.client.Set(context.Background(), key, string(data), joinRequestTTL); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store join request in valkey")
 	}
 }
@@ -148,14 +159,14 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 		existing.TeamID = data.TeamID
 	}
 
-	// Store merged data with no expiration (persistent)
+	// Store merged data with playerTTL expiration
 	mergedData, err := json.Marshal(existing)
 	if err != nil {
 		log.Error().Err(err).Str("playerID", playerID).Msg("failed to marshal player data")
 		return
 	}
 
-	if err := es.client.Set(context.Background(), key, string(mergedData), 0); err != nil {
+	if err := es.client.Set(context.Background(), key, string(mergedData), playerTTL); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store player data in valkey")
 	}
 }
@@ -250,14 +261,14 @@ func (es *EventStore) StoreSessionData(key string, data *SessionData) {
 		existing.EOSID = data.EOSID
 	}
 
-	// Store merged data with 24 hour expiration (session data)
+	// Store merged data with sessionTTL expiration
 	mergedData, err := json.Marshal(existing)
 	if err != nil {
 		log.Error().Err(err).Str("sessionKey", key).Msg("failed to marshal session data")
 		return
 	}
 
-	if err := es.client.Set(context.Background(), valkeyKey, string(mergedData), 24*time.Hour); err != nil {
+	if err := es.client.Set(context.Background(), valkeyKey, string(mergedData), sessionTTL); err != nil {
 		log.Error().Err(err).Str("key", valkeyKey).Msg("failed to store session data in valkey")
 	}
 }
@@ -295,8 +306,8 @@ func (es *EventStore) StoreRoundWinner(data *RoundWinnerData) {
 		return
 	}
 
-	// Store with 2 hour expiration
-	if err := es.client.Set(context.Background(), key, string(dataBytes), 2*time.Hour); err != nil {
+	// Store with roundDataTTL expiration
+	if err := es.client.Set(context.Background(), key, string(dataBytes), roundDataTTL); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store round winner in valkey")
 	}
 }
@@ -311,8 +322,8 @@ func (es *EventStore) StoreRoundLoser(data *RoundLoserData) {
 		return
 	}
 
-	// Store with 2 hour expiration
-	if err := es.client.Set(context.Background(), key, string(dataBytes), 2*time.Hour); err != nil {
+	// Store with roundDataTTL expiration
+	if err := es.client.Set(context.Background(), key, string(dataBytes), roundDataTTL); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store round loser in valkey")
 	}
 }
@@ -398,8 +409,8 @@ func (es *EventStore) StoreWonData(data *WonData) {
 		return
 	}
 
-	// Store with 2 hour expiration
-	if err := es.client.Set(context.Background(), key, string(dataBytes), 2*time.Hour); err != nil {
+	// Store with roundDataTTL expiration
+	if err := es.client.Set(context.Background(), key, string(dataBytes), roundDataTTL); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store won data in valkey")
 	}
 }

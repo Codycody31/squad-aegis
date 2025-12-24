@@ -137,6 +137,18 @@ func (p *AutoWarnSLWrongKitPlugin) GetDefinition() plugin_manager.PluginDefiniti
 	return Define()
 }
 
+func (p *AutoWarnSLWrongKitPlugin) GetCommands() []plugin_manager.PluginCommand {
+	return []plugin_manager.PluginCommand{}
+}
+
+func (p *AutoWarnSLWrongKitPlugin) ExecuteCommand(commandID string, params map[string]interface{}) (*plugin_manager.CommandResult, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
+func (p *AutoWarnSLWrongKitPlugin) GetCommandExecutionStatus(executionID string) (*plugin_manager.CommandExecutionStatus, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
 // Initialize initializes the plugin with its configuration and dependencies
 func (p *AutoWarnSLWrongKitPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()

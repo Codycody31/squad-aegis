@@ -77,6 +77,18 @@ func (p *FogOfWarPlugin) GetDefinition() plugin_manager.PluginDefinition {
 	return Define()
 }
 
+func (p *FogOfWarPlugin) GetCommands() []plugin_manager.PluginCommand {
+	return []plugin_manager.PluginCommand{}
+}
+
+func (p *FogOfWarPlugin) ExecuteCommand(commandID string, params map[string]interface{}) (*plugin_manager.CommandResult, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
+func (p *FogOfWarPlugin) GetCommandExecutionStatus(executionID string) (*plugin_manager.CommandExecutionStatus, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
 // Initialize initializes the plugin with its configuration and dependencies
 func (p *FogOfWarPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()

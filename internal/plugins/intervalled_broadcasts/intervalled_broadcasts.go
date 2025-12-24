@@ -77,6 +77,18 @@ func (p *IntervalledBroadcastsPlugin) GetDefinition() plugin_manager.PluginDefin
 	return Define()
 }
 
+func (p *IntervalledBroadcastsPlugin) GetCommands() []plugin_manager.PluginCommand {
+	return []plugin_manager.PluginCommand{}
+}
+
+func (p *IntervalledBroadcastsPlugin) ExecuteCommand(commandID string, params map[string]interface{}) (*plugin_manager.CommandResult, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
+func (p *IntervalledBroadcastsPlugin) GetCommandExecutionStatus(executionID string) (*plugin_manager.CommandExecutionStatus, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
 // Initialize initializes the plugin with its configuration and dependencies
 func (p *IntervalledBroadcastsPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()

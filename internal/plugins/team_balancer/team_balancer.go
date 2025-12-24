@@ -129,7 +129,7 @@ func Define() plugin_manager.PluginDefinition {
 					Description: "Seconds before scramble executes after announcement (min: 10)",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeInt,
-					Default:     12,
+					Default:     30,
 				},
 				{
 					Name:        "scramble_percentage",
@@ -199,6 +199,225 @@ func Define() plugin_manager.PluginDefinition {
 // GetDefinition returns the plugin definition
 func (p *TeamBalancerPlugin) GetDefinition() plugin_manager.PluginDefinition {
 	return Define()
+}
+
+func (p *TeamBalancerPlugin) GetCommands() []plugin_manager.PluginCommand {
+	return []plugin_manager.PluginCommand{
+		{
+			ID:            "status",
+			Name:          "Get Status",
+			Description:   "Show current team balancer status and win streak",
+			Category:      "Team Management",
+			ExecutionType: plugin_manager.CommandExecutionSync,
+		},
+		{
+			ID:                  "enable",
+			Name:                "Enable Tracking",
+			Description:         "Enable automatic win streak tracking",
+			Category:            "Team Management",
+			ExecutionType:       plugin_manager.CommandExecutionSync,
+			RequiredPermissions: []string{"manageserver"},
+		},
+		{
+			ID:                  "disable",
+			Name:                "Disable Tracking",
+			Description:         "Disable automatic win streak tracking",
+			Category:            "Team Management",
+			ExecutionType:       plugin_manager.CommandExecutionSync,
+			RequiredPermissions: []string{"manageserver"},
+		},
+		{
+			ID:                  "scramble",
+			Name:                "Scramble Teams",
+			Description:         "Initiate a team scramble",
+			Category:            "Team Management",
+			ExecutionType:       plugin_manager.CommandExecutionSync,
+			RequiredPermissions: []string{"manageserver"},
+			Parameters: plug_config_schema.ConfigSchema{
+				Fields: []plug_config_schema.ConfigField{
+					{
+						Name:        "immediate",
+						Type:        plug_config_schema.FieldTypeBool,
+						Description: "Execute scramble immediately without countdown",
+						Default:     false,
+					},
+					{
+						Name:        "dry_run",
+						Type:        plug_config_schema.FieldTypeBool,
+						Description: "Run a simulated scramble without moving players",
+						Default:     false,
+					},
+				},
+			},
+		},
+		{
+			ID:                  "cancel_scramble",
+			Name:                "Cancel Scramble",
+			Description:         "Cancel a pending team scramble",
+			Category:            "Team Management",
+			ExecutionType:       plugin_manager.CommandExecutionSync,
+			RequiredPermissions: []string{"manageserver"},
+		},
+		{
+			ID:                  "diag",
+			Name:                "Run Diagnostics",
+			Description:         "Run team balancer diagnostics (dry-run scramble)",
+			Category:            "Team Management",
+			ExecutionType:       plugin_manager.CommandExecutionSync,
+			RequiredPermissions: []string{"manageserver"},
+		},
+	}
+}
+
+func (p *TeamBalancerPlugin) ExecuteCommand(commandID string, params map[string]interface{}) (*plugin_manager.CommandResult, error) {
+	switch commandID {
+	case "status":
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		statusStr := "enabled"
+		if p.manuallyDisabled {
+			statusStr = "disabled"
+		}
+
+		msg := fmt.Sprintf("Team Balancer Status: %s | Win Streak: Team %d (%d wins) | Max: %d",
+			statusStr, p.winStreakTeam, p.winStreakCount, p.getIntConfig("max_win_streak"))
+
+		return &plugin_manager.CommandResult{
+			Success: true,
+			Message: msg,
+			Data: map[string]interface{}{
+				"enabled":          !p.manuallyDisabled,
+				"win_streak_team":  p.winStreakTeam,
+				"win_streak_count": p.winStreakCount,
+				"max_win_streak":   p.getIntConfig("max_win_streak"),
+			},
+		}, nil
+
+	case "enable":
+		p.mu.Lock()
+		if !p.manuallyDisabled {
+			p.mu.Unlock()
+			return &plugin_manager.CommandResult{
+				Success: true,
+				Message: "Win streak tracking is already enabled.",
+			}, nil
+		}
+		p.manuallyDisabled = false
+		p.mu.Unlock()
+
+		p.broadcast(p.getMessage("tracking_enabled"))
+		return &plugin_manager.CommandResult{
+			Success: true,
+			Message: "Win streak tracking enabled.",
+		}, nil
+
+	case "disable":
+		p.mu.Lock()
+		if p.manuallyDisabled {
+			p.mu.Unlock()
+			return &plugin_manager.CommandResult{
+				Success: true,
+				Message: "Win streak tracking is already disabled.",
+			}, nil
+		}
+		p.manuallyDisabled = true
+		p.resetStreak("Manual disable")
+		p.mu.Unlock()
+
+		p.broadcast(p.getMessage("tracking_disabled"))
+		return &plugin_manager.CommandResult{
+			Success: true,
+			Message: "Win streak tracking disabled.",
+		}, nil
+
+	case "scramble":
+		immediate := false
+		if val, ok := params["immediate"].(bool); ok {
+			immediate = val
+		}
+		dryRun := false
+		if val, ok := params["dry_run"].(bool); ok {
+			dryRun = val
+		}
+
+		p.mu.Lock()
+		if p.scramblePending || p.scrambleInProgress {
+			p.mu.Unlock()
+			status := "pending"
+			if p.scrambleInProgress {
+				status = "executing"
+			}
+			return &plugin_manager.CommandResult{
+				Success: false,
+				Message: fmt.Sprintf("Scramble already %s. Use cancel_scramble command to cancel.", status),
+			}, nil
+		}
+		p.mu.Unlock()
+
+		if !dryRun {
+			msg := ""
+			if immediate {
+				msg = p.getMessage("immediate_manual_scramble")
+			} else {
+				msg = p.formatMessage(p.getMessage("manual_scramble_announcement"), map[string]interface{}{
+					"delay": p.getIntConfig("scramble_announcement_delay"),
+				})
+			}
+			p.broadcast(msg)
+		}
+
+		go p.initiateScramble(dryRun, dryRun || immediate)
+		return &plugin_manager.CommandResult{
+			Success: true,
+			Message: "Scramble initiated.",
+		}, nil
+
+	case "cancel_scramble":
+		p.mu.Lock()
+		if !p.scramblePending {
+			p.mu.Unlock()
+			if p.scrambleInProgress {
+				return &plugin_manager.CommandResult{
+					Success: false,
+					Message: "Cannot cancel - scramble is already executing.",
+				}, nil
+			}
+			return &plugin_manager.CommandResult{
+				Success: false,
+				Message: "No pending scramble to cancel.",
+			}, nil
+		}
+
+		if p.scrambleCountdown != nil {
+			p.scrambleCountdown.Stop()
+		}
+		p.scramblePending = false
+		p.mu.Unlock()
+
+		p.broadcast("Scramble cancelled by admin.")
+		return &plugin_manager.CommandResult{
+			Success: true,
+			Message: "Scramble cancelled.",
+		}, nil
+
+	case "diag":
+		go func() {
+			time.Sleep(1 * time.Second)
+			p.initiateScramble(true, true)
+		}()
+		return &plugin_manager.CommandResult{
+			Success: true,
+			Message: "Diagnostics started. Check logs for results.",
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown command: %s", commandID)
+	}
+}
+
+func (p *TeamBalancerPlugin) GetCommandExecutionStatus(executionID string) (*plugin_manager.CommandExecutionStatus, error) {
+	return nil, fmt.Errorf("no commands available")
 }
 
 // Initialize initializes the plugin with its configuration and dependencies
