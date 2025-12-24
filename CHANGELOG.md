@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-24
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31, @Insidious Fiddler
+
+### 📈 Enhancement
+
+- refactor: enforce manageserver permission on server rules actions [[#125](https://github.com/Codycody31/squad-aegis/pull/125)]
+
+### 🐛 Bug Fixes
+
+- fix(discord-admin-requests): trim whitespace from permit and admin ro… [[#127](https://github.com/Codycody31/squad-aegis/pull/127)]
+- fix(discord-admin-requests): update online admin count logic with rol… [[#126](https://github.com/Codycody31/squad-aegis/pull/126)]
+
+### Misc
+
+- feat(plugins): plugin command system with command execution and status tracking features ([ea1b3c7](https://github.com/Codycody31/squad-aegis/commit/ea1b3c73be5faf21a9397189252fdabd4c9a1893))
+- refactor: introduce TTL constants for player, session, join request, and round data storage for event_store & player_tracker ([59ab186](https://github.com/Codycody31/squad-aegis/commit/59ab186d2ea893ebcabe63084ca1af5a4d0e60fb))
+- docs: bump min ram ([3699240](https://github.com/Codycody31/squad-aegis/commit/3699240d8cc65eb0cd16ce76adb2234fbd070e09))
+- fix(bans): missing selective file deletion and querying existing evidence files resulting in large unexpected deletions ([df619c8](https://github.com/Codycody31/squad-aegis/commit/df619c8ffa824f6a5ce721a7110a12c7e956cf9a))
+- feat(sudo): implement semi-okay admin dashboard with metrics, system health, storage management, and session control features ([3103225](https://github.com/Codycody31/squad-aegis/commit/3103225ae2eb2376ecb3ca0c93ed1409b2dccef1))
+- feat(plugins): implement Squad Creation Blocker plugin to prevent custom squad creation during specified periods with rate limiting and cooldown features ([b9818ab](https://github.com/Codycody31/squad-aegis/commit/b9818abe811e2c808cf9c00a7021f1c63b4da970))
+- refactor: add context menu for selecting multiple players ([e0addfa](https://github.com/Codycody31/squad-aegis/commit/e0addfaa9876c276885feb4a47d37625a85069b6))
+- docs(plugins): update auto warn & kick sl wrong kit and cbl ([7f72b12](https://github.com/Codycody31/squad-aegis/commit/7f72b122493baaf2e6ff108962b1be3957b44478))
+- feat(plugins): introduce Team Balancer plugin for tracking win streaks and managing team scrambles to ensure balanced matches ([f61238d](https://github.com/Codycody31/squad-aegis/commit/f61238d31ec67391f01613465f03e2acf40dddb1))
+- feat(plugins): add log level configuration for plugin instances with database migrations and API updates ([06e6457](https://github.com/Codycody31/squad-aegis/commit/06e64574e9ba1e9403a0a903a1b33fcfe0406722))
+- fix(workflow): add trigger_data field to ServerWorkflowExecution and update related database queries and migrations ([584a842](https://github.com/Codycody31/squad-aegis/commit/584a8425eddc0c00df2913421d83de9cbd4df48a))
+- feat(workflow): add Workflow Execution Timeline component and enhance WorkflowEditor with null checks for triggers and steps ([d49870d](https://github.com/Codycody31/squad-aegis/commit/d49870d9a5cf47f66421ca069cc14e127a366069))
+- fix(discord_teamkill): update attacker and victim data extraction in teamkill embed ([4df9a00](https://github.com/Codycody31/squad-aegis/commit/4df9a00c5085926785ea35fde34ae58d726cbfdf))
+- feat(plugins): add Discord Teamkill plugin for logging teamkill events ([bd72796](https://github.com/Codycody31/squad-aegis/commit/bd72796a7cfe5ca3739250fe28bffa515946842a))
+- fix(cbl): remove unnecessary debug logs for player checks in CBL ([bfed345](https://github.com/Codycody31/squad-aegis/commit/bfed345efe027b61264d33d1e515641e630713a1))
+- refactor(cbl): add configuration option to ignore specific Steam IDs from CBL checks ([2e91b7a](https://github.com/Codycody31/squad-aegis/commit/2e91b7a3685efff4c019759c32ce9e0225d22c6c))
+- refactor(cbl): implement Community Ban List plugin for player monitoring and alerts ([65b426a](https://github.com/Codycody31/squad-aegis/commit/65b426a3a54a6947831fedab0b9113589ea04a9b))
+- fix(cbl_info): ensure proper context usage in player connection handling ([82b7828](https://github.com/Codycody31/squad-aegis/commit/82b7828627eef556e74dfe7ebf8825ddf1ee2848))
+- chore(logwatcher): add error handling for player data removal on disconnect ([2f5a5bd](https://github.com/Codycody31/squad-aegis/commit/2f5a5bd92d03b2529c0fcb9ff909735f81605658))
+- chore(logwatcher): attempt to imrpove event data by populating attacker and victim names from player data ([db1be0c](https://github.com/Codycody31/squad-aegis/commit/db1be0c2fe37c5eb0af64bdabc1213562ff55ab1))
+- enhance(logwatcher): event store and log parser to include player names for attackers and victims ([23d4939](https://github.com/Codycody31/squad-aegis/commit/23d49394d993000b6a32536d2e13c2f332a550e0))
+- refactor(metrics): implement custom date range selection for server metrics and enhance metrics fetching logic ([2564a05](https://github.com/Codycody31/squad-aegis/commit/2564a05e0937df7a1802fae565d4dc83b940d7dd))
+- feat(server-roles): add is_admin flag to server roles and update role management functionality ([d3807b2](https://github.com/Codycody31/squad-aegis/commit/d3807b23a1c4d379db1b05c3dcfee91821ccf3d0))
+- docs(plugins): add auto-warn-sl-wrong-kit & kill-broadcast ([e72171a](https://github.com/Codycody31/squad-aegis/commit/e72171a54f19ea6cd0daac6719a9649b0a1651a4))
+- feat(plugin): add Kill Broadcast plugin to announce player kills ([d2be527](https://github.com/Codycody31/squad-aegis/commit/d2be527ee7a72b3a52c96f9fdfd8f1d7c934cc20))
+- feat(plugin): add functionality to remove players from squad without kicking ([c491995](https://github.com/Codycody31/squad-aegis/commit/c491995a9d534edf789083a041e7fe4de6cf9ca4))
+- feat(plugin): add Auto Kick SL Wrong Kit plugin and enhance PlayerInfo structure ([d00f111](https://github.com/Codycody31/squad-aegis/commit/d00f1116c758b66cbde7425e51a249dc0ffb8819))
+- refactor(discord-admin-requests): improve admin request handling ([54e1ae4](https://github.com/Codycody31/squad-aegis/commit/54e1ae4ad2684cb53837256f094931e4f9d07224))
+- chore: make pages mobile & desktop friendly [[#122](https://github.com/Codycody31/squad-aegis/pull/122)]
+
 ## [0.4.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.4.0) - 2025-12-03
 
 ### ❤️ Thanks to all contributors! ❤️
