@@ -68,6 +68,15 @@ type PlayerTracker struct {
 	stopChan        chan struct{}
 }
 
+const (
+	// playerTTL is how long we keep player metadata (EOS/Steam IDs, etc.)
+	playerTTL = 6 * time.Hour
+	// teamTTL is how long we keep team metadata
+	teamTTL = 1 * time.Hour
+	// squadTTL is how long we keep squad metadata
+	squadTTL = 1 * time.Hour
+)
+
 // RCONManager interface defines the methods we need from the RCON manager
 type RCONManager interface {
 	ExecuteCommand(serverID uuid.UUID, command string) (string, error)
@@ -156,18 +165,6 @@ func (pt *PlayerTracker) squadKey(squadID string) string {
 
 func (pt *PlayerTracker) squadsByTeamKey(teamID string) string {
 	return fmt.Sprintf("squad-aegis:player-tracker:%s:squads-by-team:%s", pt.serverID.String(), teamID)
-}
-
-func (pt *PlayerTracker) allPlayersKey() string {
-	return fmt.Sprintf("squad-aegis:player-tracker:%s:all-players", pt.serverID.String())
-}
-
-func (pt *PlayerTracker) allTeamsKey() string {
-	return fmt.Sprintf("squad-aegis:player-tracker:%s:all-teams", pt.serverID.String())
-}
-
-func (pt *PlayerTracker) allSquadsKey() string {
-	return fmt.Sprintf("squad-aegis:player-tracker:%s:all-squads", pt.serverID.String())
 }
 
 // Helper methods for JSON serialization/deserialization
@@ -812,20 +809,20 @@ func (pt *PlayerTracker) storePlayer(player *PlayerInfo) error {
 	if err != nil {
 		return err
 	}
-	if err := pt.valkeyClient.Set(pt.ctx, pt.playerKey(player.EOSID), playerData, 0); err != nil {
+	if err := pt.valkeyClient.Set(pt.ctx, pt.playerKey(player.EOSID), playerData, playerTTL); err != nil {
 		return err
 	}
 
 	// Store player by name
 	if player.Name != "" {
-		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByNameKey(player.Name), player.EOSID, 0); err != nil {
+		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByNameKey(player.Name), player.EOSID, playerTTL); err != nil {
 			return err
 		}
 	}
 
 	// Store player by controller
 	if player.PlayerController != "" {
-		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByControllerKey(player.PlayerController), player.EOSID, 0); err != nil {
+		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByControllerKey(player.PlayerController), player.EOSID, playerTTL); err != nil {
 			return err
 		}
 	}
@@ -838,7 +835,7 @@ func (pt *PlayerTracker) storeTeam(team *TeamInfo) error {
 	if err != nil {
 		return err
 	}
-	return pt.valkeyClient.Set(pt.ctx, pt.teamKey(team.TeamID), teamData, 0)
+	return pt.valkeyClient.Set(pt.ctx, pt.teamKey(team.TeamID), teamData, teamTTL)
 }
 
 func (pt *PlayerTracker) storeSquad(squad *SquadInfo) error {
@@ -846,11 +843,15 @@ func (pt *PlayerTracker) storeSquad(squad *SquadInfo) error {
 	if err != nil {
 		return err
 	}
-	return pt.valkeyClient.Set(pt.ctx, pt.squadKey(squad.SquadID), squadData, 0)
+	return pt.valkeyClient.Set(pt.ctx, pt.squadKey(squad.SquadID), squadData, squadTTL)
 }
 
 func (pt *PlayerTracker) addSquadToTeam(teamID, squadID string) error {
-	return pt.valkeyClient.HSet(pt.ctx, pt.squadsByTeamKey(teamID), squadID, squadID)
+	if err := pt.valkeyClient.HSet(pt.ctx, pt.squadsByTeamKey(teamID), squadID, squadID); err != nil {
+		return err
+	}
+	// Set expiration on the hash key
+	return pt.valkeyClient.Expire(pt.ctx, pt.squadsByTeamKey(teamID), teamTTL)
 }
 
 func (pt *PlayerTracker) cleanupDisconnectedPlayers(currentConnectedPlayers map[string]bool) error {

@@ -155,6 +155,12 @@ func (c *Client) Keys(ctx context.Context, pattern string) ([]string, error) {
 	return result.AsStrSlice()
 }
 
+// Expire sets an expiration on a key
+func (c *Client) Expire(ctx context.Context, key string, expiration time.Duration) error {
+	cmd := c.client.B().Expire().Key(key).Seconds(int64(expiration.Seconds())).Build()
+	return c.client.Do(ctx, cmd).Error()
+}
+
 // Close closes the Valkey client connection
 func (c *Client) Close() {
 	if c.client != nil {
