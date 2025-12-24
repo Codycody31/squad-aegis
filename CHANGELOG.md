@@ -17,6 +17,8 @@
 
 ### Misc
 
+- feat(plugins): plugin command system with command execution and status tracking features ([ea1b3c7](https://github.com/Codycody31/squad-aegis/commit/ea1b3c73be5faf21a9397189252fdabd4c9a1893))
+- refactor: introduce TTL constants for player, session, join request, and round data storage for event_store & player_tracker ([59ab186](https://github.com/Codycody31/squad-aegis/commit/59ab186d2ea893ebcabe63084ca1af5a4d0e60fb))
 - docs: bump min ram ([3699240](https://github.com/Codycody31/squad-aegis/commit/3699240d8cc65eb0cd16ce76adb2234fbd070e09))
 - fix(bans): missing selective file deletion and querying existing evidence files resulting in large unexpected deletions ([df619c8](https://github.com/Codycody31/squad-aegis/commit/df619c8ffa824f6a5ce721a7110a12c7e956cf9a))
 - feat(sudo): implement semi-okay admin dashboard with metrics, system health, storage management, and session control features ([3103225](https://github.com/Codycody31/squad-aegis/commit/3103225ae2eb2376ecb3ca0c93ed1409b2dccef1))
