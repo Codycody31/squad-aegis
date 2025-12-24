@@ -64,8 +64,10 @@ import {
     Database,
     X,
     MoreVertical,
+    Terminal,
 } from "lucide-vue-next";
 import PluginKVStore from "~/components/PluginKVStore.vue";
+import PluginCommandsModal from "~/components/PluginCommandsModal.vue";
 import {
     Sheet,
     SheetContent,
@@ -106,6 +108,8 @@ const editingDataValue = ref("");
 const showEditDialog = ref(false);
 const showKVStoreSheet = ref(false);
 const selectedPluginForKV = ref<any>(null);
+const showCommandsModal = ref(false);
+const selectedPluginForCommands = ref<any>(null);
 
 // Combobox state
 const pluginSearchQuery = ref("");
@@ -682,6 +686,11 @@ const saveDataItem = async () => {
 const openKVStoreSheet = (plugin: any) => {
     selectedPluginForKV.value = plugin;
     showKVStoreSheet.value = true;
+};
+
+const openCommandsModal = (plugin: any) => {
+    selectedPluginForCommands.value = plugin;
+    showCommandsModal.value = true;
 };
 
 const deleteDataItem = async (key: string) => {
@@ -1589,6 +1598,15 @@ onMounted(async () => {
                                         <Button
                                             variant="outline"
                                             size="sm"
+                                            @click="openCommandsModal(plugin)"
+                                            class="hidden sm:inline-flex"
+                                            title="Run Commands"
+                                        >
+                                            <Terminal class="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
                                             @click="openKVStoreSheet(plugin)"
                                             class="hidden sm:inline-flex"
                                             title="Manage Plugin Data"
@@ -1630,6 +1648,12 @@ onMounted(async () => {
                                                 >
                                                     <FileText class="w-4 h-4 mr-2" />
                                                     View Logs
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                    @click="openCommandsModal(plugin)"
+                                                >
+                                                    <Terminal class="w-4 h-4 mr-2" />
+                                                    Run Commands
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem
                                                     @click="openKVStoreSheet(plugin)"
@@ -2390,5 +2414,14 @@ onMounted(async () => {
                 </div>
             </SheetContent>
         </Sheet>
+
+        <!-- Plugin Commands Modal -->
+        <PluginCommandsModal
+            v-if="selectedPluginForCommands"
+            v-model:open="showCommandsModal"
+            :server-id="String(serverId)"
+            :plugin-id="selectedPluginForCommands.id"
+            :plugin-name="selectedPluginForCommands.plugin_name"
+        />
     </div>
 </template>

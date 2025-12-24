@@ -35,6 +35,17 @@ type Plugin interface {
 
 	// UpdateConfig updates the plugin configuration
 	UpdateConfig(config map[string]interface{}) error
+
+	// GetCommands returns the list of commands exposed by this plugin
+	GetCommands() []PluginCommand
+
+	// ExecuteCommand executes a command with the given parameters
+	// For sync commands: returns result immediately
+	// For async commands: returns execution ID and starts background execution
+	ExecuteCommand(commandID string, params map[string]interface{}) (*CommandResult, error)
+
+	// GetCommandExecutionStatus returns the status of an async command execution
+	GetCommandExecutionStatus(executionID string) (*CommandExecutionStatus, error)
 }
 
 // PluginDefinition defines the metadata and capabilities of a plugin
@@ -92,6 +103,47 @@ const (
 	PluginStatusError    PluginStatus = "error"
 	PluginStatusDisabled PluginStatus = "disabled"
 )
+
+// PluginCommand defines a user-executable command exposed by a plugin
+type PluginCommand struct {
+	ID                  string                          `json:"id"`
+	Name                string                          `json:"name"`
+	Description         string                          `json:"description"`
+	Category            string                          `json:"category,omitempty"`
+	Parameters          plug_config_schema.ConfigSchema `json:"parameters,omitempty"`
+	ExecutionType       CommandExecutionType            `json:"execution_type"`
+	RequiredPermissions []string                        `json:"required_permissions,omitempty"`
+	ConfirmMessage      string                          `json:"confirm_message,omitempty"`
+}
+
+// CommandExecutionType defines how a command executes
+type CommandExecutionType string
+
+const (
+	CommandExecutionSync  CommandExecutionType = "sync"
+	CommandExecutionAsync CommandExecutionType = "async"
+)
+
+// CommandResult represents the result of a command execution
+type CommandResult struct {
+	Success     bool                   `json:"success"`
+	Message     string                 `json:"message,omitempty"`
+	Data        map[string]interface{} `json:"data,omitempty"`
+	ExecutionID string                 `json:"execution_id,omitempty"` // For async commands
+	Error       string                 `json:"error,omitempty"`
+}
+
+// CommandExecutionStatus represents async command execution status
+type CommandExecutionStatus struct {
+	ExecutionID string         `json:"execution_id"`
+	CommandID   string         `json:"command_id"`
+	Status      string         `json:"status"`             // "running", "completed", "failed"
+	Progress    int            `json:"progress,omitempty"` // 0-100
+	Message     string         `json:"message,omitempty"`
+	Result      *CommandResult `json:"result,omitempty"`
+	StartedAt   time.Time      `json:"started_at"`
+	CompletedAt *time.Time     `json:"completed_at,omitempty"`
+}
 
 // PluginInstance represents an active plugin instance
 type PluginInstance struct {
@@ -412,3 +464,91 @@ type ConnectorRegistry interface {
 	// CreateConnectorInstance creates a new connector instance
 	CreateConnectorInstance(connectorID string) (Connector, error)
 }
+
+/*
+Example Plugin Command Implementation:
+
+	func (p *MyPlugin) GetCommands() []PluginCommand {
+		return []PluginCommand{
+			{
+				ID:            "balance_teams",
+				Name:          "Balance Teams",
+				Description:   "Automatically balance teams based on player skill",
+				Category:      "Team Management",
+				ExecutionType: CommandExecutionSync,
+				RequiredPermissions: []string{"manageserver"},
+				ConfirmMessage: "This will move players between teams. Continue?",
+				Parameters: plug_config_schema.ConfigSchema{
+					Fields: []plug_config_schema.ConfigField{
+						{
+							Name:        "method",
+							Type:        "string",
+							Description: "Balancing method",
+							Required:    true,
+							Options:     []string{"kd_ratio", "playtime", "random"},
+							Default:     "kd_ratio",
+						},
+						{
+							Name:        "preserve_squads",
+							Type:        "bool",
+							Description: "Keep squad members together",
+							Default:     true,
+						},
+					},
+				},
+			},
+		}
+	}
+
+	func (p *MyPlugin) ExecuteCommand(commandID string, params map[string]interface{}) (*CommandResult, error) {
+		switch commandID {
+		case "balance_teams":
+			method := params["method"].(string)
+			preserveSquads := params["preserve_squads"].(bool)
+
+			// Execute balancing logic...
+			movedPlayers := p.balanceTeams(method, preserveSquads)
+
+			return &CommandResult{
+				Success: true,
+				Message: fmt.Sprintf("Teams balanced! Moved %d players", movedPlayers),
+				Data: map[string]interface{}{
+					"players_moved": movedPlayers,
+					"method_used":   method,
+				},
+			}, nil
+
+		default:
+			return nil, fmt.Errorf("unknown command: %s", commandID)
+		}
+	}
+
+	// For async commands, return an execution ID and track status
+	func (p *MyPlugin) ExecuteCommand(commandID string, params map[string]interface{}) (*CommandResult, error) {
+		switch commandID {
+		case "long_running_task":
+			executionID := uuid.New().String()
+
+			// Start task in background
+			go p.runLongTask(executionID, params)
+
+			return &CommandResult{
+				Success:     true,
+				ExecutionID: executionID,
+				Message:     "Task started",
+			}, nil
+
+		default:
+			return nil, fmt.Errorf("unknown command: %s", commandID)
+		}
+	}
+
+	func (p *MyPlugin) GetCommandExecutionStatus(executionID string) (*CommandExecutionStatus, error) {
+		// Look up execution status from plugin's internal tracking
+		status, exists := p.executions[executionID]
+		if !exists {
+			return nil, fmt.Errorf("execution not found")
+		}
+		return status, nil
+	}
+*/

@@ -81,6 +81,18 @@ func (p *DiscordTeamkillPlugin) GetDefinition() plugin_manager.PluginDefinition 
 	return Define()
 }
 
+func (p *DiscordTeamkillPlugin) GetCommands() []plugin_manager.PluginCommand {
+	return []plugin_manager.PluginCommand{}
+}
+
+func (p *DiscordTeamkillPlugin) ExecuteCommand(commandID string, params map[string]interface{}) (*plugin_manager.CommandResult, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
+func (p *DiscordTeamkillPlugin) GetCommandExecutionStatus(executionID string) (*plugin_manager.CommandExecutionStatus, error) {
+	return nil, fmt.Errorf("no commands available")
+}
+
 // Initialize initializes the plugin with its configuration and dependencies
 func (p *DiscordTeamkillPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()
