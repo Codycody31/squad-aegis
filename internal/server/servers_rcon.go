@@ -584,20 +584,6 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
-	// Format the ban command (duration is already in days)
-	banCommand := fmt.Sprintf("AdminBan %s", request.SteamId)
-	if durationDays > 0 {
-		banCommand += fmt.Sprintf(" %dd", durationDays)
-	}
-	banCommand += " " + request.Reason
-
-	// Execute ban command
-	response, err := r.ExecuteRaw(banCommand)
-	if err != nil {
-		log.Error().Err(err).Str("steamId", request.SteamId).Str("serverId", serverId.String()).Msg("Failed to apply ban via RCON")
-		// Don't return error here, ban is already in database
-	}
-
 	// Also kick the player via RCON
 	err = r.KickPlayer(request.SteamId, request.Reason)
 	if err != nil {
@@ -630,8 +616,7 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:player:ban", auditData)
 
 	responses.Success(c, "Player banned successfully", &gin.H{
-		"banId":    banID,
-		"response": response,
+		"banId": banID,
 	})
 }
 

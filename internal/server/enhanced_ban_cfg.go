@@ -148,16 +148,6 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 		// Format the ban entry in official Squad format
 		steamIDStr := strconv.FormatInt(steamIDInt, 10)
 
-		// Build admin info
-		adminInfo := "System"
-		adminSteamID := "0"
-		if adminUsername.Valid && adminUsername.String != "" {
-			adminInfo = adminUsername.String
-		}
-		if adminSteamIDInt.Valid && adminSteamIDInt.Int64 > 0 {
-			adminSteamID = strconv.FormatInt(adminSteamIDInt.Int64, 10)
-		}
-
 		var expiryTimestamp string
 		if duration == 0 {
 			expiryTimestamp = "9999999999"
@@ -174,8 +164,8 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 			reasonComment = " //Permanent ban"
 		}
 
-		banCfg.WriteString(fmt.Sprintf("%s [SteamID %s] Banned:%s:%s%s\n",
-			adminInfo, adminSteamID, steamIDStr, expiryTimestamp, reasonComment))
+		banCfg.WriteString(fmt.Sprintf("%s:%s%s\n",
+			steamIDStr, expiryTimestamp, reasonComment))
 	}
 	return nil
 }
