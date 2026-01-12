@@ -8,6 +8,7 @@
 
 ### Misc
 
+- Revert "wip" ([510bac7](https://github.com/Codycody31/squad-aegis/commit/510bac7c82a0bacad254a21ee50894651b3a3f77))
 - fix: remote ban list file being incorrect format (?) ([85c602f](https://github.com/Codycody31/squad-aegis/commit/85c602f06425d65d87ca6cfdae20c9f901a66f38))
 - wip ([bdbafb0](https://github.com/Codycody31/squad-aegis/commit/bdbafb0115ce7e4360676cb104a31dc0ad41325b))
 
