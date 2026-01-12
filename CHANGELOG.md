@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-01-12
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Insidious Fiddler
+
+### Misc
+
+- fix: remote ban list file being incorrect format (?) ([85c602f](https://github.com/Codycody31/squad-aegis/commit/85c602f06425d65d87ca6cfdae20c9f901a66f38))
+- wip ([bdbafb0](https://github.com/Codycody31/squad-aegis/commit/bdbafb0115ce7e4360676cb104a31dc0ad41325b))
+
 ## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-24
 
 ### ❤️ Thanks to all contributors! ❤️
