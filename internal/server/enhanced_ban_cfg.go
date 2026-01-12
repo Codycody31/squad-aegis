@@ -88,16 +88,6 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 			continue
 		}
 
-		// Format the ban entry in official Squad format
-		adminInfo := "System"
-		adminSteamID := "0"
-		if ban.AdminName != "" {
-			adminInfo = ban.AdminName
-		}
-		if ban.AdminSteamID != "" {
-			adminSteamID = ban.AdminSteamID
-		}
-
 		var expiryTimestamp string
 		if ban.Duration == 0 {
 			expiryTimestamp = "9999999999"
@@ -114,8 +104,8 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 			reasonComment = " //Permanent ban"
 		}
 
-		banCfg.WriteString(fmt.Sprintf("%s [SteamID %s] Banned:%s:%s%s\n",
-			adminInfo, adminSteamID, ban.SteamID, expiryTimestamp, reasonComment))
+		banCfg.WriteString(fmt.Sprintf("%s:%s%s\n",
+			ban.SteamID, expiryTimestamp, reasonComment))
 	}
 
 	// Include remote ban sources if requested
