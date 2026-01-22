@@ -27,6 +27,7 @@ type EventIngester struct {
 
 // IngestEvent represents an event ready for ingestion
 type IngestEvent struct {
+	EventID   uuid.UUID
 	ServerID  uuid.UUID
 	EventType event_manager.EventType
 	EventTime time.Time
@@ -127,6 +128,7 @@ func (i *EventIngester) Stop() {
 // processEvent converts an event manager event to an ingest event
 func (i *EventIngester) processEvent(event event_manager.Event) {
 	ingestEvent := &IngestEvent{
+		EventID:   event.ID,
 		ServerID:  event.ServerID,
 		EventType: event.Type,
 		EventTime: event.Timestamp,
@@ -261,8 +263,8 @@ func (i *EventIngester) ingestChatMessages(events []*IngestEvent) error {
 	for _, event := range events {
 		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
-		// Generate a UUID for the message
-		messageID := uuid.New()
+		// Use the event ID as the message ID for consistent tracking
+		messageID := event.EventID
 		chatData, ok := event.Data.(*event_manager.RconChatMessageData)
 		if !ok {
 			continue
@@ -323,14 +325,14 @@ func (i *EventIngester) ingestPlayerConnected(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_player_connected_events 
-		(event_time, server_id, chain_id, player_controller, ip, steam, eos, ingested_at) VALUES`
+	query := `INSERT INTO squad_aegis.server_player_connected_events
+		(id, event_time, server_id, chain_id, player_controller, ip, steam, eos, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*8)
+	args := make([]interface{}, 0, len(events)*9)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, playerController, ip, steam, eos string
@@ -343,6 +345,7 @@ func (i *EventIngester) ingestPlayerConnected(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			event.ServerID,
 			chainID,
@@ -363,14 +366,14 @@ func (i *EventIngester) ingestPlayerDisconnected(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_player_disconnected_events 
-		(event_time, server_id, chain_id, player_controller, player_suffix, team, ip, steam, eos, ingest_ts) VALUES`
+	query := `INSERT INTO squad_aegis.server_player_disconnected_events
+		(id, event_time, server_id, chain_id, player_controller, player_suffix, team, ip, steam, eos, ingest_ts) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*10)
+	args := make([]interface{}, 0, len(events)*11)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, playerController, playerSuffix, team, ip, steam, eos string
@@ -385,6 +388,7 @@ func (i *EventIngester) ingestPlayerDisconnected(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			event.ServerID,
 			chainID,
@@ -407,14 +411,14 @@ func (i *EventIngester) ingestPlayerDamaged(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_player_damaged_events 
-		(event_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_controller, weapon, teamkill, ingested_at) VALUES`
+	query := `INSERT INTO squad_aegis.server_player_damaged_events
+		(id, event_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_controller, weapon, teamkill, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*18)
+	args := make([]interface{}, 0, len(events)*19)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, victimName, attackerName, attackerController, weapon, attackerEOS, attackerSteam string
@@ -451,6 +455,7 @@ func (i *EventIngester) ingestPlayerDamaged(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			event.ServerID,
 			chainID,
@@ -481,14 +486,14 @@ func (i *EventIngester) ingestPlayerDied(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_player_died_events 
-		(event_time, wound_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_player_controller, weapon, teamkill, ingested_at) VALUES`
+	query := `INSERT INTO squad_aegis.server_player_died_events
+		(id, event_time, wound_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_player_controller, weapon, teamkill, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*19)
+	args := make([]interface{}, 0, len(events)*20)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, victimName, attackerPlayerController, weapon, attackerEOS, attackerSteam, woundTimeStr string
@@ -535,6 +540,7 @@ func (i *EventIngester) ingestPlayerDied(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			woundTimePtr,
 			event.ServerID,
@@ -566,14 +572,14 @@ func (i *EventIngester) ingestPlayerWounded(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_player_wounded_events 
-		(event_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_player_controller, weapon, teamkill, ingested_at) VALUES`
+	query := `INSERT INTO squad_aegis.server_player_wounded_events
+		(id, event_time, server_id, chain_id, victim_name, victim_eos, victim_steam, victim_team, victim_squad, damage, attacker_name, attacker_eos, attacker_steam, attacker_team, attacker_squad, attacker_player_controller, weapon, teamkill, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*18)
+	args := make([]interface{}, 0, len(events)*19)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, victimName, attackerPlayerController, weapon, attackerEOS, attackerSteam string
@@ -610,6 +616,7 @@ func (i *EventIngester) ingestPlayerWounded(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			event.ServerID,
 			chainID,
@@ -640,14 +647,14 @@ func (i *EventIngester) ingestPlayerRevived(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_player_revived_events 
-		(event_time, server_id, chain_id, reviver_name, reviver_eos, reviver_steam, reviver_team, reviver_squad, victim_name, victim_eos, victim_steam, victim_team, victim_squad, ingested_at) VALUES`
+	query := `INSERT INTO squad_aegis.server_player_revived_events
+		(id, event_time, server_id, chain_id, reviver_name, reviver_eos, reviver_steam, reviver_team, reviver_squad, victim_name, victim_eos, victim_steam, victim_team, victim_squad, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*14)
+	args := make([]interface{}, 0, len(events)*15)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, reviverName, victimName, reviverEOS, reviverSteam, victimEOS, victimSteam string
@@ -676,6 +683,7 @@ func (i *EventIngester) ingestPlayerRevived(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			event.ServerID,
 			chainID,
@@ -702,14 +710,14 @@ func (i *EventIngester) ingestPlayerPossess(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_player_possess_events 
-		(event_time, server_id, chain_id, player_suffix, possess_classname, player_eos, player_steam, ingested_at) VALUES`
+	query := `INSERT INTO squad_aegis.server_player_possess_events
+		(id, event_time, server_id, chain_id, player_suffix, possess_classname, player_eos, player_steam, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*8)
+	args := make([]interface{}, 0, len(events)*9)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, playerSuffix, possessClassname, playerEOS, playerSteam string
@@ -722,6 +730,7 @@ func (i *EventIngester) ingestPlayerPossess(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			event.ServerID,
 			chainID,
@@ -742,14 +751,14 @@ func (i *EventIngester) ingestJoinSucceeded(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_join_succeeded_events 
-		(event_time, server_id, chain_id, player_suffix, ip, steam, eos, ingested_at) VALUES`
+	query := `INSERT INTO squad_aegis.server_join_succeeded_events
+		(id, event_time, server_id, chain_id, player_suffix, ip, steam, eos, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*8)
+	args := make([]interface{}, 0, len(events)*9)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, playerSuffix, ip, steam, eos string
@@ -762,6 +771,7 @@ func (i *EventIngester) ingestJoinSucceeded(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			event.ServerID,
 			chainID,
@@ -818,14 +828,14 @@ func (i *EventIngester) ingestDeployableDamaged(events []*IngestEvent) error {
 		return nil
 	}
 
-	query := `INSERT INTO squad_aegis.server_deployable_damaged_events 
-		(event_time, server_id, chain_id, deployable, damage, weapon, player_suffix, damage_type, health_remaining, ingested_at) VALUES`
+	query := `INSERT INTO squad_aegis.server_deployable_damaged_events
+		(id, event_time, server_id, chain_id, deployable, damage, weapon, player_suffix, damage_type, health_remaining, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*10)
+	args := make([]interface{}, 0, len(events)*11)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
 		var chainID, deployable, weapon, playerSuffix, damageType string
@@ -842,6 +852,7 @@ func (i *EventIngester) ingestDeployableDamaged(events []*IngestEvent) error {
 		}
 
 		args = append(args,
+			event.EventID,
 			event.EventTime,
 			event.ServerID,
 			chainID,

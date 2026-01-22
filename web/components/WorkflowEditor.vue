@@ -713,6 +713,43 @@ function getConfigFields(stepType: string, actionType?: string) {
                         description: "Optional reason for the ban",
                     },
                 ];
+            case "ban_player_with_evidence":
+                return [
+                    {
+                        key: "player_id",
+                        label: "Player ID",
+                        type: "text",
+                        required: true,
+                        placeholder:
+                            "e.g. ${trigger_event.steam_id}",
+                        description:
+                            "Steam ID of the player to ban (use ${trigger_event.steam_id})",
+                    },
+                    {
+                        key: "duration",
+                        label: "Ban Duration (days)",
+                        type: "number",
+                        required: true,
+                        placeholder: "7",
+                        description: "Duration in days (0 = permanent ban)",
+                    },
+                    {
+                        key: "reason",
+                        label: "Ban Reason",
+                        type: "text",
+                        required: false,
+                        placeholder: "e.g. Offensive language: ${trigger_event.message}",
+                        description: "Ban reason (can include trigger event data)",
+                    },
+                    {
+                        key: "rule_id",
+                        label: "Rule ID (Optional)",
+                        type: "text",
+                        required: false,
+                        placeholder: "e.g. ${workflow.variables.rule_id}",
+                        description: "Optional UUID of the server rule violated",
+                    },
+                ];
             case "warn_player":
                 return [
                     {

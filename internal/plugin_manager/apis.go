@@ -703,6 +703,116 @@ func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Dura
 	return nil
 }
 
+// mapPluginEventTypeToEvidence maps event types to evidence types and ClickHouse tables
+func mapPluginEventTypeToEvidence(eventType string) (evidenceType string, clickhouseTable string) {
+	switch eventType {
+	case "RCON_CHAT_MESSAGE":
+		return "chat_message", "squad_aegis.server_player_chat_messages"
+	case "LOG_PLAYER_CONNECTED":
+		return "player_connected", "squad_aegis.server_player_connected_events"
+	case "LOG_PLAYER_DIED":
+		return "player_died", "squad_aegis.server_player_died_events"
+	case "LOG_PLAYER_WOUNDED":
+		return "player_wounded", "squad_aegis.server_player_wounded_events"
+	case "LOG_PLAYER_DAMAGED":
+		return "player_damaged", "squad_aegis.server_player_damaged_events"
+	default:
+		return "", ""
+	}
+}
+
+// BanWithEvidence bans a player and links evidence from an event
+func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration time.Duration, eventID string, eventType string) (string, error) {
+	// Convert duration to days
+	durationDays := int(duration.Hours() / 24)
+
+	// Map event type to evidence type and table
+	evidenceType, clickhouseTable := mapPluginEventTypeToEvidence(eventType)
+	if evidenceType == "" || clickhouseTable == "" {
+		return "", fmt.Errorf("unsupported event type for evidence: %s", eventType)
+	}
+
+	// Parse event ID
+	eventUUID, err := uuid.Parse(eventID)
+	if err != nil {
+		return "", fmt.Errorf("invalid event ID format: %w", err)
+	}
+
+	// Convert playerID to int64
+	steamID, err := strconv.ParseInt(playerID, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("invalid Steam ID format: %w", err)
+	}
+
+	// Start transaction
+	tx, err := api.db.Begin()
+	if err != nil {
+		return "", fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Create ban record
+	banID := uuid.New()
+	now := time.Now()
+
+	banQuery := `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
+	_, err = tx.Exec(banQuery,
+		banID,
+		api.serverID,
+		steamID,
+		reason,
+		durationDays,
+		now,
+		now,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create ban: %w", err)
+	}
+
+	// Create evidence record
+	metadata := map[string]interface{}{
+		"event_type": eventType,
+		"event_id":   eventID,
+		"plugin":     true,
+	}
+	metadataJSON, _ := json.Marshal(metadata)
+
+	evidenceQuery := `INSERT INTO ban_evidence (id, ban_id, evidence_type, clickhouse_table, record_id, server_id, event_time, metadata, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+	_, err = tx.Exec(evidenceQuery,
+		uuid.New(),
+		banID.String(),
+		evidenceType,
+		clickhouseTable,
+		eventUUID.String(),
+		api.serverID,
+		now,
+		metadataJSON,
+		now,
+		now,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert evidence: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Execute RCON ban
+	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", playerID, durationDays, reason)
+	_, err = api.rconManager.ExecuteCommand(api.serverID, command)
+	if err != nil {
+		log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
+	}
+
+	// Kick player
+	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", playerID, reason)
+	_, _ = api.rconManager.ExecuteCommand(api.serverID, kickCommand)
+
+	return banID.String(), nil
+}
+
 // storeBanInDatabase stores the ban information in the database
 func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration time.Duration) error {
 	// Convert playerID (which should be a Steam ID) to int64

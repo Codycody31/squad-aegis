@@ -194,6 +194,11 @@ const actionTypes = [
         description: "Ban a player from the server",
     },
     {
+        value: "ban_player_with_evidence",
+        label: "Ban Player with Evidence",
+        description: "Ban a player and link the triggering event as evidence",
+    },
+    {
         value: "warn_player",
         label: "Warn Player",
         description: "Send a warning to a player",

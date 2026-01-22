@@ -303,6 +303,12 @@ type RconAPI interface {
 	// BanPlayer bans a player (admin only)
 	BanPlayer(playerID string, reason string, duration time.Duration) error
 
+	// BanWithEvidence bans a player and links evidence from an event (admin only)
+	// eventID should be the UUID from Event.ID or ClickHouse message_id/event_id
+	// eventType should match EventType constants (e.g., "RCON_CHAT_MESSAGE")
+	// Returns the ban UUID and any error
+	BanWithEvidence(playerID string, reason string, duration time.Duration, eventID string, eventType string) (string, error)
+
 	// RemovePlayerFromSquad removes a player from their squad without kicking them
 	RemovePlayerFromSquad(playerID string) error
 

@@ -254,6 +254,8 @@ func (wm *WorkflowManager) handleEvent(event event_manager.Event) {
 	for _, workflow := range triggeredWorkflows {
 		eventDataMap := wm.convertEventDataToMap(event.Data)
 		eventDataMap["event_type"] = string(event.Type)
+		eventDataMap["event_id"] = event.ID.String()
+		eventDataMap["event_time"] = event.Timestamp.Format(time.RFC3339Nano)
 		log.Debug().
 			Str("workflow_id", workflow.ID.String()).
 			Str("workflow_name", workflow.Name).
@@ -1099,6 +1101,8 @@ func (wm *WorkflowManager) executeActionStep(context *models.WorkflowExecutionCo
 		return wm.executeKickPlayerAction(context, step)
 	case models.ActionTypeBanPlayer:
 		return wm.executeBanPlayerAction(context, step)
+	case models.ActionTypeBanPlayerWithEvidence:
+		return wm.executeBanPlayerWithEvidenceAction(context, step)
 	case models.ActionTypeWarnPlayer:
 		return wm.executeWarnPlayerAction(context, step)
 	case models.ActionTypeHTTPRequest:
@@ -1355,6 +1359,195 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 		"duration":  duration,
 		"reason":    reason,
 		"response":  response,
+	}
+
+	return nil
+}
+
+// mapEventTypeToEvidence maps event types to evidence types and ClickHouse tables
+func (wm *WorkflowManager) mapEventTypeToEvidence(eventType string) (evidenceType string, clickhouseTable string) {
+	switch eventType {
+	case "RCON_CHAT_MESSAGE":
+		return "chat_message", "squad_aegis.server_player_chat_messages"
+	case "LOG_PLAYER_CONNECTED":
+		return "player_connected", "squad_aegis.server_player_connected_events"
+	case "LOG_PLAYER_DIED":
+		return "player_died", "squad_aegis.server_player_died_events"
+	case "LOG_PLAYER_WOUNDED":
+		return "player_wounded", "squad_aegis.server_player_wounded_events"
+	case "LOG_PLAYER_DAMAGED":
+		return "player_damaged", "squad_aegis.server_player_damaged_events"
+	default:
+		return "", ""
+	}
+}
+
+// executeBanPlayerWithEvidenceAction executes a ban player action with automatic evidence linking
+func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.WorkflowExecutionContext, step *models.WorkflowStep) error {
+	// Extract config
+	playerId, ok := step.Config["player_id"].(string)
+	if !ok {
+		return fmt.Errorf("missing player_id in ban player with evidence action config")
+	}
+
+	duration, ok := step.Config["duration"].(float64)
+	if !ok {
+		return fmt.Errorf("missing duration in ban player with evidence action config")
+	}
+
+	reason, _ := step.Config["reason"].(string)
+	if reason == "" {
+		reason = "Banned by workflow with evidence"
+	}
+
+	ruleID, _ := step.Config["rule_id"].(string)
+
+	// Replace variables
+	playerId = wm.replaceVariablesWithContext(playerId, context.Variables, context.TriggerEvent, context.Metadata)
+	reason = wm.replaceVariablesWithContext(reason, context.Variables, context.TriggerEvent, context.Metadata)
+	if ruleID != "" {
+		ruleID = wm.replaceVariablesWithContext(ruleID, context.Variables, context.TriggerEvent, context.Metadata)
+	}
+
+	log.Info().
+		Str("execution_id", context.ExecutionID.String()).
+		Str("player_id", playerId).
+		Str("reason", reason).
+		Msg("Banning player with evidence")
+
+	// Extract evidence from trigger event
+	var evidenceItems []struct {
+		EvidenceType    string
+		ClickhouseTable string
+		RecordID        string
+		EventTime       time.Time
+	}
+
+	if eventID, ok := context.TriggerEvent["event_id"].(string); ok {
+		eventType, _ := context.TriggerEvent["event_type"].(string)
+		evidenceType, clickhouseTable := wm.mapEventTypeToEvidence(eventType)
+
+		if evidenceType != "" && clickhouseTable != "" {
+			var eventTime time.Time
+			if eventTimeStr, ok := context.TriggerEvent["event_time"].(string); ok {
+				if parsedTime, err := time.Parse(time.RFC3339Nano, eventTimeStr); err == nil {
+					eventTime = parsedTime
+				}
+			}
+			if eventTime.IsZero() {
+				eventTime = time.Now()
+			}
+
+			evidenceItems = append(evidenceItems, struct {
+				EvidenceType    string
+				ClickhouseTable string
+				RecordID        string
+				EventTime       time.Time
+			}{
+				EvidenceType:    evidenceType,
+				ClickhouseTable: clickhouseTable,
+				RecordID:        eventID,
+				EventTime:       eventTime,
+			})
+		} else {
+			log.Warn().
+				Str("event_type", eventType).
+				Msg("Event type does not support evidence linking")
+		}
+	} else {
+		log.Warn().Msg("No event_id found in trigger context, creating ban without evidence")
+	}
+
+	// Create ban in database
+	banID := uuid.New()
+	steamID, err := strconv.ParseInt(playerId, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid steam ID format: %w", err)
+	}
+
+	// Start transaction
+	tx, err := wm.db.BeginTx(wm.ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now()
+
+	// Insert ban
+	var banQuery string
+	var banArgs []interface{}
+
+	if ruleID != "" {
+		ruleUUID, err := uuid.Parse(ruleID)
+		if err != nil {
+			return fmt.Errorf("invalid rule ID format: %w", err)
+		}
+		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
+		banArgs = []interface{}{banID, context.ServerID, steamID, reason, int(duration), ruleUUID, now, now}
+	} else {
+		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
+		banArgs = []interface{}{banID, context.ServerID, steamID, reason, int(duration), now, now}
+	}
+
+	_, err = tx.ExecContext(wm.ctx, banQuery, banArgs...)
+	if err != nil {
+		return fmt.Errorf("failed to create ban: %w", err)
+	}
+
+	// Insert evidence records
+	for _, ev := range evidenceItems {
+		metadata := map[string]interface{}{
+			"event_type": context.TriggerEvent["event_type"],
+			"event_id":   ev.RecordID,
+		}
+		metadataJSON, _ := json.Marshal(metadata)
+
+		evidenceQuery := `INSERT INTO ban_evidence (id, ban_id, evidence_type, clickhouse_table, record_id, server_id, event_time, metadata, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+		_, err = tx.ExecContext(wm.ctx, evidenceQuery,
+			uuid.New(),
+			banID.String(),
+			ev.EvidenceType,
+			ev.ClickhouseTable,
+			ev.RecordID,
+			context.ServerID,
+			ev.EventTime,
+			metadataJSON,
+			now,
+			now,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert evidence: %w", err)
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Execute RCON ban
+	command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, duration, reason)
+	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
+	if err != nil {
+		log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
+	}
+
+	// Kick player
+	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+	_, kickErr := wm.rconManager.ExecuteCommand(context.ServerID, kickCommand)
+
+	// Store results
+	context.StepResults[step.ID] = map[string]interface{}{
+		"ban_id":         banID.String(),
+		"command":        command,
+		"player_id":      playerId,
+		"duration":       duration,
+		"reason":         reason,
+		"rule_id":        ruleID,
+		"response":       response,
+		"evidence_count": len(evidenceItems),
+		"kicked":         kickErr == nil,
 	}
 
 	return nil
@@ -3117,6 +3310,168 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		L.Push(lua.LString(response))
 		return 2 // Return success boolean and response
 	}))
+
+	// Ban player with evidence linking
+	L.SetField(rconTable, "ban_with_evidence", L.NewFunction(func(L *lua.LState) int {
+		steamID := L.CheckString(1)
+		duration := L.CheckNumber(2) // Duration in days
+		reason := L.OptString(3, "Banned by workflow with evidence")
+		ruleID := L.OptString(4, "")
+
+		// Replace variables
+		steamID = wm.replaceVariablesWithContext(steamID, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		if ruleID != "" {
+			ruleID = wm.replaceVariablesWithContext(ruleID, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
+		}
+
+		// Extract evidence from trigger event
+		var evidenceItems []struct {
+			EvidenceType    string
+			ClickhouseTable string
+			RecordID        string
+			EventTime       time.Time
+		}
+
+		if eventID, ok := workflowContext.TriggerEvent["event_id"].(string); ok {
+			eventType, _ := workflowContext.TriggerEvent["event_type"].(string)
+			evidenceType, clickhouseTable := wm.mapEventTypeToEvidence(eventType)
+
+			if evidenceType != "" && clickhouseTable != "" {
+				var eventTime time.Time
+				if eventTimeStr, ok := workflowContext.TriggerEvent["event_time"].(string); ok {
+					if parsedTime, err := time.Parse(time.RFC3339Nano, eventTimeStr); err == nil {
+						eventTime = parsedTime
+					}
+				}
+				if eventTime.IsZero() {
+					eventTime = time.Now()
+				}
+
+				evidenceItems = append(evidenceItems, struct {
+					EvidenceType    string
+					ClickhouseTable string
+					RecordID        string
+					EventTime       time.Time
+				}{
+					EvidenceType:    evidenceType,
+					ClickhouseTable: clickhouseTable,
+					RecordID:        eventID,
+					EventTime:       eventTime,
+				})
+			} else {
+				log.Warn().Str("event_type", eventType).Msg("Event type does not support evidence linking")
+			}
+		} else {
+			log.Warn().Msg("No event_id found in trigger context, creating ban without evidence")
+		}
+
+		// Create ban in database
+		banID := uuid.New()
+		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(fmt.Sprintf("invalid steam ID format: %v", err)))
+			return 2
+		}
+
+		// Start transaction
+		tx, err := wm.db.BeginTx(wm.ctx, nil)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(fmt.Sprintf("failed to begin transaction: %v", err)))
+			return 2
+		}
+		defer tx.Rollback()
+
+		now := time.Now()
+
+		// Insert ban
+		var banQuery string
+		var banArgs []interface{}
+
+		if ruleID != "" {
+			ruleUUID, err := uuid.Parse(ruleID)
+			if err != nil {
+				L.Push(lua.LNil)
+				L.Push(lua.LString(fmt.Sprintf("invalid rule ID format: %v", err)))
+				return 2
+			}
+			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
+			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDInt, reason, int(duration), ruleUUID, now, now}
+		} else {
+			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
+			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDInt, reason, int(duration), now, now}
+		}
+
+		_, err = tx.ExecContext(wm.ctx, banQuery, banArgs...)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(fmt.Sprintf("failed to create ban: %v", err)))
+			return 2
+		}
+
+		// Insert evidence records
+		for _, ev := range evidenceItems {
+			metadata := map[string]interface{}{
+				"event_type": workflowContext.TriggerEvent["event_type"],
+				"event_id":   ev.RecordID,
+			}
+			metadataJSON, _ := json.Marshal(metadata)
+
+			evidenceQuery := `INSERT INTO ban_evidence (id, ban_id, evidence_type, clickhouse_table, record_id, server_id, event_time, metadata, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+			_, err = tx.ExecContext(wm.ctx, evidenceQuery,
+				uuid.New(),
+				banID.String(),
+				ev.EvidenceType,
+				ev.ClickhouseTable,
+				ev.RecordID,
+				workflowContext.ServerID,
+				ev.EventTime,
+				metadataJSON,
+				now,
+				now,
+			)
+			if err != nil {
+				L.Push(lua.LNil)
+				L.Push(lua.LString(fmt.Sprintf("failed to insert evidence: %v", err)))
+				return 2
+			}
+		}
+
+		// Commit transaction
+		if err := tx.Commit(); err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(fmt.Sprintf("failed to commit transaction: %v", err)))
+			return 2
+		}
+
+		log.Info().
+			Str("execution_id", workflowContext.ExecutionID.String()).
+			Str("ban_id", banID.String()).
+			Str("steam_id", steamID).
+			Float64("duration", float64(duration)).
+			Str("reason", reason).
+			Int("evidence_count", len(evidenceItems)).
+			Msg("LUA script banning player with evidence")
+
+		// Execute RCON ban
+		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", steamID, float64(duration), reason)
+		_, err = wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
+		if err != nil {
+			log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
+		}
+
+		// Kick player
+		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", steamID, reason)
+		_, _ = wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
+
+		// Return ban ID and nil error
+		L.Push(lua.LString(banID.String()))
+		L.Push(lua.LNil)
+		return 2
+	}))
+
 	L.SetField(rconTable, "warn", L.NewFunction(func(L *lua.LState) int {
 		playerId := L.CheckString(1)
 		message := L.CheckString(2)
