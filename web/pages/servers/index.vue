@@ -142,26 +142,11 @@ async function fetchServers() {
   loading.value = true;
   error.value = null;
 
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const { data, error: fetchError } = await useFetch<ServersResponse>(
+    const { data, error: fetchError } = await useAuthFetch<ServersResponse>(
       `${runtimeConfig.public.backendApi}/servers`,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 
@@ -192,29 +177,17 @@ async function fetchServers() {
 
 // Function to add a server
 async function addServer(values: any) {
-  const { 
+  const {
     name, ip_address, game_port, rcon_ip_address, rcon_port, rcon_password,
-    log_source_type, log_file_path, log_host, log_port, log_username, 
-    log_password, log_poll_frequency, log_read_from_start 
+    log_source_type, log_file_path, log_host, log_port, log_username,
+    log_password, log_poll_frequency, log_read_from_start
   } = values;
 
   addServerLoading.value = true;
   error.value = null;
 
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    addServerLoading.value = false;
-    return;
-  }
-
   try {
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       `${runtimeConfig.public.backendApi}/servers`,
       {
         method: "POST",
@@ -225,7 +198,7 @@ async function addServer(values: any) {
           rcon_ip_address,
           rcon_port: parseInt(rcon_port),
           rcon_password,
-          
+
           // Log configuration
           log_source_type: log_source_type || null,
           log_file_path: log_file_path || null,
@@ -235,9 +208,6 @@ async function addServer(values: any) {
           log_password: log_password || null,
           log_poll_frequency: log_poll_frequency ? parseInt(log_poll_frequency) : null,
           log_read_from_start: log_read_from_start || false,
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
         },
       }
     );
@@ -273,26 +243,11 @@ async function deleteServer(serverId: string) {
   loading.value = true;
   error.value = null;
 
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       `${runtimeConfig.public.backendApi}/servers/${serverId}`,
       {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 

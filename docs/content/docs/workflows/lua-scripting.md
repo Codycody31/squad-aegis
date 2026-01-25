@@ -306,6 +306,113 @@ else
 end
 ```
 
+#### `workflow.rcon.ban_with_evidence(steam_id, duration, reason, rule_id)`
+
+Bans a player and automatically links the triggering event as evidence in the database. This creates a complete audit trail with the event that caused the ban stored as evidence.
+
+**Parameters:**
+
+- `steam_id` (string): Player's Steam ID (required)
+- `duration` (number): Ban duration in days (0 = permanent)
+- `reason` (string): Ban reason (required)
+- `rule_id` (string): Optional rule UUID to associate with the ban
+
+**Returns:** `ban_id, error`
+
+- `ban_id` (string): UUID of the created ban, or `nil` if failed
+- `error` (string): Error message, or `nil` if successful
+
+**Supported Event Types for Evidence:**
+- `RCON_CHAT_MESSAGE` - Chat message evidence
+- `LOG_PLAYER_CONNECTED` - Connection event evidence
+- `LOG_PLAYER_DIED` - Death event evidence
+- `LOG_PLAYER_WOUNDED` - Wound event evidence
+- `LOG_PLAYER_DAMAGED` - Damage event evidence
+
+**Features:**
+- Automatically creates ban record in PostgreSQL database
+- Links triggering event to ban as evidence in ClickHouse
+- Executes RCON ban command
+- Kicks player immediately
+- Returns ban UUID for tracking and reference
+
+```lua
+-- Basic usage
+local ban_id, err = workflow.rcon.ban_with_evidence(
+    trigger_event.steam_id,
+    7,
+    "Offensive language: " .. trigger_event.message
+)
+
+if err then
+    workflow.log.error("Ban failed: " .. err)
+else
+    workflow.log.info("Banned player with ID: " .. ban_id)
+end
+```
+
+**Complete Example with Rule Lookup:**
+
+```lua
+local steam_id = trigger_event.steam_id
+local message = trigger_event.message
+local player_name = trigger_event.player_name
+
+-- Lookup rule ID from database
+local rule_rows = workflow.db.query('SELECT id FROM server_rules WHERE title = $1', 'Offensive Language')
+local rule_id = (rule_rows and #rule_rows > 0) and rule_rows[1].id or ''
+
+-- Ban with evidence
+local ban_id, err = workflow.rcon.ban_with_evidence(
+    steam_id,
+    7,
+    'Offensive language: ' .. message,
+    rule_id
+)
+
+if err then
+    workflow.log.error('Ban failed: ' .. err)
+else
+    workflow.log.info('Banned ' .. player_name .. ' (Ban ID: ' .. ban_id .. ') with evidence')
+
+    -- Store ban ID for later use
+    workflow.variable.set('last_ban_id', ban_id)
+end
+```
+
+**Error Handling:**
+
+```lua
+local ban_id, err = workflow.rcon.ban_with_evidence(
+    trigger_event.steam_id,
+    7,
+    "Rule violation"
+)
+
+if err then
+    -- Handle specific errors
+    if err:match("invalid steam ID") then
+        workflow.log.error("Invalid Steam ID format")
+    elseif err:match("transaction") then
+        workflow.log.error("Database error, ban not created")
+    else
+        workflow.log.error("Ban failed: " .. err)
+    end
+    return
+end
+
+-- Ban succeeded
+workflow.log.info("Player banned successfully. Ban ID: " .. ban_id)
+```
+
+**Notes:**
+- Automatically captures the trigger event from workflow context
+- If event_id is missing, creates ban without evidence (graceful degradation)
+- If event type doesn't support evidence, logs warning and proceeds without evidence
+- Database operations use transactions for atomicity
+- RCON failures are logged but don't prevent database ban creation
+- Evidence links to ClickHouse for complete audit trails
+
 #### `workflow.rcon.warn(player_id, message)`
 
 Sends a warning message to a specific player.

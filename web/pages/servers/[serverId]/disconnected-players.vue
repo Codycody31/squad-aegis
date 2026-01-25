@@ -47,24 +47,11 @@ async function fetchDisconnectedPlayers() {
   loading.value = true;
   error.value = null;
 
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const { data, error: fetchError } = await useFetch<PlayersResponse>(
-      `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/server-population`,
+    const { data, error: fetchError } = await useAuthFetch<PlayersResponse>(
+      `/servers/${serverId}/rcon/server-population`,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 
@@ -74,26 +61,25 @@ async function fetchDisconnectedPlayers() {
 
     if (data.value && data.value.data && data.value.data.players) {
       disconnectedPlayers.value = data.value.data.players.disconnectedPlayers || [];
-      
+
       // Sort by disconnect time (most recent first)
       disconnectedPlayers.value.sort((a, b) => {
         // Parse the disconnect time strings (e.g., "5m30s")
         const getSeconds = (timeStr: string) => {
           const minutesMatch = timeStr.match(/(\d+)m/);
           const secondsMatch = timeStr.match(/(\d+)s/);
-          
+
           const minutes = minutesMatch ? parseInt(minutesMatch[1]) : 0;
           const seconds = secondsMatch ? parseInt(secondsMatch[1]) : 0;
-          
+
           return minutes * 60 + seconds;
         };
-        
+
         return getSeconds(a.sinceDisconnect) - getSeconds(b.sinceDisconnect);
       });
     }
   } catch (err: any) {
     error.value = err.message || "An error occurred while fetching disconnected players data";
-    console.error(err);
   } finally {
     loading.value = false;
   }

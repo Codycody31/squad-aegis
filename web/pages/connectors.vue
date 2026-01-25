@@ -101,11 +101,7 @@ const getStatusIcon = (status: string) => {
 // Load configured connectors
 const loadConnectors = async () => {
   try {
-    const response = await $fetch("/api/connectors", {
-      headers: {
-        Authorization: `Bearer ${authStore.token}`,
-      },
-    });
+    const response = await useAuthFetchImperative("/api/connectors");
     connectors.value = response.data.connectors || [];
   } catch (error: any) {
     console.error("Failed to load connectors:", error);
@@ -120,11 +116,7 @@ const loadConnectors = async () => {
 // Load available connector definitions
 const loadAvailableConnectors = async () => {
   try {
-    const response = await $fetch("/api/connectors/available", {
-      headers: {
-        Authorization: `Bearer ${authStore.token}`,
-      },
-    });
+    const response = await useAuthFetchImperative("/api/connectors/available");
     availableConnectors.value = response.data.connectors || [];
     console.log("Available connectors:", availableConnectors.value);
   } catch (error: any) {
@@ -150,11 +142,8 @@ const createConnector = async () => {
   }
 
   try {
-    await $fetch("/api/connectors", {
+    await useAuthFetchImperative("/api/connectors", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${authStore.token}`,
-      },
       body: {
         connector_id: selectedConnector.value,
         config: connectorConfig.value,
@@ -187,11 +176,8 @@ const deleteConnector = async (connector: any) => {
   }
 
   try {
-    await $fetch(`/api/connectors/${connector.id}`, {
+    await useAuthFetchImperative(`/api/connectors/${connector.id}`, {
       method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${authStore.token}`,
-      },
     });
 
     toast({
@@ -296,11 +282,8 @@ const saveConnectorConfig = async () => {
   if (!currentConnector.value) return;
 
   try {
-    await $fetch(`/api/connectors/${currentConnector.value.id}`, {
+    await useAuthFetchImperative(`/api/connectors/${currentConnector.value.id}`, {
       method: "PUT",
-      headers: {
-        Authorization: `Bearer ${authStore.token}`,
-      },
       body: {
         config: connectorConfig.value,
       },

@@ -516,14 +516,6 @@ const fetchMetrics = async () => {
 
   try {
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-      runtimeConfig.public.sessionCookieName as string
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-      throw new Error("Authentication required");
-    }
 
     // Build query parameters
     let url = `${runtimeConfig.public.backendApi}/servers/${serverId}/metrics/history`;
@@ -554,7 +546,7 @@ const fetchMetrics = async () => {
     } else {
       // Use period selector
       params.append("period", selectedPeriod.value);
-      
+
       // Calculate appropriate interval based on period for higher fidelity
       let interval = 15; // default
       switch (selectedPeriod.value) {
@@ -579,13 +571,10 @@ const fetchMetrics = async () => {
 
     url += `?${params.toString()}`;
 
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       url,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 
@@ -598,7 +587,6 @@ const fetchMetrics = async () => {
     }
   } catch (err: any) {
     error.value = err.message || "An error occurred while fetching metrics";
-    console.error(err);
   } finally {
     loading.value = false;
   }

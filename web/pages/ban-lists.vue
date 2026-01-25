@@ -140,29 +140,10 @@ const loadData = async () => {
 
 // Load ban lists
 const loadBanLists = async () => {
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        return;
-    }
-
     try {
-        const response = (await $fetch(
-            `${runtimeConfig.public.backendApi}/ban-lists`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
-        )) as any;
+        const response = await useAuthFetchImperative<any>(
+            `${runtimeConfig.public.backendApi}/ban-lists`
+        );
         banLists.value = response.data.ban_lists || [];
     } catch (error: any) {
         console.error("Failed to load ban lists:", error);
@@ -176,29 +157,10 @@ const loadBanLists = async () => {
 
 // Load remote sources
 const loadRemoteSources = async () => {
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        return;
-    }
-
     try {
-        const response = (await $fetch(
-            `${runtimeConfig.public.backendApi}/remote-ban-sources`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
-        )) as any;
+        const response = await useAuthFetchImperative<any>(
+            `${runtimeConfig.public.backendApi}/remote-ban-sources`
+        );
         remoteSources.value = response.data.sources || [];
     } catch (error: any) {
         console.error("Failed to load remote sources:", error);
@@ -212,29 +174,10 @@ const loadRemoteSources = async () => {
 
 // Load ignored Steam IDs
 const loadIgnoredSteamIDs = async () => {
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        return;
-    }
-
     try {
-        const response = (await $fetch(
-            `${runtimeConfig.public.backendApi}/ignored-steam-ids`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
-        )) as any;
+        const response = await useAuthFetchImperative<any>(
+            `${runtimeConfig.public.backendApi}/ignored-steam-ids`
+        );
         ignoredSteamIDs.value = response.data.ignored_steam_ids || [];
     } catch (error: any) {
         console.error("Failed to load ignored Steam IDs:", error);
@@ -248,19 +191,9 @@ const loadIgnoredSteamIDs = async () => {
 
 // Create ban list
 const createBanList = async () => {
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
-
     try {
-        await $fetch(`${runtimeConfig.public.backendApi}/ban-lists`, {
+        await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/ban-lists`, {
             method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
             body: banListForm.value,
         });
 
@@ -286,23 +219,13 @@ const createBanList = async () => {
 const updateBanList = async () => {
     if (!currentBanList.value) return;
 
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
-
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/ban-lists/${currentBanList.value.id}`,
             {
                 method: "PUT",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
                 body: banListForm.value,
-            },
+            }
         );
 
         toast({
@@ -333,22 +256,12 @@ const deleteBanList = async (banList: any) => {
         return;
     }
 
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
-
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/ban-lists/${banList.id}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
+            }
         );
 
         toast({
@@ -369,19 +282,9 @@ const deleteBanList = async (banList: any) => {
 
 // Create remote source
 const createRemoteSource = async () => {
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
-
     try {
-        await $fetch(`${runtimeConfig.public.backendApi}/remote-ban-sources`, {
+        await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/remote-ban-sources`, {
             method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
             body: remoteSourceForm.value,
         });
 
@@ -413,22 +316,12 @@ const deleteRemoteSource = async (remoteSource: any) => {
         return;
     }
 
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
-
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/remote-ban-sources/${remoteSource.id}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
+            }
         );
 
         toast({
@@ -449,19 +342,9 @@ const deleteRemoteSource = async (remoteSource: any) => {
 
 // Create ignored Steam ID
 const createIgnoredSteamID = async () => {
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
-
     try {
-        await $fetch(`${runtimeConfig.public.backendApi}/ignored-steam-ids`, {
+        await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/ignored-steam-ids`, {
             method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
             body: ignoredSteamIDForm.value,
         });
 
@@ -493,22 +376,12 @@ const deleteIgnoredSteamID = async (ignoredSteamID: any) => {
         return;
     }
 
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
-
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/ignored-steam-ids/${ignoredSteamID.id}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
+            }
         );
 
         toast({

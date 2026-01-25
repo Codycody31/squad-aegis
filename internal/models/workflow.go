@@ -123,18 +123,19 @@ const (
 
 // Predefined action types
 const (
-	ActionTypeRconCommand    = "rcon_command"
-	ActionTypeAdminBroadcast = "admin_broadcast"
-	ActionTypeChatMessage    = "chat_message"
-	ActionTypeKickPlayer     = "kick_player"
-	ActionTypeBanPlayer      = "ban_player"
-	ActionTypeWarnPlayer     = "warn_player"
-	ActionTypeHTTPRequest    = "http_request"
-	ActionTypeWebhook        = "webhook"
-	ActionTypeDiscordMessage = "discord_message"
-	ActionTypeLogMessage     = "log_message"
-	ActionTypeSetVariable    = "set_variable"
-	ActionTypeLuaScript      = "lua_script"
+	ActionTypeRconCommand            = "rcon_command"
+	ActionTypeAdminBroadcast         = "admin_broadcast"
+	ActionTypeChatMessage            = "chat_message"
+	ActionTypeKickPlayer             = "kick_player"
+	ActionTypeBanPlayer              = "ban_player"
+	ActionTypeBanPlayerWithEvidence  = "ban_player_with_evidence"
+	ActionTypeWarnPlayer             = "warn_player"
+	ActionTypeHTTPRequest            = "http_request"
+	ActionTypeWebhook                = "webhook"
+	ActionTypeDiscordMessage         = "discord_message"
+	ActionTypeLogMessage             = "log_message"
+	ActionTypeSetVariable            = "set_variable"
+	ActionTypeLuaScript              = "lua_script"
 )
 
 // Predefined condition operators

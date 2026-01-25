@@ -32,15 +32,8 @@ const stats = ref({
 // Fetch servers data
 const fetchServers = async () => {
     loading.value = true;
-    const { data, error } = await useFetch(
-        `${runtimeConfig.public.backendApi}/servers`,
-        {
-            headers: {
-                Authorization: `Bearer ${
-                    useCookie(runtimeConfig.public.sessionCookieName).value
-                }`,
-            },
-        },
+    const { data, error } = await useAuthFetch(
+        `${runtimeConfig.public.backendApi}/servers`
     );
 
     if (error.value) {
@@ -63,15 +56,8 @@ const fetchAllServerStats = async () => {
     // Create an array of promises for parallel fetching
     const promises = servers.value.map(async (server) => {
         // Fetch server metrics (including player count)
-        const { data: metricsData } = await useFetch(
-            `${runtimeConfig.public.backendApi}/servers/${server.id}/metrics`,
-            {
-                headers: {
-                    Authorization: `Bearer ${
-                        useCookie(runtimeConfig.public.sessionCookieName).value
-                    }`,
-                },
-            },
+        const { data: metricsData } = await useAuthFetch(
+            `${runtimeConfig.public.backendApi}/servers/${server.id}/metrics`
         );
 
         if (metricsData.value?.data?.metrics?.players?.total) {
@@ -79,15 +65,8 @@ const fetchAllServerStats = async () => {
         }
 
         // Fetch banned players count
-        const { data: bansData } = await useFetch(
-            `${runtimeConfig.public.backendApi}/servers/${server.id}/bans`,
-            {
-                headers: {
-                    Authorization: `Bearer ${
-                        useCookie(runtimeConfig.public.sessionCookieName).value
-                    }`,
-                },
-            },
+        const { data: bansData } = await useAuthFetch(
+            `${runtimeConfig.public.backendApi}/servers/${server.id}/bans`
         );
 
         if (bansData.value?.data?.bans) {
@@ -95,15 +74,8 @@ const fetchAllServerStats = async () => {
         }
 
         // Fetch server status
-        const { data: statusData } = await useFetch(
-            `${runtimeConfig.public.backendApi}/servers/${server.id}/status`,
-            {
-                headers: {
-                    Authorization: `Bearer ${
-                        useCookie(runtimeConfig.public.sessionCookieName).value
-                    }`,
-                },
-            },
+        const { data: statusData } = await useAuthFetch(
+            `${runtimeConfig.public.backendApi}/servers/${server.id}/status`
         );
 
         if (statusData.value?.data?.status) {

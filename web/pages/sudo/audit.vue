@@ -24,14 +24,13 @@ const totalPages = ref(1);
 const fetchLogs = async () => {
   loading.value = true;
   try {
-    const res = await $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/audit/logs`, {
+    const res = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/audit/logs`, {
       params: {
         page: currentPage.value,
         limit: 50,
         search: searchQuery.value,
         action: actionFilter.value,
       },
-      headers: { Authorization: `Bearer ${authStore.token}` },
     });
     logs.value = res.data.logs;
     totalPages.value = res.data.pagination.total_pages;

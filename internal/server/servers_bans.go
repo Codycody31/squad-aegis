@@ -55,6 +55,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	defer rows.Close()
 
 	bans := []models.ServerBan{}
+	steamIDs := []string{}
 	for rows.Next() {
 		var ban models.ServerBan
 		var steamIDInt int64
@@ -87,8 +88,8 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		// Convert steamID from int64 to string
 		ban.SteamID = strconv.FormatInt(steamIDInt, 10)
 
-		// Set player name to steam ID for now (could be enhanced later with ClickHouse lookup)
-		ban.Name = ban.SteamID
+		// Collect steam IDs for batch lookup
+		steamIDs = append(steamIDs, ban.SteamID)
 
 		// Set rule ID if present
 		if ruleID.Valid {
@@ -123,6 +124,19 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		ban.Evidence, _ = s.loadBanEvidence(c.Request.Context(), ban.ID)
 
 		bans = append(bans, ban)
+	}
+
+	// Batch lookup player names from ClickHouse
+	playerNames := s.lookupPlayerNamesBatch(c.Request.Context(), steamIDs)
+
+	// Assign player names to bans
+	for i := range bans {
+		if name, ok := playerNames[bans[i].SteamID]; ok {
+			bans[i].Name = name
+		} else {
+			// Fallback to steam ID if no name found
+			bans[i].Name = bans[i].SteamID
+		}
 	}
 
 	responses.Success(c, "Bans fetched successfully", &gin.H{
@@ -951,6 +965,45 @@ func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.Ba
 	}
 
 	return evidence, nil
+}
+
+// lookupPlayerNamesBatch looks up player names from ClickHouse for a batch of steam IDs
+func (s *Server) lookupPlayerNamesBatch(ctx context.Context, steamIDs []string) map[string]string {
+	result := make(map[string]string)
+
+	if len(steamIDs) == 0 || s.Dependencies.Clickhouse == nil {
+		return result
+	}
+
+	// Build query with IN clause for batch lookup
+	// Get the most recent player_suffix for each steam ID
+	query := `
+		SELECT
+			steam,
+			argMax(player_suffix, event_time) as player_name
+		FROM squad_aegis.server_join_succeeded_events
+		WHERE steam IN (?)
+		GROUP BY steam
+	`
+
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, steamIDs)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to lookup player names from ClickHouse")
+		return result
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var steamID, playerName string
+		if err := rows.Scan(&steamID, &playerName); err != nil {
+			continue
+		}
+		if playerName != "" {
+			result[steamID] = playerName
+		}
+	}
+
+	return result
 }
 
 // fetchEvidenceMetadataFromClickHouse fetches the full event data from ClickHouse

@@ -147,26 +147,11 @@ async function fetchUsers() {
   loading.value = true;
   error.value = null;
 
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const { data, error: fetchError } = await useFetch<UsersResponse>(
+    const { data, error: fetchError } = await useAuthFetch<UsersResponse>(
       `${runtimeConfig.public.backendApi}/users`,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 
@@ -199,20 +184,8 @@ async function addUser(values: any) {
   addUserLoading.value = true;
   error.value = null;
 
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    addUserLoading.value = false;
-    return;
-  }
-
   try {
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       `${runtimeConfig.public.backendApi}/users`,
       {
         method: "POST",
@@ -222,9 +195,6 @@ async function addUser(values: any) {
           username,
           password,
           super_admin: superAdmin,
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
         },
       }
     );
@@ -268,20 +238,8 @@ async function editUser(values: any) {
   editUserLoading.value = true;
   error.value = null;
 
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    editUserLoading.value = false;
-    return;
-  }
-
   try {
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       `${runtimeConfig.public.backendApi}/users/${editingUser.value.id}`,
       {
         method: "PUT",
@@ -289,9 +247,6 @@ async function editUser(values: any) {
           steam_id,
           name,
           super_admin: superAdmin,
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
         },
       }
     );
@@ -324,26 +279,11 @@ async function deleteUser(userId: string) {
   loading.value = true;
   error.value = null;
 
-  const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       `${runtimeConfig.public.backendApi}/users/${userId}`,
       {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 

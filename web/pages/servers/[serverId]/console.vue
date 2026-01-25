@@ -110,24 +110,13 @@ async function executeCommand() {
   loading.value = true;
 
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
 
-  if (!token) {
-    return;
-  }
-
-  const { data, error } = await useFetch<CommandResponse>(
+  const { data, error } = await useAuthFetch<CommandResponse>(
     `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
     {
       method: "POST",
       body: {
         command: command.value,
-      },
-      headers: {
-        Authorization: `Bearer ${token}`,
       },
     }
   );
@@ -135,7 +124,6 @@ async function executeCommand() {
   let responseText = "No response from server";
 
   if (error.value) {
-    console.error(error.value);
     responseText = `Error: ${error.value.message || "Unknown error"}`;
   }
 
@@ -168,28 +156,13 @@ async function fetchSuggestions(query: string) {
   }
 
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
 
-  if (!token) {
-    return;
-  }
-
-  const { data, error } = await useFetch<CommandsResponse>(
+  const { data, error } = await useAuthFetch<CommandsResponse>(
     `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/commands/autocomplete?q=${query}`,
     {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     }
   );
-
-  if (error.value) {
-    console.error(error.value);
-  }
 
   if (data.value && data.value.data && data.value.data.commands) {
     const commandsList = data.value.data.commands;
@@ -233,25 +206,13 @@ watch(command, (newCommand) => {
 // Function to fetch all commands
 async function fetchAllCommands() {
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
 
-  const { data, error } = await useFetch<CommandsResponse>(
+  const { data, error } = await useAuthFetch<CommandsResponse>(
     `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/commands`,
     {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     }
   );
-
-  if (error.value) {
-    console.error(error.value);
-    return;
-  }
 
   if (data.value && data.value.data && data.value.data.commands) {
     allCommands.value = data.value.data.commands;

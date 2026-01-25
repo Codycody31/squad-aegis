@@ -1009,24 +1009,13 @@ const expandAllSteps = () => {
 
 const loadExecution = async () => {
     try {
-        const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
-
         loading.value = true;
         error.value = null;
 
-        const response = await $fetch<
+        const response = await useAuthFetchImperative<
             ApiResponse<{ execution: WorkflowExecution }>
         >(
             `/api/servers/${serverId.value}/workflows/${workflowId.value}/executions/${executionId.value}`,
-            {
-                headers: {
-                    Authorization: token ? `Bearer ${token}` : "",
-                },
-            },
         );
 
         if (response.code === 200) {
@@ -1043,19 +1032,13 @@ const loadExecution = async () => {
 
 const loadMessages = async (append = false) => {
     try {
-        const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
-
         messagesLoading.value = true;
         if (!append) {
             messages.value = [];
             messagesOffset.value = 0;
         }
 
-        const response = await $fetch<
+        const response = await useAuthFetchImperative<
             ApiResponse<{
                 execution: WorkflowExecution;
                 messages: WorkflowLogMessage[];
@@ -1068,9 +1051,6 @@ const loadMessages = async (append = false) => {
                 query: {
                     limit: parseInt(messagesPageSize.value),
                     offset: messagesOffset.value,
-                },
-                headers: {
-                    Authorization: token ? `Bearer ${token}` : "",
                 },
             },
         );
@@ -1114,19 +1094,13 @@ const onMessagePageSizeChange = () => {
 
 const loadLogs = async (append = false) => {
     try {
-        const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
-
         logsLoading.value = true;
         if (!append) {
             logs.value = [];
             logsOffset.value = 0;
         }
 
-        const response = await $fetch<
+        const response = await useAuthFetchImperative<
             ApiResponse<{
                 execution: WorkflowExecution;
                 logs: WorkflowExecutionLog[];
@@ -1139,9 +1113,6 @@ const loadLogs = async (append = false) => {
                 query: {
                     limit: parseInt(logsPageSize.value),
                     offset: logsOffset.value,
-                },
-                headers: {
-                    Authorization: token ? `Bearer ${token}` : "",
                 },
             },
         );

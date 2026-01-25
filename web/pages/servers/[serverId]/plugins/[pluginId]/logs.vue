@@ -49,6 +49,7 @@ const router = useRouter();
 const serverId = route.params.serverId;
 const pluginId = route.params.pluginId;
 const authStore = useAuthStore();
+const runtimeConfig = useRuntimeConfig();
 
 // State variables
 const loading = ref(true);
@@ -184,15 +185,10 @@ const formatConsoleTimestamp = (timestamp: string) => {
 // Load plugin details
 const loadPlugin = async () => {
     try {
-        const response = await $fetch(
-            `/api/servers/${serverId}/plugins/${pluginId}`,
-            {
-                headers: {
-                    Authorization: `Bearer ${authStore.token}`,
-                },
-            },
+        const response = await useAuthFetchImperative<any>(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/plugins/${pluginId}`
         );
-        plugin.value = (response as any).data.plugin;
+        plugin.value = response.data.plugin;
     } catch (error: any) {
         console.error("Failed to load plugin:", error);
         toast({
@@ -222,7 +218,7 @@ const handleScroll = async (event: Event) => {
 // Load initial logs (latest first)
 const loadInitialLogs = async () => {
     try {
-        let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc`;
+        let url = `${runtimeConfig.public.backendApi}/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc`;
 
         // Add filters if set
         const params = new URLSearchParams();
@@ -233,13 +229,9 @@ const loadInitialLogs = async () => {
             url += "&" + params.toString();
         }
 
-        const response = await $fetch(url, {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
+        const response = await useAuthFetchImperative<any>(url);
 
-        const newLogs = (response as any).data.logs || [];
+        const newLogs = response.data.logs || [];
         const reversedLogs = newLogs.slice().reverse();
         logs.value = reversedLogs;
 
@@ -274,7 +266,7 @@ const loadOlderLogs = async () => {
     const previousScrollHeight = container?.scrollHeight || 0;
 
     try {
-        let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc&before=${oldestLogId.value}`;
+        let url = `${runtimeConfig.public.backendApi}/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc&before=${oldestLogId.value}`;
 
         // Add filters if set
         const params = new URLSearchParams();
@@ -285,13 +277,9 @@ const loadOlderLogs = async () => {
             url += "&" + params.toString();
         }
 
-        const response = await $fetch(url, {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
+        const response = await useAuthFetchImperative<any>(url);
 
-        const olderLogs = (response as any).data.logs || [];
+        const olderLogs = response.data.logs || [];
         const reversedOlderLogs = olderLogs.slice().reverse();
 
         if (reversedOlderLogs.length > 0) {
@@ -325,7 +313,7 @@ const loadNewerLogs = async () => {
     if (!newestLogId.value) return;
 
     try {
-        let url = `/api/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc&after=${newestLogId.value}`;
+        let url = `${runtimeConfig.public.backendApi}/servers/${serverId}/plugins/${pluginId}/logs?limit=${logsPerPage.value}&order=desc&after=${newestLogId.value}`;
 
         // Add filters if set
         const params = new URLSearchParams();
@@ -336,13 +324,9 @@ const loadNewerLogs = async () => {
             url += "&" + params.toString();
         }
 
-        const response = await $fetch(url, {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
+        const response = await useAuthFetchImperative<any>(url);
 
-        const newerLogs = (response as any).data.logs || [];
+        const newerLogs = response.data.logs || [];
         const reversedNewerLogs = newerLogs.slice().reverse();
 
         if (reversedNewerLogs.length > 0) {

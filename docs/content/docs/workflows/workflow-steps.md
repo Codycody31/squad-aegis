@@ -123,6 +123,90 @@ Bans a player from the server.
 }
 ```
 
+#### Ban Player with Evidence (`ban_player_with_evidence`)
+
+Bans a player and automatically links the triggering event as evidence in the database. This creates a complete audit trail with the event that caused the ban (chat messages, deaths, etc.) stored as evidence.
+
+**Configuration:**
+
+- `player_id` (required) - Player ID (Steam ID or player name) to ban
+- `duration` (required) - Ban duration in days (0 = permanent)
+- `reason` (optional) - Reason for the ban
+- `rule_id` (optional) - Server rule UUID to associate with the ban
+
+**Supported Event Types for Evidence:**
+- `RCON_CHAT_MESSAGE` - Chat message evidence
+- `LOG_PLAYER_CONNECTED` - Connection event evidence
+- `LOG_PLAYER_DIED` - Death event evidence
+- `LOG_PLAYER_WOUNDED` - Wound event evidence
+- `LOG_PLAYER_DAMAGED` - Damage event evidence
+
+**Features:**
+- Automatically creates ban record in database with UUID
+- Links triggering event as evidence in ClickHouse
+- Executes RCON ban command
+- Kicks player immediately
+- Returns ban_id, evidence_count, and success status
+
+**Example:**
+
+```json
+{
+  "name": "Ban with Offensive Language Evidence",
+  "type": "action",
+  "config": {
+    "action_type": "ban_player_with_evidence",
+    "player_id": "${trigger_event.steam_id}",
+    "duration": 7,
+    "reason": "Offensive language: ${trigger_event.message}",
+    "rule_id": "${workflow.variables.rule_id}"
+  }
+}
+```
+
+**Complete Workflow Example:**
+
+```json
+{
+  "name": "Offensive Language Auto-Ban",
+  "triggers": [{
+    "event_type": "RCON_CHAT_MESSAGE",
+    "conditions": [{
+      "field": "message",
+      "operator": "regex",
+      "value": "(?i)(offensive|slur|word)",
+      "type": "string"
+    }]
+  }],
+  "steps": [
+    {
+      "name": "Lookup Rule",
+      "type": "lua",
+      "config": {
+        "script": "local rows = workflow.db.query('SELECT id FROM server_rules WHERE title = $1', 'Offensive Language')\nif rows and #rows > 0 then\n  workflow.variables.rule_id = rows[1].id\nend"
+      }
+    },
+    {
+      "name": "Ban with Evidence",
+      "type": "action",
+      "config": {
+        "action_type": "ban_player_with_evidence",
+        "player_id": "${trigger_event.steam_id}",
+        "duration": 7,
+        "reason": "Offensive language: ${trigger_event.message}",
+        "rule_id": "${workflow.variables.rule_id}"
+      }
+    }
+  ]
+}
+```
+
+**Notes:**
+- If the event_id is missing from the trigger context, the ban is created without evidence (graceful degradation)
+- If the event type doesn't support evidence, a warning is logged and the ban proceeds without evidence
+- Evidence links to ClickHouse records via the event UUID for complete audit trails
+- The ban record can be queried via API with attached evidence for admin review and appeals
+
 #### Warn Player (`warn_player`)
 
 Sends a warning message to a specific player.

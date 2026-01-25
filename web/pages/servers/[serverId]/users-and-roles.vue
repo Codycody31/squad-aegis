@@ -282,25 +282,12 @@ async function fetchRoles() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value.roles = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch<RolesResponse>(
+        const { data, error: fetchError } = await useAuthFetch<RolesResponse>(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/roles`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -327,25 +314,12 @@ async function fetchAdmins() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value.admins = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch<AdminsResponse>(
+        const { data, error: fetchError } = await useAuthFetch<AdminsResponse>(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/admins`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -372,25 +346,12 @@ async function fetchUsers() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value.users = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch<UsersResponse>(
+        const { data, error: fetchError } = await useAuthFetch<UsersResponse>(
             `${runtimeConfig.public.backendApi}/users`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -419,19 +380,9 @@ async function onRoleSubmit(values: any) {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        addRoleLoading.value = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/roles`,
             {
                 method: "POST",
@@ -439,9 +390,6 @@ async function onRoleSubmit(values: any) {
                     name: values.name,
                     permissions: values.permissions || [],
                     is_admin: values.is_admin !== undefined ? values.is_admin : true,
-                },
-                headers: {
-                    Authorization: `Bearer ${token}`,
                 },
             },
         );
@@ -480,25 +428,12 @@ async function removeRole(roleId: string) {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value.roles = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/roles/${roleId}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -546,16 +481,6 @@ async function updateRole(values: any) {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        editRoleLoading.value = false;
-        return;
-    }
 
     try {
         const updateBody: any = {};
@@ -575,14 +500,11 @@ async function updateRole(values: any) {
             return;
         }
 
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/roles/${editingRole.value.id}`,
             {
                 method: "PUT",
                 body: updateBody,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -612,16 +534,6 @@ async function addAdmin(values: any) {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        addAdminLoading.value = false;
-        return;
-    }
 
     try {
         // Prepare request body based on admin type
@@ -645,14 +557,11 @@ async function addAdmin(values: any) {
             requestBody.notes = notes;
         }
 
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/admins`,
             {
                 method: "POST",
                 body: requestBody,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -686,25 +595,12 @@ async function removeAdmin(adminId: string) {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value.admins = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/admins/${adminId}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -745,29 +641,15 @@ async function updateAdminNotes(values: any) {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        editAdminLoading.value = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/admins/${editingAdmin.value.id}`,
             {
                 method: "PUT",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
+                body: {
                     notes: values.notes,
-                }),
+                },
             },
         );
 
@@ -803,25 +685,12 @@ async function cleanupExpiredAdmins() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        cleanupLoading.value = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/admin/cleanup-expired-admins`,
             {
                 method: "POST",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
