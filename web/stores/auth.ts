@@ -71,6 +71,7 @@ export const useAuthStore = defineStore("auth", {
     logout() {
       this.user = null;
       this.token = null;
+      this.serverPermissions = {};
     },
   },
 });

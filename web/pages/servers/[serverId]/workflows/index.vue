@@ -241,32 +241,19 @@ async function fetchWorkflows() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await $fetch<{
-            workflows: Workflow[];
-        }>(`${runtimeConfig.public.backendApi}/servers/${serverId}/workflows`, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
+        const response = await useAuthFetchImperative<{
+            data: { workflows: Workflow[] };
+            error?: string;
+        }>(`${runtimeConfig.public.backendApi}/servers/${serverId}/workflows`);
 
-        if (fetchError) {
-            throw new Error(fetchError);
+        if (response.error) {
+            throw new Error(response.error);
         }
 
-        if (data && data.workflows) {
-            workflows.value = data.workflows;
+        if (response.data && response.data.workflows) {
+            workflows.value = response.data.workflows;
         }
     } catch (err: any) {
         error.value = err.message || "Error fetching workflows";
@@ -293,19 +280,14 @@ async function createWorkflow() {
 
     isCreating.value = true;
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
 
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows`,
             {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify(newWorkflow.value),
             },
@@ -334,19 +316,14 @@ async function createWorkflow() {
 async function updateWorkflow(workflow: Workflow) {
     isUpdating.value = true;
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
 
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflow.id}`,
             {
                 method: "PUT",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
                     name: workflow.name,
@@ -388,19 +365,12 @@ async function deleteWorkflow(workflowId: string) {
     }
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
 
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 

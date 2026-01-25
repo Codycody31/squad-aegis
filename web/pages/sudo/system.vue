@@ -18,9 +18,7 @@ const health = ref<SystemHealth | null>(null);
 const fetchHealth = async () => {
   loading.value = true;
   try {
-    const res = await $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/system/health`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    });
+    const res = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/system/health`);
     health.value = res.data.data;
   } catch (err: any) {
     console.error("Error fetching health:", err);

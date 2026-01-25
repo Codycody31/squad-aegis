@@ -35,9 +35,7 @@ const fileToDelete = ref<string | null>(null);
 
 const fetchSummary = async () => {
   try {
-    const res = await $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/storage/summary`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    });
+    const res = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/storage/summary`);
     summary.value = res.data.data;
   } catch (err: any) {
     console.error("Error fetching storage summary:", err);
@@ -49,13 +47,12 @@ const fetchFiles = async () => {
   error.value = null;
 
   try {
-    const res = await $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/storage/files`, {
+    const res = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/storage/files`, {
       params: {
         page: currentPage.value,
         limit: 50,
         prefix: searchQuery.value,
       },
-      headers: { Authorization: `Bearer ${authStore.token}` },
     });
 
     files.value = res.data.files;
@@ -113,9 +110,8 @@ const deleteFile = async () => {
   if (!fileToDelete.value) return;
 
   try {
-    await $fetch(`${runtimeConfig.public.backendApi}/sudo/storage/files/${fileToDelete.value}`, {
+    await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/sudo/storage/files/${fileToDelete.value}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${authStore.token}` },
     });
 
     await Promise.all([fetchFiles(), fetchSummary()]);
@@ -131,9 +127,8 @@ const bulkDelete = async () => {
   if (selectedFiles.value.size === 0) return;
 
   try {
-    await $fetch(`${runtimeConfig.public.backendApi}/sudo/storage/files/bulk-delete`, {
+    await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/sudo/storage/files/bulk-delete`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${authStore.token}` },
       body: { paths: Array.from(selectedFiles.value) },
     });
 

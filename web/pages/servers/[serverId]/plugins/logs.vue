@@ -12,7 +12,6 @@ import {
 import { Checkbox } from "~/components/ui/checkbox";
 import { Badge } from "~/components/ui/badge";
 import { toast } from "~/components/ui/toast";
-import { useAuthStore } from "~/stores/auth";
 import {
     ArrowLeft,
     FileText,
@@ -41,7 +40,6 @@ definePageMeta({
 const route = useRoute();
 const router = useRouter();
 const serverId = route.params.serverId;
-const authStore = useAuthStore();
 
 // State variables
 const loading = ref(true);
@@ -203,12 +201,8 @@ const formatConsoleTimestamp = (timestamp: string) => {
 // Load server details
 const loadServer = async () => {
     try {
-        const response = await $fetch(`/api/servers/${serverId}`, {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
-        server.value = (response as any).data.server;
+        const response = await useAuthFetchImperative<any>(`/api/servers/${serverId}`);
+        server.value = response.data.server;
     } catch (error: any) {
         console.error("Failed to load server:", error);
         toast({
@@ -249,13 +243,9 @@ const loadInitialLogs = async () => {
             url += "&" + params.toString();
         }
 
-        const response = await $fetch(url, {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
+        const response = await useAuthFetchImperative<any>(url);
 
-        const newLogs = (response as any).data.logs || [];
+        const newLogs = response.data.logs || [];
         const reversedLogs = newLogs.slice().reverse();
         logs.value = reversedLogs;
 
@@ -301,13 +291,9 @@ const loadOlderLogs = async () => {
             url += "&" + params.toString();
         }
 
-        const response = await $fetch(url, {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
+        const response = await useAuthFetchImperative<any>(url);
 
-        const olderLogs = (response as any).data.logs || [];
+        const olderLogs = response.data.logs || [];
         const reversedOlderLogs = olderLogs.slice().reverse();
 
         if (reversedOlderLogs.length > 0) {
@@ -352,13 +338,9 @@ const loadNewerLogs = async () => {
             url += "&" + params.toString();
         }
 
-        const response = await $fetch(url, {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
+        const response = await useAuthFetchImperative<any>(url);
 
-        const newerLogs = (response as any).data.logs || [];
+        const newerLogs = response.data.logs || [];
         const reversedNewerLogs = newerLogs.slice().reverse();
 
         if (reversedNewerLogs.length > 0) {

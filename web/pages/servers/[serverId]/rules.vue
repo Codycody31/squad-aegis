@@ -75,22 +75,12 @@ async function fetchRules() {
   error.value = null;
 
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-  const token = cookieToken.value;
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
 
   try {
-    const { data, error: fetchError } = await useFetch<ServerRule[]>(
+    const { data, error: fetchError } = await useAuthFetch<ServerRule[]>(
       `${runtimeConfig.public.backendApi}/servers/${serverId}/rules`,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 
@@ -103,7 +93,7 @@ async function fetchRules() {
       const mapDurationToDays = (rulesArray: ServerRule[]): ServerRule[] => {
         return rulesArray.map(rule => {
           const mappedRule = { ...rule };
-          
+
           // Map actions duration (from backend duration to frontend duration_days)
           if (mappedRule.actions) {
             mappedRule.actions = mappedRule.actions.map(action => {
@@ -116,16 +106,16 @@ async function fetchRules() {
               return mappedAction;
             });
           }
-          
+
           // Recursively map sub_rules
           if (mappedRule.sub_rules && mappedRule.sub_rules.length > 0) {
             mappedRule.sub_rules = mapDurationToDays(mappedRule.sub_rules);
           }
-          
+
           return mappedRule;
         });
       };
-      
+
       rules.value = mapDurationToDays(data.value);
       annotateNumbers();
       // Clear deleted rule IDs after successful fetch
@@ -579,27 +569,18 @@ async function saveAllRules() {
 
   isSaving.value = true;
   error.value = null;
-  
+
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-  const token = cookieToken.value;
-  
-  if (!token) {
-    error.value = "Authentication required";
-    isSaving.value = false;
-    return;
-  }
 
   // Flatten rules for bulk update, preserving the hierarchy
   const flatRules = flattenRules(rules.value);
 
   try {
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       `${runtimeConfig.public.backendApi}/servers/${serverId}/rules/bulk`,
       {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: {
@@ -623,7 +604,7 @@ async function saveAllRules() {
       description: "All rule changes have been saved successfully",
       variant: "default",
     });
-    
+
   } catch (err: any) {
     error.value = err.message || "Error saving rules";
   } finally {

@@ -59,25 +59,12 @@ async function fetchTeamsData() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch<TeamsResponse>(
+        const { data, error: fetchError } = await useAuthFetch<TeamsResponse>(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/server-population`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -99,7 +86,6 @@ async function fetchTeamsData() {
     } catch (err: any) {
         error.value =
             err.message || "An error occurred while fetching teams data";
-        console.error(err);
     } finally {
         loading.value = false;
     }

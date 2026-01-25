@@ -16,9 +16,7 @@ const config = ref<SystemConfig | null>(null);
 const fetchConfig = async () => {
   loading.value = true;
   try {
-    const res = await $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/system/config`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    });
+    const res = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/system/config`);
     config.value = res.data.data;
   } catch (err: any) {
     console.error("Error fetching config:", err);

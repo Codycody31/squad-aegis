@@ -121,25 +121,12 @@ async function fetchServerInfo() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value = false;
-        return;
-    }
 
     try {
-        const { data: responseData, error: fetchError } = await useFetch(
+        const { data: responseData, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -167,22 +154,11 @@ async function fetchServerInfo() {
 // fetch server metrics
 async function fetchServerMetrics() {
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-    if (!token) {
-        error.value = "Authentication required";
-        return;
-    }
 
-    const { data: responseData, error: fetchError } = await useFetch(
+    const { data: responseData, error: fetchError } = await useAuthFetch(
         `${runtimeConfig.public.backendApi}/servers/${serverId}/metrics`,
         {
             method: "GET",
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
         },
     );
 
@@ -203,25 +179,12 @@ async function fetchRconServerInfo() {
     rconServerInfoError.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        rconServerInfoLoading.value = false;
-        return;
-    }
 
     try {
-        const { data: responseData, error: fetchError } = await useFetch(
+        const { data: responseData, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/server-info`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -252,25 +215,12 @@ async function fetchTeamsData() {
     errorTeams.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        errorTeams.value = "Authentication required";
-        loadingTeams.value = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch<TeamsResponse>(
+        const { data, error: fetchError } = await useAuthFetch<TeamsResponse>(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/server-population`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -375,20 +325,6 @@ async function fetchAvailableLayers() {
     loadingLayers.value = true;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        loadingLayers.value = false;
-        return;
-    }
 
     try {
         interface LayersResponse {
@@ -398,13 +334,10 @@ async function fetchAvailableLayers() {
         }
 
         const { data: responseData, error: fetchError } =
-            await useFetch<LayersResponse>(
+            await useAuthFetch<LayersResponse>(
                 `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/available-layers`,
                 {
                     method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
                 },
             );
 
@@ -448,20 +381,6 @@ async function changeServerLayer() {
     changingLayer.value = true;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        changingLayer.value = false;
-        return;
-    }
 
     try {
         interface LayerChangeResponse {
@@ -472,13 +391,10 @@ async function changeServerLayer() {
         }
 
         const { data: responseData, error: fetchError } =
-            await useFetch<LayerChangeResponse>(
+            await useAuthFetch<LayerChangeResponse>(
                 `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
                 {
                     method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
                     body: {
                         command: `AdminChangeLayer ${selectedLayer.value}`,
                     },
@@ -531,20 +447,6 @@ async function setNextLayer() {
     settingNextLayer.value = true;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        settingNextLayer.value = false;
-        return;
-    }
 
     try {
         interface LayerChangeResponse {
@@ -555,13 +457,10 @@ async function setNextLayer() {
         }
 
         const { data: responseData, error: fetchError } =
-            await useFetch<LayerChangeResponse>(
+            await useAuthFetch<LayerChangeResponse>(
                 `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
                 {
                     method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
                     body: {
                         command: `AdminSetNextLayer ${selectedNextLayer.value}`,
                     },
@@ -606,20 +505,6 @@ async function endMatch() {
     endingMatch.value = true;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        endingMatch.value = false;
-        return;
-    }
 
     try {
         interface EndMatchResponse {
@@ -630,13 +515,10 @@ async function endMatch() {
         }
 
         const { data: responseData, error: fetchError } =
-            await useFetch<EndMatchResponse>(
+            await useAuthFetch<EndMatchResponse>(
                 `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
                 {
                     method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
                     body: {
                         command: `AdminEndMatch`,
                     },

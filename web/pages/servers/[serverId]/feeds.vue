@@ -515,13 +515,7 @@ const loadHistoricalData = async (
       url += `&before=${before}`;
     }
 
-    const response = await $fetch(url, {
-      headers: {
-        Authorization: `Bearer ${
-          useCookie(useRuntimeConfig().public.sessionCookieName as string).value
-        }`,
-      },
-    });
+    const response = await useAuthFetchImperative(url);
 
     const newEvents = (response as any).data.events || [];
 

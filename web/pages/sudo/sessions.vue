@@ -19,9 +19,7 @@ const sessions = ref<SessionInfo[]>([]);
 const fetchSessions = async () => {
   loading.value = true;
   try {
-    const res = await $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/sessions`, {
-      headers: { Authorization: `Bearer ${authStore.token}` },
-    });
+    const res = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/sessions`);
     sessions.value = res.data.sessions;
   } catch (err: any) {
     console.error("Error fetching sessions:", err);
@@ -32,11 +30,10 @@ const fetchSessions = async () => {
 
 const deleteSession = async (sessionId: string) => {
   if (!confirm("Are you sure you want to force logout this session?")) return;
-  
+
   try {
-    await $fetch(`${runtimeConfig.public.backendApi}/sudo/sessions/${sessionId}`, {
+    await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/sudo/sessions/${sessionId}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${authStore.token}` },
     });
     await fetchSessions();
   } catch (err: any) {

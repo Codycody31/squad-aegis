@@ -93,7 +93,7 @@ const evidenceSearchResults = ref<any[]>([]);
 const selectedEvidence = ref<any[]>([]);
 const isSearchingEvidence = ref(false);
 const evidenceText = ref("");
-const evidenceSearchType = ref("player_died");
+const evidenceSearchType = ref("chat_message");
 const evidenceSearchSteamId = ref("");
 const uploadedFiles = ref<any[]>([]);
 const textEvidenceItems = ref<any[]>([]);
@@ -101,6 +101,13 @@ const isUploadingFile = ref(false);
 const evidenceTab = ref("events"); // 'events', 'files', 'text'
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const fileInputRefEdit = ref<HTMLInputElement | null>(null);
+
+// Player search state for add ban dialog
+const playerSearchQuery = ref("");
+const playerSearchResults = ref<any[]>([]);
+const selectedPlayer = ref<any | null>(null);
+const isSearchingPlayers = ref(false);
+const showPlayerDropdown = ref(false);
 
 interface BanEvidence {
     id: string;
@@ -155,8 +162,7 @@ const formSchema = toTypedSchema(
             .min(17, "Steam ID must be at least 17 characters")
             .max(17, "Steam ID must be exactly 17 characters")
             .regex(/^\d+$/, "Steam ID must contain only numbers"),
-        player_name: z.string().optional(),
-        reason: z.string().min(1, "Reason is required"),
+        reason: z.string().optional(), // Now optional - will be auto-generated when rule is selected
         duration: z.number().min(0, "Duration must be at least 0"),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
@@ -180,14 +186,102 @@ const form = useForm({
     validationSchema: formSchema,
     initialValues: {
         steam_id: "",
-        player_name: "",
         reason: "",
-        duration: 24,
+        duration: 1,
         ban_list_id: "",
         rule_id: "",
         evidence_text: "",
     },
 });
+
+// Helper function to get rule details by ID
+function getSelectedRuleDetails(ruleId: string) {
+    if (!ruleId) return null;
+    return serverRules.value.find((r) => r.id === ruleId);
+}
+
+// Generate ban reason from rule and duration
+function generateBanReason(ruleId: string | undefined, duration: number | undefined): string {
+    if (!ruleId || ruleId === "__none__") return "";
+
+    const rule = getSelectedRuleDetails(ruleId);
+    if (!rule) return "";
+
+    // Format: "rule_number | rule_title | duration"
+    // Extract the last part of the title (after the last ">")
+    const titleParts = rule.title.split(" > ");
+    const shortTitle = titleParts[titleParts.length - 1];
+
+    const durationValue = duration ?? 0;
+    const durationText = durationValue === 0 ? "perm" : `${durationValue}d`;
+    return `${rule.number} | ${shortTitle} | ${durationText}`;
+}
+
+// Search for players
+async function searchPlayers(query: string) {
+    if (!query || query.length < 2) {
+        playerSearchResults.value = [];
+        showPlayerDropdown.value = false;
+        return;
+    }
+
+    isSearchingPlayers.value = true;
+
+    try {
+        const { data, error: fetchError } = await useAuthFetch(
+            `${runtimeConfig.public.backendApi}/players?search=${encodeURIComponent(query)}&limit=10`,
+            {
+                method: "GET",
+            },
+        );
+
+        if (fetchError.value) {
+            throw new Error(fetchError.value.message || "Failed to search players");
+        }
+
+        if (data.value && (data.value as any).data) {
+            playerSearchResults.value = (data.value as any).data.players || [];
+            showPlayerDropdown.value = playerSearchResults.value.length > 0;
+        }
+    } catch (err: any) {
+        console.error("Failed to search players:", err);
+        playerSearchResults.value = [];
+    } finally {
+        isSearchingPlayers.value = false;
+    }
+}
+
+// Select a player from search results
+function selectPlayer(player: any) {
+    selectedPlayer.value = player;
+    playerSearchQuery.value = player.player_name || "";
+    form.setFieldValue("steam_id", player.steam_id);
+    showPlayerDropdown.value = false;
+
+    // Fetch ban history for the selected player
+    if (player.steam_id) {
+        fetchPlayerBanHistory(player.steam_id);
+    }
+}
+
+// Clear selected player
+function clearSelectedPlayer() {
+    selectedPlayer.value = null;
+    playerSearchQuery.value = "";
+    form.setFieldValue("steam_id", "");
+    playerHistory.value = [];
+}
+
+// Debounced player search
+let playerSearchTimeout: ReturnType<typeof setTimeout> | null = null;
+function debouncedPlayerSearch(query: string) {
+    if (playerSearchTimeout) {
+        clearTimeout(playerSearchTimeout);
+    }
+    playerSearchTimeout = setTimeout(() => {
+        searchPlayers(query);
+    }, 300);
+}
 
 // Helper function to check if a ban is expired
 function isBanExpired(ban: BannedPlayer): boolean {
@@ -237,26 +331,13 @@ async function fetchBannedPlayers() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value = false;
-        return;
-    }
 
     try {
         const { data, error: fetchError } =
-            await useFetch<BannedPlayersResponse>(
+            await useAuthFetch<BannedPlayersResponse>(
                 `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`,
                 {
                     method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
                 },
             );
 
@@ -290,37 +371,35 @@ async function fetchBannedPlayers() {
 
 // Function to add a ban
 async function addBan(values: any) {
-    const { steam_id, player_name, reason, duration, ban_list_id, rule_id, evidence_text } =
+    const { steam_id, reason, duration, ban_list_id, rule_id, evidence_text } =
         values;
 
     addBanLoading.value = true;
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        addBanLoading.value = false;
-        return;
-    }
 
     try {
         // Clean and validate steam_id
         const cleanId = cleanSteamId(steam_id);
 
-        // Enhance the reason with player name if provided
-        let enhancedReason = reason;
-        if (player_name && player_name.trim()) {
-            enhancedReason = `${player_name}: ${reason}`;
+        // Check if a valid rule is selected (not __none__ sentinel value)
+        const hasValidRule = rule_id && rule_id.trim() && rule_id !== "__none__";
+
+        // Generate reason: if rule is selected, generate it dynamically, otherwise use provided reason
+        let finalReason = reason || "";
+        if (hasValidRule) {
+            finalReason = generateBanReason(rule_id, duration ?? 0);
+        }
+
+        // Validate that we have a reason
+        if (!finalReason) {
+            throw new Error("Reason is required. Either select a rule or provide a custom reason.");
         }
 
         const requestBody: any = {
             steam_id: cleanId,
-            reason: enhancedReason,
+            reason: finalReason,
             duration,
         };
 
@@ -329,8 +408,8 @@ async function addBan(values: any) {
             requestBody.ban_list_id = ban_list_id;
         }
 
-        // Add rule_id if selected
-        if (rule_id && rule_id.trim()) {
+        // Add rule_id if selected (not __none__)
+        if (hasValidRule) {
             requestBody.rule_id = rule_id;
         }
 
@@ -376,14 +455,11 @@ async function addBan(values: any) {
             requestBody.evidence = allEvidence;
         }
 
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`,
             {
                 method: "POST",
                 body: requestBody,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -400,6 +476,11 @@ async function addBan(values: any) {
         evidenceSearchResults.value = [];
         evidenceTab.value = "events";
         showAddBanDialog.value = false;
+        // Reset player search state
+        selectedPlayer.value = null;
+        playerSearchQuery.value = "";
+        playerSearchResults.value = [];
+        playerHistory.value = [];
 
         toast({
             title: "Success",
@@ -426,25 +507,12 @@ async function removeBan(banId: string) {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/${banId}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -475,16 +543,6 @@ async function editBan(values: any) {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        editBanLoading.value = false;
-        return;
-    }
 
     try {
         const requestBody: any = {};
@@ -570,14 +628,11 @@ async function editBan(values: any) {
             return;
         }
 
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/${editingBan.value.id}`,
             {
                 method: "PUT",
                 body: requestBody,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -706,19 +761,7 @@ function getEvidenceCounts(ban: BannedPlayer | null) {
 // Function to download evidence file
 async function downloadEvidenceFile(filePath: string, fileName: string) {
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        return;
-    }
+    const sessionCookie = useCookie(runtimeConfig.public.sessionCookieName as string);
 
     try {
         // Extract file ID from path (last part before extension)
@@ -730,7 +773,7 @@ async function downloadEvidenceFile(filePath: string, fileName: string) {
         const url = `${runtimeConfig.public.backendApi}/servers/${serverId}/evidence/files/${fileId}`;
         const response = await fetch(url, {
             headers: {
-                Authorization: `Bearer ${token}`,
+                Authorization: `Bearer ${sessionCookie.value}`,
             },
         });
 
@@ -760,21 +803,10 @@ async function downloadEvidenceFile(filePath: string, fileName: string) {
 // Function to fetch ban lists
 async function fetchBanLists() {
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
 
     try {
-        const response = (await $fetch(
+        const response = (await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/ban-lists`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
         )) as any;
 
         if (response?.data?.ban_lists) {
@@ -788,21 +820,10 @@ async function fetchBanLists() {
 // Function to fetch server's ban list subscriptions
 async function fetchServerBanListSubscriptions() {
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
 
     try {
-        const response = (await $fetch(
+        const response = (await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-list-subscriptions`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
         )) as any;
 
         if (response?.data?.subscriptions) {
@@ -828,23 +849,14 @@ async function subscribeToBanList() {
     if (!selectedBanListId.value) return;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
 
     subscribing.value = true;
 
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-list-subscriptions`,
             {
                 method: "POST",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
                 body: {
                     ban_list_id: selectedBanListId.value,
                 },
@@ -874,23 +886,14 @@ async function unsubscribeFromBanList(banListId: string) {
         return;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
 
     unsubscribing.value = banListId;
 
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/ban-list-subscriptions/${banListId}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -919,21 +922,12 @@ function formatDate(dateString: string): string {
 // Function to fetch server rules
 async function fetchServerRules() {
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) return;
 
     try {
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/rules`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -1003,24 +997,12 @@ async function fetchPlayerBanHistory(steamId: string) {
     isLoadingHistory.value = true;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        isLoadingHistory.value = false;
-        return;
-    }
 
     try {
-        const { data, error: fetchError } = await useFetch<any>(
+        const { data, error: fetchError } = await useAuthFetch<any>(
             `${runtimeConfig.public.backendApi}/players/${steamId}/ban-history`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -1101,33 +1083,16 @@ async function searchEvidenceInline(steamId: string) {
         evidenceSearchResults.value = [];
 
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
-
-        if (!token) {
-            toast({
-                title: "Error",
-                description: "Authentication required",
-                variant: "destructive",
-            });
-            isSearchingEvidence.value = false;
-            return;
-        }
 
         const params = new URLSearchParams({
             steam_id: cleanId,
             event_type: evidenceSearchType.value,
         });
 
-        const { data, error: fetchError } = await useFetch(
+        const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/events/search?${params.toString()}`,
             {
                 method: "GET",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
@@ -1220,33 +1185,16 @@ async function handleFileUpload(event: Event) {
 
     isUploadingFile.value = true;
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string,
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        toast({
-            title: "Error",
-            description: "Authentication required",
-            variant: "destructive",
-        });
-        isUploadingFile.value = false;
-        return;
-    }
 
     try {
         for (const file of Array.from(files)) {
             const formData = new FormData();
             formData.append("file", file);
 
-            const { data, error: uploadError } = await useFetch(
+            const { data, error: uploadError } = await useAuthFetch(
                 `${runtimeConfig.public.backendApi}/servers/${serverId}/evidence/upload`,
                 {
                     method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                    },
                     body: formData,
                 },
             );
@@ -1384,7 +1332,6 @@ function copyBanCfgUrl() {
                     :validation-schema="formSchema"
                     :initial-values="{
                         steam_id: '',
-                        player_name: '',
                         reason: '',
                         duration: 1,
                         ban_list_id: '',
@@ -1420,34 +1367,91 @@ function copyBanCfgUrl() {
                                 @submit="handleSubmit($event, addBan)"
                             >
                                 <div class="grid gap-4 py-4">
+                                    <!-- Player Search -->
                                     <FormField
                                         name="steam_id"
                                         v-slot="{ componentField }"
                                     >
                                         <FormItem>
-                                            <FormLabel>Steam ID</FormLabel>
+                                            <FormLabel>Player</FormLabel>
                                             <FormControl>
-                                                <Input
-                                                    placeholder="76561198012345678"
-                                                    v-bind="componentField"
-                                                    @input="
-                                                        (e: Event) => {
-                                                            const target =
-                                                                e.target as HTMLInputElement;
-                                                            if (
-                                                                target.value
-                                                                    .length ===
-                                                                17
-                                                            ) {
-                                                                fetchPlayerBanHistory(
-                                                                    target.value,
-                                                                );
-                                                            }
-                                                        }
-                                                    "
-                                                />
+                                                <div class="relative">
+                                                    <!-- Hidden input for form binding -->
+                                                    <input type="hidden" v-bind="componentField" />
+
+                                                    <!-- Selected Player Display -->
+                                                    <div v-if="selectedPlayer" class="flex items-center gap-2 p-2 border rounded-md bg-muted/50">
+                                                        <div class="flex-1">
+                                                            <p class="font-medium text-sm">{{ selectedPlayer.player_name }}</p>
+                                                            <p class="text-xs text-muted-foreground">{{ selectedPlayer.steam_id }}</p>
+                                                        </div>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            @click="clearSelectedPlayer"
+                                                        >
+                                                            <Icon name="lucide:x" class="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+
+                                                    <!-- Search Input -->
+                                                    <div v-else class="relative">
+                                                        <Input
+                                                            v-model="playerSearchQuery"
+                                                            placeholder="Search by player name or Steam ID..."
+                                                            @input="(e: Event) => debouncedPlayerSearch((e.target as HTMLInputElement).value)"
+                                                            @focus="showPlayerDropdown = playerSearchResults.length > 0"
+                                                        />
+                                                        <div v-if="isSearchingPlayers" class="absolute right-3 top-1/2 -translate-y-1/2">
+                                                            <Icon name="mdi:loading" class="h-4 w-4 animate-spin" />
+                                                        </div>
+
+                                                        <!-- Search Results Dropdown -->
+                                                        <div
+                                                            v-if="showPlayerDropdown && playerSearchResults.length > 0"
+                                                            class="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md max-h-60 overflow-auto"
+                                                        >
+                                                            <div
+                                                                v-for="player in playerSearchResults"
+                                                                :key="player.steam_id"
+                                                                class="p-2 hover:bg-muted cursor-pointer border-b last:border-b-0"
+                                                                @click="selectPlayer(player)"
+                                                            >
+                                                                <p class="font-medium text-sm">{{ player.player_name }}</p>
+                                                                <p class="text-xs text-muted-foreground">{{ player.steam_id }}</p>
+                                                                <p class="text-xs text-muted-foreground">Last seen: {{ new Date(player.last_seen).toLocaleDateString() }}</p>
+                                                            </div>
+                                                        </div>
+
+                                                        <!-- No Results Message -->
+                                                        <div
+                                                            v-if="showPlayerDropdown && playerSearchResults.length === 0 && playerSearchQuery.length >= 2 && !isSearchingPlayers"
+                                                            class="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md p-3 text-center text-sm text-muted-foreground"
+                                                        >
+                                                            No players found. You can enter a Steam ID manually below.
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </FormControl>
+                                            <FormDescription v-if="!selectedPlayer">
+                                                Search for a player or enter Steam ID manually
+                                            </FormDescription>
                                             <FormMessage />
+
+                                            <!-- Manual Steam ID Input (fallback) -->
+                                            <div v-if="!selectedPlayer && playerSearchQuery.length >= 2 && playerSearchResults.length === 0" class="mt-2">
+                                                <Input
+                                                    placeholder="Or enter Steam ID manually: 76561198012345678"
+                                                    @input="(e: Event) => {
+                                                        const target = e.target as HTMLInputElement;
+                                                        form.setFieldValue('steam_id', target.value);
+                                                        if (target.value.length === 17) {
+                                                            fetchPlayerBanHistory(target.value);
+                                                        }
+                                                    }"
+                                                />
+                                            </div>
                                         </FormItem>
                                     </FormField>
 
@@ -1530,36 +1534,12 @@ function copyBanCfgUrl() {
                                     </div>
 
                                     <FormField
-                                        name="player_name"
-                                        v-slot="{ componentField }"
-                                    >
-                                        <FormItem>
-                                            <FormLabel
-                                                >Player Name
-                                                (Optional)</FormLabel
-                                            >
-                                            <FormControl>
-                                                <Input
-                                                    placeholder="Player display name"
-                                                    v-bind="componentField"
-                                                />
-                                            </FormControl>
-                                            <FormDescription>
-                                                If provided, will be included in
-                                                the ban reason
-                                            </FormDescription>
-                                            <FormMessage />
-                                        </FormItem>
-                                    </FormField>
-
-                                    <FormField
                                         name="rule_id"
                                         v-slot="{ componentField }"
                                     >
                                         <FormItem>
                                             <FormLabel
-                                                >Rule Violated
-                                                (Optional)</FormLabel
+                                                >Rule Violated</FormLabel
                                             >
                                             <FormControl>
                                                 <Select v-bind="componentField">
@@ -1569,36 +1549,22 @@ function copyBanCfgUrl() {
                                                         />
                                                     </SelectTrigger>
                                                     <SelectContent>
+                                                        <SelectItem value="__none__">
+                                                            No rule (custom reason)
+                                                        </SelectItem>
                                                         <SelectItem
                                                             v-for="rule in serverRules"
                                                             :key="rule.id"
                                                             :value="rule.id"
                                                         >
-                                                            {{ rule.title }}
+                                                            {{ rule.number }}: {{ rule.title }}
                                                         </SelectItem>
                                                     </SelectContent>
                                                 </Select>
                                             </FormControl>
                                             <FormDescription>
-                                                Select which server rule was
-                                                violated
+                                                Select a rule to auto-generate the ban reason, or choose "No rule" for custom reason
                                             </FormDescription>
-                                            <FormMessage />
-                                        </FormItem>
-                                    </FormField>
-
-                                    <FormField
-                                        name="reason"
-                                        v-slot="{ componentField }"
-                                    >
-                                        <FormItem>
-                                            <FormLabel>Reason</FormLabel>
-                                            <FormControl>
-                                                <Textarea
-                                                    placeholder="Reason for ban"
-                                                    v-bind="componentField"
-                                                />
-                                            </FormControl>
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
@@ -1639,6 +1605,41 @@ function copyBanCfgUrl() {
                                                 >Duration in days. 0 is
                                                 permanent</FormDescription
                                             >
+                                            <FormMessage />
+                                        </FormItem>
+                                    </FormField>
+
+                                    <!-- Ban Reason Preview (shown when rule is selected) -->
+                                    <div
+                                        v-if="form.values.rule_id && form.values.rule_id !== '__none__'"
+                                        class="border rounded-md p-3 bg-muted/50"
+                                    >
+                                        <h4 class="font-medium text-sm mb-2 flex items-center">
+                                            <Icon name="lucide:info" class="h-4 w-4 mr-1" />
+                                            Generated Ban Reason
+                                        </h4>
+                                        <p class="text-sm font-mono bg-background p-2 rounded border">
+                                            {{ generateBanReason(form.values.rule_id, form.values.duration) }}
+                                        </p>
+                                    </div>
+
+                                    <!-- Custom Reason (shown when no rule is selected) -->
+                                    <FormField
+                                        v-if="!form.values.rule_id || form.values.rule_id === '__none__'"
+                                        name="reason"
+                                        v-slot="{ componentField }"
+                                    >
+                                        <FormItem>
+                                            <FormLabel>Custom Reason</FormLabel>
+                                            <FormControl>
+                                                <Textarea
+                                                    placeholder="Enter a custom ban reason..."
+                                                    v-bind="componentField"
+                                                />
+                                            </FormControl>
+                                            <FormDescription>
+                                                Required when no rule is selected
+                                            </FormDescription>
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
@@ -1740,9 +1741,6 @@ function copyBanCfgUrl() {
                                                                 <SelectValue placeholder="Event Type" />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                <SelectItem value="player_died" class="text-xs sm:text-sm">Player Deaths</SelectItem>
-                                                                <SelectItem value="player_wounded" class="text-xs sm:text-sm">Player Wounded</SelectItem>
-                                                                <SelectItem value="player_damaged" class="text-xs sm:text-sm">Player Damaged</SelectItem>
                                                                 <SelectItem value="chat_message" class="text-xs sm:text-sm">Chat Messages</SelectItem>
                                                                 <SelectItem value="player_connected" class="text-xs sm:text-sm">Connections</SelectItem>
                                                             </SelectContent>
@@ -1819,7 +1817,7 @@ function copyBanCfgUrl() {
 
                                                     <!-- Empty State -->
                                                     <div v-if="evidenceSearchResults.length === 0 && selectedEvidence.length === 0 && !isSearchingEvidence" class="text-sm text-muted-foreground text-center py-4">
-                                                        Enter a Steam ID and click "Search Events" to find game events
+                                                        Select a player above and click "Search Events" to find chat messages or connections
                                                     </div>
                                                 </div>
                                             </TabsContent>
@@ -2627,15 +2625,20 @@ function copyBanCfgUrl() {
                                     class="hover:bg-muted/50"
                                 >
                                     <TableCell>
-                                        <div class="font-medium text-sm sm:text-base">
-                                            {{ player.steam_id }}
-                                        </div>
-                                        <div
-                                            v-if="player.player_name"
-                                            class="text-xs text-muted-foreground"
+                                        <RouterLink
+                                            :to="`/players/${player.steam_id}`"
+                                            class="hover:underline"
                                         >
-                                            {{ player.player_name }}
-                                        </div>
+                                            <div class="font-medium text-sm sm:text-base text-primary">
+                                                {{ player.name && player.name !== player.steam_id ? player.name : player.steam_id }}
+                                            </div>
+                                            <div
+                                                v-if="player.name && player.name !== player.steam_id"
+                                                class="text-xs text-muted-foreground"
+                                            >
+                                                {{ player.steam_id }}
+                                            </div>
+                                        </RouterLink>
                                     </TableCell>
                                     <TableCell class="text-xs sm:text-sm">{{ player.reason }}</TableCell>
                                     <TableCell>
@@ -2742,15 +2745,20 @@ function copyBanCfgUrl() {
                         >
                         <div class="flex items-start justify-between gap-2 mb-2">
                             <div class="flex-1 min-w-0">
-                                <div class="font-semibold text-sm sm:text-base mb-1">
-                                    {{ player.steam_id }}
-                                </div>
-                                <div
-                                    v-if="player.player_name"
-                                    class="text-xs text-muted-foreground mb-2"
+                                <RouterLink
+                                    :to="`/players/${player.steam_id}`"
+                                    class="hover:underline"
                                 >
-                                    {{ player.player_name }}
-                                </div>
+                                    <div class="font-semibold text-sm sm:text-base mb-1 text-primary">
+                                        {{ player.name && player.name !== player.steam_id ? player.name : player.steam_id }}
+                                    </div>
+                                    <div
+                                        v-if="player.name && player.name !== player.steam_id"
+                                        class="text-xs text-muted-foreground mb-2"
+                                    >
+                                        {{ player.steam_id }}
+                                    </div>
+                                </RouterLink>
                                 <div class="space-y-1.5">
                                     <div>
                                         <span class="text-xs text-muted-foreground">Reason: </span>

@@ -185,11 +185,7 @@ const getStatusIcon = (status: string) => {
 // Load plugins for this server
 const loadPlugins = async () => {
     try {
-        const response = await $fetch(`/api/servers/${serverId}/plugins`, {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
+        const response = await useAuthFetchImperative(`/api/servers/${serverId}/plugins`);
         plugins.value = (response as any).data.plugins || [];
     } catch (error: any) {
         console.error("Failed to load plugins:", error);
@@ -204,11 +200,7 @@ const loadPlugins = async () => {
 // Load available plugin definitions
 const loadAvailablePlugins = async () => {
     try {
-        const response = await $fetch("/api/plugins/available", {
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        });
+        const response = await useAuthFetchImperative("/api/plugins/available");
         availablePlugins.value = (response as any).data.plugins || [];
     } catch (error: any) {
         console.error("Failed to load available plugins:", error);
@@ -232,11 +224,8 @@ const createPlugin = async () => {
     }
 
     try {
-        await $fetch(`/api/servers/${serverId}/plugins`, {
+        await useAuthFetchImperative(`/api/servers/${serverId}/plugins`, {
             method: "POST",
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
             body: {
                 plugin_id: selectedPlugin.value,
                 config: pluginConfig.value,
@@ -267,13 +256,10 @@ const togglePlugin = async (plugin: any, newState: boolean) => {
     const action = newState ? "enable" : "disable";
 
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `/api/servers/${serverId}/plugins/${plugin.id}/${action}`,
             {
                 method: "POST",
-                headers: {
-                    Authorization: `Bearer ${authStore.token}`,
-                },
             },
         );
 
@@ -304,11 +290,8 @@ const deletePlugin = async (plugin: any) => {
     }
 
     try {
-        await $fetch(`/api/servers/${serverId}/plugins/${plugin.id}`, {
+        await useAuthFetchImperative(`/api/servers/${serverId}/plugins/${plugin.id}`, {
             method: "DELETE",
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
         });
 
         toast({
@@ -435,13 +418,10 @@ const savePluginConfig = async () => {
     if (!currentPlugin.value) return;
 
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `/api/servers/${serverId}/plugins/${currentPlugin.value.id}`,
             {
                 method: "PUT",
-                headers: {
-                    Authorization: `Bearer ${authStore.token}`,
-                },
                 body: {
                     config: pluginConfig.value,
                     log_level: pluginLogLevel.value,
@@ -537,13 +517,8 @@ const loadPluginData = async (plugin: any) => {
     showDataDialog.value = true;
 
     try {
-        const response = await $fetch(
+        const response = await useAuthFetchImperative(
             `/api/servers/${serverId}/plugins/${plugin.id}/data`,
-            {
-                headers: {
-                    Authorization: `Bearer ${authStore.token}`,
-                },
-            },
         );
         pluginData.value = (response as any).data.data || [];
     } catch (error: any) {
@@ -570,13 +545,10 @@ const clearPluginData = async (plugin: any) => {
     }
 
     try {
-        const response = await $fetch(
+        const response = await useAuthFetchImperative(
             `/api/servers/${serverId}/plugins/${plugin.id}/data`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${authStore.token}`,
-                },
             },
         );
 
@@ -646,14 +618,10 @@ const saveDataItem = async () => {
     }
 
     try {
-        const response = await $fetch(
+        const response = await useAuthFetchImperative(
             `/api/servers/${serverId}/plugins/${currentPlugin.value.id}/data`,
             {
                 method: "POST",
-                headers: {
-                    Authorization: `Bearer ${authStore.token}`,
-                    "Content-Type": "application/json",
-                },
                 body: JSON.stringify({
                     key: editingDataItem.value.key,
                     value: editingDataValue.value,
@@ -703,13 +671,10 @@ const deleteDataItem = async (key: string) => {
     }
 
     try {
-        await $fetch(
+        await useAuthFetchImperative(
             `/api/servers/${serverId}/plugins/${currentPlugin.value.id}/data/${encodeURIComponent(key)}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${authStore.token}`,
-                },
             },
         );
 

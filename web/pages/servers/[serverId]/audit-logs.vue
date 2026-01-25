@@ -123,16 +123,6 @@ async function fetchAuditLogs() {
   error.value = null;
 
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
 
   // Build query parameters
   const queryParams = new URLSearchParams();
@@ -156,15 +146,12 @@ async function fetchAuditLogs() {
   }
 
   try {
-    const { data, error: fetchError } = await useFetch<AuditLogsResponse>(
+    const { data, error: fetchError } = await useAuthFetch<AuditLogsResponse>(
       `${
         runtimeConfig.public.backendApi
       }/servers/${serverId}/audit-logs?${queryParams.toString()}`,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 
@@ -179,7 +166,6 @@ async function fetchAuditLogs() {
     }
   } catch (err: any) {
     error.value = err.message || "An error occurred while fetching audit logs";
-    console.error(err);
   } finally {
     loading.value = false;
   }

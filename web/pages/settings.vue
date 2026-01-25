@@ -92,25 +92,12 @@ async function fetchUserData() {
   error.value = null;
 
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value.fetchUser = false;
-    return;
-  }
 
   try {
-    const { data, error: fetchError } = await useFetch<{ data: { user: User } }>(
+    const { data, error: fetchError } = await useAuthFetch<{ data: { user: User } }>(
       `${runtimeConfig.public.backendApi}/auth/initial`,
       {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       }
     );
 
@@ -122,7 +109,6 @@ async function fetchUserData() {
 
     if (data.value && data.value.data && data.value.data.user) {
       user.value = data.value.data.user;
-      console.log(user.value);
       // Update form values
       profileForm.setValues({
         name: user.value.name || "",
@@ -144,28 +130,15 @@ async function updateProfile(values: any) {
   successMessage.value = null;
 
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value.profile = false;
-    return;
-  }
 
   try {
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       `${runtimeConfig.public.backendApi}/auth/me`,
       {
         method: "PATCH",
         body: {
           name: values.name,
           steam_id: values.steam_id || null,
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
         },
       }
     );
@@ -197,28 +170,15 @@ async function changePassword(values: any) {
   successMessage.value = null;
 
   const runtimeConfig = useRuntimeConfig();
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value.password = false;
-    return;
-  }
 
   try {
-    const { data, error: fetchError } = await useFetch(
+    const { data, error: fetchError } = await useAuthFetch(
       `${runtimeConfig.public.backendApi}/auth/me/password`,
       {
         method: "PATCH",
         body: {
           currentPassword: values.currentPassword,
           newPassword: values.newPassword,
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
         },
       }
     );

@@ -360,6 +360,7 @@ interface Workflow {
 const route = useRoute();
 const router = useRouter();
 const { toast } = useToast();
+const authFetch = useAuthFetchImperative();
 
 // Route params
 const serverId = route.params.serverId as string;
@@ -505,25 +506,10 @@ const loadWorkflow = async () => {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string
-    );
-    const token = cookieToken.value;
-
-    if (!token) {
-        error.value = "Authentication required";
-        loading.value = false;
-        return;
-    }
 
     try {
-        const response = await $fetch<{ workflow: Workflow }>(
-            `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            }
+        const response = await authFetch<{ workflow: Workflow }>(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`
         );
 
         if (response && response.data.workflow) {
@@ -531,7 +517,7 @@ const loadWorkflow = async () => {
             workflowName.value = response.data.workflow.name;
             workflowDescription.value = response.data.workflow.description || "";
             workflowEnabled.value = response.data.workflow.enabled;
-            
+
             // Ensure definition has all required properties
             const def = response.data.workflow.definition || {};
             workflowDefinition.value = {
@@ -563,19 +549,14 @@ const saveWorkflow = async () => {
 
     isUpdating.value = true;
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string
-    );
-    const token = cookieToken.value;
 
     try {
-        await $fetch(
+        await authFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "PUT",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
                     name: workflow.value.name,
@@ -608,19 +589,14 @@ const saveBasicSettings = async () => {
 
     isUpdating.value = true;
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string
-    );
-    const token = cookieToken.value;
 
     try {
-        await $fetch(
+        await authFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "PUT",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
                     name: workflowName.value,
@@ -654,19 +630,14 @@ const toggleWorkflow = async () => {
     const newEnabled = !workflow.value.enabled;
     isUpdating.value = true;
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string
-    );
-    const token = cookieToken.value;
 
     try {
-        await $fetch(
+        await authFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "PUT",
                 headers: {
                     "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
                     name: workflow.value.name,
@@ -701,19 +672,12 @@ const deleteWorkflow = async () => {
 
     isDeleting.value = true;
     const runtimeConfig = useRuntimeConfig();
-    const cookieToken = useCookie(
-        runtimeConfig.public.sessionCookieName as string
-    );
-    const token = cookieToken.value;
 
     try {
-        await $fetch(
+        await authFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             }
         );
 
