@@ -132,8 +132,16 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 	// Generate new role ID
 	roleUUID := uuid.New()
 
+	// Use a transaction to ensure atomicity
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to begin transaction: %w", err), nil)
+		return
+	}
+	defer tx.Rollback()
+
 	// Insert the role into the database (without permissions column - use empty string for backward compat)
-	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+	_, err = tx.ExecContext(c.Request.Context(), `
 		INSERT INTO server_roles (id, server_id, name, permissions, is_admin, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`, roleUUID, serverId, request.Name, "", isAdmin, time.Now())
@@ -143,12 +151,21 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 		return
 	}
 
-	// Set permissions using the new PBAC system
-	err = s.Dependencies.PermissionRepo.SetServerRolePermissions(c.Request.Context(), roleUUID, request.Permissions)
-	if err != nil {
-		// Rollback by deleting the role
-		s.Dependencies.DB.ExecContext(c.Request.Context(), "DELETE FROM server_roles WHERE id = $1", roleUUID)
-		responses.BadRequest(c, "Failed to set role permissions", &gin.H{"error": err.Error()})
+	// Set permissions using the new PBAC system (within transaction)
+	for _, permCode := range request.Permissions {
+		_, err = tx.ExecContext(c.Request.Context(), `
+			INSERT INTO server_role_permissions (server_role_id, permission_id)
+			SELECT $1, id FROM permissions WHERE code = $2
+		`, roleUUID, permCode)
+		if err != nil {
+			responses.BadRequest(c, "Failed to set role permissions", &gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to commit transaction: %w", err), nil)
 		return
 	}
 
