@@ -17,6 +17,25 @@ const (
 	maxFileSize = 50 * 1024 * 1024 // 50MB
 )
 
+// previewableTypes defines MIME types that can be displayed inline in the browser
+var previewableTypes = map[string]bool{
+	"image/jpeg":      true,
+	"image/jpg":       true,
+	"image/png":       true,
+	"image/gif":       true,
+	"image/webp":      true,
+	"video/mp4":       true,
+	"video/webm":      true,
+	"video/quicktime": true,
+	"application/pdf": true,
+	"text/plain":      true,
+}
+
+// isPreviewableType checks if a content type can be previewed inline
+func isPreviewableType(contentType string) bool {
+	return previewableTypes[strings.ToLower(contentType)]
+}
+
 // ServerEvidenceFileUpload handles file uploads for ban evidence
 func (s *Server) ServerEvidenceFileUpload(c *gin.Context) {
 	user := s.getUserFromSession(c)
@@ -178,11 +197,25 @@ func (s *Server) ServerEvidenceFileDownload(c *gin.Context) {
 	}
 	defer fileReader.Close()
 
-	// Set headers for file download
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
-	c.Header("Content-Type", "application/octet-stream")
-	
+	// Determine content type from file extension
+	contentType := mime.TypeByExtension(filepath.Ext(fileName))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	// Check if inline preview is requested
+	inline := c.Query("inline") == "true"
+
+	// Set headers based on inline parameter
+	if inline && isPreviewableType(contentType) {
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", fileName))
+		c.Header("Content-Type", contentType)
+	} else {
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+		c.Header("Content-Type", "application/octet-stream")
+	}
+
 	// Stream file to response
-	c.DataFromReader(200, -1, "application/octet-stream", fileReader, nil)
+	c.DataFromReader(200, -1, contentType, fileReader, nil)
 }
 
