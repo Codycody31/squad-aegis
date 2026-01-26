@@ -8,6 +8,10 @@
 
 ### Misc
 
+- chore(server): implement transaction handling in ServerRolesAdd for atomic role creation and permission setting ([2807870](https://github.com/Codycody31/squad-aegis/commit/28078700f92895fab861c56c8f73324c879f3eeb))
+- chore: update licensing information from Elastic License 2.0 to GNU General Public License v3.0 (GPL-3.0) ([7794e32](https://github.com/Codycody31/squad-aegis/commit/7794e32a2625f160f312935b5dfbeeaf8651c6db))
+- feat(auth): enhance permission management with new methods and super admin checks ([aa22e80](https://github.com/Codycody31/squad-aegis/commit/aa22e8079973224b26417c44aefe0b028b921eef))
+- fix: rename MediaPreviewModal to EvidenceMediaPreviewModal for clarity ([4482b1d](https://github.com/Codycody31/squad-aegis/commit/4482b1d0240524c4de0f8e6be27f4ab1344fb975))
 - feat: add security check for copy buttons and improve user feedback with toast notifications ([db4cdc3](https://github.com/Codycody31/squad-aegis/commit/db4cdc3c8f3f2d7ad9b612971ca60bd9f5828399))
 - feat: implement media preview functionality for evidence files ([805d5d9](https://github.com/Codycody31/squad-aegis/commit/805d5d9b9348dddb1eda9c8e68c47b279b4fb2aa))
 - feat: add recent player joins endpoint and UI integration ([ca21e44](https://github.com/Codycody31/squad-aegis/commit/ca21e4473949fc20f1bbf604709a52e52cf7727a))
