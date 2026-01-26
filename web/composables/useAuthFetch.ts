@@ -1,4 +1,5 @@
 import type { UseFetchOptions } from 'nuxt/app'
+import { toast } from '~/components/ui/toast'
 
 /**
  * Custom fetch composable that handles session expiration (401) globally
@@ -9,11 +10,15 @@ export function useAuthFetch<T>(url: string, options?: UseFetchOptions<T>) {
   const authStore = useAuthStore()
   const sessionCookie = useCookie(runtimeConfig.public.sessionCookieName as string)
 
+  // Merge headers properly - Authorization should always be set
+  const mergedHeaders = {
+    Authorization: `Bearer ${sessionCookie.value}`,
+    ...(options?.headers || {}),
+  }
+
   const defaultOptions: UseFetchOptions<T> = {
-    headers: {
-      Authorization: `Bearer ${sessionCookie.value}`,
-      ...options?.headers,
-    },
+    ...options,
+    headers: mergedHeaders,
     onResponseError({ response }) {
       // Handle 401 Unauthorized - session expired or invalid
       if (response.status === 401) {
@@ -22,8 +27,7 @@ export function useAuthFetch<T>(url: string, options?: UseFetchOptions<T>) {
         sessionCookie.value = null
 
         // Show user-friendly message
-        const toast = useToast()
-        toast.toast({
+        toast({
           title: 'Session Expired',
           description: 'Your session has expired. Please log in again.',
           variant: 'destructive',
@@ -33,7 +37,6 @@ export function useAuthFetch<T>(url: string, options?: UseFetchOptions<T>) {
         navigateTo('/login')
       }
     },
-    ...options,
   }
 
   return useFetch<T>(url, defaultOptions)
@@ -64,8 +67,7 @@ export async function useAuthFetchImperative<T>(url: string, options?: any): Pro
       sessionCookie.value = null
 
       // Show user-friendly message
-      const toast = useToast()
-      toast.toast({
+      toast({
         title: 'Session Expired',
         description: 'Your session has expired. Please log in again.',
         variant: 'destructive',

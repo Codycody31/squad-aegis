@@ -33,11 +33,15 @@ func (s *Server) authSession(c *gin.Context, required bool) {
 		sessionToken = c.Query("token")
 	}
 
-	// If still no token, check for cookie
+	// If still no token, check for cookies (try multiple cookie names)
 	if sessionToken == "" {
-		cookie, err := c.Cookie("session_token")
-		if err == nil {
-			sessionToken = cookie
+		cookieNames := []string{"session", "squad_aegis_session", "session_token"}
+		for _, cookieName := range cookieNames {
+			cookie, err := c.Cookie(cookieName)
+			if err == nil && cookie != "" {
+				sessionToken = cookie
+				break
+			}
 		}
 	}
 
