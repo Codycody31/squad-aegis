@@ -34,7 +34,7 @@ func (s *Server) ServerRolesList(c *gin.Context) {
 
 	// Query the database for roles
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT id, server_id, name, permissions, is_admin, created_at
+		SELECT id, server_id, name, is_admin, created_at
 		FROM server_roles
 		WHERE server_id = $1
 		ORDER BY name ASC
@@ -49,16 +49,24 @@ func (s *Server) ServerRolesList(c *gin.Context) {
 
 	for rows.Next() {
 		var role models.ServerRole
-		var permissionsStr string
 
-		err := rows.Scan(&role.Id, &role.ServerId, &role.Name, &permissionsStr, &role.IsAdmin, &role.CreatedAt)
+		err := rows.Scan(&role.Id, &role.ServerId, &role.Name, &role.IsAdmin, &role.CreatedAt)
 		if err != nil {
 			responses.BadRequest(c, "Failed to scan role", &gin.H{"error": err.Error()})
 			return
 		}
 
-		// Parse permissions from comma-separated string
-		role.Permissions = strings.Split(permissionsStr, ",")
+		// Get permissions from the new server_role_permissions table
+		permissions, err := s.Dependencies.PermissionRepo.GetServerRolePermissions(c.Request.Context(), role.Id)
+		if err != nil {
+			responses.BadRequest(c, "Failed to get role permissions", &gin.H{"error": err.Error()})
+			return
+		}
+		role.Permissions = permissions
+		if role.Permissions == nil {
+			role.Permissions = []string{}
+		}
+
 		roles = append(roles, role)
 	}
 
@@ -115,25 +123,32 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 		return
 	}
 
-	// Convert permissions array to comma-separated string
-	permissionsStr := strings.Join(request.Permissions, ",")
-
 	// Default is_admin to true if not provided
 	isAdmin := true
 	if request.IsAdmin != nil {
 		isAdmin = *request.IsAdmin
 	}
 
-	// Insert the role into the database
-	var roleID string
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+	// Generate new role ID
+	roleUUID := uuid.New()
+
+	// Insert the role into the database (without permissions column - use empty string for backward compat)
+	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
 		INSERT INTO server_roles (id, server_id, name, permissions, is_admin, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id
-	`, uuid.New(), serverId, request.Name, permissionsStr, isAdmin, time.Now()).Scan(&roleID)
+	`, roleUUID, serverId, request.Name, "", isAdmin, time.Now())
 
 	if err != nil {
 		responses.BadRequest(c, "Failed to create role", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Set permissions using the new PBAC system
+	err = s.Dependencies.PermissionRepo.SetServerRolePermissions(c.Request.Context(), roleUUID, request.Permissions)
+	if err != nil {
+		// Rollback by deleting the role
+		s.Dependencies.DB.ExecContext(c.Request.Context(), "DELETE FROM server_roles WHERE id = $1", roleUUID)
+		responses.BadRequest(c, "Failed to set role permissions", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -141,11 +156,11 @@ func (s *Server) ServerRolesAdd(c *gin.Context) {
 		"name":        request.Name,
 		"permissions": request.Permissions,
 		"is_admin":    isAdmin,
-		"roleId":      roleID,
+		"roleId":      roleUUID.String(),
 	})
 
 	responses.Success(c, "Role created successfully", &gin.H{
-		"roleId": roleID,
+		"roleId": roleUUID.String(),
 	})
 }
 
@@ -256,12 +271,11 @@ func (s *Server) ServerRolesUpdate(c *gin.Context) {
 
 	// Get existing role to check if it exists and for audit log
 	var existingName string
-	var existingPermissionsStr string
 	var existingIsAdmin bool
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT name, permissions, is_admin FROM server_roles
+		SELECT name, is_admin FROM server_roles
 		WHERE id = $1 AND server_id = $2
-	`, roleId, serverId).Scan(&existingName, &existingPermissionsStr, &existingIsAdmin)
+	`, roleId, serverId).Scan(&existingName, &existingIsAdmin)
 
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
@@ -269,6 +283,13 @@ func (s *Server) ServerRolesUpdate(c *gin.Context) {
 		} else {
 			responses.BadRequest(c, "Failed to get role", &gin.H{"error": err.Error()})
 		}
+		return
+	}
+
+	// Get existing permissions from the new PBAC system for audit log
+	existingPermissions, err := s.Dependencies.PermissionRepo.GetServerRolePermissions(c.Request.Context(), roleId)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get existing permissions", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -293,41 +314,45 @@ func (s *Server) ServerRolesUpdate(c *gin.Context) {
 		argIndex++
 	}
 
-	if request.Permissions != nil {
-		if len(request.Permissions) == 0 {
-			responses.BadRequest(c, "At least one permission is required", &gin.H{"error": "At least one permission is required"})
-			return
-		}
-		permissionsStr := strings.Join(request.Permissions, ",")
-		updateFields = append(updateFields, fmt.Sprintf("permissions = $%d", argIndex))
-		args = append(args, permissionsStr)
-		argIndex++
-	}
-
 	if request.IsAdmin != nil {
 		updateFields = append(updateFields, fmt.Sprintf("is_admin = $%d", argIndex))
 		args = append(args, *request.IsAdmin)
 		argIndex++
 	}
 
-	if len(updateFields) == 0 {
-		responses.BadRequest(c, "No fields to update", &gin.H{"error": "No fields to update"})
-		return
+	// Handle permissions separately using the new PBAC system
+	if request.Permissions != nil {
+		if len(request.Permissions) == 0 {
+			responses.BadRequest(c, "At least one permission is required", &gin.H{"error": "At least one permission is required"})
+			return
+		}
+		err = s.Dependencies.PermissionRepo.SetServerRolePermissions(c.Request.Context(), roleId, request.Permissions)
+		if err != nil {
+			responses.BadRequest(c, "Failed to update role permissions", &gin.H{"error": err.Error()})
+			return
+		}
 	}
 
-	// Add roleId and serverId to args for WHERE clause
-	args = append(args, roleId, serverId)
+	// Update other fields if any
+	if len(updateFields) > 0 {
+		// Add roleId and serverId to args for WHERE clause
+		args = append(args, roleId, serverId)
 
-	// Build and execute update query
-	query := fmt.Sprintf(`
-		UPDATE server_roles
-		SET %s
-		WHERE id = $%d AND server_id = $%d
-	`, strings.Join(updateFields, ", "), argIndex, argIndex+1)
+		// Build and execute update query
+		query := fmt.Sprintf(`
+			UPDATE server_roles
+			SET %s
+			WHERE id = $%d AND server_id = $%d
+		`, strings.Join(updateFields, ", "), argIndex, argIndex+1)
 
-	_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), query, args...)
-	if err != nil {
-		responses.BadRequest(c, "Failed to update role", &gin.H{"error": err.Error()})
+		_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), query, args...)
+		if err != nil {
+			responses.BadRequest(c, "Failed to update role", &gin.H{"error": err.Error()})
+			return
+		}
+	} else if request.Permissions == nil {
+		// No fields to update and no permissions to update
+		responses.BadRequest(c, "No fields to update", &gin.H{"error": "No fields to update"})
 		return
 	}
 
@@ -343,7 +368,7 @@ func (s *Server) ServerRolesUpdate(c *gin.Context) {
 	}
 
 	if request.Permissions != nil {
-		auditData["oldPermissions"] = strings.Split(existingPermissionsStr, ",")
+		auditData["oldPermissions"] = existingPermissions
 		auditData["newPermissions"] = request.Permissions
 	}
 

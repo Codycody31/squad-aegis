@@ -11,6 +11,7 @@ import (
 	"github.com/leighmacdonald/steamid/v3/steamid"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/permissions"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
@@ -114,8 +115,8 @@ func (s *Server) AuthInitial(c *gin.Context) {
 		return
 	}
 
-	// Get user's server permissions
-	serverPermissions, err := core.GetUserServerPermissions(c.Copy(), s.Dependencies.DB, session.UserId)
+	// Get user's server permissions using new PBAC system
+	serverPermissions, err := s.getUserAllServerPermissions(c, session.UserId)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
@@ -125,6 +126,43 @@ func (s *Server) AuthInitial(c *gin.Context) {
 		"user":              user,
 		"serverPermissions": serverPermissions,
 	})
+}
+
+// getUserAllServerPermissions retrieves permissions for all servers a user has access to
+func (s *Server) getUserAllServerPermissions(c *gin.Context, userId uuid.UUID) (map[string][]string, error) {
+	query := `
+		SELECT DISTINCT sa.server_id, p.code
+		FROM server_admins sa
+		JOIN server_roles sr ON sa.server_role_id = sr.id
+		JOIN server_role_permissions srp ON sr.id = srp.server_role_id
+		JOIN permissions p ON srp.permission_id = p.id
+		WHERE sa.user_id = $1
+		AND (sa.expires_at IS NULL OR sa.expires_at > NOW())
+		ORDER BY sa.server_id, p.code
+	`
+
+	rows, err := s.Dependencies.DB.QueryContext(c, query, userId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query permissions: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]string)
+	for rows.Next() {
+		var serverId uuid.UUID
+		var permCode string
+		if err := rows.Scan(&serverId, &permCode); err != nil {
+			return nil, fmt.Errorf("failed to scan permission: %w", err)
+		}
+		serverIdStr := serverId.String()
+		result[serverIdStr] = append(result[serverIdStr], permCode)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating permissions: %w", err)
+	}
+
+	return result, nil
 }
 
 func (s *Server) UpdateUserProfile(c *gin.Context) {
@@ -320,7 +358,8 @@ func (s *Server) AuthHasServerPermission(permission string) gin.HandlerFunc {
 }
 
 // AuthHasAnyServerPermission checks if the user has any of the specified permissions for a server
-func (s *Server) AuthHasAnyServerPermission(permissions ...string) gin.HandlerFunc {
+// DEPRECATED: Use RequireAnyPermission instead for new code
+func (s *Server) AuthHasAnyServerPermission(perms ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Get the user from the session
 		user := s.getUserFromSession(c)
@@ -352,7 +391,7 @@ func (s *Server) AuthHasAnyServerPermission(permissions ...string) gin.HandlerFu
 		}
 
 		// Check if the user has any of the required permissions
-		hasPermission, err := s.userHasAnyServerPermission(c.Copy(), user.Id, serverId, permissions)
+		hasPermission, err := s.userHasAnyServerPermission(c.Copy(), user.Id, serverId, perms)
 		if err != nil {
 			responses.InternalServerError(c, fmt.Errorf("failed to check permissions: %w", err), nil)
 			c.Abort()
@@ -361,6 +400,151 @@ func (s *Server) AuthHasAnyServerPermission(permissions ...string) gin.HandlerFu
 
 		if !hasPermission {
 			responses.Forbidden(c, "You don't have any of the required permissions", nil)
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// =============================================================================
+// NEW PBAC Permission Middleware (uses permissions.Permission type)
+// =============================================================================
+
+// RequirePermission checks if the user has a specific permission for a server
+// This is the new PBAC middleware that uses the permissions package
+func (s *Server) RequirePermission(perm permissions.Permission) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := s.getUserFromSession(c)
+		if user == nil {
+			responses.Unauthorized(c, "Unauthorized", nil)
+			c.Abort()
+			return
+		}
+
+		// Super admins have all permissions
+		if user.SuperAdmin {
+			c.Next()
+			return
+		}
+
+		serverIdString := c.Param("serverId")
+		if serverIdString == "" {
+			responses.BadRequest(c, "Server ID is required", nil)
+			c.Abort()
+			return
+		}
+
+		serverId, err := uuid.Parse(serverIdString)
+		if err != nil {
+			responses.BadRequest(c, "Invalid server ID", nil)
+			c.Abort()
+			return
+		}
+
+		// Use new permission service
+		hasPermission, err := s.Dependencies.PermissionService.HasPermission(c.Request.Context(), user.Id, serverId, perm)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to check permissions: %w", err), nil)
+			c.Abort()
+			return
+		}
+
+		if !hasPermission {
+			responses.Forbidden(c, "You don't have the required permission", nil)
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// RequireAnyPermission checks if the user has any of the specified permissions
+func (s *Server) RequireAnyPermission(perms ...permissions.Permission) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := s.getUserFromSession(c)
+		if user == nil {
+			responses.Unauthorized(c, "Unauthorized", nil)
+			c.Abort()
+			return
+		}
+
+		if user.SuperAdmin {
+			c.Next()
+			return
+		}
+
+		serverIdString := c.Param("serverId")
+		if serverIdString == "" {
+			responses.BadRequest(c, "Server ID is required", nil)
+			c.Abort()
+			return
+		}
+
+		serverId, err := uuid.Parse(serverIdString)
+		if err != nil {
+			responses.BadRequest(c, "Invalid server ID", nil)
+			c.Abort()
+			return
+		}
+
+		hasPermission, err := s.Dependencies.PermissionService.HasAnyPermission(c.Request.Context(), user.Id, serverId, perms...)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to check permissions: %w", err), nil)
+			c.Abort()
+			return
+		}
+
+		if !hasPermission {
+			responses.Forbidden(c, "You don't have any of the required permissions", nil)
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// RequireAllPermissions checks if the user has all of the specified permissions
+func (s *Server) RequireAllPermissions(perms ...permissions.Permission) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := s.getUserFromSession(c)
+		if user == nil {
+			responses.Unauthorized(c, "Unauthorized", nil)
+			c.Abort()
+			return
+		}
+
+		if user.SuperAdmin {
+			c.Next()
+			return
+		}
+
+		serverIdString := c.Param("serverId")
+		if serverIdString == "" {
+			responses.BadRequest(c, "Server ID is required", nil)
+			c.Abort()
+			return
+		}
+
+		serverId, err := uuid.Parse(serverIdString)
+		if err != nil {
+			responses.BadRequest(c, "Invalid server ID", nil)
+			c.Abort()
+			return
+		}
+
+		hasPermission, err := s.Dependencies.PermissionService.HasAllPermissions(c.Request.Context(), user.Id, serverId, perms...)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to check permissions: %w", err), nil)
+			c.Abort()
+			return
+		}
+
+		if !hasPermission {
+			responses.Forbidden(c, "You don't have all of the required permissions", nil)
 			c.Abort()
 			return
 		}

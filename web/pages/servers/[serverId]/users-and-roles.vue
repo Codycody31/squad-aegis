@@ -39,12 +39,19 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
+    SelectGroup,
+    SelectLabel,
 } from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
 import { toast } from "~/components/ui/toast";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
+import {
+    PERMISSION_CATEGORY_NAMES,
+    getPermissionCategory,
+    type PermissionCategory,
+} from "@/constants/permissions";
 
 const route = useRoute();
 const serverId = route.params.serverId;
@@ -54,67 +61,55 @@ const loading = ref({
     roles: true,
     admins: true,
     users: true,
+    permissions: true,
+    templates: true,
 });
 const error = ref<string | null>(null);
 const roles = ref<ServerRole[]>([]);
 const admins = ref<ServerAdmin[]>([]);
 const users = ref<User[]>([]);
+const permissions = ref<PermissionGroup[]>([]);
+const roleTemplates = ref<RoleTemplate[]>([]);
 const showAddRoleDialog = ref(false);
 const showEditRoleDialog = ref(false);
 const showAddAdminDialog = ref(false);
 const showEditAdminDialog = ref(false);
+const showCreateFromTemplateDialog = ref(false);
 const addRoleLoading = ref(false);
 const editRoleLoading = ref(false);
 const addAdminLoading = ref(false);
 const editAdminLoading = ref(false);
 const cleanupLoading = ref(false);
+const createFromTemplateLoading = ref(false);
 const selectedAdminType = ref("user");
 const editingAdmin = ref<ServerAdmin | null>(null);
 const editingRole = ref<ServerRole | null>(null);
 
-// Squad permission categories
-const permissionCategories = [
-    {
-        name: "Basic Admin",
-        permissions: [
-            "reserve",
-            "balance",
-            "canseeadminchat",
-            "manageserver",
-            "teamchange",
-        ],
-    },
-    {
-        name: "Chat",
-        permissions: ["chat", "cameraman"],
-    },
-    {
-        name: "Kick & Ban",
-        permissions: ["kick", "ban", "forceteamchange", "immune"],
-    },
-    {
-        name: "Map Control",
-        permissions: [
-            "changemap",
-            "pause",
-            "cheat",
-            "private",
-            "config",
-            "featuretest",
-            "demos",
-        ],
-    },
-    {
-        name: "Squad Management",
-        permissions: ["disbandSquad", "removeFromSquad", "demoteCommander"],
-    },
-    {
-        name: "Debug",
-        permissions: ["debug"],
-    },
-];
-
 // Interfaces
+interface PermissionDefinition {
+    id: string;
+    code: string;
+    category: string;
+    name: string;
+    description: string;
+    squad_permission?: string;
+}
+
+interface PermissionGroup {
+    category: string;
+    category_name: string;
+    permissions: PermissionDefinition[];
+}
+
+interface RoleTemplate {
+    id: string;
+    name: string;
+    description: string;
+    is_system: boolean;
+    is_admin: boolean;
+    permissions: string[];
+}
+
 interface ServerRole {
     id: string;
     serverId: string;
@@ -165,6 +160,18 @@ interface UsersResponse {
     };
 }
 
+interface PermissionsResponse {
+    data: {
+        permissions: PermissionGroup[];
+    };
+}
+
+interface RoleTemplatesResponse {
+    data: {
+        templates: RoleTemplate[];
+    };
+}
+
 // Form schemas
 const roleFormSchema = toTypedSchema(
     z.object({
@@ -179,6 +186,19 @@ const roleFormSchema = toTypedSchema(
             .array(z.string())
             .min(1, "At least one permission is required"),
         is_admin: z.boolean().default(true),
+    }),
+);
+
+const templateFormSchema = toTypedSchema(
+    z.object({
+        template_id: z.string().min(1, "Please select a template"),
+        name: z
+            .string()
+            .min(1, "Role name is required")
+            .regex(
+                /^[a-zA-Z0-9_]+$/,
+                "Role name can only contain letters, numbers, and underscores.",
+            ),
     }),
 );
 
@@ -210,7 +230,7 @@ const adminFormSchema = toTypedSchema(
             },
             {
                 message: "Please select a user or enter a valid Steam ID",
-                path: ["user_id"], // This will show the error on the user_id field
+                path: ["user_id"],
             },
         ),
 );
@@ -238,6 +258,14 @@ const editRoleForm = useForm({
         name: "",
         permissions: [],
         is_admin: true,
+    },
+});
+
+const templateForm = useForm({
+    validationSchema: templateFormSchema,
+    initialValues: {
+        template_id: "",
+        name: "",
     },
 });
 
@@ -277,6 +305,79 @@ watch(showAddAdminDialog, (isOpen) => {
         adminForm.resetForm();
     }
 });
+
+// Watch for template selection to auto-fill name
+watch(
+    () => templateForm.values.template_id,
+    (newValue) => {
+        if (newValue) {
+            const template = roleTemplates.value.find((t) => t.id === newValue);
+            if (template) {
+                templateForm.setFieldValue("name", template.name);
+            }
+        }
+    },
+);
+
+// Function to fetch permissions from API
+async function fetchPermissions() {
+    loading.value.permissions = true;
+
+    const runtimeConfig = useRuntimeConfig();
+
+    try {
+        const { data, error: fetchError } = await useAuthFetch<PermissionsResponse>(
+            `${runtimeConfig.public.backendApi}/permissions`,
+            {
+                method: "GET",
+            },
+        );
+
+        if (fetchError.value) {
+            throw new Error(
+                fetchError.value.message || "Failed to fetch permissions",
+            );
+        }
+
+        if (data.value && data.value.data) {
+            permissions.value = data.value.data.permissions || [];
+        }
+    } catch (err: any) {
+        console.error("Error fetching permissions:", err);
+    } finally {
+        loading.value.permissions = false;
+    }
+}
+
+// Function to fetch role templates from API
+async function fetchRoleTemplates() {
+    loading.value.templates = true;
+
+    const runtimeConfig = useRuntimeConfig();
+
+    try {
+        const { data, error: fetchError } = await useAuthFetch<RoleTemplatesResponse>(
+            `${runtimeConfig.public.backendApi}/role-templates`,
+            {
+                method: "GET",
+            },
+        );
+
+        if (fetchError.value) {
+            throw new Error(
+                fetchError.value.message || "Failed to fetch role templates",
+            );
+        }
+
+        if (data.value && data.value.data) {
+            roleTemplates.value = data.value.data.templates || [];
+        }
+    } catch (err: any) {
+        console.error("Error fetching role templates:", err);
+    } finally {
+        loading.value.templates = false;
+    }
+}
 
 // Function to fetch roles
 async function fetchRoles() {
@@ -376,8 +477,6 @@ async function fetchUsers() {
 
 // Function to handle role form submission
 async function onRoleSubmit(values: any) {
-    console.log("Form submitted with values:", values);
-
     addRoleLoading.value = true;
     error.value = null;
 
@@ -406,6 +505,11 @@ async function onRoleSubmit(values: any) {
         roleForm.resetForm();
         showAddRoleDialog.value = false;
 
+        toast({
+            title: "Success",
+            description: "Role created successfully",
+        });
+
         // Refresh the roles list
         fetchRoles();
     } catch (err: any) {
@@ -413,6 +517,50 @@ async function onRoleSubmit(values: any) {
         console.error(err);
     } finally {
         addRoleLoading.value = false;
+    }
+}
+
+// Function to create role from template
+async function createRoleFromTemplate(values: any) {
+    createFromTemplateLoading.value = true;
+    error.value = null;
+
+    const runtimeConfig = useRuntimeConfig();
+
+    try {
+        const { data, error: fetchError } = await useAuthFetch(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/roles/from-template`,
+            {
+                method: "POST",
+                body: {
+                    template_id: values.template_id,
+                    name: values.name,
+                },
+            },
+        );
+
+        if (fetchError.value) {
+            throw new Error(
+                fetchError.value.data.message || fetchError.value.message,
+            );
+        }
+
+        // Reset form and close dialog
+        templateForm.resetForm();
+        showCreateFromTemplateDialog.value = false;
+
+        toast({
+            title: "Success",
+            description: "Role created from template successfully",
+        });
+
+        // Refresh the roles list
+        fetchRoles();
+    } catch (err: any) {
+        error.value = err.message || "An error occurred while creating the role";
+        console.error(err);
+    } finally {
+        createFromTemplateLoading.value = false;
     }
 }
 
@@ -444,6 +592,11 @@ async function removeRole(roleId: string) {
                 fetchError.value.data.message || fetchError.value.message,
             );
         }
+
+        toast({
+            title: "Success",
+            description: "Role removed successfully",
+        });
 
         // Refresh the roles list
         fetchRoles();
@@ -516,6 +669,11 @@ async function updateRole(values: any) {
             );
         }
 
+        toast({
+            title: "Success",
+            description: "Role updated successfully",
+        });
+
         // Close dialog and refresh roles
         closeEditRoleDialog();
         fetchRoles();
@@ -577,6 +735,11 @@ async function addAdmin(values: any) {
         adminForm.resetForm();
         showAddAdminDialog.value = false;
 
+        toast({
+            title: "Success",
+            description: "Admin added successfully",
+        });
+
         // Refresh the admins list
         fetchAdmins();
     } catch (err: any) {
@@ -611,6 +774,11 @@ async function removeAdmin(adminId: string) {
                 fetchError.value.data.message || fetchError.value.message,
             );
         }
+
+        toast({
+            title: "Success",
+            description: "Admin removed successfully",
+        });
 
         // Refresh the admins list
         fetchAdmins();
@@ -661,6 +829,11 @@ async function updateAdminNotes(values: any) {
             );
         }
 
+        toast({
+            title: "Success",
+            description: "Admin notes updated successfully",
+        });
+
         // Close dialog and refresh admins
         closeEditAdminDialog();
         fetchAdmins();
@@ -701,6 +874,11 @@ async function cleanupExpiredAdmins() {
                 fetchError.value.data.message || fetchError.value.message,
             );
         }
+
+        toast({
+            title: "Success",
+            description: "Expired admins cleaned up successfully",
+        });
 
         // Refresh the admins list
         fetchAdmins();
@@ -843,8 +1021,62 @@ const getAdminDisplayName = (admin: ServerAdmin): string => {
     return "Unknown";
 };
 
+// Get role name by ID
+const getRoleName = (roleId: string): string => {
+    const role = roles.value.find((r) => r.id === roleId);
+    return role ? role.name : "Unknown Role";
+};
+
+// Format permission for display
+const formatPermissionDisplay = (permCode: string): string => {
+    // Try to find in loaded permissions by exact code
+    for (const group of permissions.value) {
+        const perm = group.permissions.find((p) => p.code === permCode);
+        if (perm) {
+            return perm.name;
+        }
+    }
+
+    // For old-style permissions (without prefix), try to find matching rcon permission
+    if (!permCode.includes(":")) {
+        const rconCode = `rcon:${permCode.toLowerCase()}`;
+        for (const group of permissions.value) {
+            const perm = group.permissions.find((p) => p.code === rconCode);
+            if (perm) {
+                return perm.name;
+            }
+        }
+        // Still not found - capitalize the old permission name
+        return permCode.charAt(0).toUpperCase() + permCode.slice(1);
+    }
+
+    // New format with colon - extract the part after category
+    const parts = permCode.split(":");
+    if (parts.length >= 2) {
+        return parts.slice(1).join(" ").replace(/_/g, " ");
+    }
+    return permCode;
+};
+
+// Get permission category badge color
+const getPermissionCategoryColor = (permCode: string): string => {
+    const category = getPermissionCategory(permCode);
+    switch (category) {
+        case "ui":
+            return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
+        case "api":
+            return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+        case "rcon":
+            return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
+        default:
+            return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200";
+    }
+};
+
 // Setup initial data load
 onMounted(() => {
+    fetchPermissions();
+    fetchRoleTemplates();
     fetchRoles();
     fetchAdmins();
     fetchUsers();
@@ -883,394 +1115,439 @@ onMounted(() => {
                         class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 pb-2 sm:pb-3"
                     >
                         <CardTitle class="text-base sm:text-lg">Role Management</CardTitle>
-                        <Form
-                            v-slot="{ handleSubmit }"
-                            as=""
-                            keep-values
-                            :validation-schema="roleFormSchema"
-                            :initial-values="{
-                                name: '',
-                                permissions: [],
-                                is_admin: true,
-                            }"
-                        >
-                            <Dialog v-model:open="showAddRoleDialog">
-                                <DialogTrigger asChild>
-                                    <Button class="w-full sm:w-auto text-sm sm:text-base">Add Role</Button>
-                                </DialogTrigger>
-                                <DialogContent
-                                    class="w-[95vw] sm:max-w-[600px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
-                                >
-                                    <DialogHeader>
-                                        <DialogTitle class="text-base sm:text-lg">Add New Role</DialogTitle>
-                                        <DialogDescription class="text-xs sm:text-sm">
-                                            Create a new role with specific
-                                            permissions for Squad server
-                                            administration.
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <form
-                                        id="addRoleDialogForm"
-                                        @submit="
-                                            handleSubmit($event, onRoleSubmit)
-                                        "
+                        <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                            <!-- Create from Template Button -->
+                            <Form
+                                v-slot="{ handleSubmit }"
+                                as=""
+                                keep-values
+                                :validation-schema="templateFormSchema"
+                                :initial-values="{
+                                    template_id: '',
+                                    name: '',
+                                }"
+                            >
+                                <Dialog v-model:open="showCreateFromTemplateDialog">
+                                    <DialogTrigger asChild>
+                                        <Button variant="outline" class="w-full sm:w-auto text-sm sm:text-base">
+                                            From Template
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent
+                                        class="w-[95vw] sm:max-w-[500px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
                                     >
-                                        <div class="grid gap-4 py-4">
-                                            <FormField
-                                                name="name"
-                                                v-slot="{ componentField }"
-                                            >
-                                                <FormItem>
-                                                    <FormLabel
-                                                        >Role Name</FormLabel
-                                                    >
-                                                    <FormControl>
-                                                        <Input
-                                                            placeholder="e.g., SeniorAdmin"
-                                                            v-bind="
-                                                                componentField
-                                                            "
-                                                        />
-                                                    </FormControl>
-                                                    <FormDescription>
-                                                        Role name can only
-                                                        contain letters,
-                                                        numbers, and
-                                                        underscores. No spaces
-                                                        or special characters
-                                                        allowed.
-                                                    </FormDescription>
-                                                    <FormMessage />
-                                                </FormItem>
-                                            </FormField>
-
-                                            <FormField name="permissions">
-                                                <FormItem>
-                                                    <FormLabel
-                                                        >Permissions</FormLabel
-                                                    >
-                                                    <FormDescription>
-                                                        Select the permissions
-                                                        for this role. Each
-                                                        permission grants access
-                                                        to specific Squad admin
-                                                        commands.
-                                                    </FormDescription>
-
-                                                    <div
-                                                        class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-2"
-                                                    >
-                                                        <div
-                                                            v-for="category in permissionCategories"
-                                                            :key="category.name"
-                                                            class="border rounded-md p-3"
-                                                        >
-                                                            <h3
-                                                                class="font-medium mb-2"
-                                                            >
-                                                                {{
-                                                                    category.name
-                                                                }}
-                                                            </h3>
-                                                            <div
-                                                                class="space-y-2"
-                                                            >
-                                                                <div
-                                                                    v-for="permission in category.permissions"
-                                                                    :key="
-                                                                        permission
-                                                                    "
-                                                                    class="flex items-center space-x-2"
-                                                                >
-                                                                    <FormField
-                                                                        v-slot="{
-                                                                            value,
-                                                                            handleChange,
-                                                                        }"
-                                                                        :key="
-                                                                            permission
-                                                                        "
-                                                                        type="checkbox"
-                                                                        :value="
-                                                                            permission
-                                                                        "
-                                                                        :unchecked-value="
-                                                                            false
-                                                                        "
-                                                                        name="permissions"
+                                        <DialogHeader>
+                                            <DialogTitle class="text-base sm:text-lg">Create Role from Template</DialogTitle>
+                                            <DialogDescription class="text-xs sm:text-sm">
+                                                Select a predefined role template to quickly create a new role with standard permissions.
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <form
+                                            id="createFromTemplateForm"
+                                            @submit="handleSubmit($event, createRoleFromTemplate)"
+                                        >
+                                            <div class="grid gap-4 py-4">
+                                                <FormField
+                                                    name="template_id"
+                                                    v-slot="{ componentField }"
+                                                >
+                                                    <FormItem>
+                                                        <FormLabel>Template</FormLabel>
+                                                        <Select v-bind="componentField">
+                                                            <FormControl>
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Select a template" />
+                                                                </SelectTrigger>
+                                                            </FormControl>
+                                                            <SelectContent>
+                                                                <SelectGroup>
+                                                                    <SelectLabel>Role Templates</SelectLabel>
+                                                                    <SelectItem
+                                                                        v-for="template in roleTemplates"
+                                                                        :key="template.id"
+                                                                        :value="template.id"
                                                                     >
-                                                                        <FormItem
-                                                                            class="flex flex-row items-start space-x-3 space-y-0"
-                                                                        >
-                                                                            <FormControl>
-                                                                                <Checkbox
-                                                                                    :model-value="
-                                                                                        value.includes(
-                                                                                            permission,
-                                                                                        )
-                                                                                    "
-                                                                                    @update:model-value="
-                                                                                        handleChange
-                                                                                    "
-                                                                                />
-                                                                            </FormControl>
-                                                                            <FormLabel
-                                                                                class="font-normal"
+                                                                        <div class="flex items-center gap-2">
+                                                                            <span>{{ template.name }}</span>
+                                                                            <Badge
+                                                                                v-if="!template.is_admin"
+                                                                                variant="secondary"
+                                                                                class="text-xs"
                                                                             >
-                                                                                {{
-                                                                                    permission
-                                                                                }}
-                                                                            </FormLabel>
-                                                                        </FormItem>
-                                                                    </FormField>
+                                                                                Non-Admin
+                                                                            </Badge>
+                                                                        </div>
+                                                                    </SelectItem>
+                                                                </SelectGroup>
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <FormDescription>
+                                                            Choose a template to base your new role on.
+                                                        </FormDescription>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                </FormField>
+
+                                                <!-- Template Preview -->
+                                                <div
+                                                    v-if="templateForm.values.template_id"
+                                                    class="border rounded-md p-3 bg-muted/50"
+                                                >
+                                                    <div class="text-sm font-medium mb-2">Template Preview</div>
+                                                    <div class="text-xs text-muted-foreground mb-2">
+                                                        {{ roleTemplates.find(t => t.id === templateForm.values.template_id)?.description }}
+                                                    </div>
+                                                    <div class="flex flex-wrap gap-1">
+                                                        <Badge
+                                                            v-for="perm in roleTemplates.find(t => t.id === templateForm.values.template_id)?.permissions || []"
+                                                            :key="perm"
+                                                            variant="outline"
+                                                            :class="['text-xs', getPermissionCategoryColor(perm)]"
+                                                        >
+                                                            {{ formatPermissionDisplay(perm) }}
+                                                        </Badge>
+                                                    </div>
+                                                </div>
+
+                                                <FormField
+                                                    name="name"
+                                                    v-slot="{ componentField }"
+                                                >
+                                                    <FormItem>
+                                                        <FormLabel>Role Name</FormLabel>
+                                                        <FormControl>
+                                                            <Input
+                                                                placeholder="e.g., SeniorAdmin"
+                                                                v-bind="componentField"
+                                                            />
+                                                        </FormControl>
+                                                        <FormDescription>
+                                                            Customize the name for this server's role.
+                                                        </FormDescription>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                </FormField>
+                                            </div>
+                                            <DialogFooter>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    @click="showCreateFromTemplateDialog = false"
+                                                >
+                                                    Cancel
+                                                </Button>
+                                                <Button
+                                                    type="submit"
+                                                    :disabled="createFromTemplateLoading"
+                                                >
+                                                    {{ createFromTemplateLoading ? "Creating..." : "Create Role" }}
+                                                </Button>
+                                            </DialogFooter>
+                                        </form>
+                                    </DialogContent>
+                                </Dialog>
+                            </Form>
+
+                            <!-- Custom Role Button -->
+                            <Form
+                                v-slot="{ handleSubmit }"
+                                as=""
+                                keep-values
+                                :validation-schema="roleFormSchema"
+                                :initial-values="{
+                                    name: '',
+                                    permissions: [],
+                                    is_admin: true,
+                                }"
+                            >
+                                <Dialog v-model:open="showAddRoleDialog">
+                                    <DialogTrigger asChild>
+                                        <Button class="w-full sm:w-auto text-sm sm:text-base">Custom Role</Button>
+                                    </DialogTrigger>
+                                    <DialogContent
+                                        class="w-[95vw] sm:max-w-[700px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
+                                    >
+                                        <DialogHeader>
+                                            <DialogTitle class="text-base sm:text-lg">Create Custom Role</DialogTitle>
+                                            <DialogDescription class="text-xs sm:text-sm">
+                                                Create a new role with custom permissions. Permissions are grouped by category.
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <form
+                                            id="addRoleDialogForm"
+                                            @submit="handleSubmit($event, onRoleSubmit)"
+                                        >
+                                            <div class="grid gap-4 py-4">
+                                                <FormField
+                                                    name="name"
+                                                    v-slot="{ componentField }"
+                                                >
+                                                    <FormItem>
+                                                        <FormLabel>Role Name</FormLabel>
+                                                        <FormControl>
+                                                            <Input
+                                                                placeholder="e.g., SeniorAdmin"
+                                                                v-bind="componentField"
+                                                            />
+                                                        </FormControl>
+                                                        <FormDescription>
+                                                            Role name can only contain letters, numbers, and underscores.
+                                                        </FormDescription>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                </FormField>
+
+                                                <FormField name="permissions">
+                                                    <FormItem>
+                                                        <FormLabel>Permissions</FormLabel>
+                                                        <FormDescription>
+                                                            Select permissions for this role. Permissions are organized by category.
+                                                        </FormDescription>
+
+                                                        <div v-if="loading.permissions" class="text-center py-4">
+                                                            <div class="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
+                                                        </div>
+
+                                                        <div v-else class="space-y-4 mt-2">
+                                                            <div
+                                                                v-for="group in permissions"
+                                                                :key="group.category"
+                                                                class="border rounded-md p-3"
+                                                            >
+                                                                <h3 class="font-medium mb-2 flex items-center gap-2">
+                                                                    <Badge :class="getPermissionCategoryColor(group.category + ':')">
+                                                                        {{ group.category_name }}
+                                                                    </Badge>
+                                                                </h3>
+                                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                                    <div
+                                                                        v-for="permission in group.permissions"
+                                                                        :key="permission.code"
+                                                                        class="flex items-start space-x-2"
+                                                                    >
+                                                                        <FormField
+                                                                            v-slot="{ value, handleChange }"
+                                                                            type="checkbox"
+                                                                            :value="permission.code"
+                                                                            :unchecked-value="false"
+                                                                            name="permissions"
+                                                                        >
+                                                                            <FormItem class="flex flex-row items-start space-x-3 space-y-0">
+                                                                                <FormControl>
+                                                                                    <Checkbox
+                                                                                        :modelValue="Array.isArray(value) && value.includes(permission.code)"
+                                                                                        @update:modelValue="handleChange"
+                                                                                    />
+                                                                                </FormControl>
+                                                                                <div class="leading-none">
+                                                                                    <FormLabel class="font-normal text-sm">
+                                                                                        {{ permission.name }}
+                                                                                    </FormLabel>
+                                                                                    <p class="text-xs text-muted-foreground">
+                                                                                        {{ permission.description }}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </FormItem>
+                                                                        </FormField>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    </div>
 
-                                                    <FormMessage />
-                                                </FormItem>
-                                            </FormField>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                </FormField>
 
-                                            <FormField
-                                                name="is_admin"
-                                                v-slot="{ value, handleChange }"
-                                            >
-                                                <FormItem class="flex flex-row items-start space-x-3 space-y-0">
-                                                    <FormControl>
-                                                        <Checkbox
-                                                            :model-value="value"
-                                                            @update:model-value="handleChange"
-                                                        />
-                                                    </FormControl>
-                                                    <div class="space-y-1 leading-none">
-                                                        <FormLabel>
-                                                            Is Admin Role
-                                                        </FormLabel>
-                                                        <FormDescription>
-                                                            If checked, users with this role will be treated as admins by plugins (receive pings, appear in admin lists). Uncheck for access-only roles like "reserved".
-                                                        </FormDescription>
-                                                    </div>
-                                                </FormItem>
-                                            </FormField>
-                                        </div>
-                                        <DialogFooter>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                @click="
-                                                    showAddRoleDialog = false
-                                                "
-                                            >
-                                                Cancel
-                                            </Button>
-                                            <Button
-                                                type="submit"
-                                                :disabled="addRoleLoading"
-                                            >
-                                                {{
-                                                    addRoleLoading
-                                                        ? "Adding..."
-                                                        : "Add Role"
-                                                }}
-                                            </Button>
-                                        </DialogFooter>
-                                    </form>
-                                </DialogContent>
-                            </Dialog>
-                        </Form>
+                                                <FormField
+                                                    name="is_admin"
+                                                    v-slot="{ value, handleChange }"
+                                                >
+                                                    <FormItem class="flex flex-row items-start space-x-3 space-y-0">
+                                                        <FormControl>
+                                                            <Checkbox
+                                                                :modelValue="value"
+                                                                @update:modelValue="handleChange"
+                                                            />
+                                                        </FormControl>
+                                                        <div class="space-y-1 leading-none">
+                                                            <FormLabel>
+                                                                Is Admin Role
+                                                            </FormLabel>
+                                                            <FormDescription>
+                                                                If checked, this role will be included when plugins or workflows fetch "admins" (e.g., for pings, admin lists). Uncheck for non-management roles like "Reserved" or "VIP". All RCON roles appear in admin.cfg regardless of this setting.
+                                                            </FormDescription>
+                                                        </div>
+                                                    </FormItem>
+                                                </FormField>
+                                            </div>
+                                            <DialogFooter>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    @click="showAddRoleDialog = false"
+                                                >
+                                                    Cancel
+                                                </Button>
+                                                <Button
+                                                    type="submit"
+                                                    :disabled="addRoleLoading"
+                                                >
+                                                    {{ addRoleLoading ? "Adding..." : "Add Role" }}
+                                                </Button>
+                                            </DialogFooter>
+                                        </form>
+                                    </DialogContent>
+                                </Dialog>
+                            </Form>
 
-                        <!-- Edit Role Dialog -->
-                        <Form
-                            :key="editingRole?.id"
-                            :validation-schema="roleFormSchema"
-                            :initial-values="{
-                                name: editingRole?.name || '',
-                                permissions: editingRole?.permissions || [],
-                                is_admin: editingRole?.is_admin ?? true,
-                            }"
-                            v-slot="{ handleSubmit }"
-                        >
-                            <Dialog v-model:open="showEditRoleDialog">
-                                <DialogContent
-                                    class="w-[95vw] sm:max-w-[600px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
-                                >
-                                    <DialogHeader>
-                                        <DialogTitle class="text-base sm:text-lg">Edit Role</DialogTitle>
-                                        <DialogDescription class="text-xs sm:text-sm">
-                                            Update the role name, permissions, and admin status.
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                    <form
-                                        id="editRoleDialogForm"
-                                        @submit="
-                                            handleSubmit($event, updateRole)
-                                        "
+                            <!-- Edit Role Dialog -->
+                            <Form
+                                :key="editingRole?.id"
+                                :validation-schema="roleFormSchema"
+                                :initial-values="{
+                                    name: editingRole?.name || '',
+                                    permissions: editingRole?.permissions || [],
+                                    is_admin: editingRole?.is_admin ?? true,
+                                }"
+                                v-slot="{ handleSubmit }"
+                            >
+                                <Dialog v-model:open="showEditRoleDialog">
+                                    <DialogContent
+                                        class="w-[95vw] sm:max-w-[700px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
                                     >
-                                        <div class="grid gap-4 py-4">
-                                            <FormField
-                                                name="name"
-                                                v-slot="{ componentField }"
-                                            >
-                                                <FormItem>
-                                                    <FormLabel
-                                                        >Role Name</FormLabel
-                                                    >
-                                                    <FormControl>
-                                                        <Input
-                                                            placeholder="e.g., SeniorAdmin"
-                                                            v-bind="
-                                                                componentField
-                                                            "
-                                                        />
-                                                    </FormControl>
-                                                    <FormDescription>
-                                                        Role name can only
-                                                        contain letters,
-                                                        numbers, and
-                                                        underscores. No spaces
-                                                        or special characters
-                                                        allowed.
-                                                    </FormDescription>
-                                                    <FormMessage />
-                                                </FormItem>
-                                            </FormField>
+                                        <DialogHeader>
+                                            <DialogTitle class="text-base sm:text-lg">Edit Role</DialogTitle>
+                                            <DialogDescription class="text-xs sm:text-sm">
+                                                Update the role name, permissions, and admin status.
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <form
+                                            id="editRoleDialogForm"
+                                            @submit="handleSubmit($event, updateRole)"
+                                        >
+                                            <div class="grid gap-4 py-4">
+                                                <FormField
+                                                    name="name"
+                                                    v-slot="{ componentField }"
+                                                >
+                                                    <FormItem>
+                                                        <FormLabel>Role Name</FormLabel>
+                                                        <FormControl>
+                                                            <Input
+                                                                placeholder="e.g., SeniorAdmin"
+                                                                v-bind="componentField"
+                                                            />
+                                                        </FormControl>
+                                                        <FormDescription>
+                                                            Role name can only contain letters, numbers, and underscores.
+                                                        </FormDescription>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                </FormField>
 
-                                            <FormField name="permissions">
-                                                <FormItem>
-                                                    <FormLabel
-                                                        >Permissions</FormLabel
-                                                    >
-                                                    <FormDescription>
-                                                        Select the permissions
-                                                        for this role. Each
-                                                        permission grants access
-                                                        to specific Squad admin
-                                                        commands.
-                                                    </FormDescription>
+                                                <FormField name="permissions">
+                                                    <FormItem>
+                                                        <FormLabel>Permissions</FormLabel>
+                                                        <FormDescription>
+                                                            Select permissions for this role. Permissions are organized by category.
+                                                        </FormDescription>
 
-                                                    <div
-                                                        class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-2"
-                                                    >
-                                                        <div
-                                                            v-for="category in permissionCategories"
-                                                            :key="category.name"
-                                                            class="border rounded-md p-3"
-                                                        >
-                                                            <h3
-                                                                class="font-medium mb-2"
-                                                            >
-                                                                {{
-                                                                    category.name
-                                                                }}
-                                                            </h3>
+                                                        <div v-if="loading.permissions" class="text-center py-4">
+                                                            <div class="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full mx-auto"></div>
+                                                        </div>
+
+                                                        <div v-else class="space-y-4 mt-2">
                                                             <div
-                                                                class="space-y-2"
+                                                                v-for="group in permissions"
+                                                                :key="group.category"
+                                                                class="border rounded-md p-3"
                                                             >
-                                                                <div
-                                                                    v-for="permission in category.permissions"
-                                                                    :key="
-                                                                        permission
-                                                                    "
-                                                                    class="flex items-center space-x-2"
-                                                                >
-                                                                    <FormField
-                                                                        v-slot="{
-                                                                            value,
-                                                                            handleChange,
-                                                                        }"
-                                                                        :key="
-                                                                            permission
-                                                                        "
-                                                                        type="checkbox"
-                                                                        :value="
-                                                                            permission
-                                                                        "
-                                                                        :unchecked-value="
-                                                                            false
-                                                                        "
-                                                                        name="permissions"
+                                                                <h3 class="font-medium mb-2 flex items-center gap-2">
+                                                                    <Badge :class="getPermissionCategoryColor(group.category + ':')">
+                                                                        {{ group.category_name }}
+                                                                    </Badge>
+                                                                </h3>
+                                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                                    <div
+                                                                        v-for="permission in group.permissions"
+                                                                        :key="permission.code"
+                                                                        class="flex items-start space-x-2"
                                                                     >
-                                                                        <FormItem
-                                                                            class="flex flex-row items-start space-x-3 space-y-0"
+                                                                        <FormField
+                                                                            v-slot="{ value, handleChange }"
+                                                                            type="checkbox"
+                                                                            :value="permission.code"
+                                                                            :unchecked-value="false"
+                                                                            name="permissions"
                                                                         >
-                                                                            <FormControl>
-                                                                                <Checkbox
-                                                                                    :model-value="
-                                                                                        value.includes(
-                                                                                            permission,
-                                                                                        )
-                                                                                    "
-                                                                                    @update:model-value="
-                                                                                        handleChange
-                                                                                    "
-                                                                                />
-                                                                            </FormControl>
-                                                                            <FormLabel
-                                                                                class="font-normal"
-                                                                            >
-                                                                                {{
-                                                                                    permission
-                                                                                }}
-                                                                            </FormLabel>
-                                                                        </FormItem>
-                                                                    </FormField>
+                                                                            <FormItem class="flex flex-row items-start space-x-3 space-y-0">
+                                                                                <FormControl>
+                                                                                    <Checkbox
+                                                                                        :modelValue="Array.isArray(value) && value.includes(permission.code)"
+                                                                                        @update:modelValue="handleChange"
+                                                                                    />
+                                                                                </FormControl>
+                                                                                <div class="leading-none">
+                                                                                    <FormLabel class="font-normal text-sm">
+                                                                                        {{ permission.name }}
+                                                                                    </FormLabel>
+                                                                                    <p class="text-xs text-muted-foreground">
+                                                                                        {{ permission.description }}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </FormItem>
+                                                                        </FormField>
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    </div>
 
-                                                    <FormMessage />
-                                                </FormItem>
-                                            </FormField>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                </FormField>
 
-                                            <FormField
-                                                name="is_admin"
-                                                v-slot="{ value, handleChange }"
-                                            >
-                                                <FormItem class="flex flex-row items-start space-x-3 space-y-0">
-                                                    <FormControl>
-                                                        <Checkbox
-                                                            :model-value="value"
-                                                            @update:model-value="handleChange"
-                                                        />
-                                                    </FormControl>
-                                                    <div class="space-y-1 leading-none">
-                                                        <FormLabel>
-                                                            Is Admin Role
-                                                        </FormLabel>
-                                                        <FormDescription>
-                                                            If checked, users with this role will be treated as admins by plugins (receive pings, appear in admin lists). Uncheck for access-only roles like "reserved".
-                                                        </FormDescription>
-                                                    </div>
-                                                </FormItem>
-                                            </FormField>
-                                        </div>
-                                        <DialogFooter>
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                @click="
-                                                    closeEditRoleDialog
-                                                "
-                                            >
-                                                Cancel
-                                            </Button>
-                                            <Button
-                                                type="submit"
-                                                :disabled="editRoleLoading"
-                                            >
-                                                {{
-                                                    editRoleLoading
-                                                        ? "Updating..."
-                                                        : "Update Role"
-                                                }}
-                                            </Button>
-                                        </DialogFooter>
-                                    </form>
-                                </DialogContent>
-                            </Dialog>
-                        </Form>
+                                                <FormField
+                                                    name="is_admin"
+                                                    v-slot="{ value, handleChange }"
+                                                >
+                                                    <FormItem class="flex flex-row items-start space-x-3 space-y-0">
+                                                        <FormControl>
+                                                            <Checkbox
+                                                                :modelValue="value"
+                                                                @update:modelValue="handleChange"
+                                                            />
+                                                        </FormControl>
+                                                        <div class="space-y-1 leading-none">
+                                                            <FormLabel>
+                                                                Is Admin Role
+                                                            </FormLabel>
+                                                            <FormDescription>
+                                                                If checked, this role will be included when plugins or workflows fetch "admins" (e.g., for pings, admin lists). Uncheck for non-management roles. All RCON roles appear in admin.cfg regardless.
+                                                            </FormDescription>
+                                                        </div>
+                                                    </FormItem>
+                                                </FormField>
+                                            </div>
+                                            <DialogFooter>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    @click="closeEditRoleDialog"
+                                                >
+                                                    Cancel
+                                                </Button>
+                                                <Button
+                                                    type="submit"
+                                                    :disabled="editRoleLoading"
+                                                >
+                                                    {{ editRoleLoading ? "Updating..." : "Update Role" }}
+                                                </Button>
+                                            </DialogFooter>
+                                        </form>
+                                    </DialogContent>
+                                </Dialog>
+                            </Form>
+                        </div>
                     </CardHeader>
                     <CardContent>
                         <div v-if="loading.roles" class="text-center py-6 sm:py-8">
@@ -1297,9 +1574,7 @@ onMounted(() => {
                                             <TableHead class="text-xs sm:text-sm">Type</TableHead>
                                             <TableHead class="text-xs sm:text-sm">Permissions</TableHead>
                                             <TableHead class="text-xs sm:text-sm">Created At</TableHead>
-                                            <TableHead class="text-right text-xs sm:text-sm"
-                                                >Actions</TableHead
-                                            >
+                                            <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -1308,32 +1583,39 @@ onMounted(() => {
                                             :key="role.id"
                                             class="hover:bg-muted/50"
                                         >
-                                            <TableCell class="font-medium text-sm sm:text-base">{{
-                                                role.name
-                                            }}</TableCell>
+                                            <TableCell class="font-medium text-sm sm:text-base">
+                                                {{ role.name }}
+                                            </TableCell>
                                             <TableCell>
                                                 <Badge
                                                     :variant="role.is_admin ? 'default' : 'secondary'"
                                                     class="text-xs"
                                                 >
-                                                    {{ role.is_admin ? 'Admin' : 'Access Only' }}
+                                                    {{ role.is_admin ? 'Admin' : 'Non-Admin' }}
                                                 </Badge>
                                             </TableCell>
                                             <TableCell>
-                                                <div class="flex flex-wrap gap-1">
+                                                <div class="flex flex-wrap gap-1 max-w-md">
                                                     <Badge
-                                                        v-for="permission in role.permissions"
+                                                        v-for="permission in role.permissions.slice(0, 5)"
                                                         :key="permission"
+                                                        variant="outline"
+                                                        :class="['text-xs', getPermissionCategoryColor(permission)]"
+                                                    >
+                                                        {{ formatPermissionDisplay(permission) }}
+                                                    </Badge>
+                                                    <Badge
+                                                        v-if="role.permissions.length > 5"
                                                         variant="outline"
                                                         class="text-xs"
                                                     >
-                                                        {{ permission }}
+                                                        +{{ role.permissions.length - 5 }} more
                                                     </Badge>
                                                 </div>
                                             </TableCell>
-                                            <TableCell class="text-xs sm:text-sm">{{
-                                                formatDate(role.created_at)
-                                            }}</TableCell>
+                                            <TableCell class="text-xs sm:text-sm">
+                                                {{ formatDate(role.created_at) }}
+                                            </TableCell>
                                             <TableCell class="text-right">
                                                 <div class="flex gap-2 justify-end">
                                                     <Button
@@ -1363,58 +1645,65 @@ onMounted(() => {
 
                             <!-- Mobile Card View -->
                             <div class="md:hidden space-y-3">
-                            <div
-                                v-for="role in roles"
-                                :key="role.id"
-                                class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
-                            >
-                                <div class="flex items-start justify-between gap-2 mb-2">
-                                    <div class="flex-1 min-w-0">
-                                        <h3 class="font-semibold text-sm sm:text-base mb-1">{{ role.name }}</h3>
-                                        <div class="flex items-center gap-2 mb-1">
-                                            <Badge
-                                                :variant="role.is_admin ? 'default' : 'secondary'"
-                                                class="text-xs"
-                                            >
-                                                {{ role.is_admin ? 'Admin' : 'Access Only' }}
-                                            </Badge>
+                                <div
+                                    v-for="role in roles"
+                                    :key="role.id"
+                                    class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
+                                >
+                                    <div class="flex items-start justify-between gap-2 mb-2">
+                                        <div class="flex-1 min-w-0">
+                                            <h3 class="font-semibold text-sm sm:text-base mb-1">{{ role.name }}</h3>
+                                            <div class="flex items-center gap-2 mb-1">
+                                                <Badge
+                                                    :variant="role.is_admin ? 'default' : 'secondary'"
+                                                    class="text-xs"
+                                                >
+                                                    {{ role.is_admin ? 'Admin' : 'Non-Admin' }}
+                                                </Badge>
+                                            </div>
+                                            <p class="text-xs text-muted-foreground">
+                                                Created: {{ formatDate(role.created_at) }}
+                                            </p>
                                         </div>
-                                        <p class="text-xs text-muted-foreground">
-                                            Created: {{ formatDate(role.created_at) }}
-                                        </p>
+                                        <div class="flex flex-col gap-1 flex-shrink-0">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                @click="openEditRoleDialog(role)"
+                                                :disabled="loading.roles"
+                                                class="h-8 text-xs"
+                                            >
+                                                Edit
+                                            </Button>
+                                            <Button
+                                                variant="destructive"
+                                                size="sm"
+                                                @click="removeRole(role.id)"
+                                                :disabled="loading.roles"
+                                                class="h-8 text-xs"
+                                            >
+                                                Remove
+                                            </Button>
+                                        </div>
                                     </div>
-                                    <div class="flex flex-col gap-1 flex-shrink-0">
-                                        <Button
+                                    <div class="flex flex-wrap gap-1 mt-2">
+                                        <Badge
+                                            v-for="permission in role.permissions.slice(0, 4)"
+                                            :key="permission"
                                             variant="outline"
-                                            size="sm"
-                                            @click="openEditRoleDialog(role)"
-                                            :disabled="loading.roles"
-                                            class="h-8 text-xs"
+                                            :class="['text-xs', getPermissionCategoryColor(permission)]"
                                         >
-                                            Edit
-                                        </Button>
-                                        <Button
-                                            variant="destructive"
-                                            size="sm"
-                                            @click="removeRole(role.id)"
-                                            :disabled="loading.roles"
-                                            class="h-8 text-xs"
+                                            {{ formatPermissionDisplay(permission) }}
+                                        </Badge>
+                                        <Badge
+                                            v-if="role.permissions.length > 4"
+                                            variant="outline"
+                                            class="text-xs"
                                         >
-                                            Remove
-                                        </Button>
+                                            +{{ role.permissions.length - 4 }} more
+                                        </Badge>
                                     </div>
                                 </div>
-                                <div class="flex flex-wrap gap-1 mt-2">
-                                    <Badge
-                                        v-for="permission in role.permissions"
-                                        :key="permission"
-                                        variant="outline"
-                                        class="text-xs"
-                                    >
-                                        {{ permission }}
-                                    </Badge>
-                                </div>
-                            </div>
                             </div>
                         </template>
                     </CardContent>
@@ -1436,11 +1725,7 @@ onMounted(() => {
                                 :disabled="cleanupLoading"
                                 class="w-full sm:w-auto text-xs sm:text-sm"
                             >
-                                {{
-                                    cleanupLoading
-                                        ? "Cleaning..."
-                                        : "Cleanup Expired"
-                                }}
+                                {{ cleanupLoading ? "Cleaning..." : "Cleanup Expired" }}
                             </Button>
                             <Form
                                 v-slot="{ handleSubmit }"
@@ -1464,19 +1749,14 @@ onMounted(() => {
                                         class="w-[95vw] sm:max-w-[425px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
                                     >
                                         <DialogHeader>
-                                            <DialogTitle class="text-base sm:text-lg"
-                                                >Add New Admin</DialogTitle
-                                            >
+                                            <DialogTitle class="text-base sm:text-lg">Add New Admin</DialogTitle>
                                             <DialogDescription class="text-xs sm:text-sm">
-                                                Assign a user as an admin with a
-                                                specific role.
+                                                Assign a user as an admin with a specific role.
                                             </DialogDescription>
                                         </DialogHeader>
                                         <form
                                             id="addAdminDialogForm"
-                                            @submit="
-                                                handleSubmit($event, addAdmin)
-                                            "
+                                            @submit="handleSubmit($event, addAdmin)"
                                         >
                                             <div class="grid gap-4 py-4">
                                                 <FormField
@@ -1484,50 +1764,25 @@ onMounted(() => {
                                                     v-slot="{ componentField }"
                                                 >
                                                     <FormItem>
-                                                        <FormLabel
-                                                            >Admin
-                                                            Type</FormLabel
-                                                        >
+                                                        <FormLabel>Admin Type</FormLabel>
                                                         <Select
-                                                            v-bind="
-                                                                componentField
-                                                            "
-                                                            @update:model-value="
-                                                                (value: any) =>
-                                                                    (selectedAdminType =
-                                                                        value ||
-                                                                        'user')
-                                                            "
+                                                            v-bind="componentField"
+                                                            @update:model-value="(value: any) => (selectedAdminType = value || 'user')"
                                                         >
                                                             <FormControl>
                                                                 <SelectTrigger>
-                                                                    <SelectValue
-                                                                        placeholder="Select admin type"
-                                                                    />
+                                                                    <SelectValue placeholder="Select admin type" />
                                                                 </SelectTrigger>
                                                             </FormControl>
                                                             <SelectContent>
                                                                 <SelectGroup>
-                                                                    <SelectItem
-                                                                        value="user"
-                                                                    >
-                                                                        Existing
-                                                                        User
-                                                                    </SelectItem>
-                                                                    <SelectItem
-                                                                        value="steam_id"
-                                                                    >
-                                                                        Steam ID
-                                                                        Only
-                                                                    </SelectItem>
+                                                                    <SelectItem value="user">Existing User</SelectItem>
+                                                                    <SelectItem value="steam_id">Steam ID Only</SelectItem>
                                                                 </SelectGroup>
                                                             </SelectContent>
                                                         </Select>
                                                         <FormDescription>
-                                                            Choose whether to
-                                                            assign an existing
-                                                            user or add an admin
-                                                            by Steam ID only.
+                                                            Choose whether to assign an existing user or add an admin by Steam ID only.
                                                         </FormDescription>
                                                         <FormMessage />
                                                     </FormItem>
@@ -1537,44 +1792,22 @@ onMounted(() => {
                                                     name="user_id"
                                                     v-slot="{ componentField }"
                                                 >
-                                                    <FormItem
-                                                        v-if="
-                                                            selectedAdminType ===
-                                                            'user'
-                                                        "
-                                                    >
-                                                        <FormLabel
-                                                            >User</FormLabel
-                                                        >
-                                                        <Select
-                                                            v-bind="
-                                                                componentField
-                                                            "
-                                                        >
+                                                    <FormItem v-if="selectedAdminType === 'user'">
+                                                        <FormLabel>User</FormLabel>
+                                                        <Select v-bind="componentField">
                                                             <FormControl>
                                                                 <SelectTrigger>
-                                                                    <SelectValue
-                                                                        placeholder="Select user"
-                                                                    />
+                                                                    <SelectValue placeholder="Select user" />
                                                                 </SelectTrigger>
                                                             </FormControl>
                                                             <SelectContent>
                                                                 <SelectGroup>
                                                                     <SelectItem
                                                                         v-for="user in filteredUsersForSelection"
-                                                                        :key="
-                                                                            user.id
-                                                                        "
-                                                                        :value="
-                                                                            user.id
-                                                                        "
+                                                                        :key="user.id"
+                                                                        :value="user.id"
                                                                     >
-                                                                        {{
-                                                                            user.name
-                                                                        }}
-                                                                        ({{
-                                                                            user.username
-                                                                        }})
+                                                                        {{ user.name }} ({{ user.username }})
                                                                     </SelectItem>
                                                                 </SelectGroup>
                                                             </SelectContent>
@@ -1587,28 +1820,16 @@ onMounted(() => {
                                                     name="steam_id"
                                                     v-slot="{ componentField }"
                                                 >
-                                                    <FormItem
-                                                        v-if="
-                                                            selectedAdminType ===
-                                                            'steam_id'
-                                                        "
-                                                    >
-                                                        <FormLabel
-                                                            >Steam ID</FormLabel
-                                                        >
+                                                    <FormItem v-if="selectedAdminType === 'steam_id'">
+                                                        <FormLabel>Steam ID</FormLabel>
                                                         <FormControl>
                                                             <Input
                                                                 placeholder="76561198012345678"
-                                                                v-bind="
-                                                                    componentField
-                                                                "
+                                                                v-bind="componentField"
                                                             />
                                                         </FormControl>
                                                         <FormDescription>
-                                                            Enter the 17-digit
-                                                            Steam ID of the
-                                                            player you want to
-                                                            make an admin.
+                                                            Enter the 17-digit Steam ID of the player you want to make an admin.
                                                         </FormDescription>
                                                         <FormMessage />
                                                     </FormItem>
@@ -1619,35 +1840,30 @@ onMounted(() => {
                                                     v-slot="{ componentField }"
                                                 >
                                                     <FormItem>
-                                                        <FormLabel
-                                                            >Role</FormLabel
-                                                        >
-                                                        <Select
-                                                            v-bind="
-                                                                componentField
-                                                            "
-                                                        >
+                                                        <FormLabel>Role</FormLabel>
+                                                        <Select v-bind="componentField">
                                                             <FormControl>
                                                                 <SelectTrigger>
-                                                                    <SelectValue
-                                                                        placeholder="Select role"
-                                                                    />
+                                                                    <SelectValue placeholder="Select role" />
                                                                 </SelectTrigger>
                                                             </FormControl>
                                                             <SelectContent>
                                                                 <SelectGroup>
                                                                     <SelectItem
                                                                         v-for="role in roles"
-                                                                        :key="
-                                                                            role.id
-                                                                        "
-                                                                        :value="
-                                                                            role.id
-                                                                        "
+                                                                        :key="role.id"
+                                                                        :value="role.id"
                                                                     >
-                                                                        {{
-                                                                            role.name
-                                                                        }}
+                                                                        <div class="flex items-center gap-2">
+                                                                            <span>{{ role.name }}</span>
+                                                                            <Badge
+                                                                                v-if="!role.is_admin"
+                                                                                variant="secondary"
+                                                                                class="text-xs"
+                                                                            >
+                                                                                Non-Admin
+                                                                            </Badge>
+                                                                        </div>
                                                                     </SelectItem>
                                                                 </SelectGroup>
                                                             </SelectContent>
@@ -1661,26 +1877,15 @@ onMounted(() => {
                                                     v-slot="{ componentField }"
                                                 >
                                                     <FormItem>
-                                                        <FormLabel
-                                                            >Expiration Date
-                                                            (Optional)</FormLabel
-                                                        >
+                                                        <FormLabel>Expiration Date (Optional)</FormLabel>
                                                         <FormControl>
                                                             <Input
                                                                 type="datetime-local"
-                                                                v-bind="
-                                                                    componentField
-                                                                "
+                                                                v-bind="componentField"
                                                             />
                                                         </FormControl>
                                                         <FormDescription>
-                                                            Leave empty for
-                                                            permanent admin
-                                                            access. Set a date
-                                                            and time for
-                                                            temporary access
-                                                            (e.g., 1-month
-                                                            trial).
+                                                            Leave empty for permanent admin access. Set a date for temporary access.
                                                         </FormDescription>
                                                         <FormMessage />
                                                     </FormItem>
@@ -1691,22 +1896,15 @@ onMounted(() => {
                                                     v-slot="{ componentField }"
                                                 >
                                                     <FormItem>
-                                                        <FormLabel
-                                                            >Notes
-                                                            (Optional)</FormLabel
-                                                        >
+                                                        <FormLabel>Notes (Optional)</FormLabel>
                                                         <FormControl>
                                                             <Input
-                                                                placeholder="e.g., Trial period, Temporary whitelist, etc."
-                                                                v-bind="
-                                                                    componentField
-                                                                "
+                                                                placeholder="e.g., Trial period, VIP supporter, etc."
+                                                                v-bind="componentField"
                                                             />
                                                         </FormControl>
                                                         <FormDescription>
-                                                            Add notes about this
-                                                            admin assignment for
-                                                            future reference.
+                                                            Add notes about this admin assignment for future reference.
                                                         </FormDescription>
                                                         <FormMessage />
                                                     </FormItem>
@@ -1716,9 +1914,7 @@ onMounted(() => {
                                                 <Button
                                                     type="button"
                                                     variant="outline"
-                                                    @click="
-                                                        showAddAdminDialog = false
-                                                    "
+                                                    @click="showAddAdminDialog = false"
                                                 >
                                                     Cancel
                                                 </Button>
@@ -1726,11 +1922,7 @@ onMounted(() => {
                                                     type="submit"
                                                     :disabled="addAdminLoading"
                                                 >
-                                                    {{
-                                                        addAdminLoading
-                                                            ? "Adding..."
-                                                            : "Add Admin"
-                                                    }}
+                                                    {{ addAdminLoading ? "Adding..." : "Add Admin" }}
                                                 </Button>
                                             </DialogFooter>
                                         </form>
@@ -1750,44 +1942,28 @@ onMounted(() => {
                                 <Dialog v-model:open="showEditAdminDialog">
                                     <DialogContent class="w-[95vw] sm:max-w-[500px] p-4 sm:p-6">
                                         <DialogHeader>
-                                            <DialogTitle class="text-base sm:text-lg"
-                                                >Edit Admin Notes</DialogTitle
-                                            >
+                                            <DialogTitle class="text-base sm:text-lg">Edit Admin Notes</DialogTitle>
                                             <DialogDescription class="text-xs sm:text-sm">
-                                                Update the notes for this admin
-                                                assignment.
+                                                Update the notes for this admin assignment.
                                             </DialogDescription>
                                         </DialogHeader>
-                                        <form
-                                            @submit="
-                                                handleSubmit(
-                                                    $event,
-                                                    updateAdminNotes,
-                                                )
-                                            "
-                                        >
+                                        <form @submit="handleSubmit($event, updateAdminNotes)">
                                             <div class="grid gap-4 py-4">
                                                 <FormField
                                                     v-slot="{ componentField }"
                                                     name="notes"
                                                 >
                                                     <FormItem>
-                                                        <FormLabel
-                                                            >Notes</FormLabel
-                                                        >
+                                                        <FormLabel>Notes</FormLabel>
                                                         <FormControl>
                                                             <Textarea
-                                                                v-bind="
-                                                                    componentField
-                                                                "
+                                                                v-bind="componentField"
                                                                 placeholder="Add notes about this admin assignment..."
                                                                 rows="4"
                                                             />
                                                         </FormControl>
                                                         <FormDescription>
-                                                            Add any notes or
-                                                            context about this
-                                                            admin assignment.
+                                                            Add any notes or context about this admin assignment.
                                                         </FormDescription>
                                                         <FormMessage />
                                                     </FormItem>
@@ -1797,9 +1973,7 @@ onMounted(() => {
                                                 <Button
                                                     type="button"
                                                     variant="outline"
-                                                    @click="
-                                                        closeEditAdminDialog
-                                                    "
+                                                    @click="closeEditAdminDialog"
                                                 >
                                                     Cancel
                                                 </Button>
@@ -1807,11 +1981,7 @@ onMounted(() => {
                                                     type="submit"
                                                     :disabled="editAdminLoading"
                                                 >
-                                                    {{
-                                                        editAdminLoading
-                                                            ? "Updating..."
-                                                            : "Update Notes"
-                                                    }}
+                                                    {{ editAdminLoading ? "Updating..." : "Update Notes" }}
                                                 </Button>
                                             </DialogFooter>
                                         </form>
@@ -1838,139 +2008,53 @@ onMounted(() => {
                         <template v-else>
                             <!-- Desktop Table View -->
                             <div class="hidden md:block overflow-x-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead class="text-xs sm:text-sm">User</TableHead>
-                                        <TableHead class="text-xs sm:text-sm">Role</TableHead>
-                                        <TableHead class="text-xs sm:text-sm">Status</TableHead>
-                                        <TableHead class="text-xs sm:text-sm">Notes</TableHead>
-                                        <TableHead class="text-xs sm:text-sm">Created At</TableHead>
-                                        <TableHead class="text-right text-xs sm:text-sm"
-                                            >Actions</TableHead
-                                        >
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    <template
-                                        v-for="(
-                                            adminGroup, key
-                                        ) in groupedAdmins"
-                                        :key="key"
-                                    >
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead class="text-xs sm:text-sm">Admin</TableHead>
+                                            <TableHead class="text-xs sm:text-sm">Role</TableHead>
+                                            <TableHead class="text-xs sm:text-sm">Status</TableHead>
+                                            <TableHead class="text-xs sm:text-sm">Notes</TableHead>
+                                            <TableHead class="text-xs sm:text-sm">Created At</TableHead>
+                                            <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
                                         <TableRow
-                                            v-for="(admin, index) in adminGroup"
+                                            v-for="admin in admins"
                                             :key="admin.id"
                                             class="hover:bg-muted/50"
-                                            :class="{
-                                                'opacity-60': admin.is_expired,
-                                            }"
                                         >
-                                            <TableCell>
-                                                <!-- Only show user info for the first row of each group -->
-                                                <div v-if="index === 0">
-                                                    <span class="text-sm sm:text-base">{{
-                                                        getAdminDisplayName(
-                                                            admin,
-                                                        )
-                                                    }}</span>
-                                                    <div
-                                                        v-if="
-                                                            adminGroup.length >
-                                                            1
-                                                        "
-                                                        class="text-xs text-blue-600 font-medium"
-                                                    >
-                                                        {{ adminGroup.length }}
-                                                        roles
-                                                    </div>
-                                                </div>
+                                            <TableCell class="font-medium text-sm sm:text-base">
+                                                {{ getAdminDisplayName(admin) }}
                                             </TableCell>
                                             <TableCell>
                                                 <Badge variant="outline" class="text-xs">
-                                                    {{
-                                                        roles.find(
-                                                            (r) =>
-                                                                r.id ===
-                                                                admin.server_role_id,
-                                                        )?.name
-                                                    }}
+                                                    {{ getRoleName(admin.server_role_id) }}
                                                 </Badge>
                                             </TableCell>
                                             <TableCell>
-                                                <div
-                                                    class="flex flex-col gap-1"
+                                                <Badge
+                                                    :variant="formatExpirationStatus(admin).variant"
+                                                    :class="formatExpirationStatus(admin).class"
+                                                    class="text-xs"
                                                 >
-                                                    <Badge
-                                                        :variant="
-                                                            formatExpirationStatus(
-                                                                admin,
-                                                            ).variant
-                                                        "
-                                                        :class="
-                                                            formatExpirationStatus(
-                                                                admin,
-                                                            ).class
-                                                        "
-                                                        class="w-fit text-xs"
-                                                    >
-                                                        {{
-                                                            formatExpirationStatus(
-                                                                admin,
-                                                            ).text
-                                                        }}
-                                                    </Badge>
-                                                    <div
-                                                        v-if="
-                                                            admin.expires_at &&
-                                                            !admin.is_expired
-                                                        "
-                                                        class="text-xs text-muted-foreground"
-                                                    >
-                                                        Expires:
-                                                        {{
-                                                            formatDate(
-                                                                admin.expires_at,
-                                                            )
-                                                        }}
-                                                    </div>
-                                                </div>
+                                                    {{ formatExpirationStatus(admin).text }}
+                                                </Badge>
                                             </TableCell>
-                                            <TableCell>
-                                                <div
-                                                    class="max-w-32 truncate"
-                                                    :title="admin.notes"
-                                                >
-                                                    <span
-                                                        v-if="admin.notes"
-                                                        class="text-xs sm:text-sm"
-                                                        >{{ admin.notes }}</span
-                                                    >
-                                                    <span
-                                                        v-else
-                                                        class="text-xs sm:text-sm text-muted-foreground italic"
-                                                        >No notes</span
-                                                    >
-                                                </div>
+                                            <TableCell class="text-xs sm:text-sm max-w-[200px] truncate">
+                                                {{ admin.notes || '-' }}
                                             </TableCell>
-                                            <TableCell class="text-xs sm:text-sm">{{
-                                                formatDate(admin.created_at)
-                                            }}</TableCell>
+                                            <TableCell class="text-xs sm:text-sm">
+                                                {{ formatDate(admin.created_at) }}
+                                            </TableCell>
                                             <TableCell class="text-right">
-                                                <div
-                                                    class="flex gap-2 justify-end"
-                                                >
+                                                <div class="flex gap-2 justify-end">
                                                     <Button
                                                         variant="outline"
                                                         size="sm"
-                                                        @click="
-                                                            openEditAdminDialog(
-                                                                admin,
-                                                            )
-                                                        "
-                                                        :disabled="
-                                                            loading.admins
-                                                        "
+                                                        @click="openEditAdminDialog(admin)"
+                                                        :disabled="loading.admins"
                                                         class="text-xs"
                                                     >
                                                         Edit
@@ -1978,14 +2062,8 @@ onMounted(() => {
                                                     <Button
                                                         variant="destructive"
                                                         size="sm"
-                                                        @click="
-                                                            removeAdmin(
-                                                                admin.id,
-                                                            )
-                                                        "
-                                                        :disabled="
-                                                            loading.admins
-                                                        "
+                                                        @click="removeAdmin(admin.id)"
+                                                        :disabled="loading.admins"
                                                         class="text-xs"
                                                     >
                                                         Remove
@@ -1993,194 +2071,68 @@ onMounted(() => {
                                                 </div>
                                             </TableCell>
                                         </TableRow>
-                                    </template>
-                                </TableBody>
-                            </Table>
-                        </div>
+                                    </TableBody>
+                                </Table>
+                            </div>
 
                             <!-- Mobile Card View -->
                             <div class="md:hidden space-y-3">
-                                <template
-                                    v-for="(
-                                        adminGroup, key
-                                    ) in groupedAdmins"
-                                    :key="key"
+                                <div
+                                    v-for="admin in admins"
+                                    :key="admin.id"
+                                    class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
                                 >
-                                    <div
-                                        v-for="(admin, index) in adminGroup"
-                                        :key="admin.id"
-                                        class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
-                                        :class="{
-                                            'opacity-60': admin.is_expired,
-                                        }"
-                                    >
-                                        <div class="flex items-start justify-between gap-2 mb-2">
-                                            <div class="flex-1 min-w-0">
-                                                <div v-if="index === 0">
-                                                    <h3 class="font-semibold text-sm sm:text-base mb-1">{{
-                                                        getAdminDisplayName(
-                                                            admin,
-                                                        )
-                                                    }}</h3>
-                                                    <div
-                                                        v-if="
-                                                            adminGroup.length >
-                                                            1
-                                                        "
-                                                        class="text-xs text-blue-600 font-medium mb-1"
-                                                    >
-                                                        {{ adminGroup.length }}
-                                                        roles
-                                                    </div>
-                                                </div>
-                                                <div class="space-y-1.5 mt-1">
-                                                    <div class="flex items-center gap-2">
-                                                        <span class="text-xs text-muted-foreground">Role:</span>
-                                                        <Badge variant="outline" class="text-xs">
-                                                            {{
-                                                                roles.find(
-                                                                    (r) =>
-                                                                        r.id ===
-                                                                        admin.server_role_id,
-                                                                )?.name
-                                                            }}
-                                                        </Badge>
-                                                    </div>
-                                                    <div class="flex items-center gap-2">
-                                                        <span class="text-xs text-muted-foreground">Status:</span>
-                                                        <Badge
-                                                            :variant="
-                                                                formatExpirationStatus(
-                                                                    admin,
-                                                                ).variant
-                                                            "
-                                                            :class="
-                                                                formatExpirationStatus(
-                                                                    admin,
-                                                                ).class
-                                                            "
-                                                            class="text-xs"
-                                                        >
-                                                            {{
-                                                                formatExpirationStatus(
-                                                                    admin,
-                                                                ).text
-                                                            }}
-                                                        </Badge>
-                                                    </div>
-                                                    <div v-if="admin.notes" class="flex items-start gap-2">
-                                                        <span class="text-xs text-muted-foreground">Notes:</span>
-                                                        <span class="text-xs break-all">{{ admin.notes }}</span>
-                                                    </div>
-                                                    <div class="text-xs text-muted-foreground">
-                                                        Created: {{ formatDate(admin.created_at) }}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="flex flex-col gap-1 flex-shrink-0">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    @click="
-                                                        openEditAdminDialog(
-                                                            admin,
-                                                        )
-                                                    "
-                                                    :disabled="
-                                                        loading.admins
-                                                    "
-                                                    class="h-8 text-xs"
+                                    <div class="flex items-start justify-between gap-2 mb-2">
+                                        <div class="flex-1 min-w-0">
+                                            <h3 class="font-semibold text-sm sm:text-base mb-1">
+                                                {{ getAdminDisplayName(admin) }}
+                                            </h3>
+                                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                                                <Badge variant="outline" class="text-xs">
+                                                    {{ getRoleName(admin.server_role_id) }}
+                                                </Badge>
+                                                <Badge
+                                                    :variant="formatExpirationStatus(admin).variant"
+                                                    :class="formatExpirationStatus(admin).class"
+                                                    class="text-xs"
                                                 >
-                                                    Edit
-                                                </Button>
-                                                <Button
-                                                    variant="destructive"
-                                                    size="sm"
-                                                    @click="
-                                                        removeAdmin(
-                                                            admin.id,
-                                                        )
-                                                    "
-                                                    :disabled="
-                                                        loading.admins
-                                                    "
-                                                    class="h-8 text-xs"
-                                                >
-                                                    Remove
-                                                </Button>
+                                                    {{ formatExpirationStatus(admin).text }}
+                                                </Badge>
                                             </div>
+                                            <p class="text-xs text-muted-foreground">
+                                                Created: {{ formatDate(admin.created_at) }}
+                                            </p>
+                                            <p v-if="admin.notes" class="text-xs text-muted-foreground mt-1 truncate">
+                                                Notes: {{ admin.notes }}
+                                            </p>
+                                        </div>
+                                        <div class="flex flex-col gap-1 flex-shrink-0">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                @click="openEditAdminDialog(admin)"
+                                                :disabled="loading.admins"
+                                                class="h-8 text-xs"
+                                            >
+                                                Edit
+                                            </Button>
+                                            <Button
+                                                variant="destructive"
+                                                size="sm"
+                                                @click="removeAdmin(admin.id)"
+                                                :disabled="loading.admins"
+                                                class="h-8 text-xs"
+                                            >
+                                                Remove
+                                            </Button>
                                         </div>
                                     </div>
-                                </template>
+                                </div>
                             </div>
                         </template>
                     </CardContent>
                 </Card>
             </TabsContent>
         </Tabs>
-
-        <Card class="mt-4 sm:mt-6">
-            <CardHeader>
-                <CardTitle class="text-base sm:text-lg">About Users & Roles</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <p class="text-xs sm:text-sm text-muted-foreground">
-                    This page allows you to manage roles and admins for your
-                    Squad server. Roles define what permissions an admin has,
-                    and admins are users assigned to those roles. Users can have
-                    multiple roles simultaneously.
-                </p>
-                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
-                    <strong>Roles</strong> - Create roles with specific
-                    permissions that determine what actions admins can perform
-                    on the server.
-                </p>
-                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
-                    <strong>Admins</strong> - Assign users to roles, giving them
-                    admin privileges on your server. You can set an expiration
-                    date for temporary access (e.g., trial periods, temporary
-                    whitelist). Users can be assigned multiple different roles,
-                    but cannot have duplicate role assignments.
-                </p>
-                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
-                    <strong>Admin Expiration</strong> - Expired admin roles are
-                    automatically cleaned up hourly. You can also manually
-                    trigger cleanup using the "Cleanup Expired" button.
-                </p>
-                <p class="text-xs sm:text-sm text-muted-foreground mt-2">
-                    <strong>Admin Config</strong> - Download the admin
-                    configuration file to use with your Squad server. Only
-                    active (non-expired) admins are included in the config.
-                </p>
-                <div class="mt-4">
-                    <h3 class="font-medium mb-2 text-sm sm:text-base">Permission Categories</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
-                        <div
-                            v-for="category in permissionCategories"
-                            :key="category.name"
-                            class="border rounded-md p-3"
-                        >
-                            <h4 class="font-medium mb-1">
-                                {{ category.name }}
-                            </h4>
-                            <ul
-                                class="text-sm text-muted-foreground list-disc list-inside"
-                            >
-                                <li
-                                    v-for="permission in category.permissions"
-                                    :key="permission"
-                                >
-                                    {{ permission }}
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            </CardContent>
-        </Card>
     </div>
 </template>
-
-<style scoped>
-/* Add any page-specific styles here */
-</style>

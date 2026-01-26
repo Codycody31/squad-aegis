@@ -12,6 +12,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
+	"go.codycody31.dev/squad-aegis/internal/permissions"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/web"
@@ -38,6 +39,8 @@ type Dependencies struct {
 	WorkflowManager      *workflow_manager.WorkflowManager
 	RemoteBanSyncService *core.RemoteBanSyncService
 	Storage              storage.Storage
+	PermissionService    *permissions.Service
+	PermissionRepo       *permissions.Repository
 }
 
 func NewRouter(serverDependencies *Dependencies) *gin.Engine {
@@ -141,6 +144,20 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			usersGroup.DELETE("/:userId", server.UserDelete)
 		}
 
+		// Permission system routes
+		permissionsGroup := apiGroup.Group("/permissions")
+		{
+			permissionsGroup.Use(server.AuthSession)
+			permissionsGroup.GET("", server.PermissionsList)
+		}
+
+		// Role templates routes
+		roleTemplatesGroup := apiGroup.Group("/role-templates")
+		{
+			roleTemplatesGroup.Use(server.AuthSession)
+			roleTemplatesGroup.GET("", server.RoleTemplatesList)
+		}
+
 		// Ban List Management Routes
 		banListsGroup := apiGroup.Group("/ban-lists")
 		{
@@ -231,8 +248,11 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 
 				serverGroup.GET("/roles", server.ServerRolesList)
 				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)
+				serverGroup.POST("/roles/from-template", server.AuthIsSuperAdmin(), server.ServerRoleCreateFromTemplate)
 				serverGroup.PUT("/roles/:roleId", server.AuthIsSuperAdmin(), server.ServerRolesUpdate)
 				serverGroup.DELETE("/roles/:roleId", server.AuthIsSuperAdmin(), server.ServerRolesRemove)
+				serverGroup.GET("/roles/:roleId/permissions", server.ServerRolePermissionsGet)
+				serverGroup.PUT("/roles/:roleId/permissions", server.AuthIsSuperAdmin(), server.ServerRolePermissionsUpdate)
 
 				serverGroup.GET("/admins", server.ServerAdminsList)
 				serverGroup.POST("/admins", server.AuthIsSuperAdmin(), server.ServerAdminsAdd)
