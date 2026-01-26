@@ -8,6 +8,9 @@
 
 ### Misc
 
+- feat: add security check for copy buttons and improve user feedback with toast notifications ([db4cdc3](https://github.com/Codycody31/squad-aegis/commit/db4cdc3c8f3f2d7ad9b612971ca60bd9f5828399))
+- feat: implement media preview functionality for evidence files ([805d5d9](https://github.com/Codycody31/squad-aegis/commit/805d5d9b9348dddb1eda9c8e68c47b279b4fb2aa))
+- feat: add recent player joins endpoint and UI integration ([ca21e44](https://github.com/Codycody31/squad-aegis/commit/ca21e4473949fc20f1bbf604709a52e52cf7727a))
 - fix: ban expiration calculation using days instead of minutes ([7a9476d](https://github.com/Codycody31/squad-aegis/commit/7a9476dff07200f137e1b5db1f9341243ab9d41e))
 - fix: clean steam_id input and improve player selection handling ([eee8c50](https://github.com/Codycody31/squad-aegis/commit/eee8c50c4b908b6f53ad20bbd10f3a517c7d2898))
 - fix: enhance cookie handling for session authentication and improve player search input ([8eadb53](https://github.com/Codycody31/squad-aegis/commit/8eadb53c363d236199745d522709a526efcf67ed))
