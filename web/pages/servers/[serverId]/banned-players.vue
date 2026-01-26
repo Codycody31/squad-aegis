@@ -2630,7 +2630,7 @@ function copyBanCfgUrl() {
                 </Dialog>
 
                 <!-- Media Preview Modal -->
-                <MediaPreviewModal
+                <EvidenceMediaPreviewModal
                     :open="showMediaPreviewModal"
                     :file="previewingFile"
                     :files="previewableFiles"
