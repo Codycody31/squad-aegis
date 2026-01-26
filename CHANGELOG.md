@@ -8,6 +8,7 @@
 
 ### Misc
 
+- fix: clean steam_id input and improve player selection handling ([eee8c50](https://github.com/Codycody31/squad-aegis/commit/eee8c50c4b908b6f53ad20bbd10f3a517c7d2898))
 - fix: enhance cookie handling for session authentication and improve player search input ([8eadb53](https://github.com/Codycody31/squad-aegis/commit/8eadb53c363d236199745d522709a526efcf67ed))
 - revert: remove BattleMetrics fallback for player name lookup (too slow) ([48db48c](https://github.com/Codycody31/squad-aegis/commit/48db48c3de8bf8c2a592d195ddc759af0d49a324))
 - fix: player name lookup and steam_id JSON encoding for ban list ([235e661](https://github.com/Codycody31/squad-aegis/commit/235e6613257dcfd7a4c481ce9d4ce51e2c166db3))
