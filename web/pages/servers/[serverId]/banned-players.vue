@@ -1375,10 +1375,7 @@ function copyBanCfgUrl() {
                                         <FormItem>
                                             <FormLabel>Player</FormLabel>
                                             <FormControl>
-                                                <div class="relative">
-                                                    <!-- Hidden input for form binding -->
-                                                    <input type="hidden" v-bind="componentField" />
-
+                                                <div class="space-y-2">
                                                     <!-- Selected Player Display -->
                                                     <div v-if="selectedPlayer" class="flex items-center gap-2 p-2 border rounded-md bg-muted/50">
                                                         <div class="flex-1">
@@ -1395,11 +1392,11 @@ function copyBanCfgUrl() {
                                                         </Button>
                                                     </div>
 
-                                                    <!-- Search Input -->
-                                                    <div v-else class="relative">
+                                                    <!-- Search Input (shown when no player selected) -->
+                                                    <div v-if="!selectedPlayer" class="relative">
                                                         <Input
                                                             v-model="playerSearchQuery"
-                                                            placeholder="Search by player name or Steam ID..."
+                                                            placeholder="Search by player name..."
                                                             @input="(e: Event) => debouncedPlayerSearch((e.target as HTMLInputElement).value)"
                                                             @focus="showPlayerDropdown = playerSearchResults.length > 0"
                                                         />
@@ -1423,35 +1420,30 @@ function copyBanCfgUrl() {
                                                                 <p class="text-xs text-muted-foreground">Last seen: {{ new Date(player.last_seen).toLocaleDateString() }}</p>
                                                             </div>
                                                         </div>
-
-                                                        <!-- No Results Message -->
-                                                        <div
-                                                            v-if="showPlayerDropdown && playerSearchResults.length === 0 && playerSearchQuery.length >= 2 && !isSearchingPlayers"
-                                                            class="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md p-3 text-center text-sm text-muted-foreground"
-                                                        >
-                                                            No players found. You can enter a Steam ID manually below.
-                                                        </div>
                                                     </div>
+
+                                                    <!-- Manual Steam ID Input (always shown when no player selected) -->
+                                                    <div v-if="!selectedPlayer">
+                                                        <Input
+                                                            v-bind="componentField"
+                                                            placeholder="Or enter Steam ID: 76561198012345678"
+                                                            @input="(e: Event) => {
+                                                                const target = e.target as HTMLInputElement;
+                                                                if (target.value.length === 17) {
+                                                                    fetchPlayerBanHistory(target.value);
+                                                                }
+                                                            }"
+                                                        />
+                                                    </div>
+
+                                                    <!-- Hidden input to hold steam_id when player is selected -->
+                                                    <input v-if="selectedPlayer" type="hidden" v-bind="componentField" />
                                                 </div>
                                             </FormControl>
                                             <FormDescription v-if="!selectedPlayer">
-                                                Search for a player or enter Steam ID manually
+                                                Search for a player by name, or enter their Steam ID directly
                                             </FormDescription>
                                             <FormMessage />
-
-                                            <!-- Manual Steam ID Input (fallback) -->
-                                            <div v-if="!selectedPlayer && playerSearchQuery.length >= 2 && playerSearchResults.length === 0" class="mt-2">
-                                                <Input
-                                                    placeholder="Or enter Steam ID manually: 76561198012345678"
-                                                    @input="(e: Event) => {
-                                                        const target = e.target as HTMLInputElement;
-                                                        form.setFieldValue('steam_id', target.value);
-                                                        if (target.value.length === 17) {
-                                                            fetchPlayerBanHistory(target.value);
-                                                        }
-                                                    }"
-                                                />
-                                            </div>
                                         </FormItem>
                                     </FormField>
 
