@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { isSecureOrLocalConnection } from "~/utils/security";
 import {
     Card,
     CardContent,
@@ -1357,7 +1358,19 @@ async function refreshData() {
     await fetchServerRules();
 }
 
+// Security check for copy buttons
+const canCopyConfigUrl = computed(() => isSecureOrLocalConnection());
+
 function copyBanCfgUrl() {
+    if (!canCopyConfigUrl.value) {
+        toast({
+            title: "Copy Disabled",
+            description: "Config URL copying is only allowed on HTTPS or localhost connections",
+            variant: "destructive",
+        });
+        return;
+    }
+
     var url = "";
     if (runtimeConfig.public.backendApi.startsWith("/")) {
         // Relative URL, construct full URL
@@ -2636,7 +2649,14 @@ function copyBanCfgUrl() {
                 >
                     {{ loading ? "Refreshing..." : "Refresh" }}
                 </Button>
-                <Button @click="copyBanCfgUrl" class="w-full sm:w-auto text-sm sm:text-base">Copy Ban Config URL</Button>
+                <Button
+                    @click="copyBanCfgUrl"
+                    :disabled="!canCopyConfigUrl"
+                    :title="canCopyConfigUrl ? 'Copy Ban Config URL' : 'Copy disabled - use HTTPS or localhost'"
+                    class="w-full sm:w-auto text-sm sm:text-base"
+                >
+                    Copy Ban Config URL
+                </Button>
             </div>
         </div>
 

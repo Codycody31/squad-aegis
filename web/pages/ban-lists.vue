@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { Button } from "~/components/ui/button";
+import { isSecureOrLocalConnection } from "~/utils/security";
 import {
     Card,
     CardContent,
@@ -89,6 +90,9 @@ const viewCfg = (banListId: string) => {
     const url = getBanListCfgUrl(banListId);
     window.open(url, "_blank");
 };
+
+// Security check for copy buttons
+const canCopyConfigUrl = computed(() => isSecureOrLocalConnection());
 
 // State variables
 const loading = ref(true);
@@ -637,7 +641,8 @@ onMounted(() => {
                                                 variant="ghost"
                                                 size="sm"
                                                 @click="copyCfgUrl(banList.id)"
-                                                title="Copy CFG URL"
+                                                :title="canCopyConfigUrl ? 'Copy CFG URL' : 'Copy disabled - use HTTPS or localhost'"
+                                                :disabled="!canCopyConfigUrl"
                                                 class="text-xs"
                                             >
                                                 <Link class="h-4 w-4" />
@@ -717,6 +722,8 @@ onMounted(() => {
                                     variant="ghost"
                                     size="sm"
                                     @click="copyCfgUrl(banList.id)"
+                                    :title="canCopyConfigUrl ? 'Copy CFG URL' : 'Copy disabled - use HTTPS or localhost'"
+                                    :disabled="!canCopyConfigUrl"
                                     class="h-8 text-xs"
                                 >
                                     <Link class="h-3 w-3" />

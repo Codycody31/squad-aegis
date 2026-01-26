@@ -17,6 +17,7 @@ import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
 import type { User } from "@/types";
 import { useAuthStore } from "@/stores/auth";
+import { toast } from "~/components/ui/toast";
 
 const authStore = useAuthStore();
 
@@ -75,21 +76,25 @@ const loading = ref({
   password: false,
   fetchUser: false,
 });
-const error = ref<string | null>(null);
-const successMessage = ref<string | null>(null);
 
-// Function to show success message with auto-dismiss
+function showError(title: string, message: string) {
+  toast({
+    title,
+    description: message,
+    variant: "destructive",
+  });
+}
+
 function showSuccess(message: string) {
-  successMessage.value = message;
-  setTimeout(() => {
-    successMessage.value = null;
-  }, 5000); // Auto-dismiss after 5 seconds
+  toast({
+    title: "Success",
+    description: message,
+  });
 }
 
 // Function to fetch user data
 async function fetchUserData() {
   loading.value.fetchUser = true;
-  error.value = null;
 
   const runtimeConfig = useRuntimeConfig();
 
@@ -116,8 +121,7 @@ async function fetchUserData() {
       });
     }
   } catch (err: any) {
-    error.value = err.message || "An error occurred while fetching user data";
-    console.error(err);
+    showError("Error", err.message || "An error occurred while fetching user data");
   } finally {
     loading.value.fetchUser = false;
   }
@@ -126,8 +130,6 @@ async function fetchUserData() {
 // Function to update profile
 async function updateProfile(values: any) {
   loading.value.profile = true;
-  error.value = null;
-  successMessage.value = null;
 
   const runtimeConfig = useRuntimeConfig();
 
@@ -156,8 +158,7 @@ async function updateProfile(values: any) {
     // Refresh user data
     fetchUserData();
   } catch (err: any) {
-    error.value = err.message || "An error occurred while updating profile";
-    console.error(err);
+    showError("Update Failed", err.message || "An error occurred while updating profile");
   } finally {
     loading.value.profile = false;
   }
@@ -166,8 +167,6 @@ async function updateProfile(values: any) {
 // Function to change password
 async function changePassword(values: any) {
   loading.value.password = true;
-  error.value = null;
-  successMessage.value = null;
 
   const runtimeConfig = useRuntimeConfig();
 
@@ -194,8 +193,7 @@ async function changePassword(values: any) {
     // Reset password form
     passwordForm.resetForm();
   } catch (err: any) {
-    error.value = err.message || "An error occurred while changing password";
-    console.error(err);
+    showError("Password Change Failed", err.message || "An error occurred while changing password");
   } finally {
     loading.value.password = false;
   }
@@ -210,14 +208,6 @@ onMounted(() => {
 <template>
   <div class="p-4">
     <h1 class="text-3xl font-bold mb-8">Account Settings</h1>
-
-    <div v-if="error" class="bg-red-500 text-white p-4 rounded mb-6">
-      {{ error }}
-    </div>
-
-    <div v-if="successMessage" class="bg-green-500 text-white p-4 rounded mb-6">
-      {{ successMessage }}
-    </div>
 
     <div v-if="loading.fetchUser" class="text-center py-8">
       <div

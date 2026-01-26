@@ -42,11 +42,11 @@ import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
 import { useAuthStore } from "@/stores/auth";
+import { toast } from "~/components/ui/toast";
 
 const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
 const loading = ref(true);
-const error = ref<string | null>(null);
 const users = ref<User[]>([]);
 const refreshInterval = ref<NodeJS.Timeout | null>(null);
 const searchQuery = ref("");
@@ -145,7 +145,6 @@ const filteredUsers = computed(() => {
 // Function to fetch users data
 async function fetchUsers() {
   loading.value = true;
-  error.value = null;
 
   try {
     const { data, error: fetchError } = await useAuthFetch<UsersResponse>(
@@ -170,8 +169,11 @@ async function fetchUsers() {
       });
     }
   } catch (err: any) {
-    error.value = err.message || "An error occurred while fetching users data";
-    console.error(err);
+    toast({
+      title: "Error",
+      description: err.message || "An error occurred while fetching users data",
+      variant: "destructive",
+    });
   } finally {
     loading.value = false;
   }
@@ -182,7 +184,6 @@ async function addUser(values: any) {
   const { steam_id, name, username, password, superAdmin } = values;
 
   addUserLoading.value = true;
-  error.value = null;
 
   try {
     const { data, error: fetchError } = await useAuthFetch(
@@ -207,11 +208,19 @@ async function addUser(values: any) {
     addForm.resetForm();
     showAddUserDialog.value = false;
 
+    toast({
+      title: "Success",
+      description: "User added successfully",
+    });
+
     // Refresh the users list
     fetchUsers();
   } catch (err: any) {
-    error.value = err.message || "An error occurred while adding the user";
-    console.error(err);
+    toast({
+      title: "Failed to Add User",
+      description: err.message || "An error occurred while adding the user",
+      variant: "destructive",
+    });
   } finally {
     addUserLoading.value = false;
   }
@@ -236,7 +245,6 @@ async function editUser(values: any) {
   const { steam_id, name, superAdmin } = values;
 
   editUserLoading.value = true;
-  error.value = null;
 
   try {
     const { data, error: fetchError } = await useAuthFetch(
@@ -260,11 +268,19 @@ async function editUser(values: any) {
     showEditUserDialog.value = false;
     editingUser.value = null;
 
+    toast({
+      title: "Success",
+      description: "User updated successfully",
+    });
+
     // Refresh the users list
     fetchUsers();
   } catch (err: any) {
-    error.value = err.message || "An error occurred while updating the user";
-    console.error(err);
+    toast({
+      title: "Failed to Update User",
+      description: err.message || "An error occurred while updating the user",
+      variant: "destructive",
+    });
   } finally {
     editUserLoading.value = false;
   }
@@ -277,7 +293,6 @@ async function deleteUser(userId: string) {
   }
 
   loading.value = true;
-  error.value = null;
 
   try {
     const { data, error: fetchError } = await useAuthFetch(
@@ -291,11 +306,19 @@ async function deleteUser(userId: string) {
       throw new Error(fetchError.value.message || "Failed to delete user");
     }
 
+    toast({
+      title: "Success",
+      description: "User deleted successfully",
+    });
+
     // Refresh the users list
     fetchUsers();
   } catch (err: any) {
-    error.value = err.message || "An error occurred while deleting the user";
-    console.error(err);
+    toast({
+      title: "Failed to Delete User",
+      description: err.message || "An error occurred while deleting the user",
+      variant: "destructive",
+    });
   } finally {
     loading.value = false;
   }
@@ -521,10 +544,6 @@ function refreshData() {
           {{ loading ? "Refreshing..." : "Refresh" }}
         </Button>
       </div>
-    </div>
-
-    <div v-if="error" class="bg-red-500 text-white p-3 sm:p-4 rounded mb-3 sm:mb-4 text-sm sm:text-base">
-      {{ error }}
     </div>
 
     <Card class="mb-3 sm:mb-4">
