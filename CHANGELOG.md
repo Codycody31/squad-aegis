@@ -8,6 +8,7 @@
 
 ### Misc
 
+- revert: remove BattleMetrics fallback for player name lookup (too slow) ([48db48c](https://github.com/Codycody31/squad-aegis/commit/48db48c3de8bf8c2a592d195ddc759af0d49a324))
 - fix: player name lookup and steam_id JSON encoding for ban list ([235e661](https://github.com/Codycody31/squad-aegis/commit/235e6613257dcfd7a4c481ce9d4ce51e2c166db3))
 - refactor: api calls to handle auth failures & changesto the banned players page ([3053dc3](https://github.com/Codycody31/squad-aegis/commit/3053dc3e55161ccb877b8bc803169ec798f40a39))
 - feat: add ban-with-evidence system for workflows and plugins ([1a1314d](https://github.com/Codycody31/squad-aegis/commit/1a1314d70b4dca9ab2a847ac6c4388018bce5c8a))
