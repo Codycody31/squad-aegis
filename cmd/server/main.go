@@ -23,6 +23,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/permissions"
 	"go.codycody31.dev/squad-aegis/internal/player_tracker_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_registry"
@@ -285,6 +286,10 @@ func run(ctx context.Context) error {
 			httpPort = "3131"
 		}
 
+		// Initialize permission service and repository
+		permissionService := permissions.NewService(database)
+		permissionRepo := permissions.NewRepository(database)
+
 		deps := &server.Dependencies{
 			DB:                   database,
 			Clickhouse:           clickhouseClient,
@@ -296,6 +301,8 @@ func run(ctx context.Context) error {
 			WorkflowManager:      workflowManager,
 			RemoteBanSyncService: core.NewRemoteBanSyncService(database, database),
 			Storage:              storageBackend,
+			PermissionService:    permissionService,
+			PermissionRepo:       permissionRepo,
 		}
 
 		// Start remote ban sync service

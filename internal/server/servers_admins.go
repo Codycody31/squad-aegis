@@ -486,6 +486,7 @@ func (s *Server) ServerAdminsRemove(c *gin.Context) {
 }
 
 // ServerAdminsCfg handles generating the admin config file
+// This exports roles and admins in Squad's admin.cfg format
 func (s *Server) ServerAdminsCfg(c *gin.Context) {
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
@@ -501,7 +502,7 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 		return
 	}
 
-	// Get admins (only active ones for config generation)
+	// Get admins (only active ones for config generation - is_admin=true roles only)
 	admins, err := core.GetActiveServerAdmins(c.Request.Context(), s.Dependencies.DB, serverId)
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server admins", &gin.H{"error": err.Error()})
@@ -510,10 +511,25 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 
 	var configBuilder strings.Builder
 
+	// Write role groups with their RCON permissions from new PBAC schema
 	for _, role := range roles {
-		configBuilder.WriteString(fmt.Sprintf("Group=%s:%s\n", role.Name, strings.Join(role.Permissions, ",")))
+		// Get RCON permissions for this role from the new schema
+		squadPerms, err := s.Dependencies.PermissionService.GetRCONPermissionsForExport(c.Request.Context(), role.Id)
+		if err != nil {
+			// Fall back to legacy permissions if new schema not available
+			configBuilder.WriteString(fmt.Sprintf("Group=%s:%s\n", role.Name, strings.Join(role.Permissions, ",")))
+			continue
+		}
+
+		if len(squadPerms) > 0 {
+			configBuilder.WriteString(fmt.Sprintf("Group=%s:%s\n", role.Name, strings.Join(squadPerms, ",")))
+		} else if len(role.Permissions) > 0 {
+			// Fall back to legacy permissions
+			configBuilder.WriteString(fmt.Sprintf("Group=%s:%s\n", role.Name, strings.Join(role.Permissions, ",")))
+		}
 	}
 
+	// Write admin entries
 	for _, admin := range admins {
 		roleName := ""
 

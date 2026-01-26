@@ -1,3 +1,5 @@
+import { UI_PERMISSIONS, RCON_PERMISSIONS } from "@/constants/permissions";
+
 export default [
   { heading: "Server" },
   {
@@ -6,6 +8,7 @@ export default [
     to: {
       name: "servers-serverId",
     },
+    permissions: [UI_PERMISSIONS.DASHBOARD_VIEW],
   },
   {
     title: "Teams & Squads",
@@ -13,6 +16,7 @@ export default [
     to: {
       name: "servers-serverId-teams-and-squads",
     },
+    permissions: [UI_PERMISSIONS.PLAYERS_VIEW],
   },
   {
     title: "Disconnected Players",
@@ -20,6 +24,7 @@ export default [
     to: {
       name: "servers-serverId-disconnected-players",
     },
+    permissions: [UI_PERMISSIONS.PLAYERS_VIEW],
   },
   {
     title: "Banned Players",
@@ -27,6 +32,7 @@ export default [
     to: {
       name: "servers-serverId-banned-players",
     },
+    permissions: [UI_PERMISSIONS.BANS_VIEW],
   },
   {
     title: "Users & Roles",
@@ -34,7 +40,7 @@ export default [
     to: {
       name: "servers-serverId-users-and-roles",
     },
-    permissions: ["super_admin"],
+    permissions: [UI_PERMISSIONS.USERS_MANAGE, UI_PERMISSIONS.ROLES_MANAGE],
   },
   {
     title: "Console",
@@ -42,7 +48,7 @@ export default [
     to: {
       name: "servers-serverId-console",
     },
-    permissions: ["super_admin", "manageserver"],
+    permissions: [UI_PERMISSIONS.CONSOLE_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
   },
   {
     title: "Feeds",
@@ -50,6 +56,7 @@ export default [
     to: {
       name: "servers-serverId-feeds",
     },
+    permissions: [UI_PERMISSIONS.FEEDS_VIEW],
   },
   {
     title: "Metrics",
@@ -57,6 +64,7 @@ export default [
     to: {
       name: "servers-serverId-metrics",
     },
+    permissions: [UI_PERMISSIONS.METRICS_VIEW],
   },
   {
     title: "Audit Logs",
@@ -64,7 +72,7 @@ export default [
     to: {
       name: "servers-serverId-audit-logs",
     },
-    permissions: ["super_admin", "manageserver"],
+    permissions: [UI_PERMISSIONS.AUDIT_LOGS_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
   },
   {
     title: "Rules",
@@ -72,6 +80,7 @@ export default [
     to: {
       name: "servers-serverId-rules",
     },
+    permissions: [UI_PERMISSIONS.RULES_VIEW],
   },
   {
     title: "Plugins",
@@ -79,7 +88,7 @@ export default [
     to: {
       name: "servers-serverId-plugins",
     },
-    permissions: ["super_admin", "manageserver"],
+    permissions: [UI_PERMISSIONS.PLUGINS_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
   },
   {
     title: "Workflows",
@@ -87,7 +96,7 @@ export default [
     to: {
       name: "servers-serverId-workflows",
     },
-    permissions: ["super_admin", "manageserver"],
+    permissions: [UI_PERMISSIONS.WORKFLOWS_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
   },
   {
     title: "Settings",
@@ -95,5 +104,6 @@ export default [
     to: {
       name: "servers-serverId-settings",
     },
+    permissions: [UI_PERMISSIONS.SETTINGS_VIEW],
   },
 ];

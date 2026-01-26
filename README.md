@@ -46,17 +46,4 @@ For help and support, you can refer to the resources below:
 
 ## License
 
-Squad Aegis is licensed under the Elastic License 2.0 (ELv2).
-
-You are allowed to:
-- Use the software
-- Modify and fork the software
-- Self-host the software for yourself or for your own group/organization
-
-You are **not** allowed to:
-- Sell the software
-- Offer the software as a hosted service or platform to others
-- Repackage or “resell” Squad Aegis commercially without written permission
-
-If you'd like to offer Squad Aegis as a service or include it in a commercial product,
-please contact: Insidious Fiddler (contact@codycody31.dev)
+Squad Aegis is licensed under the Gnu General Public License v3.0 (GPL-3.0). See the [LICENSE](LICENSE) and [NOTICE](NOTICE) files for more details.
