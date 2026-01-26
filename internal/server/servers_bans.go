@@ -117,7 +117,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		// Calculate if ban is permanent and expiry date
 		ban.Permanent = ban.Duration == 0
 		if !ban.Permanent {
-			ban.ExpiresAt = ban.CreatedAt.Add(time.Duration(ban.Duration) * time.Minute)
+			ban.ExpiresAt = ban.CreatedAt.Add(time.Duration(ban.Duration) * 24 * time.Hour)
 		}
 
 		// Load evidence records for this ban
@@ -286,7 +286,7 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 
 	// Add expiry information if not permanent
 	if request.Duration > 0 {
-		expiresAt := time.Now().Add(time.Duration(request.Duration) * time.Minute)
+		expiresAt := time.Now().Add(time.Duration(request.Duration) * 24 * time.Hour)
 		auditData["expiresAt"] = expiresAt.Format(time.RFC3339)
 	}
 
@@ -496,7 +496,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	// Calculate if ban is permanent and expiry date
 	currentBan.Permanent = currentBan.Duration == 0
 	if !currentBan.Permanent {
-		currentBan.ExpiresAt = currentBan.CreatedAt.Add(time.Duration(currentBan.Duration) * time.Minute)
+		currentBan.ExpiresAt = currentBan.CreatedAt.Add(time.Duration(currentBan.Duration) * 24 * time.Hour)
 	}
 
 	// Build update query dynamically based on provided fields
@@ -733,7 +733,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	// Calculate if ban is permanent and expiry date
 	updatedBan.Permanent = updatedBan.Duration == 0
 	if !updatedBan.Permanent {
-		updatedBan.ExpiresAt = updatedBan.CreatedAt.Add(time.Duration(updatedBan.Duration) * time.Minute)
+		updatedBan.ExpiresAt = updatedBan.CreatedAt.Add(time.Duration(updatedBan.Duration) * 24 * time.Hour)
 	}
 
 	// Create detailed audit log
