@@ -226,7 +226,7 @@ async function executeSquadAction() {
                 <span>Swap to Other Team</span>
             </DropdownMenuItem>
             <DropdownMenuItem
-                v-if="squad.name === 'COMMAND SQUAD'"
+                v-if="squad.name.trim().toUpperCase() === 'COMMAND SQUAD'"
                 @click="openActionDialog('demote-commander')"
                 v-show="
                     authStore.getServerPermission(
