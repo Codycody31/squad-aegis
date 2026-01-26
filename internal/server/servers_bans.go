@@ -968,42 +968,113 @@ func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.Ba
 }
 
 // lookupPlayerNamesBatch looks up player names from ClickHouse for a batch of steam IDs
+// Falls back to BattleMetrics API for any missing names
 func (s *Server) lookupPlayerNamesBatch(ctx context.Context, steamIDs []string) map[string]string {
 	result := make(map[string]string)
 
-	if len(steamIDs) == 0 || s.Dependencies.Clickhouse == nil {
+	if len(steamIDs) == 0 {
 		return result
 	}
 
-	// Build query with IN clause for batch lookup
-	// Get the most recent player_suffix for each steam ID
-	query := `
-		SELECT
-			steam,
-			argMax(player_suffix, event_time) as player_name
-		FROM squad_aegis.server_join_succeeded_events
-		WHERE steam IN (?)
-		GROUP BY steam
-	`
+	// First, try to get names from ClickHouse
+	if s.Dependencies.Clickhouse != nil {
+		query := `
+			SELECT
+				steam,
+				argMax(player_suffix, event_time) as player_name
+			FROM squad_aegis.server_join_succeeded_events
+			WHERE steam IN (?)
+			GROUP BY steam
+		`
 
-	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, steamIDs)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to lookup player names from ClickHouse")
-		return result
-	}
-	defer rows.Close()
+		rows, err := s.Dependencies.Clickhouse.Query(ctx, query, steamIDs)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to lookup player names from ClickHouse")
+		} else {
+			defer rows.Close()
 
-	for rows.Next() {
-		var steamID, playerName string
-		if err := rows.Scan(&steamID, &playerName); err != nil {
-			continue
+			for rows.Next() {
+				var steamID, playerName string
+				if err := rows.Scan(&steamID, &playerName); err != nil {
+					continue
+				}
+				if playerName != "" {
+					result[steamID] = playerName
+				}
+			}
 		}
-		if playerName != "" {
-			result[steamID] = playerName
+	}
+
+	// Find steam IDs that still need names
+	var missingSteamIDs []string
+	for _, steamID := range steamIDs {
+		if _, found := result[steamID]; !found {
+			missingSteamIDs = append(missingSteamIDs, steamID)
+		}
+	}
+
+	// Fallback to BattleMetrics for missing names (limit concurrent requests)
+	if len(missingSteamIDs) > 0 {
+		// Limit BattleMetrics lookups to avoid rate limiting
+		maxBattleMetricsLookups := 10
+		if len(missingSteamIDs) > maxBattleMetricsLookups {
+			missingSteamIDs = missingSteamIDs[:maxBattleMetricsLookups]
+		}
+
+		for _, steamID := range missingSteamIDs {
+			if name := s.lookupPlayerNameFromBattleMetrics(ctx, steamID); name != "" {
+				result[steamID] = name
+			}
 		}
 	}
 
 	return result
+}
+
+// lookupPlayerNameFromBattleMetrics fetches a player name from BattleMetrics API
+func (s *Server) lookupPlayerNameFromBattleMetrics(ctx context.Context, steamID string) string {
+	// BattleMetrics player search by Steam ID
+	url := fmt.Sprintf("https://api.battlemetrics.com/players?filter[search]=%s&filter[playerIdentifier]=%s&page[size]=1", steamID, steamID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		log.Debug().Err(err).Str("steam_id", steamID).Msg("Failed to create BattleMetrics request")
+		return ""
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Debug().Err(err).Str("steam_id", steamID).Msg("Failed to query BattleMetrics")
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Debug().Int("status", resp.StatusCode).Str("steam_id", steamID).Msg("BattleMetrics returned non-OK status")
+		return ""
+	}
+
+	var bmResponse struct {
+		Data []struct {
+			Attributes struct {
+				Name string `json:"name"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&bmResponse); err != nil {
+		log.Debug().Err(err).Str("steam_id", steamID).Msg("Failed to decode BattleMetrics response")
+		return ""
+	}
+
+	if len(bmResponse.Data) > 0 {
+		return bmResponse.Data[0].Attributes.Name
+	}
+
+	return ""
 }
 
 // fetchEvidenceMetadataFromClickHouse fetches the full event data from ClickHouse

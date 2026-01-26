@@ -35,7 +35,7 @@ type ServerBan struct {
 	AdminID      uuid.UUID     `json:"admin_id"`
 	AdminName    string        `json:"admin_name"`
 	AdminSteamID string        `json:"admin_steam_id,omitempty"`
-	SteamID      string        `json:"steam_id,string"`
+	SteamID      string        `json:"steam_id"`
 	Name         string        `json:"name"`
 	Reason       string        `json:"reason"`
 	Duration     int           `json:"duration"`
