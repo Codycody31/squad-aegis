@@ -255,12 +255,15 @@ async function searchPlayers(query: string) {
 function selectPlayer(player: any) {
     selectedPlayer.value = player;
     playerSearchQuery.value = player.player_name || "";
-    form.setFieldValue("steam_id", player.steam_id);
+
+    // Ensure steam_id is a clean string (API might return it with quotes or as number)
+    const steamId = String(player.steam_id).replace(/"/g, "");
+    form.setFieldValue("steam_id", steamId);
     showPlayerDropdown.value = false;
 
     // Fetch ban history for the selected player
-    if (player.steam_id) {
-        fetchPlayerBanHistory(player.steam_id);
+    if (steamId) {
+        fetchPlayerBanHistory(steamId);
     }
 }
 
@@ -1422,22 +1425,18 @@ function copyBanCfgUrl() {
                                                         </div>
                                                     </div>
 
-                                                    <!-- Manual Steam ID Input (always shown when no player selected) -->
-                                                    <div v-if="!selectedPlayer">
-                                                        <Input
-                                                            v-bind="componentField"
-                                                            placeholder="Or enter Steam ID: 76561198012345678"
-                                                            @input="(e: Event) => {
-                                                                const target = e.target as HTMLInputElement;
-                                                                if (target.value.length === 17) {
-                                                                    fetchPlayerBanHistory(target.value);
-                                                                }
-                                                            }"
-                                                        />
-                                                    </div>
-
-                                                    <!-- Hidden input to hold steam_id when player is selected -->
-                                                    <input v-if="selectedPlayer" type="hidden" v-bind="componentField" />
+                                                    <!-- Steam ID Input - always present for form binding, hidden when player selected -->
+                                                    <Input
+                                                        v-bind="componentField"
+                                                        :class="{ 'hidden': selectedPlayer }"
+                                                        placeholder="Or enter Steam ID: 76561198012345678"
+                                                        @input="(e: Event) => {
+                                                            const target = e.target as HTMLInputElement;
+                                                            if (target.value.length === 17) {
+                                                                fetchPlayerBanHistory(target.value);
+                                                            }
+                                                        }"
+                                                    />
                                                 </div>
                                             </FormControl>
                                             <FormDescription v-if="!selectedPlayer">
