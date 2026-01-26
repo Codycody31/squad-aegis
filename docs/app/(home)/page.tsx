@@ -142,9 +142,6 @@ export default function HomePage() {
         {/* Technology Stack */}
         <TechnologyStack />
         
-        {/* Licensing */}
-        <Licensing />
-        
         {/* Open Source */}
         <OpenSource />
         
@@ -338,94 +335,18 @@ function TechnologyStack() {
   );
 }
 
-function Licensing() {
-  return (
-    <>
-      <h2 className="text-3xl lg:text-4xl font-bold text-fd-primary text-center mb-8 col-span-full mt-8">
-        Licensing & Usage Rights
-      </h2>
-      
-      <div className={cn(cardVariants({ className: 'flex flex-col col-span-full' }))}>
-        <Scale className="w-8 h-8 mb-4 text-fd-primary" />
-        <h3 className="text-2xl font-bold mb-6">Elastic License 2.0</h3>
-        <p className="mb-6 text-muted-foreground">
-          Squad Aegis is licensed under the Elastic License 2.0 (ELv2), a source-available license 
-          that provides flexibility while protecting the project. Here's what this means for you:
-        </p>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          <div className="p-4 rounded-lg border border-border bg-fd-muted/30">
-            <h4 className="font-semibold mb-2 flex items-center gap-2">
-              <span className="text-green-600 dark:text-green-400">✓</span>
-              What You Can Do
-            </h4>
-            <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-              <li>Use Squad Aegis for any purpose</li>
-              <li>Modify the source code</li>
-              <li>Contribute improvements</li>
-              <li>Share the code with others</li>
-              <li>Run it on your own infrastructure</li>
-            </ul>
-          </div>
-          
-          <div className="p-4 rounded-lg border border-border bg-fd-muted/30">
-            <h4 className="font-semibold mb-2 flex items-center gap-2">
-              <span className="text-red-600 dark:text-red-400">✗</span>
-              What You Cannot Do
-            </h4>
-            <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-              <li>Provide Squad Aegis as a hosted service</li>
-              <li>Circumvent license key functionality</li>
-              <li>Remove or alter license notices</li>
-              <li>Create competing hosted services</li>
-            </ul>
-          </div>
-        </div>
-        
-        <div className="p-4 rounded-lg border border-fd-primary/20 bg-fd-primary/5">
-          <p className="text-sm text-muted-foreground mb-2">
-            <strong className="text-foreground">Key Point:</strong> You can use, modify, and deploy 
-            Squad Aegis freely for your own Squad server management needs. The license only restricts 
-            offering it as a commercial hosted service.
-          </p>
-        </div>
-        
-        <div className="mt-6 flex flex-row items-center gap-2">
-          <a
-            href="https://github.com/Codycody31/squad-aegis/blob/master/LICENSE"
-            rel="noreferrer noopener"
-            target="_blank"
-            className={cn(buttonVariants({ variant: 'secondary' }))}
-          >
-            <FileText className="w-4 h-4" />
-            Read Full License
-          </a>
-          <a
-            href="https://www.elastic.co/licensing/elastic-license"
-            rel="noreferrer noopener"
-            target="_blank"
-            className={cn(buttonVariants({ variant: 'secondary' }))}
-          >
-            Learn About ELv2
-          </a>
-        </div>
-      </div>
-    </>
-  );
-}
-
 function OpenSource() {
   return (
     <>
       <h2 className="text-3xl lg:text-4xl font-bold text-fd-primary text-center mb-8 col-span-full mt-8">
-        Source Available & Community Driven
+        Open Source & Community Driven
       </h2>
       
       <div className={cn(cardVariants({ className: 'flex flex-col' }))}>
         <Heart fill="currentColor" className="text-pink-500 mb-4 w-8 h-8" />
         <h3 className="text-2xl font-bold mb-6">Made Possible by You</h3>
         <p className="mb-8 text-muted-foreground">
-          Squad Aegis is source-available and powered by the community. 
+          Squad Aegis is open-source and powered by the community. 
           Contributions, feedback, and support make this project possible.
         </p>
         <div className="mb-8 flex flex-row items-center gap-2">
@@ -457,10 +378,10 @@ function OpenSource() {
         <li>
           <span className="flex flex-row items-center gap-2 font-medium">
             <Github className="w-5 h-5 text-fd-primary" />
-            Elastic License 2.0
+            GNU General Public License - 3.0
           </span>
           <span className="mt-2 text-sm text-muted-foreground block">
-            Source-available, available on GitHub under Elastic License 2.0.
+            Open-source, available on GitHub under the GNU General Public License - 3.0 (GPL-3.0)
           </span>
         </li>
         <li>
