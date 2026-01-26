@@ -220,6 +220,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Live feeds for chat, connections, and teamkills
 				serverGroup.GET("/feeds", server.AuthSession, server.ServerFeeds)
 				serverGroup.GET("/feeds/history", server.AuthSession, server.ServerFeedsHistory)
+				serverGroup.GET("/feeds/recent-joins", server.ServerRecentJoins)
 
 				// Events search for evidence
 				serverGroup.GET("/events/search", server.AuthHasServerPermission("ban"), server.ServerEventsSearch)

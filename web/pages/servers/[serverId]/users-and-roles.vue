@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { isSecureOrLocalConnection } from "~/utils/security";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
     Table,
@@ -40,6 +41,7 @@ import {
     SelectValue,
 } from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
+import { toast } from "~/components/ui/toast";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
@@ -711,7 +713,19 @@ async function cleanupExpiredAdmins() {
     }
 }
 
+// Security check for copy buttons
+const canCopyConfigUrl = computed(() => isSecureOrLocalConnection());
+
 function copyAdminCfgUrl() {
+    if (!canCopyConfigUrl.value) {
+        toast({
+            title: "Copy Disabled",
+            description: "Config URL copying is only allowed on HTTPS or localhost connections",
+            variant: "destructive",
+        });
+        return;
+    }
+
     const runtimeConfig = useRuntimeConfig();
     var url = "";
     if (runtimeConfig.public.backendApi.startsWith("/")) {
@@ -722,6 +736,11 @@ function copyAdminCfgUrl() {
     }
 
     navigator.clipboard.writeText(url);
+
+    toast({
+        title: "Success",
+        description: "Admin configuration URL copied to clipboard",
+    });
 }
 
 // Format date
@@ -837,7 +856,14 @@ onMounted(() => {
         <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0 mb-3 sm:mb-4">
             <h1 class="text-xl sm:text-2xl font-bold">Users & Roles</h1>
 
-            <Button @click="copyAdminCfgUrl" class="w-full sm:w-auto text-sm sm:text-base">Copy Admin Config URL</Button>
+            <Button
+                @click="copyAdminCfgUrl"
+                :disabled="!canCopyConfigUrl"
+                :title="canCopyConfigUrl ? 'Copy Admin Config URL' : 'Copy disabled - use HTTPS or localhost'"
+                class="w-full sm:w-auto text-sm sm:text-base"
+            >
+                Copy Admin Config URL
+            </Button>
         </div>
 
         <div v-if="error" class="bg-red-500 text-white p-3 sm:p-4 rounded mb-3 sm:mb-4 text-sm sm:text-base">

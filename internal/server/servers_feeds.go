@@ -545,6 +545,107 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 	return events, nil
 }
 
+// ServerRecentJoins returns the most recent player joins for a server
+func (s *Server) ServerRecentJoins(c *gin.Context) {
+	user := s.getUserFromSession(c)
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get limit from query, default to 5
+	limitStr := c.DefaultQuery("limit", "5")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 || limit > 50 {
+		limit = 5
+	}
+
+	joins, err := s.getRecentServerJoins(serverId, limit)
+	if err != nil {
+		responses.BadRequest(c, "Failed to retrieve recent joins", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Recent joins retrieved successfully", &gin.H{
+		"joins": joins,
+		"count": len(joins),
+	})
+}
+
+// RecentJoin represents a recent player join event
+type RecentJoin struct {
+	ID         string    `json:"id"`
+	PlayerName string    `json:"player_name"`
+	SteamID    string    `json:"steam_id,omitempty"`
+	EOSID      string    `json:"eos_id,omitempty"`
+	JoinedAt   time.Time `json:"joined_at"`
+}
+
+// getRecentServerJoins retrieves the most recent player joins from ClickHouse
+func (s *Server) getRecentServerJoins(serverId uuid.UUID, limit int) ([]RecentJoin, error) {
+	if s.Dependencies.Clickhouse == nil {
+		return []RecentJoin{}, nil
+	}
+
+	query := `
+		SELECT
+			chain_id,
+			player_suffix,
+			steam,
+			eos,
+			event_time
+		FROM squad_aegis.server_join_succeeded_events
+		WHERE server_id = ?
+		ORDER BY event_time DESC
+		LIMIT ?`
+
+	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, serverId, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var joins []RecentJoin
+	for rows.Next() {
+		var chainId string
+		var playerSuffix string
+		var steam, eos *string
+		var eventTime time.Time
+
+		err := rows.Scan(&chainId, &playerSuffix, &steam, &eos, &eventTime)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to scan recent join row")
+			continue
+		}
+
+		join := RecentJoin{
+			ID:         chainId,
+			PlayerName: playerSuffix,
+			JoinedAt:   eventTime,
+		}
+
+		if steam != nil {
+			join.SteamID = *steam
+		}
+		if eos != nil {
+			join.EOSID = *eos
+		}
+
+		joins = append(joins, join)
+	}
+
+	return joins, nil
+}
+
 // getHistoricalTeamkillsWithPagination retrieves teamkill history with pagination
 func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
 	if s.Dependencies.Clickhouse == nil {

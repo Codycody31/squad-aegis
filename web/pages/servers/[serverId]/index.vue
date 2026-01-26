@@ -62,6 +62,11 @@ const teamsData = ref<Team[]>([]);
 const loadingTeams = ref(false);
 const errorTeams = ref<string | null>(null);
 
+// State variables for recent joins
+const recentJoins = ref<RecentJoin[]>([]);
+const loadingRecentJoins = ref(false);
+const errorRecentJoins = ref<string | null>(null);
+
 // State variables for map change dialog
 const showMapChangeDialog = ref(false);
 const availableLayers = ref<
@@ -112,6 +117,22 @@ interface Team {
 interface TeamsResponse {
     data: {
         teams: Team[];
+    };
+}
+
+// Interface for recent player joins
+interface RecentJoin {
+    id: string;
+    player_name: string;
+    steam_id?: string;
+    eos_id?: string;
+    joined_at: string;
+}
+
+interface RecentJoinsResponse {
+    data: {
+        joins: RecentJoin[];
+        count: number;
     };
 }
 
@@ -261,6 +282,40 @@ function getTeamPlayerCount(team: Team): number {
     });
 
     return count;
+}
+
+// Fetch recent server joins
+async function fetchRecentJoins() {
+    loadingRecentJoins.value = true;
+    errorRecentJoins.value = null;
+
+    const runtimeConfig = useRuntimeConfig();
+
+    try {
+        const { data, error: fetchError } =
+            await useAuthFetch<RecentJoinsResponse>(
+                `${runtimeConfig.public.backendApi}/servers/${serverId}/feeds/recent-joins?limit=5`,
+                {
+                    method: "GET",
+                },
+            );
+
+        if (fetchError.value) {
+            throw new Error(
+                fetchError.value.message || "Failed to fetch recent joins",
+            );
+        }
+
+        if (data.value && data.value.data) {
+            recentJoins.value = data.value.data.joins || [];
+        }
+    } catch (err: any) {
+        errorRecentJoins.value =
+            err.message || "An error occurred while fetching recent joins";
+        console.error(err);
+    } finally {
+        loadingRecentJoins.value = false;
+    }
 }
 
 // Get all connected players from teams data
@@ -555,6 +610,7 @@ function refresh() {
     fetchTeamsData();
     fetchServerMetrics();
     fetchRconServerInfo();
+    fetchRecentJoins();
 }
 
 refresh();
@@ -829,66 +885,69 @@ refresh();
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <!-- Connected Players Card -->
+                <!-- Last 5 Server Joins Card -->
                 <Card>
                     <CardHeader>
-                        <CardTitle>Connected Players</CardTitle>
+                        <CardTitle>Last 5 Server Joins</CardTitle>
                         <CardDescription
-                            >Currently online players</CardDescription
+                            >Most recent players who joined the
+                            server</CardDescription
                         >
                     </CardHeader>
                     <CardContent>
                         <div
-                            v-if="loadingTeams && connectedPlayers.length === 0"
+                            v-if="
+                                loadingRecentJoins && recentJoins.length === 0
+                            "
                             class="text-center py-4"
                         >
                             <div
                                 class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
                             ></div>
-                            <p class="text-sm">Loading players...</p>
+                            <p class="text-sm">Loading recent joins...</p>
                         </div>
                         <div
-                            v-else-if="errorTeams"
+                            v-else-if="errorRecentJoins"
                             class="text-red-500 text-sm py-2"
                         >
-                            {{ errorTeams }}
+                            {{ errorRecentJoins }}
                         </div>
                         <div
-                            v-else-if="connectedPlayers.length === 0"
+                            v-else-if="recentJoins.length === 0"
                             class="text-center py-4"
                         >
                             <p class="text-sm text-muted-foreground">
-                                No players connected
+                                No recent joins recorded
                             </p>
                         </div>
                         <Table v-else>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Name</TableHead>
-                                    <TableHead>Squad</TableHead>
-                                    <TableHead>Team</TableHead>
+                                    <TableHead>Player</TableHead>
+                                    <TableHead>Joined</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 <TableRow
-                                    v-for="player in connectedPlayers.slice(
-                                        0,
-                                        5,
-                                    )"
-                                    :key="player.steam_id"
+                                    v-for="join in recentJoins"
+                                    :key="join.id"
                                 >
                                     <TableCell>
-                                        <div class="flex items-center">
-                                            <span
-                                                v-if="player.isSquadLeader"
-                                                class="mr-1 text-yellow-500"
-                                                >★</span
-                                            >
-                                            {{ player.name }}
+                                        <div class="font-medium">
+                                            {{ join.player_name }}
                                         </div>
                                     </TableCell>
-                                    <TableCell>{{ player.squad }}</TableCell>
-                                    <TableCell>{{ player.team }}</TableCell>
+                                    <TableCell>
+                                        <span
+                                            class="text-sm text-muted-foreground"
+                                        >
+                                            {{
+                                                new Date(
+                                                    join.joined_at,
+                                                ).toLocaleTimeString()
+                                            }}
+                                        </span>
+                                    </TableCell>
                                 </TableRow>
                             </TableBody>
                         </Table>

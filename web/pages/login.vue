@@ -2,7 +2,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ref } from "vue";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
@@ -16,8 +15,10 @@ import {
   FormDescription,
   FormMessage,
 } from "@/components/ui/form";
+import { toast } from "~/components/ui/toast";
 
 const runtimeConfig = useRuntimeConfig();
+const loginError = ref<string | null>(null);
 
 useHead({
   title: "Login",
@@ -30,8 +31,8 @@ definePageMeta({
 
 const formSchema = toTypedSchema(
   z.object({
-    username: z.string(),
-    password: z.string(),
+    username: z.string().min(1, "Username is required"),
+    password: z.string().min(1, "Password is required"),
   })
 );
 
@@ -40,6 +41,8 @@ const form = useForm({
 });
 
 const onSubmit = form.handleSubmit(async (values) => {
+  loginError.value = null;
+
   const { data, error } = await useFetch(
     `${runtimeConfig.public.backendApi}/auth/login`,
     {
@@ -49,9 +52,14 @@ const onSubmit = form.handleSubmit(async (values) => {
   );
 
   if (error.value) {
-    form.setErrors({
-      username: error.value.data.message,
+    const errorMessage = error.value.data?.message || "Invalid username or password";
+    loginError.value = errorMessage;
+    toast({
+      title: "Login Failed",
+      description: errorMessage,
+      variant: "destructive",
     });
+    return;
   }
 
   if (data.value) {
@@ -79,6 +87,12 @@ const onSubmit = form.handleSubmit(async (values) => {
                   <p class="text-balance text-muted-foreground">
                     Login to your Squad Aegis account
                   </p>
+                </div>
+                <div
+                  v-if="loginError"
+                  class="bg-destructive/15 text-destructive text-sm p-3 rounded-md border border-destructive/30"
+                >
+                  {{ loginError }}
                 </div>
                 <div class="grid gap-2">
                   <FormField v-slot="{ componentField }" name="username">

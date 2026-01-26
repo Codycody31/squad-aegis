@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed, nextTick, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
+import { isSecureOrLocalConnection } from "~/utils/security";
 import {
     Card,
     CardContent,
@@ -57,6 +58,7 @@ import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
 import { toast } from "~/components/ui/toast";
+import { canPreview, getMediaCategory } from "~/utils/mediaTypes";
 
 const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
@@ -108,6 +110,11 @@ const playerSearchResults = ref<any[]>([]);
 const selectedPlayer = ref<any | null>(null);
 const isSearchingPlayers = ref(false);
 const showPlayerDropdown = ref(false);
+
+// Media preview state
+const showMediaPreviewModal = ref(false);
+const previewingFile = ref<BanEvidence | null>(null);
+const previewFileIndex = ref(0);
 
 interface BanEvidence {
     id: string;
@@ -803,6 +810,52 @@ async function downloadEvidenceFile(filePath: string, fileName: string) {
     }
 }
 
+// Function to get the previewable files from the current ban evidence
+const previewableFiles = computed(() => {
+    if (!viewingBanEvidence.value?.evidence) return [];
+    return viewingBanEvidence.value.evidence.filter(
+        (e) => e.evidence_type === "file_upload"
+    );
+});
+
+// Function to get preview URL for a file
+function getPreviewUrl(filePath: string): string {
+    const fileId = filePath.split("/").pop()?.split(".")[0];
+    return `${runtimeConfig.public.backendApi}/servers/${serverId}/evidence/files/${fileId}?inline=true`;
+}
+
+// Function to open media preview modal
+function openMediaPreviewModal(evidence: BanEvidence, index: number) {
+    previewingFile.value = evidence;
+    previewFileIndex.value = index;
+    showMediaPreviewModal.value = true;
+}
+
+// Function to close media preview modal
+function closeMediaPreviewModal() {
+    showMediaPreviewModal.value = false;
+    previewingFile.value = null;
+}
+
+// Function to navigate between files in preview
+function navigatePreview(direction: "prev" | "next") {
+    const files = previewableFiles.value;
+    if (direction === "next" && previewFileIndex.value < files.length - 1) {
+        previewFileIndex.value++;
+        previewingFile.value = files[previewFileIndex.value];
+    } else if (direction === "prev" && previewFileIndex.value > 0) {
+        previewFileIndex.value--;
+        previewingFile.value = files[previewFileIndex.value];
+    }
+}
+
+// Function to download the currently previewed file
+function downloadPreviewedFile() {
+    if (previewingFile.value?.file_path && previewingFile.value?.file_name) {
+        downloadEvidenceFile(previewingFile.value.file_path, previewingFile.value.file_name);
+    }
+}
+
 // Function to fetch ban lists
 async function fetchBanLists() {
     const runtimeConfig = useRuntimeConfig();
@@ -1305,7 +1358,19 @@ async function refreshData() {
     await fetchServerRules();
 }
 
+// Security check for copy buttons
+const canCopyConfigUrl = computed(() => isSecureOrLocalConnection());
+
 function copyBanCfgUrl() {
+    if (!canCopyConfigUrl.value) {
+        toast({
+            title: "Copy Disabled",
+            description: "Config URL copying is only allowed on HTTPS or localhost connections",
+            variant: "destructive",
+        });
+        return;
+    }
+
     var url = "";
     if (runtimeConfig.public.backendApi.startsWith("/")) {
         // Relative URL, construct full URL
@@ -2465,22 +2530,69 @@ function copyBanCfgUrl() {
                                             :key="`file-${idx}`"
                                             class="border rounded-md p-3"
                                         >
-                                            <div class="flex items-center justify-between">
-                                                <div class="flex-1">
-                                                    <div class="font-medium text-sm">{{ evidence.file_name }}</div>
+                                            <div class="flex items-start gap-3">
+                                                <!-- Thumbnail Preview -->
+                                                <div
+                                                    v-if="canPreview(evidence.file_type)"
+                                                    class="w-16 h-16 rounded cursor-pointer overflow-hidden bg-muted flex-shrink-0 flex items-center justify-center"
+                                                    @click="openMediaPreviewModal(evidence, idx)"
+                                                >
+                                                    <img
+                                                        v-if="getMediaCategory(evidence.file_type) === 'image'"
+                                                        :src="getPreviewUrl(evidence.file_path ?? '')"
+                                                        :alt="evidence.file_name ?? 'Image'"
+                                                        class="w-full h-full object-cover"
+                                                    />
+                                                    <Icon
+                                                        v-else-if="getMediaCategory(evidence.file_type) === 'video'"
+                                                        name="lucide:play-circle"
+                                                        class="w-8 h-8 text-muted-foreground"
+                                                    />
+                                                    <Icon
+                                                        v-else-if="getMediaCategory(evidence.file_type) === 'pdf'"
+                                                        name="lucide:file-text"
+                                                        class="w-8 h-8 text-red-500"
+                                                    />
+                                                    <Icon
+                                                        v-else-if="getMediaCategory(evidence.file_type) === 'text'"
+                                                        name="lucide:file-code"
+                                                        class="w-8 h-8 text-blue-500"
+                                                    />
+                                                </div>
+                                                <div v-else class="w-16 h-16 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                                                    <Icon name="lucide:file" class="w-8 h-8 text-muted-foreground" />
+                                                </div>
+
+                                                <!-- File Info -->
+                                                <div class="flex-1 min-w-0">
+                                                    <div class="font-medium text-sm truncate">{{ evidence.file_name }}</div>
                                                     <div class="text-xs text-muted-foreground mt-1">
-                                                        {{ formatFileSize(evidence.file_size || 0) }} • {{ evidence.file_type }}
+                                                        {{ formatFileSize(evidence.file_size || 0) }} &bull; {{ evidence.file_type }}
                                                     </div>
                                                 </div>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    @click="downloadEvidenceFile(evidence.file_path ?? '', evidence.file_name ?? 'file')"
-                                                >
-                                                    <Icon name="lucide:download" class="h-4 w-4 mr-1" />
-                                                    Download
-                                                </Button>
+
+                                                <!-- Actions -->
+                                                <div class="flex gap-2 flex-shrink-0">
+                                                    <Button
+                                                        v-if="canPreview(evidence.file_type)"
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        @click="openMediaPreviewModal(evidence, idx)"
+                                                        title="Preview"
+                                                    >
+                                                        <Icon name="lucide:eye" class="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        @click="downloadEvidenceFile(evidence.file_path ?? '', evidence.file_name ?? 'file')"
+                                                        title="Download"
+                                                    >
+                                                        <Icon name="lucide:download" class="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -2517,6 +2629,18 @@ function copyBanCfgUrl() {
                     </DialogContent>
                 </Dialog>
 
+                <!-- Media Preview Modal -->
+                <MediaPreviewModal
+                    :open="showMediaPreviewModal"
+                    :file="previewingFile"
+                    :files="previewableFiles"
+                    :current-index="previewFileIndex"
+                    :preview-url="previewingFile?.file_path ? getPreviewUrl(previewingFile.file_path) : ''"
+                    @update:open="showMediaPreviewModal = $event"
+                    @navigate="navigatePreview"
+                    @download="downloadPreviewedFile"
+                />
+
                 <Button
                     @click="refreshData"
                     :disabled="loading"
@@ -2525,7 +2649,14 @@ function copyBanCfgUrl() {
                 >
                     {{ loading ? "Refreshing..." : "Refresh" }}
                 </Button>
-                <Button @click="copyBanCfgUrl" class="w-full sm:w-auto text-sm sm:text-base">Copy Ban Config URL</Button>
+                <Button
+                    @click="copyBanCfgUrl"
+                    :disabled="!canCopyConfigUrl"
+                    :title="canCopyConfigUrl ? 'Copy Ban Config URL' : 'Copy disabled - use HTTPS or localhost'"
+                    class="w-full sm:w-auto text-sm sm:text-base"
+                >
+                    Copy Ban Config URL
+                </Button>
             </div>
         </div>
 

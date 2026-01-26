@@ -893,7 +893,7 @@ func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(steamID string) error 
 		if record.Progress >= whitelistThreshold {
 			// Get rank among whitelisted players
 			rank := p.getPlayerRank(steamID)
-			status = fmt.Sprintf("✓ WHITELISTED (Rank #%d)", rank)
+			status = fmt.Sprintf("WHITELISTED (Rank #%d)", rank)
 		} else {
 			status = fmt.Sprintf("Progress: %.1f%%", percentage)
 		}
@@ -924,11 +924,11 @@ func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(steamID string) error 
 func (p *SquadLeaderWhitelistPlugin) sendProgressNotification(steamID, playerName string, percentage float64, isWhitelisted bool) {
 	var message string
 	if isWhitelisted {
-		message = "🎉 CONGRATULATIONS! 🎉\n" +
+		message = "CONGRATULATIONS!\n" +
 			"You are now SQUAD LEADER WHITELISTED!\n" +
 			"Thank you for your leadership!"
 	} else {
-		message = "🎉 SQUAD LEADER PROGRESS 🎉\n" +
+		message = "SQUAD LEADER PROGRESS\n" +
 			fmt.Sprintf("Leadership Update: %.0f%%", percentage) + "\n" +
 			"Keep leading to earn whitelist!"
 	}
