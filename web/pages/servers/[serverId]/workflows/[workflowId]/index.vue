@@ -360,7 +360,6 @@ interface Workflow {
 const route = useRoute();
 const router = useRouter();
 const { toast } = useToast();
-const authFetch = useAuthFetchImperative();
 
 // Route params
 const serverId = route.params.serverId as string;
@@ -508,7 +507,7 @@ const loadWorkflow = async () => {
     const runtimeConfig = useRuntimeConfig();
 
     try {
-        const response = await authFetch<{ workflow: Workflow }>(
+        const response = await useAuthFetchImperative<{ workflow: Workflow }>(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`
         );
 
@@ -551,7 +550,7 @@ const saveWorkflow = async () => {
     const runtimeConfig = useRuntimeConfig();
 
     try {
-        await authFetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "PUT",
@@ -591,7 +590,7 @@ const saveBasicSettings = async () => {
     const runtimeConfig = useRuntimeConfig();
 
     try {
-        await authFetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "PUT",
@@ -632,7 +631,7 @@ const toggleWorkflow = async () => {
     const runtimeConfig = useRuntimeConfig();
 
     try {
-        await authFetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "PUT",
@@ -674,7 +673,7 @@ const deleteWorkflow = async () => {
     const runtimeConfig = useRuntimeConfig();
 
     try {
-        await authFetch(
+        await useAuthFetchImperative(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/workflows/${workflowId}`,
             {
                 method: "DELETE",
