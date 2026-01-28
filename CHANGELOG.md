@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-01-26
+## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-01-28
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### Misc
 
+- chore: clean up unused imports and optimize component structure ([42a135b](https://github.com/Codycody31/squad-aegis/commit/42a135b5287e78438f0ec7339e4ec5885de9a441))
 - chore(server): implement transaction handling in ServerRolesAdd for atomic role creation and permission setting ([2807870](https://github.com/Codycody31/squad-aegis/commit/28078700f92895fab861c56c8f73324c879f3eeb))
 - chore: update licensing information from Elastic License 2.0 to GNU General Public License v3.0 (GPL-3.0) ([7794e32](https://github.com/Codycody31/squad-aegis/commit/7794e32a2625f160f312935b5dfbeeaf8651c6db))
 - feat(auth): enhance permission management with new methods and super admin checks ([aa22e80](https://github.com/Codycody31/squad-aegis/commit/aa22e8079973224b26417c44aefe0b028b921eef))
