@@ -45,6 +45,13 @@ import {
     SelectValue,
 } from "~/components/ui/select";
 import { useToast } from "~/components/ui/toast";
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetHeader,
+    SheetTitle,
+} from "~/components/ui/sheet";
 import WorkflowEditor from "~/components/WorkflowEditor.vue";
 import WorkflowExecutions from "~/components/WorkflowExecutions.vue";
 import WorkflowKVStore from "~/components/WorkflowKVStore.vue";
@@ -106,6 +113,11 @@ const isImporting = ref<boolean>(false);
 const importJsonText = ref<string>("");
 const importError = ref<string>("");
 const importFile = ref<File | null>(null);
+const showEditDialog = ref<boolean>(false);
+const selectedWorkflow = ref<Workflow | null>(null);
+const showExecutionDialog = ref<boolean>(false);
+const showKVStoreSheet = ref<boolean>(false);
+const selectedWorkflowForKV = ref<Workflow | null>(null);
 
 // Form state
 const newWorkflow = ref({
