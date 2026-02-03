@@ -59,6 +59,7 @@ import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
 import { toast } from "~/components/ui/toast";
 import { canPreview, getMediaCategory } from "~/utils/mediaTypes";
+import { UI_PERMISSIONS } from "~/constants/permissions";
 
 const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
@@ -1410,9 +1411,9 @@ function copyBanCfgUrl() {
                         <DialogTrigger asChild>
                             <Button
                                 v-if="
-                                    authStore.getServerPermission(
+                                    authStore.hasPermission(
                                         serverId as string,
-                                        'ban',
+                                        UI_PERMISSIONS.BANS_CREATE,
                                     )
                                 "
                                 class="w-full sm:w-auto text-sm sm:text-base"
@@ -2827,9 +2828,9 @@ function copyBanCfgUrl() {
                                                 @click="openEditBanDialog(player)"
                                                 :disabled="loading"
                                                 v-if="
-                                                    authStore.getServerPermission(
+                                                    authStore.hasPermission(
                                                         serverId,
-                                                        'ban',
+                                                        UI_PERMISSIONS.BANS_EDIT,
                                                     )
                                                 "
                                                 class="text-xs"
@@ -2842,9 +2843,9 @@ function copyBanCfgUrl() {
                                                 @click="removeBan(player.id)"
                                                 :disabled="loading"
                                                 v-if="
-                                                    authStore.getServerPermission(
+                                                    authStore.hasPermission(
                                                         serverId,
-                                                        'ban',
+                                                        UI_PERMISSIONS.BANS_DELETE,
                                                     )
                                                 "
                                                 class="text-xs"
@@ -2934,9 +2935,9 @@ function copyBanCfgUrl() {
                                     @click="openEditBanDialog(player)"
                                     :disabled="loading"
                                     v-if="
-                                        authStore.getServerPermission(
+                                        authStore.hasPermission(
                                             serverId,
-                                            'ban',
+                                            UI_PERMISSIONS.BANS_EDIT,
                                         )
                                     "
                                     class="h-8 text-xs"
@@ -2949,9 +2950,9 @@ function copyBanCfgUrl() {
                                     @click="removeBan(player.id)"
                                     :disabled="loading"
                                     v-if="
-                                        authStore.getServerPermission(
+                                        authStore.hasPermission(
                                             serverId,
-                                            'ban',
+                                            UI_PERMISSIONS.BANS_DELETE,
                                         )
                                     "
                                     class="h-8 text-xs"

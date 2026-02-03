@@ -26,6 +26,7 @@ import {
 } from "~/components/ui/select";
 import { useToast } from "~/components/ui/toast";
 import type { Player } from "~/types";
+import { UI_PERMISSIONS } from "~/constants/permissions";
 
 const { toast } = useToast();
 const authStore = useAuthStore();
@@ -297,19 +298,19 @@ async function executeBulkAction() {
 }
 
 const hasKickPermission = computed(() =>
-    authStore.getServerPermission(props.serverId as string, "kick")
+    authStore.hasPermission(props.serverId as string, UI_PERMISSIONS.PLAYERS_KICK)
 );
 
 const hasBanPermission = computed(() =>
-    authStore.getServerPermission(props.serverId as string, "ban")
+    authStore.hasPermission(props.serverId as string, UI_PERMISSIONS.BANS_CREATE)
 );
 
 const hasWarnPermission = computed(() =>
-    authStore.getServerPermission(props.serverId as string, "warn")
+    authStore.hasPermission(props.serverId as string, UI_PERMISSIONS.PLAYERS_WARN)
 );
 
 const hasMovePermission = computed(() =>
-    authStore.getServerPermission(props.serverId as string, "forceteamchange")
+    authStore.hasPermission(props.serverId as string, UI_PERMISSIONS.PLAYERS_MOVE)
 );
 </script>
 
