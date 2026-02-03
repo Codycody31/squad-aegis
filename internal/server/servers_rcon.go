@@ -416,8 +416,8 @@ func (s *Server) logRuleViolation(ctx context.Context, serverId uuid.UUID, steam
 	}
 
 	query := `
-		INSERT INTO squad_aegis.player_rule_violations 
-		(violation_id, server_id, player_steam_id, rule_id, admin_user_id, action_type, created_at, ingested_at) 
+		INSERT INTO squad_aegis.player_rule_violations
+		(violation_id, server_id, player_steam_id, rule_id, admin_user_id, action_type, created_at, ingested_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
@@ -583,6 +583,11 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	}
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
+
+	_, err = r.ExecuteRaw("AdminReloadServerConfig")
+	if err != nil {
+		log.Error().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban")
+	}
 
 	// Also kick the player via RCON
 	err = r.KickPlayer(request.SteamId, request.Reason)
