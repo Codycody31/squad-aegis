@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-01-28
+## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-02-03
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### Misc
 
+- chore: hopefully fix squad not loading remote ban lists cfg ([d7423c4](https://github.com/Codycody31/squad-aegis/commit/d7423c41f9d5d30095c9f00bda23dceabc1e7de6))
 - refactor: replace authFetch with useAuthFetchImperative for consistency in API calls ([0d40ac0](https://github.com/Codycody31/squad-aegis/commit/0d40ac0e3cd267e462723963a6a5c3b80a8dbf09))
 - chore: clean up unused imports and optimize component structure ([42a135b](https://github.com/Codycody31/squad-aegis/commit/42a135b5287e78438f0ec7339e4ec5885de9a441))
 - chore(server): implement transaction handling in ServerRolesAdd for atomic role creation and permission setting ([2807870](https://github.com/Codycody31/squad-aegis/commit/28078700f92895fab861c56c8f73324c879f3eeb))
