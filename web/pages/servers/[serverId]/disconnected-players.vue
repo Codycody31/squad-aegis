@@ -47,9 +47,11 @@ async function fetchDisconnectedPlayers() {
   loading.value = true;
   error.value = null;
 
+  const runtimeConfig = useRuntimeConfig();
+
   try {
     const { data, error: fetchError } = await useAuthFetch<PlayersResponse>(
-      `/servers/${serverId}/rcon/server-population`,
+      `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/server-population`,
       {
         method: "GET",
       }
