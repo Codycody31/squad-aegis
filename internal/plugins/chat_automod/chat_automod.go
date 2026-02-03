@@ -101,14 +101,6 @@ func getConfigSchema() plug_config_schema.ConfigSchema {
 				Type:        plug_config_schema.FieldTypeBool,
 				Default:     true,
 			},
-			{
-				Name:        "enable_hate_speech",
-				Description: "Enable detection of hate speech patterns (e.g., 'kill all X', 'death to X')",
-				Required:    false,
-				Type:        plug_config_schema.FieldTypeBool,
-				Default:     true,
-			},
-
 			// Regional settings
 			{
 				Name:        "region",
@@ -290,13 +282,12 @@ func (p *ChatAutoModPlugin) Initialize(config map[string]interface{}, apis *plug
 	}
 
 	p.apis.LogAPI.Info("Chat AutoMod plugin initialized", map[string]interface{}{
-		"region":                   p.getStringConfig("region"),
-		"enable_racial_slurs":      p.getBoolConfig("enable_racial_slurs"),
-		"enable_homophobic_slurs":  p.getBoolConfig("enable_homophobic_slurs"),
-		"enable_ableist_language":  p.getBoolConfig("enable_ableist_language"),
-		"enable_hate_speech":       p.getBoolConfig("enable_hate_speech"),
-		"violation_expiry_days":    expiryDays,
-		"escalation_action_count":  len(p.escalationActions),
+		"region":                  p.getStringConfig("region"),
+		"enable_racial_slurs":     p.getBoolConfig("enable_racial_slurs"),
+		"enable_homophobic_slurs": p.getBoolConfig("enable_homophobic_slurs"),
+		"enable_ableist_language": p.getBoolConfig("enable_ableist_language"),
+		"violation_expiry_days":   expiryDays,
+		"escalation_action_count": len(p.escalationActions),
 	})
 
 	return nil
@@ -308,9 +299,8 @@ func (p *ChatAutoModPlugin) initializeFilters() error {
 	enableRacial := p.getBoolConfig("enable_racial_slurs")
 	enableHomophobic := p.getBoolConfig("enable_homophobic_slurs")
 	enableAbleist := p.getBoolConfig("enable_ableist_language")
-	enableHateSpeech := p.getBoolConfig("enable_hate_speech")
 
-	p.filters = NewLanguageFilters(region, enableRacial, enableHomophobic, enableAbleist, enableHateSpeech)
+	p.filters = NewLanguageFilters(region, enableRacial, enableHomophobic, enableAbleist)
 
 	// Set whitelist
 	whitelist := p.getArrayStringConfig("whitelist")
