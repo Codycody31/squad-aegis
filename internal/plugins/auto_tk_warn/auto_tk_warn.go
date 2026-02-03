@@ -3,6 +3,7 @@ package auto_tk_warn
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
@@ -39,14 +40,14 @@ func Define() plugin_manager.PluginDefinition {
 			Fields: []plug_config_schema.ConfigField{
 				{
 					Name:        "attacker_message",
-					Description: "The message to warn attacking players with.",
+					Description: "The message to warn attacking players with. Use {{attacker}} for attacker name and {{victim}} for victim name.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeString,
 					Default:     "Please apologise for ALL TKs in ALL chat!",
 				},
 				{
 					Name:        "victim_message",
-					Description: "The message that will be sent to the victim.",
+					Description: "The message that will be sent to the victim. Use {{attacker}} for attacker name and {{victim}} for victim name.",
 					Required:    false,
 					Type:        plug_config_schema.FieldTypeString,
 					Default:     "You have been TK'd...",
@@ -211,6 +212,10 @@ func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) 
 	attackerMessage := p.getStringConfig("attacker_message")
 	victimMessage := p.getStringConfig("victim_message")
 
+	// Replace template variables in messages
+	attackerMessage = p.replaceTemplateVars(attackerMessage, event.AttackerName, event.VictimName)
+	victimMessage = p.replaceTemplateVars(victimMessage, event.AttackerName, event.VictimName)
+
 	// Warn the attacker if configured
 	if warnAttacker && attackerMessage != "" && event.AttackerSteam != "" {
 		if err := p.apis.RconAPI.SendWarningToPlayer(event.AttackerSteam, attackerMessage); err != nil {
@@ -280,4 +285,11 @@ func (p *AutoTKWarnPlugin) getBoolConfig(key string) bool {
 		return value
 	}
 	return false
+}
+
+// replaceTemplateVars replaces {{attacker}} and {{victim}} placeholders with actual names
+func (p *AutoTKWarnPlugin) replaceTemplateVars(message, attackerName, victimName string) string {
+	message = strings.ReplaceAll(message, "{{attacker}}", attackerName)
+	message = strings.ReplaceAll(message, "{{victim}}", victimName)
+	return message
 }
