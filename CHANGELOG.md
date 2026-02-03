@@ -8,6 +8,8 @@
 
 ### Misc
 
+- feat(plugin): chat auto-mod ([e03a4f5](https://github.com/Codycody31/squad-aegis/commit/e03a4f518e918183ec827cea6f2a93e0a909425a))
+- refactor: fix incorrect permission checks on banned players and other conponents ([043ddb8](https://github.com/Codycody31/squad-aegis/commit/043ddb8669aaa0c4f1cb2c609d39ce4affc461c7))
 - chore: hopefully fix squad not loading remote ban lists cfg ([d7423c4](https://github.com/Codycody31/squad-aegis/commit/d7423c41f9d5d30095c9f00bda23dceabc1e7de6))
 - refactor: replace authFetch with useAuthFetchImperative for consistency in API calls ([0d40ac0](https://github.com/Codycody31/squad-aegis/commit/0d40ac0e3cd267e462723963a6a5c3b80a8dbf09))
 - chore: clean up unused imports and optimize component structure ([42a135b](https://github.com/Codycody31/squad-aegis/commit/42a135b5287e78438f0ec7339e4ec5885de9a441))
