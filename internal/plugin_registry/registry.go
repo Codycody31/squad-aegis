@@ -8,6 +8,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugins/auto_tk_warn"
 	"go.codycody31.dev/squad-aegis/internal/plugins/auto_warn_sl_wrong_kit"
 	"go.codycody31.dev/squad-aegis/internal/plugins/cbl"
+	"go.codycody31.dev/squad-aegis/internal/plugins/chat_automod"
 	"go.codycody31.dev/squad-aegis/internal/plugins/chat_commands"
 	"go.codycody31.dev/squad-aegis/internal/plugins/command_scheduler"
 	"go.codycody31.dev/squad-aegis/internal/plugins/discord_admin_broadcast"
@@ -70,6 +71,12 @@ func RegisterAllPlugins(pm *plugin_manager.PluginManager) error {
 	// Register CBL plugin
 	if err := pm.RegisterPlugin(cbl.Define()); err != nil {
 		log.Error().Err(err).Msg("Failed to register CBL plugin")
+		return err
+	}
+
+	// Register Chat AutoMod plugin
+	if err := pm.RegisterPlugin(chat_automod.Define()); err != nil {
+		log.Error().Err(err).Msg("Failed to register Chat AutoMod plugin")
 		return err
 	}
 
