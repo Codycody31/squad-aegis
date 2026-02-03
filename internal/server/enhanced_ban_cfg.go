@@ -90,7 +90,7 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 
 		var expiryTimestamp string
 		if ban.Duration == 0 {
-			expiryTimestamp = "9999999999"
+			expiryTimestamp = "0"
 		} else {
 			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * (time.Hour * 24))
 			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
@@ -140,7 +140,7 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 
 		var expiryTimestamp string
 		if duration == 0 {
-			expiryTimestamp = "9999999999"
+			expiryTimestamp = "0"
 		} else {
 			expiryTime := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
 			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
@@ -245,7 +245,7 @@ func (s *Server) processCSVBans(c *gin.Context, body io.Reader, banCfg *strings.
 		expiry := "0"
 		if len(record) > 3 && record[3] != "" {
 			if record[3] == "0" {
-				expiry = "9999999999"
+				expiry = "0"
 			} else {
 				// If there's an expiry timestamp
 				if expiryTime, err := time.Parse(time.RFC3339, record[3]); err == nil {
@@ -303,7 +303,7 @@ func (s *Server) processTextBans(c *gin.Context, body io.Reader, banCfg *strings
 				}
 			}
 		} else {
-			expiryStr = "9999999999"
+			expiryStr = "0"
 		}
 
 		// Remote bans don't have admin info, so use "Remote" as admin name
