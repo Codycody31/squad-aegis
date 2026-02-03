@@ -1914,18 +1914,27 @@ func (s *Server) PlayerSessionHistory(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	query := fmt.Sprintf(`
-		SELECT
-			event_time,
-			server_id,
-			ip,
-			'connected' as event_type
-		FROM squad_aegis.server_player_connected_events
-		WHERE %s
-		ORDER BY event_time DESC
+		SELECT * FROM (
+			SELECT
+				event_time,
+				server_id,
+				ip,
+				'connected' as event_type
+			FROM squad_aegis.server_player_connected_events
+			WHERE %s
+			UNION ALL
+			SELECT
+				event_time,
+				server_id,
+				ip,
+				'disconnected' as event_type
+			FROM squad_aegis.server_player_disconnected_events
+			WHERE %s
+		) ORDER BY event_time DESC
 		LIMIT ? OFFSET ?
-	`, whereClause)
+	`, whereClause, whereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, limit, offset)
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, limit, offset)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
