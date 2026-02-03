@@ -221,18 +221,18 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/metrics", server.ServerMetrics)
 				serverGroup.GET("/metrics/history", server.ServerMetricsHistory)
 				serverGroup.GET("/status", server.ServerStatus)
-				serverGroup.GET("/audit-logs", server.AuthHasServerPermission("manageserver"), server.ServerAuditLogs)
+				serverGroup.GET("/audit-logs", server.RequirePermission(permissions.RCONManageServer), server.ServerAuditLogs)
 
 				serverGroup.GET("/rcon/commands", server.RconCommandList)
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)
 				serverGroup.POST("/rcon/execute", server.ServerRconExecute)
 				serverGroup.GET("/rcon/server-population", server.ServerRconServerPopulation)
 				serverGroup.GET("/rcon/available-layers", server.ServerRconAvailableLayers)
-				serverGroup.GET("/rcon/events", server.AuthHasServerPermission("manageserver"), server.ServerRconEvents)
-				serverGroup.POST("/rcon/force-restart", server.AuthHasServerPermission("manageserver"), server.ServerRconForceRestart)
+				serverGroup.GET("/rcon/events", server.RequirePermission(permissions.RCONManageServer), server.ServerRconEvents)
+				serverGroup.POST("/rcon/force-restart", server.RequirePermission(permissions.RCONManageServer), server.ServerRconForceRestart)
 
 				// Log watcher management
-				serverGroup.POST("/logwatcher/restart", server.AuthHasServerPermission("manageserver"), server.ServerLogwatcherRestart)
+				serverGroup.POST("/logwatcher/restart", server.RequirePermission(permissions.RCONManageServer), server.ServerLogwatcherRestart)
 
 				// Live feeds for chat, connections, and teamkills
 				serverGroup.GET("/feeds", server.AuthSession, server.ServerFeeds)
@@ -240,11 +240,11 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.GET("/feeds/recent-joins", server.ServerRecentJoins)
 
 				// Events search for evidence
-				serverGroup.GET("/events/search", server.AuthHasServerPermission("ban"), server.ServerEventsSearch)
+				serverGroup.GET("/events/search", server.RequireAnyPermission(permissions.UIBansCreate, permissions.UIBansEdit), server.ServerEventsSearch)
 
 				// Evidence file upload/download
-				serverGroup.POST("/evidence/upload", server.AuthHasServerPermission("ban"), server.ServerEvidenceFileUpload)
-				serverGroup.GET("/evidence/files/:fileId", server.AuthHasServerPermission("ban"), server.ServerEvidenceFileDownload)
+				serverGroup.POST("/evidence/upload", server.RequireAnyPermission(permissions.UIBansCreate, permissions.UIBansEdit), server.ServerEvidenceFileUpload)
+				serverGroup.GET("/evidence/files/:fileId", server.RequireAnyPermission(permissions.UIBansView, permissions.UIBansCreate, permissions.UIBansEdit), server.ServerEvidenceFileDownload)
 
 				serverGroup.GET("/roles", server.ServerRolesList)
 				serverGroup.POST("/roles", server.AuthIsSuperAdmin(), server.ServerRolesAdd)
@@ -260,27 +260,27 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.DELETE("/admins/:adminId", server.AuthIsSuperAdmin(), server.ServerAdminsRemove)
 
 				serverGroup.GET("/bans", server.ServerBansList)
-				serverGroup.POST("/bans", server.AuthHasAnyServerPermission("ban"), server.ServerBansAdd)
-				serverGroup.PUT("/bans/:banId", server.AuthHasAnyServerPermission("ban"), server.ServerBansUpdate)
-				serverGroup.DELETE("/bans/:banId", server.AuthHasAnyServerPermission("ban"), server.ServerBansRemove)
+				serverGroup.POST("/bans", server.RequirePermission(permissions.UIBansCreate), server.ServerBansAdd)
+				serverGroup.PUT("/bans/:banId", server.RequirePermission(permissions.UIBansEdit), server.ServerBansUpdate)
+				serverGroup.DELETE("/bans/:banId", server.RequirePermission(permissions.UIBansDelete), server.ServerBansRemove)
 
 				// Ban list subscription management
 				serverGroup.GET("/ban-list-subscriptions", server.ServerBanListSubscriptions)
-				serverGroup.POST("/ban-list-subscriptions", server.AuthHasServerPermission("manageserver"), server.ServerBanListSubscriptionCreate)
-				serverGroup.DELETE("/ban-list-subscriptions/:banListId", server.AuthHasServerPermission("manageserver"), server.ServerBanListSubscriptionDelete)
+				serverGroup.POST("/ban-list-subscriptions", server.RequirePermission(permissions.RCONManageServer), server.ServerBanListSubscriptionCreate)
+				serverGroup.DELETE("/ban-list-subscriptions/:banListId", server.RequirePermission(permissions.RCONManageServer), server.ServerBanListSubscriptionDelete)
 
 				// Player action endpoints
-				serverGroup.POST("/rcon/kick-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconKickPlayer)
-				serverGroup.POST("/rcon/warn-player", server.AuthHasAnyServerPermission("kick"), server.ServerRconWarnPlayer)
-				serverGroup.POST("/rcon/move-player", server.AuthHasAnyServerPermission("forceteamchange"), server.ServerRconMovePlayer)
+				serverGroup.POST("/rcon/kick-player", server.RequirePermission(permissions.UIPlayersKick), server.ServerRconKickPlayer)
+				serverGroup.POST("/rcon/warn-player", server.RequirePermission(permissions.UIPlayersWarn), server.ServerRconWarnPlayer)
+				serverGroup.POST("/rcon/move-player", server.RequirePermission(permissions.UIPlayersMove), server.ServerRconMovePlayer)
 
 				// Player action endpoints with rule violation support
 				playerActionGroup := serverGroup.Group("/rcon/player")
 				{
 					playerActionGroup.GET("/escalation-suggestion", server.ServerRconPlayerEscalationSuggestion)
-					playerActionGroup.POST("/kick", server.AuthHasAnyServerPermission("kick"), server.ServerRconPlayerKick)
-					playerActionGroup.POST("/ban", server.AuthHasAnyServerPermission("ban"), server.ServerRconPlayerBan)
-					playerActionGroup.POST("/warn", server.AuthHasAnyServerPermission("kick"), server.ServerRconPlayerWarn)
+					playerActionGroup.POST("/kick", server.RequirePermission(permissions.UIPlayersKick), server.ServerRconPlayerKick)
+					playerActionGroup.POST("/ban", server.RequirePermission(permissions.UIBansCreate), server.ServerRconPlayerBan)
+					playerActionGroup.POST("/warn", server.RequirePermission(permissions.UIPlayersWarn), server.ServerRconPlayerWarn)
 				}
 
 				// Server info endpoints
@@ -290,21 +290,21 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				pluginGroup := serverGroup.Group("/plugins")
 				{
 					pluginGroup.GET("", server.ServerPluginList)
-					pluginGroup.GET("/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogsAll)
-					pluginGroup.GET("/logs/ws", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogsAllWebSocket)
-					pluginGroup.POST("", server.AuthHasServerPermission("manageserver"), server.ServerPluginCreate)
+					pluginGroup.GET("/logs", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginLogsAll)
+					pluginGroup.GET("/logs/ws", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginLogsAllWebSocket)
+					pluginGroup.POST("", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginCreate)
 					pluginGroup.GET("/:pluginId", server.ServerPluginGet)
-					pluginGroup.PUT("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginUpdate)
-					pluginGroup.POST("/:pluginId/enable", server.AuthHasServerPermission("manageserver"), server.ServerPluginEnable)
-					pluginGroup.POST("/:pluginId/disable", server.AuthHasServerPermission("manageserver"), server.ServerPluginDisable)
-					pluginGroup.DELETE("/:pluginId", server.AuthHasServerPermission("manageserver"), server.ServerPluginDelete)
-					pluginGroup.GET("/:pluginId/logs", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogs)
-					pluginGroup.GET("/:pluginId/logs/ws", server.AuthHasServerPermission("manageserver"), server.ServerPluginLogsWebSocket)
+					pluginGroup.PUT("/:pluginId", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginUpdate)
+					pluginGroup.POST("/:pluginId/enable", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginEnable)
+					pluginGroup.POST("/:pluginId/disable", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDisable)
+					pluginGroup.DELETE("/:pluginId", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDelete)
+					pluginGroup.GET("/:pluginId/logs", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginLogs)
+					pluginGroup.GET("/:pluginId/logs/ws", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginLogsWebSocket)
 					pluginGroup.GET("/:pluginId/metrics", server.ServerPluginMetrics)
-					pluginGroup.GET("/:pluginId/data", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataGet)
-					pluginGroup.POST("/:pluginId/data", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataSet)
-					pluginGroup.DELETE("/:pluginId/data", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataClear)
-					pluginGroup.DELETE("/:pluginId/data/:key", server.AuthHasServerPermission("manageserver"), server.ServerPluginDataDelete)
+					pluginGroup.GET("/:pluginId/data", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDataGet)
+					pluginGroup.POST("/:pluginId/data", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDataSet)
+					pluginGroup.DELETE("/:pluginId/data", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDataClear)
+					pluginGroup.DELETE("/:pluginId/data/:key", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDataDelete)
 					
 					// Plugin command endpoints
 					pluginGroup.GET("/:pluginId/commands", server.ServerPluginCommandsList)
@@ -316,16 +316,16 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				rulesGroup := serverGroup.Group("/rules")
 				{
 					rulesGroup.GET("", server.listServerRules)
-					rulesGroup.POST("", server.AuthHasServerPermission("manageserver"), server.createServerRule)
-					rulesGroup.PUT("/:ruleId", server.AuthHasServerPermission("manageserver"), server.updateServerRule)
-					rulesGroup.DELETE("/:ruleId", server.AuthHasServerPermission("manageserver"), server.deleteServerRule)
-					rulesGroup.PUT("/bulk", server.AuthHasServerPermission("manageserver"), server.bulkUpdateServerRules) // Bulk update endpoint
+					rulesGroup.POST("", server.RequirePermission(permissions.UIRulesManage), server.createServerRule)
+					rulesGroup.PUT("/:ruleId", server.RequirePermission(permissions.UIRulesManage), server.updateServerRule)
+					rulesGroup.DELETE("/:ruleId", server.RequirePermission(permissions.UIRulesManage), server.deleteServerRule)
+					rulesGroup.PUT("/bulk", server.RequirePermission(permissions.UIRulesManage), server.bulkUpdateServerRules) // Bulk update endpoint
 				}
 
 				// Server Workflows
 				workflowsGroup := serverGroup.Group("/workflows")
 				{
-					workflowsGroup.Use(server.AuthHasServerPermission("manageserver"))
+					workflowsGroup.Use(server.RequirePermission(permissions.UIWorkflowsManage))
 					workflowsGroup.GET("", server.ServerWorkflowsList)
 					workflowsGroup.POST("", server.ServerWorkflowCreate)
 

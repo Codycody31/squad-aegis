@@ -2,10 +2,8 @@ package server
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/Masterminds/squirrel"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/leighmacdonald/steamid/v3/steamid"
@@ -233,38 +231,39 @@ func (s *Server) UpdateUserPassword(c *gin.Context) {
 }
 
 // GetUserServerPermissions retrieves the permissions a user has for a specific server
+// Uses the new PBAC system (server_role_permissions table)
 func (s *Server) GetUserServerPermissions(c *gin.Context, userId, serverId uuid.UUID) ([]string, error) {
-	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-	sql, args, err := psql.Select("sr.permissions").
-		From("server_admins sa").
-		Join("server_roles sr ON sa.server_role_id = sr.id").
-		Where(squirrel.Eq{"sa.server_id": serverId, "sa.user_id": userId}).
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SQL query: %w", err)
-	}
+	query := `
+		SELECT DISTINCT p.code
+		FROM server_admins sa
+		JOIN server_roles sr ON sa.server_role_id = sr.id
+		JOIN server_role_permissions srp ON sr.id = srp.server_role_id
+		JOIN permissions p ON srp.permission_id = p.id
+		WHERE sa.user_id = $1 AND sa.server_id = $2
+		AND (sa.expires_at IS NULL OR sa.expires_at > NOW())
+		ORDER BY p.code
+	`
 
-	var permissionsStr string
-	err = s.Dependencies.DB.QueryRowContext(c, sql, args...).Scan(&permissionsStr)
+	rows, err := s.Dependencies.DB.QueryContext(c, query, userId, serverId)
 	if err != nil {
-		if strings.Contains(err.Error(), "no rows") {
-			return []string{}, nil // User has no permissions for this server
+		return nil, fmt.Errorf("failed to query permissions: %w", err)
+	}
+	defer rows.Close()
+
+	var perms []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, fmt.Errorf("failed to scan permission: %w", err)
 		}
-		return nil, fmt.Errorf("failed to get permissions: %w", err)
+		perms = append(perms, code)
 	}
 
-	// Parse permissions from comma-separated string
-	if permissionsStr == "" {
-		return []string{}, nil
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating permissions: %w", err)
 	}
 
-	permissions := strings.Split(permissionsStr, ",")
-	// Trim whitespace from each permission
-	for i, perm := range permissions {
-		permissions[i] = strings.TrimSpace(perm)
-	}
-
-	return permissions, nil
+	return perms, nil
 }
 
 // userHasServerPermission checks if a user has a specific permission for a server

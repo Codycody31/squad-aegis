@@ -26,6 +26,7 @@ import {
 } from "~/components/ui/select";
 import { useToast } from "~/components/ui/toast";
 import type { Player } from "~/types";
+import { UI_PERMISSIONS } from "~/constants/permissions";
 
 const { toast } = useToast();
 const authStore = useAuthStore();
@@ -503,9 +504,9 @@ function copyToClipboard(text: string) {
                 <DropdownMenuItem
                     @click="openActionDialog('warn')"
                     v-if="
-                        authStore.getServerPermission(
+                        authStore.hasPermission(
                             serverId as string,
-                            'warn',
+                            UI_PERMISSIONS.PLAYERS_WARN,
                         )
                     "
                 >
@@ -518,9 +519,9 @@ function copyToClipboard(text: string) {
                 <DropdownMenuItem
                     @click="openActionDialog('move')"
                     v-if="
-                        authStore.getServerPermission(
+                        authStore.hasPermission(
                             serverId as string,
-                            'forceteamchange',
+                            UI_PERMISSIONS.PLAYERS_MOVE,
                         )
                     "
                 >
@@ -533,9 +534,9 @@ function copyToClipboard(text: string) {
                 <DropdownMenuItem
                     @click="openActionDialog('remove-from-squad')"
                     v-if="
-                        authStore.getServerPermission(
+                        authStore.hasPermission(
                             serverId as string,
-                            'kick',
+                            UI_PERMISSIONS.PLAYERS_KICK,
                         ) && player.squadId != 0
                     "
                 >
@@ -548,9 +549,9 @@ function copyToClipboard(text: string) {
                 <DropdownMenuItem
                     @click="openActionDialog('kick')"
                     v-if="
-                        authStore.getServerPermission(
+                        authStore.hasPermission(
                             serverId as string,
-                            'kick',
+                            UI_PERMISSIONS.PLAYERS_KICK,
                         )
                     "
                 >
@@ -563,7 +564,7 @@ function copyToClipboard(text: string) {
             </template>
             <DropdownMenuItem
                 @click="openActionDialog('ban')"
-                v-if="authStore.getServerPermission(serverId as string, 'ban')"
+                v-if="authStore.hasPermission(serverId as string, UI_PERMISSIONS.BANS_CREATE)"
             >
                 <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
                 <span>Ban Player</span>
