@@ -24,6 +24,14 @@ type PlayerProfile struct {
 	ChatHistory    []ChatMessage      `json:"chat_history,omitempty"`
 	Violations     []RuleViolation    `json:"violations,omitempty"`
 	RecentServers  []RecentServerInfo `json:"recent_servers"`
+
+	// Admin-focused fields
+	ActiveBans       []ActiveBan        `json:"active_bans"`
+	ViolationSummary ViolationSummary   `json:"violation_summary"`
+	TeamkillMetrics  TeamkillMetrics    `json:"teamkill_metrics"`
+	RiskIndicators   []RiskIndicator    `json:"risk_indicators"`
+	NameHistory      []NameHistoryEntry `json:"name_history"`
+	WeaponStats      []WeaponStat       `json:"weapon_stats"`
 }
 
 // PlayerStatistics holds combat and gameplay statistics
@@ -75,6 +83,96 @@ type RecentServerInfo struct {
 	ServerName string    `json:"server_name"`
 	LastSeen   time.Time `json:"last_seen"`
 	Sessions   int64     `json:"sessions"`
+}
+
+// ViolationSummary represents a summary of player violations
+type ViolationSummary struct {
+	TotalWarns  int64      `json:"total_warns"`
+	TotalKicks  int64      `json:"total_kicks"`
+	TotalBans   int64      `json:"total_bans"`
+	LastAction  *time.Time `json:"last_action,omitempty"`
+}
+
+// TeamkillMetrics represents detailed teamkill statistics
+type TeamkillMetrics struct {
+	TotalTeamkills      int64   `json:"total_teamkills"`
+	TeamkillsPerSession float64 `json:"teamkills_per_session"`
+	TeamkillRatio       float64 `json:"teamkill_ratio"` // TKs / total kills
+	RecentTeamkills     int64   `json:"recent_teamkills"` // Last 7 days
+}
+
+// RiskIndicator represents a risk flag for admin attention
+type RiskIndicator struct {
+	Type        string `json:"type"`        // "high_tk_rate", "recent_ban", "multiple_names", "cbl_flagged", "ip_shared"
+	Severity    string `json:"severity"`    // "critical", "high", "medium", "low"
+	Description string `json:"description"`
+}
+
+// ActiveBan represents a currently active ban on the player
+type ActiveBan struct {
+	BanID      string     `json:"ban_id"`
+	ServerID   string     `json:"server_id"`
+	ServerName string     `json:"server_name"`
+	Reason     string     `json:"reason"`
+	Duration   int        `json:"duration"`
+	Permanent  bool       `json:"permanent"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	AdminName  string     `json:"admin_name"`
+}
+
+// NameHistoryEntry represents a name used by the player
+type NameHistoryEntry struct {
+	Name         string    `json:"name"`
+	FirstUsed    time.Time `json:"first_used"`
+	LastUsed     time.Time `json:"last_used"`
+	SessionCount int64     `json:"session_count"`
+}
+
+// WeaponStat represents weapon usage statistics
+type WeaponStat struct {
+	Weapon    string `json:"weapon"`
+	Kills     int64  `json:"kills"`
+	Teamkills int64  `json:"teamkills"`
+}
+
+// TeamkillVictim represents a player who was teamkilled
+type TeamkillVictim struct {
+	VictimName   string    `json:"victim_name"`
+	VictimSteam  string    `json:"victim_steam"`
+	VictimEOS    string    `json:"victim_eos"`
+	TKCount      int64     `json:"tk_count"`
+	WeaponsUsed  []string  `json:"weapons_used"`
+	FirstTK      time.Time `json:"first_tk"`
+	LastTK       time.Time `json:"last_tk"`
+}
+
+// SessionHistoryEntry represents a connection session
+type SessionHistoryEntry struct {
+	EventTime  time.Time `json:"event_time"`
+	ServerID   string    `json:"server_id"`
+	ServerName string    `json:"server_name,omitempty"`
+	IP         string    `json:"ip,omitempty"` // Only visible with permission
+	EventType  string    `json:"event_type"`   // "connected" or "disconnected"
+}
+
+// RelatedPlayer represents a player potentially related (same IP)
+type RelatedPlayer struct {
+	SteamID        string `json:"steam_id"`
+	EOSID          string `json:"eos_id"`
+	PlayerName     string `json:"player_name"`
+	RelationType   string `json:"relation_type"` // "same_ip"
+	SharedSessions int64  `json:"shared_sessions"`
+	IsBanned       bool   `json:"is_banned"`
+}
+
+// PaginatedChatHistory represents paginated chat messages
+type PaginatedChatHistory struct {
+	Messages   []ChatMessage `json:"messages"`
+	Total      int64         `json:"total"`
+	Page       int           `json:"page"`
+	Limit      int           `json:"limit"`
+	TotalPages int           `json:"total_pages"`
 }
 
 // PlayerSearchResult represents a simplified player profile for search results
@@ -290,6 +388,40 @@ func (s *Server) PlayerGet(c *gin.Context) {
 	if err == nil {
 		profile.RecentServers = recentServers
 	}
+
+	// Get admin-focused data
+	// Active bans
+	activeBans, err := s.getPlayerActiveBans(c, playerID, isSteamID)
+	if err == nil {
+		profile.ActiveBans = activeBans
+	}
+
+	// Violation summary
+	violationSummary, err := s.getPlayerViolationSummary(c, playerID, isSteamID)
+	if err == nil {
+		profile.ViolationSummary = *violationSummary
+	}
+
+	// Teamkill metrics
+	tkMetrics, err := s.getPlayerTeamkillMetrics(c, playerID, isSteamID, profile.TotalSessions, profile.Statistics.Kills)
+	if err == nil {
+		profile.TeamkillMetrics = *tkMetrics
+	}
+
+	// Name history
+	nameHistory, err := s.getPlayerNameHistory(c, playerID, isSteamID)
+	if err == nil {
+		profile.NameHistory = nameHistory
+	}
+
+	// Weapon stats
+	weaponStats, err := s.getPlayerWeaponStats(c, playerID, isSteamID)
+	if err == nil {
+		profile.WeaponStats = weaponStats
+	}
+
+	// Calculate risk indicators
+	profile.RiskIndicators = s.calculateRiskIndicators(profile)
 
 	responses.Success(c, "Player profile fetched successfully", &gin.H{"player": profile})
 }
@@ -1212,4 +1344,720 @@ func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteam
 	}
 
 	return servers, nil
+}
+
+// getPlayerActiveBans retrieves active bans for the player
+func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID bool) ([]ActiveBan, error) {
+	// Get steam ID
+	steamIDStr := playerID
+	if !isSteamID {
+		query := `SELECT steam FROM squad_aegis.server_join_succeeded_events WHERE eos = ? LIMIT 1`
+		row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
+		var steamID *string
+		if err := row.Scan(&steamID); err != nil || steamID == nil {
+			return []ActiveBan{}, nil
+		}
+		steamIDStr = *steamID
+	}
+
+	// Query PostgreSQL for active bans
+	// Duration is in days, 0 means permanent
+	// Calculate expiration as created_at + duration days
+	query := `
+		SELECT
+			b.id, b.server_id, b.reason, b.duration,
+			b.created_at,
+			COALESCE(s.name, 'Unknown Server') as server_name,
+			COALESCE(u.name, 'System') as admin_name
+		FROM server_bans b
+		LEFT JOIN servers s ON b.server_id = s.id
+		LEFT JOIN users u ON b.admin_id = u.id
+		WHERE b.steam_id = $1
+		AND (b.duration = 0 OR b.created_at + (b.duration || ' days')::interval > NOW())
+		ORDER BY b.created_at DESC
+	`
+
+	rows, err := s.Dependencies.DB.Query(query, steamIDStr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	bans := []ActiveBan{}
+	for rows.Next() {
+		var ban ActiveBan
+		err := rows.Scan(
+			&ban.BanID,
+			&ban.ServerID,
+			&ban.Reason,
+			&ban.Duration,
+			&ban.CreatedAt,
+			&ban.ServerName,
+			&ban.AdminName,
+		)
+		if err != nil {
+			continue
+		}
+		// Calculate expiration
+		ban.Permanent = ban.Duration == 0
+		if !ban.Permanent {
+			expiresAt := ban.CreatedAt.AddDate(0, 0, ban.Duration)
+			ban.ExpiresAt = &expiresAt
+		}
+		bans = append(bans, ban)
+	}
+
+	return bans, nil
+}
+
+// getPlayerViolationSummary retrieves a summary of player violations
+func (s *Server) getPlayerViolationSummary(c *gin.Context, playerID string, isSteamID bool) (*ViolationSummary, error) {
+	// Get steam ID
+	steamIDStr := playerID
+	if !isSteamID {
+		query := `SELECT steam FROM squad_aegis.server_join_succeeded_events WHERE eos = ? LIMIT 1`
+		row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
+		var steamID *string
+		if err := row.Scan(&steamID); err != nil || steamID == nil {
+			return &ViolationSummary{}, nil
+		}
+		steamIDStr = *steamID
+	}
+
+	steamIDUint, err := strconv.ParseUint(steamIDStr, 10, 64)
+	if err != nil {
+		return &ViolationSummary{}, nil
+	}
+
+	query := `
+		SELECT
+			countIf(action_type = 'WARN') as total_warns,
+			countIf(action_type = 'KICK') as total_kicks,
+			countIf(action_type = 'BAN') as total_bans,
+			max(created_at) as last_action
+		FROM squad_aegis.player_rule_violations
+		WHERE player_steam_id = ?
+	`
+
+	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, steamIDUint)
+
+	var summary ViolationSummary
+	err = row.Scan(
+		&summary.TotalWarns,
+		&summary.TotalKicks,
+		&summary.TotalBans,
+		&summary.LastAction,
+	)
+	if err != nil {
+		return &ViolationSummary{}, nil
+	}
+
+	return &summary, nil
+}
+
+// getPlayerTeamkillMetrics retrieves detailed teamkill statistics
+func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSteamID bool, totalSessions int64, totalKills int64) (*TeamkillMetrics, error) {
+	whereClause := "attacker_steam = ?"
+	if !isSteamID {
+		whereClause = "attacker_eos = ?"
+	}
+
+	// Total teamkills
+	query := fmt.Sprintf(`
+		SELECT
+			count(*) as total_teamkills,
+			countIf(event_time >= now() - INTERVAL 7 DAY) as recent_teamkills
+		FROM squad_aegis.server_player_died_events
+		WHERE teamkill = 1 AND (%s)
+	`, whereClause)
+
+	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
+
+	var metrics TeamkillMetrics
+	err := row.Scan(&metrics.TotalTeamkills, &metrics.RecentTeamkills)
+	if err != nil {
+		return &TeamkillMetrics{}, nil
+	}
+
+	// Calculate per-session rate
+	if totalSessions > 0 {
+		metrics.TeamkillsPerSession = float64(metrics.TotalTeamkills) / float64(totalSessions)
+	}
+
+	// Calculate TK ratio (TKs / total kills)
+	if totalKills > 0 {
+		metrics.TeamkillRatio = float64(metrics.TotalTeamkills) / float64(totalKills)
+	}
+
+	return &metrics, nil
+}
+
+// getPlayerNameHistory retrieves all names used by the player
+func (s *Server) getPlayerNameHistory(c *gin.Context, playerID string, isSteamID bool) ([]NameHistoryEntry, error) {
+	whereClause := "steam = ?"
+	if !isSteamID {
+		whereClause = "eos = ?"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			player_suffix as name,
+			min(event_time) as first_used,
+			max(event_time) as last_used,
+			count(*) as session_count
+		FROM squad_aegis.server_join_succeeded_events
+		WHERE %s AND player_suffix != ''
+		GROUP BY player_suffix
+		ORDER BY last_used DESC
+	`, whereClause)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	names := []NameHistoryEntry{}
+	for rows.Next() {
+		var entry NameHistoryEntry
+		err := rows.Scan(&entry.Name, &entry.FirstUsed, &entry.LastUsed, &entry.SessionCount)
+		if err != nil {
+			continue
+		}
+		names = append(names, entry)
+	}
+
+	return names, nil
+}
+
+// getPlayerWeaponStats retrieves weapon usage statistics
+func (s *Server) getPlayerWeaponStats(c *gin.Context, playerID string, isSteamID bool) ([]WeaponStat, error) {
+	whereClause := "attacker_steam = ?"
+	if !isSteamID {
+		whereClause = "attacker_eos = ?"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			weapon,
+			count(*) as kills,
+			countIf(teamkill = 1) as teamkills
+		FROM squad_aegis.server_player_died_events
+		WHERE (%s) AND weapon != ''
+		GROUP BY weapon
+		ORDER BY kills DESC
+		LIMIT 20
+	`, whereClause)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	weapons := []WeaponStat{}
+	for rows.Next() {
+		var stat WeaponStat
+		err := rows.Scan(&stat.Weapon, &stat.Kills, &stat.Teamkills)
+		if err != nil {
+			continue
+		}
+		weapons = append(weapons, stat)
+	}
+
+	return weapons, nil
+}
+
+// calculateRiskIndicators generates risk flags based on player data
+func (s *Server) calculateRiskIndicators(profile *PlayerProfile) []RiskIndicator {
+	indicators := []RiskIndicator{}
+
+	// Check for active bans
+	if len(profile.ActiveBans) > 0 {
+		indicators = append(indicators, RiskIndicator{
+			Type:        "active_ban",
+			Severity:    "critical",
+			Description: fmt.Sprintf("Player has %d active ban(s)", len(profile.ActiveBans)),
+		})
+	}
+
+	// Check teamkill rate
+	if profile.TeamkillMetrics.TeamkillRatio > 0.1 { // More than 10% of kills are TKs
+		indicators = append(indicators, RiskIndicator{
+			Type:        "high_tk_rate",
+			Severity:    "high",
+			Description: fmt.Sprintf("High teamkill ratio: %.1f%% of kills are teamkills", profile.TeamkillMetrics.TeamkillRatio*100),
+		})
+	} else if profile.TeamkillMetrics.TeamkillRatio > 0.05 { // More than 5%
+		indicators = append(indicators, RiskIndicator{
+			Type:        "elevated_tk_rate",
+			Severity:    "medium",
+			Description: fmt.Sprintf("Elevated teamkill ratio: %.1f%% of kills are teamkills", profile.TeamkillMetrics.TeamkillRatio*100),
+		})
+	}
+
+	// Check for recent teamkills
+	if profile.TeamkillMetrics.RecentTeamkills >= 5 {
+		indicators = append(indicators, RiskIndicator{
+			Type:        "recent_teamkills",
+			Severity:    "high",
+			Description: fmt.Sprintf("%d teamkills in the last 7 days", profile.TeamkillMetrics.RecentTeamkills),
+		})
+	}
+
+	// Check for multiple names
+	if len(profile.NameHistory) > 3 {
+		indicators = append(indicators, RiskIndicator{
+			Type:        "multiple_names",
+			Severity:    "low",
+			Description: fmt.Sprintf("Player has used %d different names", len(profile.NameHistory)),
+		})
+	}
+
+	// Check for recent bans in violation history
+	if profile.ViolationSummary.TotalBans > 0 {
+		indicators = append(indicators, RiskIndicator{
+			Type:        "prior_bans",
+			Severity:    "medium",
+			Description: fmt.Sprintf("Player has %d prior ban(s) on record", profile.ViolationSummary.TotalBans),
+		})
+	}
+
+	// Check for high violation count
+	totalViolations := profile.ViolationSummary.TotalWarns + profile.ViolationSummary.TotalKicks + profile.ViolationSummary.TotalBans
+	if totalViolations >= 10 {
+		indicators = append(indicators, RiskIndicator{
+			Type:        "high_violations",
+			Severity:    "high",
+			Description: fmt.Sprintf("Player has %d total violations", totalViolations),
+		})
+	} else if totalViolations >= 5 {
+		indicators = append(indicators, RiskIndicator{
+			Type:        "multiple_violations",
+			Severity:    "medium",
+			Description: fmt.Sprintf("Player has %d violations", totalViolations),
+		})
+	}
+
+	return indicators
+}
+
+// PlayerChatHistoryPaginated handles GET /api/players/:playerId/chat - paginated chat history
+func (s *Server) PlayerChatHistoryPaginated(c *gin.Context) {
+	playerID := c.Param("playerId")
+	if playerID == "" {
+		responses.BadRequest(c, "Player ID is required", nil)
+		return
+	}
+
+	// Parse query parameters
+	page := 1
+	limit := 50
+	chatType := c.Query("type")
+	search := c.Query("search")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+
+	if pageStr := c.Query("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	isSteamID := false
+	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
+		isSteamID = true
+	}
+
+	whereClause := "steam_id = ?"
+	if !isSteamID {
+		whereClause = "eos_id = ?"
+	}
+
+	var queryPlayerID interface{} = playerID
+	if isSteamID {
+		steamIDUint, err := strconv.ParseUint(playerID, 10, 64)
+		if err != nil {
+			responses.BadRequest(c, "Invalid Steam ID", nil)
+			return
+		}
+		queryPlayerID = steamIDUint
+	}
+
+	// Build filters
+	filters := []string{whereClause}
+	args := []interface{}{queryPlayerID}
+
+	if chatType != "" && chatType != "all" {
+		filters = append(filters, "chat_type = ?")
+		args = append(args, chatType)
+	}
+	if search != "" {
+		filters = append(filters, "message ILIKE ?")
+		args = append(args, "%"+search+"%")
+	}
+	if startDate != "" {
+		filters = append(filters, "sent_at >= ?")
+		args = append(args, startDate)
+	}
+	if endDate != "" {
+		filters = append(filters, "sent_at <= ?")
+		args = append(args, endDate)
+	}
+
+	whereSQL := strings.Join(filters, " AND ")
+
+	// Get total count
+	countQuery := fmt.Sprintf(`
+		SELECT count(*) FROM squad_aegis.server_player_chat_messages WHERE %s
+	`, whereSQL)
+
+	var total int64
+	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), countQuery, args...)
+	if err := row.Scan(&total); err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
+	// Get paginated results
+	offset := (page - 1) * limit
+	args = append(args, limit, offset)
+
+	query := fmt.Sprintf(`
+		SELECT
+			message_id,
+			sent_at,
+			message,
+			chat_type,
+			server_id
+		FROM squad_aegis.server_player_chat_messages
+		WHERE %s
+		ORDER BY sent_at DESC
+		LIMIT ? OFFSET ?
+	`, whereSQL)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, args...)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	defer rows.Close()
+
+	messages := []ChatMessage{}
+	for rows.Next() {
+		var msg ChatMessage
+		var messageID string
+		err := rows.Scan(&messageID, &msg.SentAt, &msg.Message, &msg.ChatType, &msg.ServerID)
+		if err != nil {
+			continue
+		}
+		messages = append(messages, msg)
+	}
+
+	totalPages := int(total) / limit
+	if int(total)%limit > 0 {
+		totalPages++
+	}
+
+	responses.Success(c, "Chat history fetched successfully", &gin.H{
+		"chat": PaginatedChatHistory{
+			Messages:   messages,
+			Total:      total,
+			Page:       page,
+			Limit:      limit,
+			TotalPages: totalPages,
+		},
+	})
+}
+
+// PlayerTeamkillsAnalysis handles GET /api/players/:playerId/teamkills - teamkill analysis
+func (s *Server) PlayerTeamkillsAnalysis(c *gin.Context) {
+	playerID := c.Param("playerId")
+	if playerID == "" {
+		responses.BadRequest(c, "Player ID is required", nil)
+		return
+	}
+
+	isSteamID := false
+	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
+		isSteamID = true
+	}
+
+	whereClause := "attacker_steam = ?"
+	if !isSteamID {
+		whereClause = "attacker_eos = ?"
+	}
+
+	// Get teamkill victims
+	victimsQuery := fmt.Sprintf(`
+		SELECT
+			victim_name,
+			victim_steam,
+			victim_eos,
+			count(*) as tk_count,
+			groupArray(weapon) as weapons_used,
+			min(event_time) as first_tk,
+			max(event_time) as last_tk
+		FROM squad_aegis.server_player_died_events
+		WHERE teamkill = 1 AND (%s)
+		GROUP BY victim_name, victim_steam, victim_eos
+		ORDER BY tk_count DESC
+		LIMIT 20
+	`, whereClause)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), victimsQuery, playerID)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	defer rows.Close()
+
+	victims := []TeamkillVictim{}
+	for rows.Next() {
+		var victim TeamkillVictim
+		err := rows.Scan(
+			&victim.VictimName,
+			&victim.VictimSteam,
+			&victim.VictimEOS,
+			&victim.TKCount,
+			&victim.WeaponsUsed,
+			&victim.FirstTK,
+			&victim.LastTK,
+		)
+		if err != nil {
+			continue
+		}
+		victims = append(victims, victim)
+	}
+
+	// Get TK weapon breakdown
+	weaponsQuery := fmt.Sprintf(`
+		SELECT
+			weapon,
+			count(*) as tk_count
+		FROM squad_aegis.server_player_died_events
+		WHERE teamkill = 1 AND (%s) AND weapon != ''
+		GROUP BY weapon
+		ORDER BY tk_count DESC
+		LIMIT 10
+	`, whereClause)
+
+	weaponRows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), weaponsQuery, playerID)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	defer weaponRows.Close()
+
+	tkWeapons := []struct {
+		Weapon  string `json:"weapon"`
+		TKCount int64  `json:"tk_count"`
+	}{}
+	for weaponRows.Next() {
+		var w struct {
+			Weapon  string `json:"weapon"`
+			TKCount int64  `json:"tk_count"`
+		}
+		if err := weaponRows.Scan(&w.Weapon, &w.TKCount); err == nil {
+			tkWeapons = append(tkWeapons, w)
+		}
+	}
+
+	responses.Success(c, "Teamkill analysis fetched successfully", &gin.H{
+		"victims":    victims,
+		"tk_weapons": tkWeapons,
+	})
+}
+
+// PlayerSessionHistory handles GET /api/players/:playerId/sessions - session history
+func (s *Server) PlayerSessionHistory(c *gin.Context) {
+	playerID := c.Param("playerId")
+	if playerID == "" {
+		responses.BadRequest(c, "Player ID is required", nil)
+		return
+	}
+
+	// Check if user has permission to view IPs
+	canViewIPs := false
+	if user := s.getUserFromSession(c); user != nil && user.SuperAdmin {
+		canViewIPs = true
+	}
+
+	page := 1
+	limit := 50
+	if pageStr := c.Query("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	isSteamID := false
+	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
+		isSteamID = true
+	}
+
+	whereClause := "steam = ?"
+	if !isSteamID {
+		whereClause = "eos = ?"
+	}
+
+	offset := (page - 1) * limit
+
+	query := fmt.Sprintf(`
+		SELECT
+			event_time,
+			server_id,
+			ip,
+			'connected' as event_type
+		FROM squad_aegis.server_player_connected_events
+		WHERE %s
+		ORDER BY event_time DESC
+		LIMIT ? OFFSET ?
+	`, whereClause)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, limit, offset)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	defer rows.Close()
+
+	sessions := []SessionHistoryEntry{}
+	for rows.Next() {
+		var session SessionHistoryEntry
+		var ip string
+		err := rows.Scan(&session.EventTime, &session.ServerID, &ip, &session.EventType)
+		if err != nil {
+			continue
+		}
+
+		// Only include IP if user has permission
+		if canViewIPs {
+			session.IP = ip
+		}
+
+		// Get server name
+		serverNameQuery := `SELECT name FROM servers WHERE id = $1`
+		row := s.Dependencies.DB.QueryRow(serverNameQuery, session.ServerID)
+		var serverName string
+		if err := row.Scan(&serverName); err == nil {
+			session.ServerName = serverName
+		}
+
+		sessions = append(sessions, session)
+	}
+
+	responses.Success(c, "Session history fetched successfully", &gin.H{
+		"sessions":    sessions,
+		"can_view_ip": canViewIPs,
+		"page":        page,
+		"limit":       limit,
+	})
+}
+
+// PlayerRelatedPlayers handles GET /api/players/:playerId/related - related players (same IP)
+func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
+	playerID := c.Param("playerId")
+	if playerID == "" {
+		responses.BadRequest(c, "Player ID is required", nil)
+		return
+	}
+
+	// Only super admins can view related players (IP-based)
+	user := s.getUserFromSession(c)
+	if user == nil || !user.SuperAdmin {
+		responses.Forbidden(c, "Permission denied", nil)
+		return
+	}
+
+	isSteamID := false
+	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
+		isSteamID = true
+	}
+
+	whereClause := "steam = ?"
+	if !isSteamID {
+		whereClause = "eos = ?"
+	}
+
+	// Find players sharing the same IPs
+	// Need to join with server_join_succeeded_events to get player names
+	query := fmt.Sprintf(`
+		WITH player_ips AS (
+			SELECT DISTINCT ip
+			FROM squad_aegis.server_player_connected_events
+			WHERE %s AND ip != ''
+		),
+		related_connections AS (
+			SELECT
+				steam,
+				eos,
+				count(*) as shared_sessions
+			FROM squad_aegis.server_player_connected_events
+			WHERE ip IN (SELECT ip FROM player_ips)
+				AND NOT (%s)
+				AND (steam != '' OR eos != '')
+			GROUP BY steam, eos
+		),
+		player_names AS (
+			SELECT
+				steam,
+				eos,
+				any(player_suffix) as player_name
+			FROM squad_aegis.server_join_succeeded_events
+			WHERE steam != '' OR eos != ''
+			GROUP BY steam, eos
+		)
+		SELECT
+			rc.steam,
+			rc.eos,
+			COALESCE(pn.player_name, '') as player_name,
+			rc.shared_sessions
+		FROM related_connections rc
+		LEFT JOIN player_names pn ON (rc.steam != '' AND rc.steam = pn.steam) OR (rc.eos != '' AND rc.eos = pn.eos)
+		ORDER BY rc.shared_sessions DESC
+		LIMIT 20
+	`, whereClause, whereClause)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	defer rows.Close()
+
+	related := []RelatedPlayer{}
+	for rows.Next() {
+		var player RelatedPlayer
+		err := rows.Scan(&player.SteamID, &player.EOSID, &player.PlayerName, &player.SharedSessions)
+		if err != nil {
+			continue
+		}
+		player.RelationType = "same_ip"
+
+		// Check if this player is banned (duration 0 = permanent, otherwise check if created_at + duration > now)
+		if player.SteamID != "" {
+			banQuery := `SELECT EXISTS(SELECT 1 FROM server_bans WHERE steam_id = $1 AND (duration = 0 OR created_at + (duration || ' days')::interval > NOW()))`
+			var isBanned bool
+			if err := s.Dependencies.DB.QueryRow(banQuery, player.SteamID).Scan(&isBanned); err == nil {
+				player.IsBanned = isBanned
+			}
+		}
+
+		related = append(related, player)
+	}
+
+	responses.Success(c, "Related players fetched successfully", &gin.H{
+		"related_players": related,
+	})
 }
