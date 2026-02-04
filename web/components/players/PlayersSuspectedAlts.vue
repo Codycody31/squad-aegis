@@ -19,7 +19,7 @@ const error = ref<string | null>(null);
 const altGroups = ref<AltAccountGroup[]>([]);
 const totalGroups = ref(0);
 const page = ref(1);
-const limit = 10;
+const limit = 5;
 const expandedGroups = ref<Set<string>>(new Set());
 
 async function fetchAltGroups() {
@@ -102,11 +102,6 @@ function getTimeAgo(dateString: string | null): string {
   return "Just now";
 }
 
-function loadMore() {
-  page.value++;
-  fetchAltGroups();
-}
-
 onMounted(() => {
   fetchAltGroups();
 });
@@ -114,26 +109,34 @@ onMounted(() => {
 
 <template>
   <Card>
-    <div class="px-4 py-3 border-b">
-      <span class="text-sm font-medium flex items-center gap-2">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          class="h-4 w-4 text-orange-500"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-          <circle cx="9" cy="7" r="4" />
-          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-        </svg>
-        Suspected Alts
-      </span>
-      <p class="text-xs text-muted-foreground mt-1">
-        Players sharing IP addresses
-      </p>
+    <div class="px-4 py-3 border-b flex items-center justify-between">
+      <div>
+        <span class="text-sm font-medium flex items-center gap-2">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-4 w-4 text-orange-500"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+          Suspected Alts
+        </span>
+        <p class="text-xs text-muted-foreground mt-1">
+          Players sharing IP addresses
+        </p>
+      </div>
+      <NuxtLink
+        to="/players/alts"
+        class="text-xs text-primary hover:underline"
+      >
+        View All
+      </NuxtLink>
     </div>
     <CardContent class="pt-3">
 
@@ -247,18 +250,14 @@ onMounted(() => {
           </CollapsibleContent>
         </Collapsible>
 
-        <!-- Load More -->
-        <div v-if="altGroups.length < totalGroups" class="pt-3">
-          <Button
-            variant="outline"
-            size="sm"
-            class="w-full"
-            :disabled="loading"
-            @click="loadMore"
+        <!-- View All Link -->
+        <div v-if="totalGroups > limit" class="pt-3 text-center">
+          <NuxtLink
+            to="/players/alts"
+            class="text-sm text-primary hover:underline"
           >
-            <span v-if="loading">Loading...</span>
-            <span v-else>Load More ({{ totalGroups - altGroups.length }} remaining)</span>
-          </Button>
+            View all {{ totalGroups }} groups
+          </NuxtLink>
         </div>
       </div>
     </CardContent>
