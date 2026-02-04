@@ -8,6 +8,8 @@
 
 ### Misc
 
+- refactor(identity)!: replace EventTime with FirstSeen and LastSeen fields ([77476a3](https://github.com/Codycody31/squad-aegis/commit/77476a3aeabe74ccf8404fda5093b2e8ae516127))
+- feat(identity): add identity resolver and periodic worker with migrations for player identity aggregration and consolidation ([804b34d](https://github.com/Codycody31/squad-aegis/commit/804b34dd1de6cebfb1d0298bb016989a032fd2e0))
 - feat(players): add dedicated alts page and view-all link, reduce widget limit ([43c9ca0](https://github.com/Codycody31/squad-aegis/commit/43c9ca0dd14f9d12e6068078dad66f5217df41a7))
 - feat(players): add wounded/damaged combat event types ([3d5675b](https://github.com/Codycody31/squad-aegis/commit/3d5675bf78e5c7bd8e7333a9c30e675a3077780d))
 - refactor(players): query shared IPs then fetch players per IP ([48c4721](https://github.com/Codycody31/squad-aegis/commit/48c4721a127a61b5ebdb1cbb47304fb54f1b410b))
