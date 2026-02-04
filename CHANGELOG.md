@@ -8,6 +8,7 @@
 
 ### Misc
 
+- refactor(players): query shared IPs then fetch players per IP ([48c4721](https://github.com/Codycody31/squad-aegis/commit/48c4721a127a61b5ebdb1cbb47304fb54f1b410b))
 - feat(players): add player UI components and alt-groups endpoint ([5672849](https://github.com/Codycody31/squad-aegis/commit/567284973994b4b8922b9c3873efe46ebd2b84a4))
 - feat(player): add combat history API and UI ([fa5ca2a](https://github.com/Codycody31/squad-aegis/commit/fa5ca2ad6f4ba55de09c7564757e563170abbdba))
 - feat(sessions): pair connect/disconnect events and surface durations ([f6a20c0](https://github.com/Codycody31/squad-aegis/commit/f6a20c050064e05d5cd1ee26122d9bc522bfc4fd))
