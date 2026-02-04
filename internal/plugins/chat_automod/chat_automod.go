@@ -684,15 +684,17 @@ func (p *ChatAutoModPlugin) UpdateConfig(config map[string]interface{}) error {
 		return fmt.Errorf("failed to reparse escalation actions: %w", err)
 	}
 
-	// Update tracker expiry
+	// Update tracker expiry (only if apis is initialized)
 	expiryDays := p.getIntConfig("violation_expiry_days")
-	p.tracker = NewViolationTracker(p.apis.DatabaseAPI, expiryDays)
+	if p.apis != nil {
+		p.tracker = NewViolationTracker(p.apis.DatabaseAPI, expiryDays)
 
-	p.apis.LogAPI.Info("Chat AutoMod plugin configuration updated", map[string]interface{}{
-		"region":                  p.getStringConfig("region"),
-		"violation_expiry_days":   expiryDays,
-		"escalation_action_count": len(p.escalationActions),
-	})
+		p.apis.LogAPI.Info("Chat AutoMod plugin configuration updated", map[string]interface{}{
+			"region":                  p.getStringConfig("region"),
+			"violation_expiry_days":   expiryDays,
+			"escalation_action_count": len(p.escalationActions),
+		})
+	}
 
 	return nil
 }

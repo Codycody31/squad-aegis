@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -294,6 +295,11 @@ func (pm *PluginManager) GetPluginInstances(serverID uuid.UUID) []*PluginInstanc
 		instances = append(instances, &maskedInstance)
 	}
 
+	// Sort by created_at for stable ordering
+	sort.Slice(instances, func(i, j int) bool {
+		return instances[i].CreatedAt.Before(instances[j].CreatedAt)
+	})
+
 	return instances
 }
 
@@ -393,9 +399,12 @@ func (pm *PluginManager) UpdatePluginConfig(serverID, instanceID uuid.UUID, conf
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
-	// Update plugin config
-	if err := instance.Plugin.UpdateConfig(mergedConfig); err != nil {
-		return fmt.Errorf("failed to update plugin config: %w", err)
+	// Only call UpdateConfig on the plugin if it's initialized (enabled and running)
+	// Disabled/stopped plugins haven't been initialized so their apis/dependencies are nil
+	if instance.Status != PluginStatusDisabled && instance.Status != PluginStatusStopped {
+		if err := instance.Plugin.UpdateConfig(mergedConfig); err != nil {
+			return fmt.Errorf("failed to update plugin config: %w", err)
+		}
 	}
 
 	// Update instance record
