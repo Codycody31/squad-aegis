@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
@@ -227,6 +228,24 @@ type PlayerStatsSummary struct {
 	TotalKills        int64                `json:"total_kills"`
 	TotalDeaths       int64                `json:"total_deaths"`
 	TotalTeamkills    int64                `json:"total_teamkills"`
+}
+
+// AltAccountPlayer represents a player in an alt account group
+type AltAccountPlayer struct {
+	SteamID        string     `json:"steam_id"`
+	EOSID          string     `json:"eos_id"`
+	PlayerName     string     `json:"player_name"`
+	IsBanned       bool       `json:"is_banned"`
+	SharedSessions int64      `json:"shared_sessions"`
+	LastSeen       *time.Time `json:"last_seen"`
+}
+
+// AltAccountGroup represents a group of players sharing IPs (potential alts)
+type AltAccountGroup struct {
+	GroupID       string             `json:"group_id"`
+	Players       []AltAccountPlayer `json:"players"`
+	SharedIPCount int                `json:"shared_ip_count"`
+	LastActivity  *time.Time         `json:"last_activity"`
 }
 
 // PlayersList handles GET /api/players - search and list players
@@ -2298,5 +2317,170 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 		"events": events,
 		"page":   page,
 		"limit":  limit,
+	})
+}
+
+// PlayersAltGroups handles GET /api/players/alt-groups - list all suspected alt account groups
+func (s *Server) PlayersAltGroups(c *gin.Context) {
+	// Only super admins can view alt account groups (IP-based)
+	user := s.getUserFromSession(c)
+	if user == nil || !user.SuperAdmin {
+		responses.Forbidden(c, "Permission denied", nil)
+		return
+	}
+
+	// Pagination
+	page := 1
+	limit := 20
+	if pageStr := c.Query("page"); pageStr != "" {
+		if parsedPage, err := strconv.Atoi(pageStr); err == nil && parsedPage > 0 {
+			page = parsedPage
+		}
+	}
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 50 {
+			limit = parsedLimit
+		}
+	}
+	offset := (page - 1) * limit
+
+	// Query to find all IPs shared by multiple players, grouped by IP
+	// This gives us groups of players that share the same IP address
+	query := `
+		WITH multi_player_ips AS (
+			-- Find IPs used by more than one distinct player
+			SELECT ip
+			FROM squad_aegis.server_player_connected_events
+			WHERE ip != '' AND (steam != '' OR eos != '')
+			GROUP BY ip
+			HAVING countDistinct(if(steam != '', steam, eos)) > 1
+		),
+		player_ip_sessions AS (
+			-- Get all players connected from those shared IPs with session counts
+			SELECT
+				ip,
+				if(steam != '', steam, eos) as player_id,
+				steam,
+				eos,
+				count() as sessions,
+				max(event_time) as last_seen
+			FROM squad_aegis.server_player_connected_events
+			WHERE ip IN (SELECT ip FROM multi_player_ips)
+				AND (steam != '' OR eos != '')
+			GROUP BY ip, player_id, steam, eos
+		),
+		player_names AS (
+			-- Get latest player names
+			SELECT
+				if(steam != '', steam, eos) as player_id,
+				any(player_suffix) as player_name
+			FROM squad_aegis.server_join_succeeded_events
+			WHERE steam != '' OR eos != ''
+			GROUP BY player_id
+		),
+		ip_groups AS (
+			-- Group players by IP and aggregate
+			SELECT
+				ip,
+				groupArray(tuple(
+					pis.steam,
+					pis.eos,
+					COALESCE(pn.player_name, ''),
+					pis.sessions,
+					pis.last_seen
+				)) as players,
+				max(pis.last_seen) as group_last_activity
+			FROM player_ip_sessions pis
+			LEFT JOIN player_names pn ON pis.player_id = pn.player_id
+			GROUP BY ip
+			HAVING length(players) > 1
+		)
+		SELECT
+			ip,
+			players,
+			group_last_activity
+		FROM ip_groups
+		ORDER BY group_last_activity DESC
+		LIMIT ? OFFSET ?
+	`
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, limit, offset)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to query alt account groups")
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	defer rows.Close()
+
+	groups := []AltAccountGroup{}
+	for rows.Next() {
+		var ip string
+		var playersData []struct {
+			Steam    string
+			Eos      string
+			Name     string
+			Sessions uint64
+			LastSeen time.Time
+		}
+		var groupLastActivity time.Time
+
+		err := rows.Scan(&ip, &playersData, &groupLastActivity)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to scan alt account group row")
+			continue
+		}
+
+		group := AltAccountGroup{
+			GroupID:       ip, // Use IP as group ID (hashed in frontend if needed)
+			SharedIPCount: 1,  // Each group is based on one shared IP
+			LastActivity:  &groupLastActivity,
+			Players:       make([]AltAccountPlayer, 0, len(playersData)),
+		}
+
+		for _, p := range playersData {
+			player := AltAccountPlayer{
+				SteamID:        p.Steam,
+				EOSID:          p.Eos,
+				PlayerName:     p.Name,
+				SharedSessions: int64(p.Sessions),
+				LastSeen:       &p.LastSeen,
+			}
+
+			// Check if this player is banned
+			if player.SteamID != "" {
+				banQuery := `SELECT EXISTS(SELECT 1 FROM server_bans WHERE steam_id = $1 AND (duration = 0 OR created_at + (duration || ' days')::interval > NOW()))`
+				var isBanned bool
+				if err := s.Dependencies.DB.QueryRow(banQuery, player.SteamID).Scan(&isBanned); err == nil {
+					player.IsBanned = isBanned
+				}
+			}
+
+			group.Players = append(group.Players, player)
+		}
+
+		groups = append(groups, group)
+	}
+
+	// Get total count for pagination
+	countQuery := `
+		SELECT count() FROM (
+			SELECT ip
+			FROM squad_aegis.server_player_connected_events
+			WHERE ip != '' AND (steam != '' OR eos != '')
+			GROUP BY ip
+			HAVING countDistinct(if(steam != '', steam, eos)) > 1
+		)
+	`
+	var totalGroups int64
+	if err := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), countQuery).Scan(&totalGroups); err != nil {
+		log.Warn().Err(err).Msg("Failed to get alt groups count")
+		totalGroups = int64(len(groups))
+	}
+
+	responses.Success(c, "Alt account groups fetched successfully", &gin.H{
+		"alt_groups":   groups,
+		"total_groups": totalGroups,
+		"page":         page,
+		"limit":        limit,
 	})
 }

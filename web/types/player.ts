@@ -173,6 +173,29 @@ export interface RelatedPlayer {
   is_banned: boolean;
 }
 
+export interface AltAccountPlayer {
+  steam_id: string;
+  eos_id: string;
+  player_name: string;
+  is_banned: boolean;
+  shared_sessions: number;
+  last_seen: string | null;
+}
+
+export interface AltAccountGroup {
+  group_id: string;
+  players: AltAccountPlayer[];
+  shared_ip_count: number;
+  last_activity: string | null;
+}
+
+export interface AltAccountGroupsResponse {
+  alt_groups: AltAccountGroup[];
+  total_groups: number;
+  page: number;
+  limit: number;
+}
+
 export interface PaginatedChatHistory {
   messages: ChatMessage[];
   total: number;
