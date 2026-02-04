@@ -54,7 +54,6 @@ import {
     TabsContent,
 } from "~/components/ui/tabs";
 import { Plus, Trash2 } from "lucide-vue-next";
-import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
 import { toast } from "~/components/ui/toast";
@@ -189,18 +188,8 @@ const editFormSchema = toTypedSchema(
     }),
 );
 
-// Setup forms
-const form = useForm({
-    validationSchema: formSchema,
-    initialValues: {
-        steam_id: "",
-        reason: "",
-        duration: 1,
-        ban_list_id: "",
-        rule_id: "",
-        evidence_text: "",
-    },
-});
+// Template ref to access the Form component's methods
+const addBanFormRef = ref<any>(null);
 
 // Helper function to get rule details by ID
 function getSelectedRuleDetails(ruleId: string) {
@@ -266,7 +255,9 @@ function selectPlayer(player: any) {
 
     // Ensure steam_id is a clean string (API might return it with quotes or as number)
     const steamId = String(player.steam_id).replace(/"/g, "");
-    form.setFieldValue("steam_id", steamId);
+    if (addBanFormRef.value) {
+        addBanFormRef.value.setFieldValue("steam_id", steamId);
+    }
     showPlayerDropdown.value = false;
 
     // Fetch ban history for the selected player
@@ -279,7 +270,9 @@ function selectPlayer(player: any) {
 function clearSelectedPlayer() {
     selectedPlayer.value = null;
     playerSearchQuery.value = "";
-    form.setFieldValue("steam_id", "");
+    if (addBanFormRef.value) {
+        addBanFormRef.value.setFieldValue("steam_id", "");
+    }
     playerHistory.value = [];
 }
 
@@ -479,7 +472,9 @@ async function addBan(values: any) {
         }
 
         // Reset form and close dialog
-        form.resetForm();
+        if (addBanFormRef.value) {
+            addBanFormRef.value.resetForm();
+        }
         selectedEvidence.value = [];
         evidenceText.value = "";
         uploadedFiles.value = [];
@@ -1395,7 +1390,8 @@ function copyBanCfgUrl() {
             <h1 class="text-xl sm:text-2xl font-bold">Banned Players</h1>
             <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                 <Form
-                    v-slot="{ handleSubmit }"
+                    ref="addBanFormRef"
+                    v-slot="{ handleSubmit, values: formValues }"
                     as=""
                     keep-values
                     :validation-schema="formSchema"
@@ -1668,7 +1664,7 @@ function copyBanCfgUrl() {
 
                                     <!-- Ban Reason Preview (shown when rule is selected) -->
                                     <div
-                                        v-if="form.values.rule_id && form.values.rule_id !== '__none__'"
+                                        v-if="formValues.rule_id && formValues.rule_id !== '__none__'"
                                         class="border rounded-md p-3 bg-muted/50"
                                     >
                                         <h4 class="font-medium text-sm mb-2 flex items-center">
@@ -1676,13 +1672,13 @@ function copyBanCfgUrl() {
                                             Generated Ban Reason
                                         </h4>
                                         <p class="text-sm font-mono bg-background p-2 rounded border">
-                                            {{ generateBanReason(form.values.rule_id, form.values.duration) }}
+                                            {{ generateBanReason(formValues.rule_id, formValues.duration) }}
                                         </p>
                                     </div>
 
                                     <!-- Custom Reason (shown when no rule is selected) -->
                                     <FormField
-                                        v-if="!form.values.rule_id || form.values.rule_id === '__none__'"
+                                        v-if="!formValues.rule_id || formValues.rule_id === '__none__'"
                                         name="reason"
                                         v-slot="{ componentField }"
                                     >
@@ -1804,8 +1800,8 @@ function copyBanCfgUrl() {
                                                         </Select>
                                                         <Button
                                                             type="button"
-                                                            @click="searchEvidenceInline(form.values.steam_id || '')"
-                                                            :disabled="!form.values.steam_id || form.values.steam_id.length !== 17 || isSearchingEvidence"
+                                                            @click="searchEvidenceInline(formValues.steam_id || '')"
+                                                            :disabled="!formValues.steam_id || formValues.steam_id.length !== 17 || isSearchingEvidence"
                                                             class="flex-1 text-xs sm:text-sm"
                                                         >
                                                             <Icon v-if="isSearchingEvidence" name="mdi:loading" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2 animate-spin" />

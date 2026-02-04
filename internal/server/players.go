@@ -106,8 +106,12 @@ type ViolationSummary struct {
 type TeamkillMetrics struct {
 	TotalTeamkills      int64   `json:"total_teamkills"`
 	TeamkillsPerSession float64 `json:"teamkills_per_session"`
-	TeamkillRatio       float64 `json:"teamkill_ratio"` // TKs / total kills
-	RecentTeamkills     int64   `json:"recent_teamkills"` // Last 7 days
+	TeamkillRatio       float64 `json:"teamkill_ratio"`       // TKs / total kills
+	RecentTeamkills     int64   `json:"recent_teamkills"`     // Last 7 days
+	TotalTeamWounds     int64   `json:"total_team_wounds"`    // Times downed a teammate
+	TotalTeamDamage     int64   `json:"total_team_damage"`    // Times damaged a teammate
+	RecentTeamWounds    int64   `json:"recent_team_wounds"`   // Team wounds in last 7 days
+	RecentTeamDamage    int64   `json:"recent_team_damage"`   // Team damage in last 7 days
 }
 
 // RiskIndicator represents a risk flag for admin attention
@@ -1672,8 +1676,10 @@ func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSte
 		whereClause = "attacker_eos = ?"
 	}
 
-	// Total teamkills
-	query := fmt.Sprintf(`
+	var metrics TeamkillMetrics
+
+	// Total teamkills from died events
+	tkQuery := fmt.Sprintf(`
 		SELECT
 			count(*) as total_teamkills,
 			countIf(event_time >= now() - INTERVAL 7 DAY) as recent_teamkills
@@ -1681,12 +1687,37 @@ func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSte
 		WHERE teamkill = 1 AND (%s)
 	`, whereClause)
 
-	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
+	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), tkQuery, playerID)
+	if err := row.Scan(&metrics.TotalTeamkills, &metrics.RecentTeamkills); err != nil {
+		// Continue with zeros if error
+	}
 
-	var metrics TeamkillMetrics
-	err := row.Scan(&metrics.TotalTeamkills, &metrics.RecentTeamkills)
-	if err != nil {
-		return &TeamkillMetrics{}, nil
+	// Total team wounds from wounded events
+	woundQuery := fmt.Sprintf(`
+		SELECT
+			count(*) as total_team_wounds,
+			countIf(event_time >= now() - INTERVAL 7 DAY) as recent_team_wounds
+		FROM squad_aegis.server_player_wounded_events
+		WHERE teamkill = 1 AND (%s)
+	`, whereClause)
+
+	row = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), woundQuery, playerID)
+	if err := row.Scan(&metrics.TotalTeamWounds, &metrics.RecentTeamWounds); err != nil {
+		// Continue with zeros if error
+	}
+
+	// Total team damage from damaged events
+	damageQuery := fmt.Sprintf(`
+		SELECT
+			count(*) as total_team_damage,
+			countIf(event_time >= now() - INTERVAL 7 DAY) as recent_team_damage
+		FROM squad_aegis.server_player_damaged_events
+		WHERE teamkill = 1 AND (%s)
+	`, whereClause)
+
+	row = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), damageQuery, playerID)
+	if err := row.Scan(&metrics.TotalTeamDamage, &metrics.RecentTeamDamage); err != nil {
+		// Continue with zeros if error
 	}
 
 	// Calculate per-session rate
