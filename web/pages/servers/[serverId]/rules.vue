@@ -598,12 +598,21 @@ async function saveAllRules() {
     hasUnsavedChanges.value = false;
     await fetchRules();
 
-    // Show success toast
-    toast({
-      title: "Rules Saved",
-      description: "All rule changes have been saved successfully",
-      variant: "default",
-    });
+    // Show success toast with MOTD upload status
+    const motdAutoUploaded = (data.value as any)?.motd_auto_uploaded;
+    if (motdAutoUploaded) {
+      toast({
+        title: "Rules Saved & MOTD Uploaded",
+        description: "Rules saved and MOTD automatically uploaded to game server",
+        variant: "default",
+      });
+    } else {
+      toast({
+        title: "Rules Saved",
+        description: "All rule changes have been saved successfully",
+        variant: "default",
+      });
+    }
 
   } catch (err: any) {
     error.value = err.message || "Error saving rules";

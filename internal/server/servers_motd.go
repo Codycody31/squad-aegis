@@ -581,14 +581,17 @@ func (s *Server) triggerMOTDUpload(ctx context.Context, serverID uuid.UUID) {
 	s.updateMOTDUploadSuccess(ctx, config.ID, content)
 }
 
-// TriggerMOTDUploadIfEnabled is exported for use by rules bulk update
-func (s *Server) TriggerMOTDUploadIfEnabled(ctx context.Context, serverID uuid.UUID) {
+// TriggerMOTDUploadIfEnabled is exported for use by rules bulk update.
+// Returns true if upload was triggered, false otherwise.
+func (s *Server) TriggerMOTDUploadIfEnabled(ctx context.Context, serverID uuid.UUID) bool {
 	config, err := s.fetchOrCreateMOTDConfig(ctx, serverID)
 	if err != nil {
-		return
+		return false
 	}
 
 	if config.AutoUploadOnChange && config.UploadEnabled {
 		go s.triggerMOTDUpload(context.Background(), serverID)
+		return true
 	}
+	return false
 }
