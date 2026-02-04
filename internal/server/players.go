@@ -2344,106 +2344,107 @@ func (s *Server) PlayersAltGroups(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
-	// Query to find all IPs shared by multiple players, grouped by IP
-	// This gives us groups of players that share the same IP address
-	query := `
-		WITH multi_player_ips AS (
-			-- Find IPs used by more than one distinct player
-			SELECT ip
-			FROM squad_aegis.server_player_connected_events
-			WHERE ip != '' AND (steam != '' OR eos != '')
-			GROUP BY ip
-			HAVING countDistinct(if(steam != '', steam, eos)) > 1
-		),
-		player_ip_sessions AS (
-			-- Get all players connected from those shared IPs with session counts
-			SELECT
-				ip,
-				if(steam != '', steam, eos) as player_id,
-				steam,
-				eos,
-				count() as sessions,
-				max(event_time) as last_seen
-			FROM squad_aegis.server_player_connected_events
-			WHERE ip IN (SELECT ip FROM multi_player_ips)
-				AND (steam != '' OR eos != '')
-			GROUP BY ip, player_id, steam, eos
-		),
-		player_names AS (
-			-- Get latest player names
-			SELECT
-				if(steam != '', steam, eos) as player_id,
-				any(player_suffix) as player_name
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE steam != '' OR eos != ''
-			GROUP BY player_id
-		),
-		ip_groups AS (
-			-- Group players by IP and aggregate
-			SELECT
-				ip,
-				groupArray(tuple(
-					pis.steam,
-					pis.eos,
-					COALESCE(pn.player_name, ''),
-					pis.sessions,
-					pis.last_seen
-				)) as players,
-				max(pis.last_seen) as group_last_activity
-			FROM player_ip_sessions pis
-			LEFT JOIN player_names pn ON pis.player_id = pn.player_id
-			GROUP BY ip
-			HAVING length(players) > 1
-		)
+	// Step 1: Get IPs shared by multiple players with last activity
+	ipsQuery := `
 		SELECT
 			ip,
-			players,
-			group_last_activity
-		FROM ip_groups
-		ORDER BY group_last_activity DESC
+			max(event_time) as last_activity,
+			countDistinct(if(steam != '', steam, eos)) as player_count
+		FROM squad_aegis.server_player_connected_events
+		WHERE ip != '' AND (steam != '' OR eos != '')
+		GROUP BY ip
+		HAVING player_count > 1
+		ORDER BY last_activity DESC
 		LIMIT ? OFFSET ?
 	`
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, limit, offset)
+	ipRows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), ipsQuery, limit, offset)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to query alt account groups")
+		log.Error().Err(err).Msg("Failed to query shared IPs")
 		responses.InternalServerError(c, err, nil)
 		return
 	}
-	defer rows.Close()
+	defer ipRows.Close()
+
+	type ipInfo struct {
+		IP           string
+		LastActivity time.Time
+		PlayerCount  uint64
+	}
+	sharedIPs := []ipInfo{}
+	for ipRows.Next() {
+		var info ipInfo
+		if err := ipRows.Scan(&info.IP, &info.LastActivity, &info.PlayerCount); err != nil {
+			log.Error().Err(err).Msg("Failed to scan IP row")
+			continue
+		}
+		sharedIPs = append(sharedIPs, info)
+	}
 
 	groups := []AltAccountGroup{}
-	for rows.Next() {
-		var ip string
-		var playersData []struct {
-			Steam    string
-			Eos      string
-			Name     string
-			Sessions uint64
-			LastSeen time.Time
-		}
-		var groupLastActivity time.Time
 
-		err := rows.Scan(&ip, &playersData, &groupLastActivity)
+	// Step 2: For each IP, get the players
+	for _, ipInfo := range sharedIPs {
+		playersQuery := `
+			WITH player_sessions AS (
+				SELECT
+					steam,
+					eos,
+					count() as sessions,
+					max(event_time) as last_seen
+				FROM squad_aegis.server_player_connected_events
+				WHERE ip = ? AND (steam != '' OR eos != '')
+				GROUP BY steam, eos
+			),
+			player_names AS (
+				SELECT
+					steam,
+					eos,
+					any(player_suffix) as player_name
+				FROM squad_aegis.server_join_succeeded_events
+				WHERE steam != '' OR eos != ''
+				GROUP BY steam, eos
+			)
+			SELECT
+				ps.steam,
+				ps.eos,
+				COALESCE(pn.player_name, '') as player_name,
+				ps.sessions,
+				ps.last_seen
+			FROM player_sessions ps
+			LEFT JOIN player_names pn ON (ps.steam != '' AND ps.steam = pn.steam) OR (ps.eos != '' AND ps.eos = pn.eos)
+			ORDER BY ps.last_seen DESC
+		`
+
+		playerRows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), playersQuery, ipInfo.IP)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to scan alt account group row")
+			log.Error().Err(err).Str("ip", ipInfo.IP).Msg("Failed to query players for IP")
 			continue
 		}
 
+		lastActivity := ipInfo.LastActivity
 		group := AltAccountGroup{
-			GroupID:       ip, // Use IP as group ID (hashed in frontend if needed)
-			SharedIPCount: 1,  // Each group is based on one shared IP
-			LastActivity:  &groupLastActivity,
-			Players:       make([]AltAccountPlayer, 0, len(playersData)),
+			GroupID:       ipInfo.IP,
+			SharedIPCount: 1,
+			LastActivity:  &lastActivity,
+			Players:       []AltAccountPlayer{},
 		}
 
-		for _, p := range playersData {
+		for playerRows.Next() {
+			var steam, eos, name string
+			var sessions uint64
+			var lastSeen time.Time
+			if err := playerRows.Scan(&steam, &eos, &name, &sessions, &lastSeen); err != nil {
+				log.Error().Err(err).Msg("Failed to scan player row")
+				continue
+			}
+
 			player := AltAccountPlayer{
-				SteamID:        p.Steam,
-				EOSID:          p.Eos,
-				PlayerName:     p.Name,
-				SharedSessions: int64(p.Sessions),
-				LastSeen:       &p.LastSeen,
+				SteamID:        steam,
+				EOSID:          eos,
+				PlayerName:     name,
+				SharedSessions: int64(sessions),
+				LastSeen:       &lastSeen,
 			}
 
 			// Check if this player is banned
@@ -2457,8 +2458,11 @@ func (s *Server) PlayersAltGroups(c *gin.Context) {
 
 			group.Players = append(group.Players, player)
 		}
+		playerRows.Close()
 
-		groups = append(groups, group)
+		if len(group.Players) > 1 {
+			groups = append(groups, group)
+		}
 	}
 
 	// Get total count for pagination
