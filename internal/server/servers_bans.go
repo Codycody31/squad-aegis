@@ -275,6 +275,14 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
+	// Log rule violation to ClickHouse if rule ID is provided
+	if request.RuleID != nil && *request.RuleID != "" {
+		if err := s.logRuleViolation(c.Request.Context(), serverId, request.SteamID, request.RuleID, &user.Id, "BAN"); err != nil {
+			log.Warn().Err(err).Str("steamId", request.SteamID).Str("ruleId", *request.RuleID).Msg("Failed to log rule violation for manual ban")
+			// Don't fail the ban creation if violation logging fails
+		}
+	}
+
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"banId":         banID.String(),
@@ -282,6 +290,11 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		"reason":        request.Reason,
 		"duration":      request.Duration,
 		"evidenceCount": len(request.Evidence),
+	}
+
+	// Add rule ID to audit log if provided
+	if request.RuleID != nil && *request.RuleID != "" {
+		auditData["ruleId"] = *request.RuleID
 	}
 
 	// Add expiry information if not permanent
