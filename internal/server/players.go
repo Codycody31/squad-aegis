@@ -457,17 +457,17 @@ func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern s
 			SELECT
 				steam,
 				eos,
-				anyIf(name, name != '') as player_name,
+				name,
 				max(event_time) as last_seen,
 				min(event_time) as first_seen
 			FROM all_player_records
-			WHERE steam != '' OR eos != ''
-			GROUP BY steam, eos
+			WHERE name != ''
+			GROUP BY steam, eos, name
 		)
 		SELECT
 			anyIf(steam, steam != '') as steam_id,
 			anyIf(eos, eos != '') as eos_id,
-			any(player_name) as player_name,
+			any(name) as player_name,
 			max(last_seen) as last_seen,
 			min(first_seen) as first_seen
 		FROM player_identifiers
@@ -475,9 +475,9 @@ func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern s
 			multiIf(
 				steam != '', steam,
 				eos != '', eos,
-				''
+				name
 			)
-		HAVING steam_id != '' OR eos_id != ''
+		HAVING player_name != ''
 		ORDER BY last_seen DESC
 		LIMIT ?
 	`
