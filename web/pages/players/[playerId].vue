@@ -203,7 +203,7 @@ onMounted(async () => {
       <PlayerRiskIndicators
         :risk-indicators="player.risk_indicators || []"
         :violation-summary="player.violation_summary || { total_warns: 0, total_kicks: 0, total_bans: 0 }"
-        :teamkill-metrics="player.teamkill_metrics || { total_teamkills: 0, teamkills_per_session: 0, teamkill_ratio: 0, recent_teamkills: 0 }"
+        :teamkill-metrics="player.teamkill_metrics || { total_teamkills: 0, teamkills_per_session: 0, teamkill_ratio: 0, recent_teamkills: 0, total_team_wounds: 0, total_team_damage: 0, recent_team_wounds: 0, recent_team_damage: 0 }"
         :cbl-data="cblData"
         :name-count="player.name_history?.length || 1"
       />
@@ -211,7 +211,7 @@ onMounted(async () => {
       <!-- Stats Grid -->
       <PlayerStatsGrid
         :statistics="player.statistics"
-        :teamkill-metrics="player.teamkill_metrics || { total_teamkills: 0, teamkills_per_session: 0, teamkill_ratio: 0, recent_teamkills: 0 }"
+        :teamkill-metrics="player.teamkill_metrics || { total_teamkills: 0, teamkills_per_session: 0, teamkill_ratio: 0, recent_teamkills: 0, total_team_wounds: 0, total_team_damage: 0, recent_team_wounds: 0, recent_team_damage: 0 }"
         :total-sessions="player.total_sessions"
         :total-play-time="player.total_play_time"
       />
@@ -274,7 +274,7 @@ onMounted(async () => {
         <TabsContent value="teamkills">
           <PlayerTeamkillAnalysis
             :player-id="(route.params.playerId as string)"
-            :metrics="player.teamkill_metrics || { total_teamkills: 0, teamkills_per_session: 0, teamkill_ratio: 0, recent_teamkills: 0 }"
+            :metrics="player.teamkill_metrics || { total_teamkills: 0, teamkills_per_session: 0, teamkill_ratio: 0, recent_teamkills: 0, total_team_wounds: 0, total_team_damage: 0, recent_team_wounds: 0, recent_team_damage: 0 }"
             :weapon-stats="player.weapon_stats || []"
           />
         </TabsContent>

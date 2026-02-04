@@ -79,10 +79,26 @@ const totalViolations = computed(
 const tkPercentage = computed(() => {
   return (props.teamkillMetrics.teamkill_ratio * 100).toFixed(1);
 });
+
+const totalFriendlyFire = computed(() => {
+  return (
+    (props.teamkillMetrics.total_teamkills || 0) +
+    (props.teamkillMetrics.total_team_wounds || 0) +
+    (props.teamkillMetrics.total_team_damage || 0)
+  );
+});
+
+const recentFriendlyFire = computed(() => {
+  return (
+    (props.teamkillMetrics.recent_teamkills || 0) +
+    (props.teamkillMetrics.recent_team_wounds || 0) +
+    (props.teamkillMetrics.recent_team_damage || 0)
+  );
+});
 </script>
 
 <template>
-  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
+  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
     <!-- CBL Risk Rating -->
     <Card v-if="cblData" class="col-span-1">
       <CardContent class="p-4 text-center">
@@ -114,6 +130,27 @@ const tkPercentage = computed(() => {
         </div>
         <div class="text-xs text-muted-foreground">
           {{ teamkillMetrics.total_teamkills }} total TKs
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- Friendly Fire (Total Team Damage/Wounds/Kills) -->
+    <Card class="col-span-1">
+      <CardContent class="p-4 text-center">
+        <div class="text-xs text-muted-foreground mb-1">Friendly Fire</div>
+        <div
+          class="text-3xl font-bold"
+          :class="{
+            'text-destructive': totalFriendlyFire >= 20,
+            'text-orange-500': totalFriendlyFire >= 10 && totalFriendlyFire < 20,
+            'text-yellow-500': totalFriendlyFire >= 5 && totalFriendlyFire < 10,
+            'text-muted-foreground': totalFriendlyFire < 5,
+          }"
+        >
+          {{ totalFriendlyFire }}
+        </div>
+        <div class="text-xs text-muted-foreground">
+          {{ recentFriendlyFire }} recent
         </div>
       </CardContent>
     </Card>

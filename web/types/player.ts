@@ -102,6 +102,10 @@ export interface TeamkillMetrics {
   teamkills_per_session: number;
   teamkill_ratio: number;
   recent_teamkills: number;
+  total_team_wounds: number;
+  total_team_damage: number;
+  recent_team_wounds: number;
+  recent_team_damage: number;
 }
 
 export interface RiskIndicator {
