@@ -8,6 +8,7 @@
 
 ### Misc
 
+- feat(motd): add server motd config, generator, uploader and UI ([b0f8a77](https://github.com/Codycody31/squad-aegis/commit/b0f8a77cbd560cd42444bd2550a842b32d411594))
 - fix(plugin_manager): sort plugin instances by creation time ([91fbb2f](https://github.com/Codycody31/squad-aegis/commit/91fbb2f48ef9572c6fc65f11d78eddcd45ec3429))
 - fix(plugin): skip calling UpdateConfig on disabled or stopped plugins ([b67e66d](https://github.com/Codycody31/squad-aegis/commit/b67e66d31ac117acc6a7064cf8cad9489daf128a))
 - feat(players): add friendly-fire metrics and UI ([c61e552](https://github.com/Codycody31/squad-aegis/commit/c61e552afacad24e1eaa4bf3c65bbd4ba19f0880))
