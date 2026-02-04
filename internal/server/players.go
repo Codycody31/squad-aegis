@@ -163,7 +163,7 @@ type SessionHistoryEntry struct {
 // CombatHistoryEntry represents a kill or death event
 type CombatHistoryEntry struct {
 	EventTime    time.Time `json:"event_time"`
-	EventType    string    `json:"event_type"` // "kill" or "death"
+	EventType    string    `json:"event_type"` // "kill", "death", "wounded", "damaged", "wounded_by", "damaged_by"
 	ServerID     string    `json:"server_id"`
 	ServerName   string    `json:"server_name,omitempty"`
 	Weapon       string    `json:"weapon"`
@@ -2229,6 +2229,7 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 
 	query := fmt.Sprintf(`
 		SELECT * FROM (
+			-- Kills (player killed someone)
 			SELECT
 				event_time,
 				'kill' as event_type,
@@ -2246,6 +2247,7 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			FROM squad_aegis.server_player_died_events
 			WHERE %s
 			UNION ALL
+			-- Deaths (player was killed)
 			SELECT
 				event_time,
 				'death' as event_type,
@@ -2262,11 +2264,83 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 				victim_squad as player_squad
 			FROM squad_aegis.server_player_died_events
 			WHERE %s
+			UNION ALL
+			-- Wounded someone (player downed someone)
+			SELECT
+				event_time,
+				'wounded' as event_type,
+				server_id,
+				weapon,
+				damage,
+				teamkill,
+				victim_name as other_name,
+				victim_steam as other_steam_id,
+				victim_eos as other_eos_id,
+				victim_team as other_team,
+				victim_squad as other_squad,
+				attacker_team as player_team,
+				attacker_squad as player_squad
+			FROM squad_aegis.server_player_wounded_events
+			WHERE %s
+			UNION ALL
+			-- Wounded by (player was downed)
+			SELECT
+				event_time,
+				'wounded_by' as event_type,
+				server_id,
+				weapon,
+				damage,
+				teamkill,
+				attacker_name as other_name,
+				attacker_steam as other_steam_id,
+				attacker_eos as other_eos_id,
+				attacker_team as other_team,
+				attacker_squad as other_squad,
+				victim_team as player_team,
+				victim_squad as player_squad
+			FROM squad_aegis.server_player_wounded_events
+			WHERE %s
+			UNION ALL
+			-- Damaged someone (player dealt damage)
+			SELECT
+				event_time,
+				'damaged' as event_type,
+				server_id,
+				weapon,
+				damage,
+				teamkill,
+				victim_name as other_name,
+				victim_steam as other_steam_id,
+				victim_eos as other_eos_id,
+				victim_team as other_team,
+				victim_squad as other_squad,
+				attacker_team as player_team,
+				attacker_squad as player_squad
+			FROM squad_aegis.server_player_damaged_events
+			WHERE %s
+			UNION ALL
+			-- Damaged by (player took damage)
+			SELECT
+				event_time,
+				'damaged_by' as event_type,
+				server_id,
+				weapon,
+				damage,
+				teamkill,
+				attacker_name as other_name,
+				attacker_steam as other_steam_id,
+				attacker_eos as other_eos_id,
+				attacker_team as other_team,
+				attacker_squad as other_squad,
+				victim_team as player_team,
+				victim_squad as player_squad
+			FROM squad_aegis.server_player_damaged_events
+			WHERE %s
 		) ORDER BY event_time DESC
 		LIMIT ? OFFSET ?
-	`, killWhereClause, deathWhereClause)
+	`, killWhereClause, deathWhereClause, killWhereClause, deathWhereClause, killWhereClause, deathWhereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, limit, offset)
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, playerID, playerID, playerID, playerID, limit, offset)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return

@@ -32,6 +32,8 @@ import {
   Skull,
   Target,
   AlertTriangle,
+  Crosshair,
+  Heart,
 } from "lucide-vue-next";
 import type { CombatHistoryEntry } from "~/types/player";
 
@@ -147,13 +149,17 @@ onMounted(() => {
           Combat History
         </CardTitle>
         <Select v-model="eventTypeFilter">
-          <SelectTrigger class="w-full sm:w-32">
+          <SelectTrigger class="w-full sm:w-40">
             <SelectValue placeholder="Type" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="all">All Events</SelectItem>
             <SelectItem value="kill">Kills</SelectItem>
             <SelectItem value="death">Deaths</SelectItem>
+            <SelectItem value="wounded">Downed</SelectItem>
+            <SelectItem value="wounded_by">Downed By</SelectItem>
+            <SelectItem value="damaged">Damaged</SelectItem>
+            <SelectItem value="damaged_by">Damaged By</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -214,12 +220,44 @@ onMounted(() => {
                       Kill
                     </Badge>
                     <Badge
-                      v-else
+                      v-else-if="event.event_type === 'death'"
                       variant="default"
                       class="bg-red-600"
                     >
                       <Skull class="h-3 w-3 mr-1" />
                       Death
+                    </Badge>
+                    <Badge
+                      v-else-if="event.event_type === 'wounded'"
+                      variant="default"
+                      class="bg-orange-500"
+                    >
+                      <Crosshair class="h-3 w-3 mr-1" />
+                      Downed
+                    </Badge>
+                    <Badge
+                      v-else-if="event.event_type === 'wounded_by'"
+                      variant="default"
+                      class="bg-orange-700"
+                    >
+                      <Heart class="h-3 w-3 mr-1" />
+                      Downed By
+                    </Badge>
+                    <Badge
+                      v-else-if="event.event_type === 'damaged'"
+                      variant="default"
+                      class="bg-blue-500"
+                    >
+                      <Crosshair class="h-3 w-3 mr-1" />
+                      Hit
+                    </Badge>
+                    <Badge
+                      v-else-if="event.event_type === 'damaged_by'"
+                      variant="default"
+                      class="bg-blue-700"
+                    >
+                      <Heart class="h-3 w-3 mr-1" />
+                      Hit By
                     </Badge>
                     <TooltipProvider v-if="event.teamkill">
                       <Tooltip>
@@ -227,7 +265,7 @@ onMounted(() => {
                           <AlertTriangle class="h-4 w-4 text-yellow-500" />
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>Teamkill</p>
+                          <p>Friendly Fire</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
@@ -287,9 +325,45 @@ onMounted(() => {
                   <Target class="h-3 w-3 mr-1" />
                   Kill
                 </Badge>
-                <Badge v-else variant="default" class="bg-red-600">
+                <Badge
+                  v-else-if="event.event_type === 'death'"
+                  variant="default"
+                  class="bg-red-600"
+                >
                   <Skull class="h-3 w-3 mr-1" />
                   Death
+                </Badge>
+                <Badge
+                  v-else-if="event.event_type === 'wounded'"
+                  variant="default"
+                  class="bg-orange-500"
+                >
+                  <Crosshair class="h-3 w-3 mr-1" />
+                  Downed
+                </Badge>
+                <Badge
+                  v-else-if="event.event_type === 'wounded_by'"
+                  variant="default"
+                  class="bg-orange-700"
+                >
+                  <Heart class="h-3 w-3 mr-1" />
+                  Downed By
+                </Badge>
+                <Badge
+                  v-else-if="event.event_type === 'damaged'"
+                  variant="default"
+                  class="bg-blue-500"
+                >
+                  <Crosshair class="h-3 w-3 mr-1" />
+                  Hit
+                </Badge>
+                <Badge
+                  v-else-if="event.event_type === 'damaged_by'"
+                  variant="default"
+                  class="bg-blue-700"
+                >
+                  <Heart class="h-3 w-3 mr-1" />
+                  Hit By
                 </Badge>
                 <AlertTriangle
                   v-if="event.teamkill"
@@ -303,7 +377,7 @@ onMounted(() => {
             <div class="space-y-1 text-sm">
               <div>
                 <span class="text-muted-foreground">
-                  {{ event.event_type === "kill" ? "Victim" : "Attacker" }}:
+                  {{ ['kill', 'wounded', 'damaged'].includes(event.event_type) ? "Victim" : "Attacker" }}:
                 </span>
                 <NuxtLink
                   v-if="getOtherPlayerId(event)"
