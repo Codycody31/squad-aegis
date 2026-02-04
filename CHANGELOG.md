@@ -10,6 +10,11 @@
 
 - feat(workflow-stats): Add server-side computation of workflow execution stats [[#135](https://github.com/Codycody31/squad-aegis/pull/135)]
 
+### 📚 Documentation
+
+- docs: Remove GNU GPL license document [[#139](https://github.com/Codycody31/squad-aegis/pull/139)]
+- docs(claude): add claude.md guidance for claude code [[#134](https://github.com/Codycody31/squad-aegis/pull/134)]
+
 ### 📈 Enhancement
 
 - refactor(server): Add rule violation logging for manual bans [[#138](https://github.com/Codycody31/squad-aegis/pull/138)]
@@ -18,10 +23,6 @@
 ### 🐛 Bug Fixes
 
 - fix(server): MOTD auto-upload feedback on rule changes [[#137](https://github.com/Codycody31/squad-aegis/pull/137)]
-
-### 📚 Documentation
-
-- docs(claude): add claude.md guidance for claude code [[#134](https://github.com/Codycody31/squad-aegis/pull/134)]
 
 ### Misc
 
