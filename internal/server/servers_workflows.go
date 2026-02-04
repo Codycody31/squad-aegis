@@ -339,6 +339,56 @@ func (s *Server) ServerWorkflowExecutions(c *gin.Context) {
 	})
 }
 
+// ServerWorkflowExecutionStats returns computed statistics for a workflow
+func (s *Server) ServerWorkflowExecutionStats(c *gin.Context) {
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowID, err := uuid.Parse(c.Param("workflowId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid workflow ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
+
+	// Verify workflow exists and belongs to server
+	workflow, err := workflowDB.GetWorkflow(workflowID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			responses.NotFound(c, "Workflow not found", nil)
+			return
+		}
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get workflow"})
+		return
+	}
+
+	if workflow.ServerID != serverID {
+		responses.NotFound(c, "Workflow not found", nil)
+		return
+	}
+
+	// Get statistics
+	stats, err := workflowDB.GetWorkflowExecutionStats(workflowID)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get execution statistics"})
+		return
+	}
+
+	responses.Success(c, "Execution statistics retrieved successfully", &gin.H{
+		"stats": stats,
+	})
+}
+
 // ServerWorkflowExecutionGet returns details for a specific execution
 func (s *Server) ServerWorkflowExecutionGet(c *gin.Context) {
 	user := s.getUserFromSession(c)
