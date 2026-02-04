@@ -34,6 +34,8 @@ export const UI_PERMISSIONS = {
   RULES_MANAGE: "ui:rules:manage",
   BAN_LISTS_VIEW: "ui:ban_lists:view",
   BAN_LISTS_MANAGE: "ui:ban_lists:manage",
+  MOTD_VIEW: "ui:motd:view",
+  MOTD_MANAGE: "ui:motd:manage",
 } as const;
 
 // API Permissions - Control access to API endpoints

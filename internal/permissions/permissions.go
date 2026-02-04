@@ -47,6 +47,8 @@ const (
 	UIRulesManage     Permission = "ui:rules:manage"
 	UIBanListsView    Permission = "ui:ban_lists:view"
 	UIBanListsManage  Permission = "ui:ban_lists:manage"
+	UIMOTDView        Permission = "ui:motd:view"
+	UIMOTDManage      Permission = "ui:motd:manage"
 )
 
 // API Permissions - Control access to API endpoints.
@@ -210,6 +212,7 @@ func AllPermissions() []Permission {
 		UIUsersManage, UIRolesManage, UIBansView, UIBansCreate, UIBansEdit, UIBansDelete,
 		UIPlayersView, UIPlayersKick, UIPlayersWarn, UIPlayersMove,
 		UIRulesView, UIRulesManage, UIBanListsView, UIBanListsManage,
+		UIMOTDView, UIMOTDManage,
 		// API
 		APIServersRead, APIServersWrite, APIBansRead, APIBansWrite,
 		APIPlayersRead, APIRconExecute, APIPluginsManage, APIWorkflowsManage,
@@ -232,6 +235,7 @@ func UIPermissions() []Permission {
 		UIUsersManage, UIRolesManage, UIBansView, UIBansCreate, UIBansEdit, UIBansDelete,
 		UIPlayersView, UIPlayersKick, UIPlayersWarn, UIPlayersMove,
 		UIRulesView, UIRulesManage, UIBanListsView, UIBanListsManage,
+		UIMOTDView, UIMOTDManage,
 	}
 }
 
