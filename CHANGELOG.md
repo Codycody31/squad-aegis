@@ -8,6 +8,7 @@
 
 ### ✨ Features
 
+- feat(player): Improve name history retrieval with linked identifiers [[#141](https://github.com/Codycody31/squad-aegis/pull/141)]
 - feat(workflow-stats): Add server-side computation of workflow execution stats [[#135](https://github.com/Codycody31/squad-aegis/pull/135)]
 
 ### 🐛 Bug Fixes
