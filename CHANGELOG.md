@@ -8,6 +8,7 @@
 
 ### Misc
 
+- chore: temp set postgres to 14 for dev... ([5d39d03](https://github.com/Codycody31/squad-aegis/commit/5d39d033b52519be60d6c78b54643e00b9125e7c))
 - refactor(identity)!: replace EventTime with FirstSeen and LastSeen fields ([77476a3](https://github.com/Codycody31/squad-aegis/commit/77476a3aeabe74ccf8404fda5093b2e8ae516127))
 - feat(identity): add identity resolver and periodic worker with migrations for player identity aggregration and consolidation ([804b34d](https://github.com/Codycody31/squad-aegis/commit/804b34dd1de6cebfb1d0298bb016989a032fd2e0))
 - feat(players): add dedicated alts page and view-all link, reduce widget limit ([43c9ca0](https://github.com/Codycody31/squad-aegis/commit/43c9ca0dd14f9d12e6068078dad66f5217df41a7))
