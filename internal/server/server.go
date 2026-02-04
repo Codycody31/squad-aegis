@@ -322,6 +322,16 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 					rulesGroup.PUT("/bulk", server.RequirePermission(permissions.UIRulesManage), server.bulkUpdateServerRules) // Bulk update endpoint
 				}
 
+				// Server MOTD
+				motdGroup := serverGroup.Group("/motd")
+				{
+					motdGroup.GET("", server.getMOTDConfig)
+					motdGroup.PUT("", server.RequirePermission(permissions.UIMOTDManage), server.updateMOTDConfig)
+					motdGroup.GET("/preview", server.previewMOTD)
+					motdGroup.POST("/upload", server.RequirePermission(permissions.UIMOTDManage), server.uploadMOTD)
+					motdGroup.POST("/test-connection", server.RequirePermission(permissions.UIMOTDManage), server.testMOTDConnection)
+				}
+
 				// Server Workflows
 				workflowsGroup := serverGroup.Group("/workflows")
 				{

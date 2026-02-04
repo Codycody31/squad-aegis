@@ -520,5 +520,8 @@ func (s *Server) bulkUpdateServerRules(c *gin.Context) {
 		return
 	}
 
+	// Trigger MOTD auto-upload if enabled
+	s.TriggerMOTDUploadIfEnabled(c.Request.Context(), serverID)
+
 	c.JSON(http.StatusOK, updatedRules)
 }

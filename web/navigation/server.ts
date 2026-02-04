@@ -83,6 +83,14 @@ export default [
     permissions: [UI_PERMISSIONS.RULES_VIEW],
   },
   {
+    title: "MOTD",
+    icon: "mdi:message-text",
+    to: {
+      name: "servers-serverId-motd",
+    },
+    permissions: [UI_PERMISSIONS.MOTD_VIEW],
+  },
+  {
     title: "Plugins",
     icon: "lucide:puzzle",
     to: {
