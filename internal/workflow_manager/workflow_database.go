@@ -664,3 +664,52 @@ func (wd *WorkflowDatabase) CountKVPairs(workflowID uuid.UUID) (int, error) {
 
 	return count, nil
 }
+
+// WorkflowExecutionStats holds computed statistics for a workflow
+type WorkflowExecutionStats struct {
+	TotalExecutions int64   `json:"total_executions"`
+	SuccessRate     float64 `json:"success_rate"`
+	AvgDurationMs   *int64  `json:"avg_duration_ms"`
+	RunningCount    int64   `json:"running_count"`
+}
+
+// GetWorkflowExecutionStats computes aggregate statistics for a workflow
+func (wd *WorkflowDatabase) GetWorkflowExecutionStats(workflowID uuid.UUID) (*WorkflowExecutionStats, error) {
+	query := `
+		SELECT
+			COUNT(*) as total_executions,
+			COALESCE(
+				ROUND(
+					(COUNT(*) FILTER (WHERE status = 'COMPLETED')::numeric /
+					NULLIF(COUNT(*), 0)::numeric) * 100,
+					2
+				),
+				0
+			) as success_rate,
+			EXTRACT(EPOCH FROM AVG(completed_at - started_at) FILTER (WHERE completed_at IS NOT NULL)) * 1000 as avg_duration_ms,
+			COUNT(*) FILTER (WHERE status IN ('RUNNING', 'EXECUTING')) as running_count
+		FROM server_workflow_executions
+		WHERE workflow_id = $1
+	`
+
+	var stats WorkflowExecutionStats
+	var avgDurationMs sql.NullFloat64
+
+	err := wd.db.QueryRow(query, workflowID).Scan(
+		&stats.TotalExecutions,
+		&stats.SuccessRate,
+		&avgDurationMs,
+		&stats.RunningCount,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if avgDurationMs.Valid {
+		ms := int64(avgDurationMs.Float64)
+		stats.AvgDurationMs = &ms
+	}
+
+	return &stats, nil
+}
