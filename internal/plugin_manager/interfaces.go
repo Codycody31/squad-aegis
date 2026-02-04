@@ -309,6 +309,19 @@ type RconAPI interface {
 	// Returns the ban UUID and any error
 	BanWithEvidence(playerID string, reason string, duration time.Duration, eventID string, eventType string) (string, error)
 
+	// WarnPlayerWithRule sends a warning and logs the violation to player history if ruleID is provided
+	WarnPlayerWithRule(playerID string, message string, ruleID *string) error
+
+	// KickPlayerWithRule kicks a player and logs the violation to player history if ruleID is provided
+	KickPlayerWithRule(playerID string, reason string, ruleID *string) error
+
+	// BanPlayerWithRule bans a player and logs the violation to player history if ruleID is provided
+	BanPlayerWithRule(playerID string, reason string, duration time.Duration, ruleID *string) error
+
+	// BanWithEvidenceAndRule bans a player with evidence linking and logs the violation to player history if ruleID is provided
+	// Returns the ban UUID and any error
+	BanWithEvidenceAndRule(playerID string, reason string, duration time.Duration, eventID string, eventType string, ruleID *string) (string, error)
+
 	// RemovePlayerFromSquad removes a player from their squad without kicking them
 	RemovePlayerFromSquad(playerID string) error
 

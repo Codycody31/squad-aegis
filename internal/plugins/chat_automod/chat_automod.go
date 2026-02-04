@@ -101,14 +101,6 @@ func getConfigSchema() plug_config_schema.ConfigSchema {
 				Type:        plug_config_schema.FieldTypeBool,
 				Default:     true,
 			},
-			{
-				Name:        "enable_hate_speech",
-				Description: "Enable detection of hate speech patterns (e.g., 'kill all X', 'death to X')",
-				Required:    false,
-				Type:        plug_config_schema.FieldTypeBool,
-				Default:     true,
-			},
-
 			// Regional settings
 			{
 				Name:        "region",
@@ -290,13 +282,12 @@ func (p *ChatAutoModPlugin) Initialize(config map[string]interface{}, apis *plug
 	}
 
 	p.apis.LogAPI.Info("Chat AutoMod plugin initialized", map[string]interface{}{
-		"region":                   p.getStringConfig("region"),
-		"enable_racial_slurs":      p.getBoolConfig("enable_racial_slurs"),
-		"enable_homophobic_slurs":  p.getBoolConfig("enable_homophobic_slurs"),
-		"enable_ableist_language":  p.getBoolConfig("enable_ableist_language"),
-		"enable_hate_speech":       p.getBoolConfig("enable_hate_speech"),
-		"violation_expiry_days":    expiryDays,
-		"escalation_action_count":  len(p.escalationActions),
+		"region":                  p.getStringConfig("region"),
+		"enable_racial_slurs":     p.getBoolConfig("enable_racial_slurs"),
+		"enable_homophobic_slurs": p.getBoolConfig("enable_homophobic_slurs"),
+		"enable_ableist_language": p.getBoolConfig("enable_ableist_language"),
+		"violation_expiry_days":   expiryDays,
+		"escalation_action_count": len(p.escalationActions),
 	})
 
 	return nil
@@ -308,9 +299,8 @@ func (p *ChatAutoModPlugin) initializeFilters() error {
 	enableRacial := p.getBoolConfig("enable_racial_slurs")
 	enableHomophobic := p.getBoolConfig("enable_homophobic_slurs")
 	enableAbleist := p.getBoolConfig("enable_ableist_language")
-	enableHateSpeech := p.getBoolConfig("enable_hate_speech")
 
-	p.filters = NewLanguageFilters(region, enableRacial, enableHomophobic, enableAbleist, enableHateSpeech)
+	p.filters = NewLanguageFilters(region, enableRacial, enableHomophobic, enableAbleist)
 
 	// Set whitelist
 	whitelist := p.getArrayStringConfig("whitelist")
@@ -477,14 +467,17 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 	message := p.formatMessage(action.Message, result.Category)
 
 	// Execute action
+	// Get rule ID for violation logging
+	ruleID := p.getRuleIDPtr()
+
 	var actionErr error
 	switch action.Action {
 	case "WARN":
-		actionErr = p.apis.RconAPI.SendWarningToPlayer(chatEvent.SteamID, message)
+		actionErr = p.apis.RconAPI.WarnPlayerWithRule(chatEvent.SteamID, message, ruleID)
 	case "KICK":
-		actionErr = p.apis.RconAPI.KickPlayer(chatEvent.SteamID, message)
+		actionErr = p.apis.RconAPI.KickPlayerWithRule(chatEvent.SteamID, message, ruleID)
 	case "BAN":
-		actionErr = p.executeBan(chatEvent, eventID, message, action.BanDurationDays)
+		actionErr = p.executeBan(chatEvent, eventID, message, action.BanDurationDays, ruleID)
 	}
 
 	if actionErr != nil {
@@ -521,17 +514,27 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 	return nil
 }
 
-// executeBan performs a ban with evidence linking
-func (p *ChatAutoModPlugin) executeBan(chatEvent *event_manager.RconChatMessageData, eventID uuid.UUID, reason string, durationDays int) error {
+// getRuleIDPtr returns a pointer to the configured rule_id or nil if not set
+func (p *ChatAutoModPlugin) getRuleIDPtr() *string {
+	ruleID := p.getStringConfig("rule_id")
+	if ruleID == "" {
+		return nil
+	}
+	return &ruleID
+}
+
+// executeBan performs a ban with evidence linking and optional rule linking
+func (p *ChatAutoModPlugin) executeBan(chatEvent *event_manager.RconChatMessageData, eventID uuid.UUID, reason string, durationDays int, ruleID *string) error {
 	duration := time.Duration(durationDays*24) * time.Hour
 
-	// Use BanWithEvidence to link the chat message as evidence
-	banID, err := p.apis.RconAPI.BanWithEvidence(
+	// Use BanWithEvidenceAndRule to link the chat message as evidence and log rule violation
+	banID, err := p.apis.RconAPI.BanWithEvidenceAndRule(
 		chatEvent.SteamID,
 		reason,
 		duration,
 		eventID.String(),
 		"RCON_CHAT_MESSAGE",
+		ruleID,
 	)
 
 	if err != nil {
@@ -544,6 +547,7 @@ func (p *ChatAutoModPlugin) executeBan(chatEvent *event_manager.RconChatMessageD
 		"player_name":   chatEvent.PlayerName,
 		"duration_days": durationDays,
 		"event_id":      eventID.String(),
+		"rule_id":       ruleID,
 	})
 
 	return nil

@@ -779,7 +779,7 @@ func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, plugin
 	return &PluginAPIs{
 		ServerAPI:    NewServerAPI(serverID, pm.db, pm.rconManager),
 		DatabaseAPI:  NewDatabaseAPI(instanceID, pm.db),
-		RconAPI:      NewRconAPI(serverID, pm.db, pm.rconManager),
+		RconAPI:      NewRconAPI(serverID, pm.db, pm.rconManager, pm.clickhouseClient),
 		AdminAPI:     NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
 		EventAPI:     NewEventAPI(serverID, instanceID, pluginName, pm.eventManager),
 		ConnectorAPI: NewConnectorAPI(pm),

@@ -15,7 +15,6 @@ const (
 	CategoryRacial     FilterCategory = "racial"
 	CategoryHomophobic FilterCategory = "homophobic"
 	CategoryAbleist    FilterCategory = "ableist"
-	CategoryHateSpeech FilterCategory = "hate_speech"
 	CategoryCustom     FilterCategory = "custom"
 )
 
@@ -32,22 +31,20 @@ type LanguageFilters struct {
 	racialPatterns     []*regexp.Regexp
 	homophobicPatterns []*regexp.Regexp
 	ableistPatterns    []*regexp.Regexp
-	hateSpeechPatterns []*regexp.Regexp
 	customPatterns     []*regexp.Regexp
 
-	whitelist        map[string]bool
-	region           string
-	regionalExempt   map[string]map[string]bool // region -> words exempt in that region
+	whitelist      map[string]bool
+	region         string
+	regionalExempt map[string]map[string]bool // region -> words exempt in that region
 
 	// Enable flags
 	enableRacial     bool
 	enableHomophobic bool
 	enableAbleist    bool
-	enableHateSpeech bool
 }
 
 // NewLanguageFilters creates a new LanguageFilters instance
-func NewLanguageFilters(region string, enableRacial, enableHomophobic, enableAbleist, enableHateSpeech bool) *LanguageFilters {
+func NewLanguageFilters(region string, enableRacial, enableHomophobic, enableAbleist bool) *LanguageFilters {
 	f := &LanguageFilters{
 		whitelist:        make(map[string]bool),
 		region:           strings.ToLower(region),
@@ -55,7 +52,6 @@ func NewLanguageFilters(region string, enableRacial, enableHomophobic, enableAbl
 		enableRacial:     enableRacial,
 		enableHomophobic: enableHomophobic,
 		enableAbleist:    enableAbleist,
-		enableHateSpeech: enableHateSpeech,
 	}
 
 	// Initialize built-in patterns
@@ -108,21 +104,6 @@ func (f *LanguageFilters) initBuiltInPatterns() {
 	}
 
 	f.ableistPatterns = compilePatterns(ableistTerms)
-
-	// Hate speech patterns - phrases indicating violent intent toward groups
-	hateSpeechTerms := []string{
-		`k+[i1!|]+l+l+\s*(all|the|every)\s*\w+`,           // "kill all X"
-		`d+[e3]+[a@4]+t+h+\s*t+[o0]\s*\w+`,                // "death to X"
-		`g+[a@4]+s+\s*t+h+[e3]\s*\w+`,                     // "gas the X"
-		`[e3]+x+t+[e3]+r+m+[i1!|]+n+[a@4]+t+[e3]+\s*\w+`,  // "exterminate X"
-		`g+[e3]+n+[o0]+c+[i1!|]+d+[e3]?`,                  // "genocide"
-		`h+[i1!|]+t+l+[e3]+r+\s*w+[a@4]+s+\s*r+[i1!|]+g+h+t+`, // Nazi glorification
-		`s+[i1!|]+[e3]+g+\s*h+[e3]+[i1!|]+l+`,             // Nazi salute
-		`wh+[i1!|]+t+[e3]+\s*p+[o0]+w+[e3]+r+`,            // white supremacist phrase
-		`r+[a@4]+c+[e3]+\s*w+[a@4]+r+`,                    // "race war"
-	}
-
-	f.hateSpeechPatterns = compilePatterns(hateSpeechTerms)
 }
 
 // initRegionalExemptions sets up regional word exemptions
@@ -218,17 +199,6 @@ func (f *LanguageFilters) CheckMessage(message string) *FilterResult {
 					MatchedTerms: matches,
 					Severity:     3, // Severe
 				}
-			}
-		}
-	}
-
-	if f.enableHateSpeech {
-		if matches := f.checkPatterns(normalized, f.hateSpeechPatterns); len(matches) > 0 {
-			return &FilterResult{
-				Detected:     true,
-				Category:     CategoryHateSpeech,
-				MatchedTerms: matches,
-				Severity:     3, // Severe
 			}
 		}
 	}
@@ -424,8 +394,6 @@ func GetCategoryDisplayName(category FilterCategory) string {
 		return "Homophobic Slur"
 	case CategoryAbleist:
 		return "Ableist Language"
-	case CategoryHateSpeech:
-		return "Hate Speech"
 	case CategoryCustom:
 		return "Prohibited Language"
 	default:

@@ -609,16 +609,18 @@ func (api *databaseAPI) DeletePluginData(key string) error {
 
 // rconAPI implements RconAPI interface
 type rconAPI struct {
-	serverID    uuid.UUID
-	db          *sql.DB
-	rconManager *rcon_manager.RconManager
+	serverID         uuid.UUID
+	db               *sql.DB
+	rconManager      *rcon_manager.RconManager
+	clickhouseClient *clickhouse.Client
 }
 
-func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager) RconAPI {
+func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager, clickhouseClient *clickhouse.Client) RconAPI {
 	return &rconAPI{
-		serverID:    serverID,
-		db:          db,
-		rconManager: rconManager,
+		serverID:         serverID,
+		db:               db,
+		rconManager:      rconManager,
+		clickhouseClient: clickhouseClient,
 	}
 }
 
@@ -846,6 +848,130 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 	}
 
 	return nil
+}
+
+// logPluginRuleViolation logs a rule violation to ClickHouse for player history tracking
+func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, actionType string) error {
+	if ruleID == nil || *ruleID == "" {
+		return nil // No rule ID, skip logging
+	}
+
+	if api.clickhouseClient == nil {
+		log.Warn().Msg("ClickHouse client not available, skipping violation logging")
+		return nil
+	}
+
+	ruleUUID, err := uuid.Parse(*ruleID)
+	if err != nil {
+		log.Warn().Err(err).Str("rule_id", *ruleID).Msg("Invalid rule ID format, skipping violation log")
+		return nil // Don't fail if rule ID invalid
+	}
+
+	steamID, err := strconv.ParseInt(playerID, 10, 64)
+	if err != nil {
+		log.Warn().Err(err).Str("player_id", playerID).Msg("Invalid Steam ID format, skipping violation log")
+		return nil
+	}
+
+	query := `
+		INSERT INTO squad_aegis.player_rule_violations
+		(violation_id, server_id, player_steam_id, rule_id, admin_user_id, action_type, created_at, ingested_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = api.clickhouseClient.Exec(ctx, query,
+		uuid.New(),
+		api.serverID,
+		uint64(steamID),
+		&ruleUUID,
+		nil, // No admin_user_id for plugin actions
+		actionType,
+		time.Now(),
+		time.Now(),
+	)
+
+	if err != nil {
+		log.Error().Err(err).
+			Str("server_id", api.serverID.String()).
+			Str("player_id", playerID).
+			Str("rule_id", *ruleID).
+			Str("action_type", actionType).
+			Msg("Failed to log rule violation to ClickHouse")
+		return err
+	}
+
+	log.Info().
+		Str("server_id", api.serverID.String()).
+		Str("player_id", playerID).
+		Str("rule_id", *ruleID).
+		Str("action_type", actionType).
+		Msg("Logged plugin rule violation to ClickHouse")
+
+	return nil
+}
+
+// WarnPlayerWithRule sends a warning and logs the violation to player history if ruleID is provided
+func (api *rconAPI) WarnPlayerWithRule(playerID string, message string, ruleID *string) error {
+	// Execute RCON warning
+	if err := api.SendWarningToPlayer(playerID, message); err != nil {
+		return err
+	}
+
+	// Log violation if rule_id provided (non-blocking, don't fail the action)
+	if err := api.logPluginRuleViolation(playerID, ruleID, "WARN"); err != nil {
+		log.Warn().Err(err).Msg("Failed to log warning violation, but warning was sent successfully")
+	}
+
+	return nil
+}
+
+// KickPlayerWithRule kicks a player and logs the violation to player history if ruleID is provided
+func (api *rconAPI) KickPlayerWithRule(playerID string, reason string, ruleID *string) error {
+	// Execute RCON kick
+	if err := api.KickPlayer(playerID, reason); err != nil {
+		return err
+	}
+
+	// Log violation if rule_id provided (non-blocking, don't fail the action)
+	if err := api.logPluginRuleViolation(playerID, ruleID, "KICK"); err != nil {
+		log.Warn().Err(err).Msg("Failed to log kick violation, but kick was executed successfully")
+	}
+
+	return nil
+}
+
+// BanPlayerWithRule bans a player and logs the violation to player history if ruleID is provided
+func (api *rconAPI) BanPlayerWithRule(playerID string, reason string, duration time.Duration, ruleID *string) error {
+	// Execute RCON ban
+	if err := api.BanPlayer(playerID, reason, duration); err != nil {
+		return err
+	}
+
+	// Log violation if rule_id provided (non-blocking, don't fail the action)
+	if err := api.logPluginRuleViolation(playerID, ruleID, "BAN"); err != nil {
+		log.Warn().Err(err).Msg("Failed to log ban violation, but ban was executed successfully")
+	}
+
+	return nil
+}
+
+// BanWithEvidenceAndRule bans a player with evidence linking and logs the violation to player history if ruleID is provided
+func (api *rconAPI) BanWithEvidenceAndRule(playerID string, reason string, duration time.Duration, eventID string, eventType string, ruleID *string) (string, error) {
+	// Execute ban with evidence (existing logic)
+	banID, err := api.BanWithEvidence(playerID, reason, duration, eventID, eventType)
+	if err != nil {
+		return "", err
+	}
+
+	// Log violation if rule_id provided (non-blocking, don't fail the action)
+	if err := api.logPluginRuleViolation(playerID, ruleID, "BAN"); err != nil {
+		log.Warn().Err(err).Msg("Failed to log ban violation, but ban was executed successfully")
+	}
+
+	return banID, nil
 }
 
 // eventAPI implements EventAPI interface
