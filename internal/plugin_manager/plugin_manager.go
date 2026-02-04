@@ -393,9 +393,12 @@ func (pm *PluginManager) UpdatePluginConfig(serverID, instanceID uuid.UUID, conf
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
-	// Update plugin config
-	if err := instance.Plugin.UpdateConfig(mergedConfig); err != nil {
-		return fmt.Errorf("failed to update plugin config: %w", err)
+	// Only call UpdateConfig on the plugin if it's initialized (enabled and running)
+	// Disabled/stopped plugins haven't been initialized so their apis/dependencies are nil
+	if instance.Status != PluginStatusDisabled && instance.Status != PluginStatusStopped {
+		if err := instance.Plugin.UpdateConfig(mergedConfig); err != nil {
+			return fmt.Errorf("failed to update plugin config: %w", err)
+		}
 	}
 
 	// Update instance record
