@@ -8,6 +8,8 @@
 
 ### Misc
 
+- fix(plugin_manager): sort plugin instances by creation time ([91fbb2f](https://github.com/Codycody31/squad-aegis/commit/91fbb2f48ef9572c6fc65f11d78eddcd45ec3429))
+- fix(plugin): skip calling UpdateConfig on disabled or stopped plugins ([b67e66d](https://github.com/Codycody31/squad-aegis/commit/b67e66d31ac117acc6a7064cf8cad9489daf128a))
 - feat(players): add friendly-fire metrics and UI ([c61e552](https://github.com/Codycody31/squad-aegis/commit/c61e552afacad24e1eaa4bf3c65bbd4ba19f0880))
 - chore: temp set postgres to 14 for dev... ([5d39d03](https://github.com/Codycody31/squad-aegis/commit/5d39d033b52519be60d6c78b54643e00b9125e7c))
 - refactor(identity)!: replace EventTime with FirstSeen and LastSeen fields ([77476a3](https://github.com/Codycody31/squad-aegis/commit/77476a3aeabe74ccf8404fda5093b2e8ae516127))
