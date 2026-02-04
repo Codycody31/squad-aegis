@@ -308,6 +308,7 @@ func (s *Server) searchPlayersFromIdentityTable(ctx context.Context, searchQuery
 	}
 
 	// Search by name (in all_names array), steam ID (in all_steam_ids), or EOS ID (in all_eos_ids)
+	// Use arrayExists with ilike for case-insensitive partial matching on names
 	query := `
 		SELECT
 			primary_steam_id,
@@ -317,11 +318,11 @@ func (s *Server) searchPlayersFromIdentityTable(ctx context.Context, searchQuery
 			first_seen
 		FROM squad_aegis.player_identities
 		WHERE
-			hasAny(all_names, [?]) OR
+			has(all_names, ?) OR
 			primary_name ILIKE ? OR
 			has(all_steam_ids, ?) OR
 			has(all_eos_ids, ?) OR
-			hasAny(transform(all_names, x -> x ILIKE ?, all_names, []), [1])
+			arrayExists(x -> x ILIKE ?, all_names)
 		ORDER BY last_seen DESC
 		LIMIT ?
 	`
@@ -1787,25 +1788,99 @@ func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSte
 }
 
 // getPlayerNameHistory retrieves all names used by the player
+// Aggregates names from multiple event tables for comprehensive history
 func (s *Server) getPlayerNameHistory(c *gin.Context, playerID string, isSteamID bool) ([]NameHistoryEntry, error) {
+	// Build where clauses for different table column naming conventions
 	whereClause := "steam = ?"
+	playerWhereClause := "player_steam = ?"
+	attackerWhereClause := "attacker_steam = ?"
+	victimWhereClause := "victim_steam = ?"
+	reviverWhereClause := "reviver_steam = ?"
 	if !isSteamID {
 		whereClause = "eos = ?"
+		playerWhereClause = "player_eos = ?"
+		attackerWhereClause = "attacker_eos = ?"
+		victimWhereClause = "victim_eos = ?"
+		reviverWhereClause = "reviver_eos = ?"
 	}
 
+	// Query names from all event tables that have player names
 	query := fmt.Sprintf(`
+		WITH all_names AS (
+			-- Join succeeded events
+			SELECT player_suffix as name, event_time
+			FROM squad_aegis.server_join_succeeded_events
+			WHERE %[1]s AND player_suffix != ''
+			UNION ALL
+			-- Disconnected events
+			SELECT player_suffix as name, event_time
+			FROM squad_aegis.server_player_disconnected_events
+			WHERE %[1]s AND player_suffix != ''
+			UNION ALL
+			-- Possess events
+			SELECT player_suffix as name, event_time
+			FROM squad_aegis.server_player_possess_events
+			WHERE %[2]s AND player_suffix != ''
+			UNION ALL
+			-- Damage dealt (as attacker)
+			SELECT attacker_name as name, event_time
+			FROM squad_aegis.server_player_damaged_events
+			WHERE %[3]s AND attacker_name != ''
+			UNION ALL
+			-- Damage taken (as victim)
+			SELECT victim_name as name, event_time
+			FROM squad_aegis.server_player_damaged_events
+			WHERE %[4]s AND victim_name != ''
+			UNION ALL
+			-- Deaths (as victim)
+			SELECT victim_name as name, event_time
+			FROM squad_aegis.server_player_died_events
+			WHERE %[4]s AND victim_name != ''
+			UNION ALL
+			-- Kills (as attacker)
+			SELECT attacker_name as name, event_time
+			FROM squad_aegis.server_player_died_events
+			WHERE %[3]s AND attacker_name != ''
+			UNION ALL
+			-- Wounded (as victim)
+			SELECT victim_name as name, event_time
+			FROM squad_aegis.server_player_wounded_events
+			WHERE %[4]s AND victim_name != ''
+			UNION ALL
+			-- Wounded someone (as attacker)
+			SELECT attacker_name as name, event_time
+			FROM squad_aegis.server_player_wounded_events
+			WHERE %[3]s AND attacker_name != ''
+			UNION ALL
+			-- Revived someone (as reviver)
+			SELECT reviver_name as name, event_time
+			FROM squad_aegis.server_player_revived_events
+			WHERE %[5]s AND reviver_name != ''
+			UNION ALL
+			-- Got revived (as victim)
+			SELECT victim_name as name, event_time
+			FROM squad_aegis.server_player_revived_events
+			WHERE %[4]s AND victim_name != ''
+		)
 		SELECT
-			player_suffix as name,
+			name,
 			min(event_time) as first_used,
 			max(event_time) as last_used,
 			count(*) as session_count
-		FROM squad_aegis.server_join_succeeded_events
-		WHERE %s AND player_suffix != ''
-		GROUP BY player_suffix
+		FROM all_names
+		WHERE name != ''
+		GROUP BY name
 		ORDER BY last_used DESC
-	`, whereClause)
+	`, whereClause, playerWhereClause, attackerWhereClause, victimWhereClause, reviverWhereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID)
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query,
+		playerID, playerID, // join, disconnected
+		playerID,           // possess
+		playerID, playerID, // damaged (attacker, victim)
+		playerID, playerID, // died (victim, attacker)
+		playerID, playerID, // wounded (victim, attacker)
+		playerID, playerID, // revived (reviver, victim)
+	)
 	if err != nil {
 		return nil, err
 	}
