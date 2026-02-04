@@ -432,23 +432,31 @@ func (s *Server) fetchServerRulesHierarchy(ctx context.Context, serverID uuid.UU
 		}
 	}
 
-	// Build hierarchy
-	ruleMap := make(map[uuid.UUID]*models.ServerRule)
-	for i := range rules {
-		ruleMap[rules[i].ID] = &rules[i]
-	}
-
+	// Build hierarchy: group rules by parent ID, then recursively build tree
+	childrenByParent := make(map[uuid.UUID][]models.ServerRule)
 	var rootRules []models.ServerRule
-	for i := range rules {
-		rule := &rules[i]
+
+	for _, rule := range rules {
+		rule.SubRules = nil // Reset SubRules
 		if rule.ParentID != nil {
-			if parent, ok := ruleMap[*rule.ParentID]; ok {
-				parent.SubRules = append(parent.SubRules, *rule)
-			}
+			childrenByParent[*rule.ParentID] = append(childrenByParent[*rule.ParentID], rule)
 		} else {
-			rootRules = append(rootRules, *rule)
+			rootRules = append(rootRules, rule)
 		}
 	}
+
+	// Recursively attach children
+	var attachChildren func(rules []models.ServerRule) []models.ServerRule
+	attachChildren = func(rules []models.ServerRule) []models.ServerRule {
+		for i := range rules {
+			if children, ok := childrenByParent[rules[i].ID]; ok {
+				rules[i].SubRules = attachChildren(children)
+			}
+		}
+		return rules
+	}
+
+	rootRules = attachChildren(rootRules)
 
 	return rootRules, nil
 }
