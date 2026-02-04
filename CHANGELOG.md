@@ -10,13 +10,14 @@
 
 - feat(workflow-stats): Add server-side computation of workflow execution stats [[#135](https://github.com/Codycody31/squad-aegis/pull/135)]
 
+### 📈 Enhancement
+
+- refactor(server): Add rule violation logging for manual bans [[#138](https://github.com/Codycody31/squad-aegis/pull/138)]
+- refactor(server): Optimize server rule hierarchy building [[#136](https://github.com/Codycody31/squad-aegis/pull/136)]
+
 ### 🐛 Bug Fixes
 
 - fix(server): MOTD auto-upload feedback on rule changes [[#137](https://github.com/Codycody31/squad-aegis/pull/137)]
-
-### 📈 Enhancement
-
-- refactor(server): Optimize server rule hierarchy building [[#136](https://github.com/Codycody31/squad-aegis/pull/136)]
 
 ### 📚 Documentation
 
