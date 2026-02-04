@@ -10,6 +10,10 @@
 
 - feat(workflow-stats): Add server-side computation of workflow execution stats [[#135](https://github.com/Codycody31/squad-aegis/pull/135)]
 
+### 📈 Enhancement
+
+- refactor(server): Optimize server rule hierarchy building [[#136](https://github.com/Codycody31/squad-aegis/pull/136)]
+
 ### 📚 Documentation
 
 - docs(claude): add claude.md guidance for claude code [[#134](https://github.com/Codycody31/squad-aegis/pull/134)]
