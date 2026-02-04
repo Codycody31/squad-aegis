@@ -30,7 +30,8 @@ type IdentifierPair struct {
 	Steam      string
 	EOS        string
 	Name       string
-	EventTime  time.Time
+	FirstSeen  time.Time
+	LastSeen   time.Time
 	SessionCnt uint64
 }
 
@@ -191,12 +192,10 @@ func (r *Resolver) fetchAllIdentifierPairs(ctx context.Context) ([]IdentifierPai
 	var pairs []IdentifierPair
 	for rows.Next() {
 		var p IdentifierPair
-		var firstSeen, lastSeen time.Time
-		if err := rows.Scan(&p.Steam, &p.EOS, &p.Name, &firstSeen, &lastSeen, &p.SessionCnt); err != nil {
+		if err := rows.Scan(&p.Steam, &p.EOS, &p.Name, &p.FirstSeen, &p.LastSeen, &p.SessionCnt); err != nil {
 			log.Error().Err(err).Msg("Failed to scan identifier pair")
 			continue
 		}
-		p.EventTime = lastSeen
 		pairs = append(pairs, p)
 	}
 
@@ -250,17 +249,17 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 				for _, p := range steamToData[steamID] {
 					if p.Name != "" {
 						nameSet[p.Name] = struct{}{}
-						if p.EventTime.After(latestNameTime) {
-							latestNameTime = p.EventTime
+						if p.LastSeen.After(latestNameTime) {
+							latestNameTime = p.LastSeen
 							latestName = p.Name
 						}
 					}
 					totalSessions += p.SessionCnt
-					if firstSeen.IsZero() || p.EventTime.Before(firstSeen) {
-						firstSeen = p.EventTime
+					if firstSeen.IsZero() || p.FirstSeen.Before(firstSeen) {
+						firstSeen = p.FirstSeen
 					}
-					if p.EventTime.After(lastSeen) {
-						lastSeen = p.EventTime
+					if p.LastSeen.After(lastSeen) {
+						lastSeen = p.LastSeen
 					}
 				}
 			} else if len(member) > 4 && member[:4] == "eos:" {
@@ -270,17 +269,17 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 				for _, p := range eosToData[eosID] {
 					if p.Name != "" {
 						nameSet[p.Name] = struct{}{}
-						if p.EventTime.After(latestNameTime) {
-							latestNameTime = p.EventTime
+						if p.LastSeen.After(latestNameTime) {
+							latestNameTime = p.LastSeen
 							latestName = p.Name
 						}
 					}
 					totalSessions += p.SessionCnt
-					if firstSeen.IsZero() || p.EventTime.Before(firstSeen) {
-						firstSeen = p.EventTime
+					if firstSeen.IsZero() || p.FirstSeen.Before(firstSeen) {
+						firstSeen = p.FirstSeen
 					}
-					if p.EventTime.After(lastSeen) {
-						lastSeen = p.EventTime
+					if p.LastSeen.After(lastSeen) {
+						lastSeen = p.LastSeen
 					}
 				}
 			}
