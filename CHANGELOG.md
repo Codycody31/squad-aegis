@@ -4,7 +4,11 @@
 
 ### ❤️ Thanks to all contributors! ❤️
 
-@Insidious Fiddler
+@Codycody31, @Insidious Fiddler
+
+### 📚 Documentation
+
+- docs(claude): add claude.md guidance for claude code [[#134](https://github.com/Codycody31/squad-aegis/pull/134)]
 
 ### Misc
 
