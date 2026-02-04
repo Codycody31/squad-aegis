@@ -63,7 +63,7 @@
                     <SelectItem value="failed">Failed</SelectItem>
                 </SelectContent>
             </Select>
-            <Button @click="loadExecutions(false)" :disabled="loading" variant="outline" class="w-full sm:w-auto">
+            <Button @click="() => { loadStats(); loadExecutions(false); }" :disabled="loading" variant="outline" class="w-full sm:w-auto">
                 <RefreshCw class="h-4 w-4 mr-2" :class="{ 'animate-spin': loading }" />
                 Refresh
             </Button>
@@ -302,10 +302,19 @@ interface Props {
 
 const props = defineProps<Props>();
 
+// Stats interface
+interface WorkflowStats {
+    total_executions: number;
+    success_rate: number;
+    avg_duration_ms: number | null;
+    running_count: number;
+}
+
 // State
 const loading = ref(false);
 const error = ref<string | null>(null);
 const executions = ref<WorkflowExecution[]>([]);
+const stats = ref<WorkflowStats | null>(null);
 const offset = ref(0);
 const limit = ref(20);
 const hasMore = ref(true);
@@ -353,9 +362,13 @@ const groupedExecutions = computed(() => {
     return groups;
 });
 
-const totalExecutions = computed(() => executions.value.length);
+const totalExecutions = computed(() => stats.value?.total_executions ?? executions.value.length);
 
 const successRate = computed(() => {
+    if (stats.value) {
+        return Math.round(stats.value.success_rate);
+    }
+    // Fallback to client-side calculation
     if (executions.value.length === 0) return 0;
     const completed = executions.value.filter(
         (ex) => ex.status.toLowerCase() === "completed"
@@ -364,6 +377,10 @@ const successRate = computed(() => {
 });
 
 const avgDuration = computed(() => {
+    if (stats.value?.avg_duration_ms != null) {
+        return formatDurationMs(stats.value.avg_duration_ms);
+    }
+    // Fallback to client-side calculation
     const completedExecutions = executions.value.filter(
         (ex) => ex.completed_at && ex.started_at
     );
@@ -380,6 +397,10 @@ const avgDuration = computed(() => {
 });
 
 const runningCount = computed(() => {
+    if (stats.value) {
+        return stats.value.running_count;
+    }
+    // Fallback to client-side calculation
     return executions.value.filter(
         (ex) => ex.status.toLowerCase() === "running" || ex.status.toLowerCase() === "executing"
     ).length;
@@ -538,6 +559,31 @@ const toggleExpand = (id: string) => {
     }
 };
 
+const loadStats = async () => {
+    try {
+        const runtimeConfig = useRuntimeConfig();
+        const cookieToken = useCookie(
+            runtimeConfig.public.sessionCookieName as string
+        );
+        const token = cookieToken.value;
+
+        const response = await $fetch<ApiResponse<{ stats: WorkflowStats }>>(
+            `/api/servers/${props.serverId}/workflows/${props.workflowId}/executions/stats`,
+            {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            }
+        );
+
+        if (response.code === 200) {
+            stats.value = response.data.stats;
+        }
+    } catch (err: any) {
+        console.error("Failed to load stats:", err);
+    }
+};
+
 const loadExecutions = async (append = false) => {
     try {
         const runtimeConfig = useRuntimeConfig();
@@ -600,6 +646,7 @@ const loadMore = () => {
 
 // Lifecycle
 onMounted(() => {
+    loadStats();
     loadExecutions();
 });
 </script>
