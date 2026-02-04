@@ -1997,6 +1997,68 @@ func (s *Server) getPlayerWeaponStats(c *gin.Context, playerID string, isSteamID
 	return weapons, nil
 }
 
+// lookupPlayerName retrieves the most recent name for a player by their Steam ID or EOS ID
+// Used to fill in missing names in combat events
+func (s *Server) lookupPlayerName(ctx context.Context, playerID string, isSteamID bool) string {
+	whereClause := "steam = ?"
+	playerWhereClause := "player_steam = ?"
+	attackerWhereClause := "attacker_steam = ?"
+	victimWhereClause := "victim_steam = ?"
+	if !isSteamID {
+		whereClause = "eos = ?"
+		playerWhereClause = "player_eos = ?"
+		attackerWhereClause = "attacker_eos = ?"
+		victimWhereClause = "victim_eos = ?"
+	}
+
+	// Query for the most recent non-empty name across all event tables
+	query := fmt.Sprintf(`
+		SELECT name FROM (
+			SELECT player_suffix as name, event_time
+			FROM squad_aegis.server_join_succeeded_events
+			WHERE %[1]s AND player_suffix != ''
+			UNION ALL
+			SELECT player_suffix as name, event_time
+			FROM squad_aegis.server_player_disconnected_events
+			WHERE %[1]s AND player_suffix != ''
+			UNION ALL
+			SELECT player_suffix as name, event_time
+			FROM squad_aegis.server_player_possess_events
+			WHERE %[2]s AND player_suffix != ''
+			UNION ALL
+			SELECT attacker_name as name, event_time
+			FROM squad_aegis.server_player_damaged_events
+			WHERE %[3]s AND attacker_name != ''
+			UNION ALL
+			SELECT victim_name as name, event_time
+			FROM squad_aegis.server_player_damaged_events
+			WHERE %[4]s AND victim_name != ''
+			UNION ALL
+			SELECT attacker_name as name, event_time
+			FROM squad_aegis.server_player_died_events
+			WHERE %[3]s AND attacker_name != ''
+			UNION ALL
+			SELECT victim_name as name, event_time
+			FROM squad_aegis.server_player_died_events
+			WHERE %[4]s AND victim_name != ''
+		)
+		ORDER BY event_time DESC
+		LIMIT 1
+	`, whereClause, playerWhereClause, attackerWhereClause, victimWhereClause)
+
+	var name string
+	row := s.Dependencies.Clickhouse.QueryRow(ctx, query,
+		playerID, playerID, // join, disconnected
+		playerID,           // possess
+		playerID, playerID, // damaged (attacker, victim)
+		playerID, playerID, // died (attacker, victim)
+	)
+	if err := row.Scan(&name); err != nil {
+		return ""
+	}
+	return name
+}
+
 // calculateRiskIndicators generates risk flags based on player data
 func (s *Server) calculateRiskIndicators(profile *PlayerProfile) []RiskIndicator {
 	indicators := []RiskIndicator{}
