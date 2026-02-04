@@ -419,8 +419,8 @@ func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern s
 			GROUP BY steam, eos
 		)
 		SELECT
-			any(steam) as steam_id,
-			any(eos) as eos_id,
+			anyIf(steam, steam != '') as steam_id,
+			anyIf(eos, eos != '') as eos_id,
 			any(player_name) as player_name,
 			max(last_seen) as last_seen,
 			min(first_seen) as first_seen
@@ -867,8 +867,8 @@ func (s *Server) PlayersStats(c *gin.Context) {
 			GROUP BY steam, eos
 		)
 		SELECT
-			any(steam) as steam_id,
-			any(eos) as eos_id,
+			anyIf(steam, steam != '') as steam_id,
+			anyIf(eos, eos != '') as eos_id,
 			any(player_name) as player_name,
 			max(last_seen) as last_seen,
 			min(first_seen) as first_seen
@@ -1133,8 +1133,8 @@ func (s *Server) getPlayerFromRawEvents(ctx context.Context, playerID string, is
 				(eos != '' AND eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
 		)
 		SELECT
-			any(steam) as steam_id,
-			any(eos) as eos_id,
+			anyIf(steam, steam != '') as steam_id,
+			anyIf(eos, eos != '') as eos_id,
 			any(player_suffix) as player_name,
 			max(event_time) as last_seen,
 			min(event_time) as first_seen,
