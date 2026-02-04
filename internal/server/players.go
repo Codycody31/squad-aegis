@@ -393,29 +393,74 @@ func (s *Server) searchPlayersFromIdentityTable(ctx context.Context, searchQuery
 	return players, nil
 }
 
-// searchPlayersFromRawEvents searches the raw server_join_succeeded_events table (fallback)
+// searchPlayersFromRawEvents searches raw event tables for players (fallback)
+// Searches across multiple event tables to find players even without join events
 func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern string, limit int) ([]PlayerSearchResult, error) {
 	query := `
-		WITH matching_records AS (
-			SELECT
-				steam,
-				eos,
-				player_suffix,
-				event_time
+		WITH all_player_records AS (
+			-- Join succeeded events
+			SELECT steam, eos, player_suffix as name, event_time
 			FROM squad_aegis.server_join_succeeded_events
-			WHERE
-				player_suffix ILIKE ? OR
-				steam ILIKE ? OR
-				eos ILIKE ?
+			WHERE player_suffix ILIKE ? OR steam ILIKE ? OR eos ILIKE ?
+			UNION ALL
+			-- Disconnected events
+			SELECT steam, eos, player_suffix as name, event_time
+			FROM squad_aegis.server_player_disconnected_events
+			WHERE player_suffix ILIKE ? OR steam ILIKE ? OR eos ILIKE ?
+			UNION ALL
+			-- Possess events
+			SELECT player_steam as steam, player_eos as eos, player_suffix as name, event_time
+			FROM squad_aegis.server_player_possess_events
+			WHERE player_suffix ILIKE ? OR player_steam ILIKE ? OR player_eos ILIKE ?
+			UNION ALL
+			-- Damage events (attacker)
+			SELECT attacker_steam as steam, attacker_eos as eos, attacker_name as name, event_time
+			FROM squad_aegis.server_player_damaged_events
+			WHERE attacker_name ILIKE ? OR attacker_steam ILIKE ? OR attacker_eos ILIKE ?
+			UNION ALL
+			-- Damage events (victim)
+			SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
+			FROM squad_aegis.server_player_damaged_events
+			WHERE victim_name ILIKE ? OR victim_steam ILIKE ? OR victim_eos ILIKE ?
+			UNION ALL
+			-- Died events (victim)
+			SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
+			FROM squad_aegis.server_player_died_events
+			WHERE victim_name ILIKE ? OR victim_steam ILIKE ? OR victim_eos ILIKE ?
+			UNION ALL
+			-- Died events (attacker)
+			SELECT attacker_steam as steam, attacker_eos as eos, attacker_name as name, event_time
+			FROM squad_aegis.server_player_died_events
+			WHERE attacker_name ILIKE ? OR attacker_steam ILIKE ? OR attacker_eos ILIKE ?
+			UNION ALL
+			-- Wounded events (victim)
+			SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
+			FROM squad_aegis.server_player_wounded_events
+			WHERE victim_name ILIKE ? OR victim_steam ILIKE ? OR victim_eos ILIKE ?
+			UNION ALL
+			-- Wounded events (attacker)
+			SELECT attacker_steam as steam, attacker_eos as eos, attacker_name as name, event_time
+			FROM squad_aegis.server_player_wounded_events
+			WHERE attacker_name ILIKE ? OR attacker_steam ILIKE ? OR attacker_eos ILIKE ?
+			UNION ALL
+			-- Revived events (reviver)
+			SELECT reviver_steam as steam, reviver_eos as eos, reviver_name as name, event_time
+			FROM squad_aegis.server_player_revived_events
+			WHERE reviver_name ILIKE ? OR reviver_steam ILIKE ? OR reviver_eos ILIKE ?
+			UNION ALL
+			-- Revived events (victim)
+			SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
+			FROM squad_aegis.server_player_revived_events
+			WHERE victim_name ILIKE ? OR victim_steam ILIKE ? OR victim_eos ILIKE ?
 		),
 		player_identifiers AS (
 			SELECT
 				steam,
 				eos,
-				any(player_suffix) as player_name,
+				anyIf(name, name != '') as player_name,
 				max(event_time) as last_seen,
 				min(event_time) as first_seen
-			FROM matching_records
+			FROM all_player_records
 			WHERE steam != '' OR eos != ''
 			GROUP BY steam, eos
 		)
@@ -437,7 +482,22 @@ func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern s
 		LIMIT ?
 	`
 
-	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, searchPattern, searchPattern, searchPattern, limit)
+	// Each subquery in the UNION ALL needs the search pattern 3 times (name, steam, eos)
+	// 11 subqueries * 3 params = 33 params, plus 1 for limit
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query,
+		searchPattern, searchPattern, searchPattern, // join_succeeded
+		searchPattern, searchPattern, searchPattern, // disconnected
+		searchPattern, searchPattern, searchPattern, // possess
+		searchPattern, searchPattern, searchPattern, // damaged (attacker)
+		searchPattern, searchPattern, searchPattern, // damaged (victim)
+		searchPattern, searchPattern, searchPattern, // died (victim)
+		searchPattern, searchPattern, searchPattern, // died (attacker)
+		searchPattern, searchPattern, searchPattern, // wounded (victim)
+		searchPattern, searchPattern, searchPattern, // wounded (attacker)
+		searchPattern, searchPattern, searchPattern, // revived (reviver)
+		searchPattern, searchPattern, searchPattern, // revived (victim)
+		limit,
+	)
 	if err != nil {
 		return nil, err
 	}
