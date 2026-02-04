@@ -8,6 +8,8 @@
 
 ### Misc
 
+- feat(players): add player UI components and alt-groups endpoint ([5672849](https://github.com/Codycody31/squad-aegis/commit/567284973994b4b8922b9c3873efe46ebd2b84a4))
+- feat(player): add combat history API and UI ([fa5ca2a](https://github.com/Codycody31/squad-aegis/commit/fa5ca2ad6f4ba55de09c7564757e563170abbdba))
 - feat(sessions): pair connect/disconnect events and surface durations ([f6a20c0](https://github.com/Codycody31/squad-aegis/commit/f6a20c050064e05d5cd1ee26122d9bc522bfc4fd))
 - feat(rcon): add rule-logging and new RconAPI methods ([7d1ea89](https://github.com/Codycody31/squad-aegis/commit/7d1ea89ae73cc0c7c94c0b53b5c50f5a9c33d5e0))
 - feat(players): include disconnection events in player session history ([970b186](https://github.com/Codycody31/squad-aegis/commit/970b1863e3b0a0f2595de018e96b1df749472cb6))
