@@ -8,7 +8,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import { ExternalLink, Copy, ChevronDown, Check } from "lucide-vue-next";
+import { ExternalLink, Copy, ChevronDown, Check, Link2, AlertCircle } from "lucide-vue-next";
+import { Badge } from "~/components/ui/badge";
 import type { PlayerProfile, NameHistoryEntry } from "~/types/player";
 
 const props = defineProps<{
@@ -60,6 +61,13 @@ function getTimeAgo(dateString: string | null): string {
   if (minutes > 0) return `${minutes} minute${minutes > 1 ? "s" : ""} ago`;
   return "Just now";
 }
+
+const hasLinkedIdentities = computed(() => {
+  return (
+    (props.player.all_steam_ids && props.player.all_steam_ids.length > 1) ||
+    (props.player.all_eos_ids && props.player.all_eos_ids.length > 1)
+  );
+});
 </script>
 
 <template>
@@ -93,6 +101,59 @@ function getTimeAgo(dateString: string | null): string {
       </div>
     </CardHeader>
     <CardContent>
+      <!-- Linked Identities Notice -->
+      <div
+        v-if="hasLinkedIdentities"
+        class="mb-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20"
+      >
+        <div class="flex items-start gap-2">
+          <Link2 class="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+          <div class="text-sm">
+            <p class="font-medium text-blue-600 dark:text-blue-400">
+              Linked Identities Detected
+            </p>
+            <p class="text-muted-foreground text-xs mt-1">
+              This player has used multiple authentication methods. All stats are consolidated.
+            </p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <div v-if="player.all_steam_ids && player.all_steam_ids.length > 1">
+                <span class="text-xs text-muted-foreground">Steam IDs: </span>
+                <Badge
+                  v-for="steamId in player.all_steam_ids"
+                  :key="steamId"
+                  variant="secondary"
+                  class="text-xs mr-1"
+                >
+                  {{ steamId }}
+                </Badge>
+              </div>
+              <div v-if="player.all_eos_ids && player.all_eos_ids.length > 1">
+                <span class="text-xs text-muted-foreground">EOS IDs: </span>
+                <Badge
+                  v-for="eosId in player.all_eos_ids"
+                  :key="eosId"
+                  variant="secondary"
+                  class="text-xs mr-1"
+                >
+                  {{ eosId.slice(0, 12) }}...
+                </Badge>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Identity Status Badge -->
+      <div
+        v-if="player.identity_status === 'pending'"
+        class="mb-4 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20"
+      >
+        <div class="flex items-center gap-2 text-xs text-yellow-600 dark:text-yellow-400">
+          <AlertCircle class="h-3 w-3" />
+          <span>Identity resolution pending - stats may be incomplete</span>
+        </div>
+      </div>
+
       <!-- IDs with copy buttons -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <div>

@@ -21,6 +21,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/db"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	"go.codycody31.dev/squad-aegis/internal/identity"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/permissions"
@@ -161,6 +162,11 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return oops.Wrapf(err, "failed to migrate clickhouse")
 	}
+
+	// Start identity resolution worker (runs every 6 hours)
+	identityWorker := identity.NewWorker(clickhouseClient, 6*time.Hour)
+	go identityWorker.Start(ctx)
+	defer identityWorker.Stop()
 
 	// Create and start event ingester
 	eventIngester = clickhouse.NewEventIngester(ctx, clickhouseClient, eventManager)

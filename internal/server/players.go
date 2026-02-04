@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -33,6 +34,13 @@ type PlayerProfile struct {
 	RiskIndicators   []RiskIndicator    `json:"risk_indicators"`
 	NameHistory      []NameHistoryEntry `json:"name_history"`
 	WeaponStats      []WeaponStat       `json:"weapon_stats"`
+
+	// Consolidated identity fields
+	CanonicalID    string   `json:"canonical_id,omitempty"`
+	AllSteamIDs    []string `json:"all_steam_ids,omitempty"`
+	AllEOSIDs      []string `json:"all_eos_ids,omitempty"`
+	AllNames       []string `json:"all_names,omitempty"`
+	IdentityStatus string   `json:"identity_status,omitempty"` // "resolved", "pending"
 }
 
 // PlayerStatistics holds combat and gameplay statistics
@@ -267,10 +275,121 @@ func (s *Server) PlayersList(c *gin.Context) {
 
 	// Normalize the search query
 	searchQuery = strings.TrimSpace(searchQuery)
+	searchPattern := "%" + searchQuery + "%"
 
-	// Build the ClickHouse query to search for players
-	// Search by player name (suffix), steam ID, or EOS ID
-	// Link players who share either Steam ID or EOS ID
+	// Try searching the pre-computed identity table first
+	players, err := s.searchPlayersFromIdentityTable(c.Request.Context(), searchQuery, searchPattern, limit)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to search identity table, falling back to raw events")
+		players, err = s.searchPlayersFromRawEvents(c.Request.Context(), searchPattern, limit)
+		if err != nil {
+			responses.InternalServerError(c, err, nil)
+			return
+		}
+	}
+
+	responses.Success(c, "Players fetched successfully", &gin.H{
+		"players": players,
+		"count":   len(players),
+	})
+}
+
+// searchPlayersFromIdentityTable searches the pre-computed player_identities table
+func (s *Server) searchPlayersFromIdentityTable(ctx context.Context, searchQuery, searchPattern string, limit int) ([]PlayerSearchResult, error) {
+	// Check if the identity table has data
+	var count uint64
+	countRow := s.Dependencies.Clickhouse.QueryRow(ctx, "SELECT count() FROM squad_aegis.player_identities")
+	if err := countRow.Scan(&count); err != nil || count == 0 {
+		return nil, fmt.Errorf("identity table empty or not accessible")
+	}
+
+	// Search by name (in all_names array), steam ID (in all_steam_ids), or EOS ID (in all_eos_ids)
+	query := `
+		SELECT
+			primary_steam_id,
+			primary_eos_id,
+			primary_name,
+			last_seen,
+			first_seen
+		FROM squad_aegis.player_identities
+		WHERE
+			hasAny(all_names, [?]) OR
+			primary_name ILIKE ? OR
+			has(all_steam_ids, ?) OR
+			has(all_eos_ids, ?) OR
+			hasAny(transform(all_names, x -> x ILIKE ?, all_names, []), [1])
+		ORDER BY last_seen DESC
+		LIMIT ?
+	`
+
+	// For exact matches, try the lookup table first for speed
+	lookupQuery := `
+		SELECT pi.primary_steam_id, pi.primary_eos_id, pi.primary_name, pi.last_seen, pi.first_seen
+		FROM squad_aegis.player_identity_lookup pil
+		JOIN squad_aegis.player_identities pi ON pil.canonical_id = pi.canonical_id
+		WHERE pil.identifier_value = ? OR pil.identifier_value ILIKE ?
+		ORDER BY pi.last_seen DESC
+		LIMIT ?
+	`
+
+	// Try exact lookup first
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, lookupQuery, searchQuery, searchPattern, limit)
+	if err == nil {
+		defer rows.Close()
+		players := []PlayerSearchResult{}
+		seenCanonical := make(map[string]bool)
+
+		for rows.Next() {
+			var player PlayerSearchResult
+			var steamID, eosID string
+
+			if err := rows.Scan(&steamID, &eosID, &player.PlayerName, &player.LastSeen, &player.FirstSeen); err != nil {
+				continue
+			}
+
+			// Deduplicate by canonical identity
+			key := steamID + "|" + eosID
+			if seenCanonical[key] {
+				continue
+			}
+			seenCanonical[key] = true
+
+			player.SteamID = steamID
+			player.EOSID = eosID
+			players = append(players, player)
+		}
+
+		if len(players) > 0 {
+			return players, nil
+		}
+	}
+
+	// Fallback to broader search on the identities table
+	rows, err = s.Dependencies.Clickhouse.Query(ctx, query, searchQuery, searchPattern, searchQuery, searchQuery, searchPattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	players := []PlayerSearchResult{}
+	for rows.Next() {
+		var player PlayerSearchResult
+		var steamID, eosID string
+
+		if err := rows.Scan(&steamID, &eosID, &player.PlayerName, &player.LastSeen, &player.FirstSeen); err != nil {
+			continue
+		}
+
+		player.SteamID = steamID
+		player.EOSID = eosID
+		players = append(players, player)
+	}
+
+	return players, nil
+}
+
+// searchPlayersFromRawEvents searches the raw server_join_succeeded_events table (fallback)
+func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern string, limit int) ([]PlayerSearchResult, error) {
 	query := `
 		WITH matching_records AS (
 			SELECT
@@ -284,7 +403,6 @@ func (s *Server) PlayersList(c *gin.Context) {
 				steam ILIKE ? OR
 				eos ILIKE ?
 		),
-		-- Collect all steam/eos pairs and their identifiers
 		player_identifiers AS (
 			SELECT
 				steam,
@@ -295,21 +413,7 @@ func (s *Server) PlayersList(c *gin.Context) {
 			FROM matching_records
 			WHERE steam != '' OR eos != ''
 			GROUP BY steam, eos
-		),
-		-- Find all steam IDs and eos IDs that should be linked
-		steam_to_eos AS (
-			SELECT steam, groupArray(eos) as eos_list
-			FROM player_identifiers
-			WHERE steam != ''
-			GROUP BY steam
-		),
-		eos_to_steam AS (
-			SELECT eos, groupArray(steam) as steam_list
-			FROM player_identifiers
-			WHERE eos != ''
-			GROUP BY eos
 		)
-		-- Consolidate by choosing primary identifier
 		SELECT
 			any(steam) as steam_id,
 			any(eos) as eos_id,
@@ -318,7 +422,6 @@ func (s *Server) PlayersList(c *gin.Context) {
 			min(first_seen) as first_seen
 		FROM player_identifiers
 		GROUP BY
-			-- Group by the first non-empty identifier (steam preferred)
 			multiIf(
 				steam != '', steam,
 				eos != '', eos,
@@ -329,19 +432,9 @@ func (s *Server) PlayersList(c *gin.Context) {
 		LIMIT ?
 	`
 
-	searchPattern := "%" + searchQuery + "%"
-
-	rows, err := s.Dependencies.Clickhouse.Query(
-		c.Request.Context(),
-		query,
-		searchPattern,
-		searchPattern,
-		searchPattern,
-		limit,
-	)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, searchPattern, searchPattern, searchPattern, limit)
 	if err != nil {
-		responses.InternalServerError(c, err, nil)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -350,14 +443,7 @@ func (s *Server) PlayersList(c *gin.Context) {
 		var player PlayerSearchResult
 		var steamID, eosID *string
 
-		err := rows.Scan(
-			&steamID,
-			&eosID,
-			&player.PlayerName,
-			&player.LastSeen,
-			&player.FirstSeen,
-		)
-		if err != nil {
+		if err := rows.Scan(&steamID, &eosID, &player.PlayerName, &player.LastSeen, &player.FirstSeen); err != nil {
 			continue
 		}
 
@@ -371,10 +457,7 @@ func (s *Server) PlayersList(c *gin.Context) {
 		players = append(players, player)
 	}
 
-	responses.Success(c, "Players fetched successfully", &gin.H{
-		"players": players,
-		"count":   len(players),
-	})
+	return players, nil
 }
 
 // PlayerGet handles GET /api/players/:playerId - get player profile by steam or eos id
@@ -925,6 +1008,92 @@ func (s *Server) getLinkedPlayerIdentifiers(c *gin.Context, playerID string, isS
 // Aggregates data across all records that share the same Steam ID or EOS ID
 // Handles transitive linking: if records share ANY identifier, they're the same player
 func (s *Server) getPlayerBasicInfo(c *gin.Context, playerID string, isSteamID bool) (*PlayerProfile, error) {
+	// Try to get from pre-computed identity table first
+	profile, err := s.getPlayerFromIdentityTable(c.Request.Context(), playerID, isSteamID)
+	if err == nil && profile != nil {
+		return profile, nil
+	}
+
+	// Fallback to raw events query
+	return s.getPlayerFromRawEvents(c.Request.Context(), playerID, isSteamID)
+}
+
+// getPlayerFromIdentityTable fetches player profile from pre-computed identity table
+func (s *Server) getPlayerFromIdentityTable(ctx context.Context, playerID string, isSteamID bool) (*PlayerProfile, error) {
+	idType := "eos"
+	if isSteamID {
+		idType = "steam"
+	}
+
+	// First, look up the canonical ID
+	lookupQuery := `
+		SELECT canonical_id
+		FROM squad_aegis.player_identity_lookup
+		WHERE identifier_type = ? AND identifier_value = ?
+		ORDER BY computed_at DESC
+		LIMIT 1
+	`
+
+	var canonicalID string
+	row := s.Dependencies.Clickhouse.QueryRow(ctx, lookupQuery, idType, playerID)
+	if err := row.Scan(&canonicalID); err != nil {
+		return nil, fmt.Errorf("player not found in identity table: %w", err)
+	}
+
+	// Fetch full identity data
+	identityQuery := `
+		SELECT
+			canonical_id,
+			primary_steam_id,
+			primary_eos_id,
+			primary_name,
+			all_steam_ids,
+			all_eos_ids,
+			all_names,
+			total_sessions,
+			first_seen,
+			last_seen
+		FROM squad_aegis.player_identities
+		WHERE canonical_id = ?
+	`
+
+	var profile PlayerProfile
+	var allSteamIDs, allEOSIDs, allNames []string
+	var totalSessions uint64
+
+	row = s.Dependencies.Clickhouse.QueryRow(ctx, identityQuery, canonicalID)
+	err := row.Scan(
+		&profile.CanonicalID,
+		&profile.SteamID,
+		&profile.EOSID,
+		&profile.PlayerName,
+		&allSteamIDs,
+		&allEOSIDs,
+		&allNames,
+		&totalSessions,
+		&profile.FirstSeen,
+		&profile.LastSeen,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch identity: %w", err)
+	}
+
+	profile.AllSteamIDs = allSteamIDs
+	profile.AllEOSIDs = allEOSIDs
+	profile.AllNames = allNames
+	profile.TotalSessions = int64(totalSessions)
+	profile.IdentityStatus = "resolved"
+
+	// Calculate total play time
+	if profile.FirstSeen != nil && profile.LastSeen != nil {
+		profile.TotalPlayTime = int64(profile.LastSeen.Sub(*profile.FirstSeen).Seconds())
+	}
+
+	return &profile, nil
+}
+
+// getPlayerFromRawEvents fetches player profile from raw events (fallback)
+func (s *Server) getPlayerFromRawEvents(ctx context.Context, playerID string, isSteamID bool) (*PlayerProfile, error) {
 	whereClause := "steam = ?"
 	if !isSteamID {
 		whereClause = "eos = ?"
@@ -970,7 +1139,7 @@ func (s *Server) getPlayerBasicInfo(c *gin.Context, playerID string, isSteamID b
 		WHERE steam != '' OR eos != ''
 	`, whereClause)
 
-	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
+	row := s.Dependencies.Clickhouse.QueryRow(ctx, query, playerID)
 
 	var profile PlayerProfile
 	var steamID, eosID *string
@@ -995,6 +1164,7 @@ func (s *Server) getPlayerBasicInfo(c *gin.Context, playerID string, isSteamID b
 		profile.EOSID = *eosID
 	}
 	profile.TotalSessions = totalSessions
+	profile.IdentityStatus = "pending" // Not yet in identity table
 
 	// Calculate total play time (approximate based on session days)
 	if profile.FirstSeen != nil && profile.LastSeen != nil {
