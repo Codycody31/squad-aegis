@@ -10,6 +10,11 @@
 
 - feat(workflow-stats): Add server-side computation of workflow execution stats [[#135](https://github.com/Codycody31/squad-aegis/pull/135)]
 
+### 🐛 Bug Fixes
+
+- refactor/player-identity-search-improvements [[#140](https://github.com/Codycody31/squad-aegis/pull/140)]
+- fix(server): MOTD auto-upload feedback on rule changes [[#137](https://github.com/Codycody31/squad-aegis/pull/137)]
+
 ### 📚 Documentation
 
 - docs: Remove GNU GPL license document [[#139](https://github.com/Codycody31/squad-aegis/pull/139)]
@@ -19,10 +24,6 @@
 
 - refactor(server): Add rule violation logging for manual bans [[#138](https://github.com/Codycody31/squad-aegis/pull/138)]
 - refactor(server): Optimize server rule hierarchy building [[#136](https://github.com/Codycody31/squad-aegis/pull/136)]
-
-### 🐛 Bug Fixes
-
-- fix(server): MOTD auto-upload feedback on rule changes [[#137](https://github.com/Codycody31/squad-aegis/pull/137)]
 
 ### Misc
 
