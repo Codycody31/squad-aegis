@@ -2835,6 +2835,19 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			}
 		}
 
+		// If other player name is empty but we have their ID, try to look up their name
+		if entry.OtherName == "" && (entry.OtherSteamID != "" || entry.OtherEOSID != "") {
+			otherID := entry.OtherSteamID
+			isSteam := true
+			if otherID == "" {
+				otherID = entry.OtherEOSID
+				isSteam = false
+			}
+			if name := s.lookupPlayerName(c.Request.Context(), otherID, isSteam); name != "" {
+				entry.OtherName = name
+			}
+		}
+
 		events = append(events, entry)
 	}
 
