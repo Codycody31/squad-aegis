@@ -400,6 +400,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			playersGroup.GET("/:playerId/teamkills", server.PlayerTeamkillsAnalysis)
 			playersGroup.GET("/:playerId/sessions", server.PlayerSessionHistory)
 			playersGroup.GET("/:playerId/related", server.PlayerRelatedPlayers)
+			playersGroup.GET("/:playerId/combat", server.PlayerCombatHistory)
 		}
 
 		// Sudo/Superadmin management routes

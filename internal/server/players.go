@@ -159,6 +159,24 @@ type SessionHistoryEntry struct {
 	Ongoing           bool       `json:"ongoing"`
 }
 
+// CombatHistoryEntry represents a kill or death event
+type CombatHistoryEntry struct {
+	EventTime    time.Time `json:"event_time"`
+	EventType    string    `json:"event_type"` // "kill" or "death"
+	ServerID     string    `json:"server_id"`
+	ServerName   string    `json:"server_name,omitempty"`
+	Weapon       string    `json:"weapon"`
+	Damage       float32   `json:"damage"`
+	Teamkill     bool      `json:"teamkill"`
+	OtherName    string    `json:"other_name"`
+	OtherSteamID string    `json:"other_steam_id,omitempty"`
+	OtherEOSID   string    `json:"other_eos_id,omitempty"`
+	OtherTeam    string    `json:"other_team"`
+	OtherSquad   string    `json:"other_squad"`
+	PlayerTeam   string    `json:"player_team"`
+	PlayerSquad  string    `json:"player_squad"`
+}
+
 // RelatedPlayer represents a player potentially related (same IP)
 type RelatedPlayer struct {
 	SteamID        string `json:"steam_id"`
@@ -2149,5 +2167,136 @@ func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
 
 	responses.Success(c, "Related players fetched successfully", &gin.H{
 		"related_players": related,
+	})
+}
+
+// PlayerCombatHistory handles GET /api/players/:playerId/combat - combat history (kills and deaths)
+func (s *Server) PlayerCombatHistory(c *gin.Context) {
+	playerID := c.Param("playerId")
+	if playerID == "" {
+		responses.BadRequest(c, "Player ID is required", nil)
+		return
+	}
+
+	page := 1
+	limit := 50
+	if pageStr := c.Query("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+	}
+
+	isSteamID := false
+	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
+		isSteamID = true
+	}
+
+	// Build WHERE clauses for kills (player is attacker) and deaths (player is victim)
+	var killWhereClause, deathWhereClause string
+	if isSteamID {
+		killWhereClause = "attacker_steam = ?"
+		deathWhereClause = "victim_steam = ?"
+	} else {
+		killWhereClause = "attacker_eos = ?"
+		deathWhereClause = "victim_eos = ?"
+	}
+
+	offset := (page - 1) * limit
+
+	query := fmt.Sprintf(`
+		SELECT * FROM (
+			SELECT
+				event_time,
+				'kill' as event_type,
+				server_id,
+				weapon,
+				damage,
+				teamkill,
+				victim_name as other_name,
+				victim_steam as other_steam_id,
+				victim_eos as other_eos_id,
+				victim_team as other_team,
+				victim_squad as other_squad,
+				attacker_team as player_team,
+				attacker_squad as player_squad
+			FROM squad_aegis.server_player_died_events
+			WHERE %s
+			UNION ALL
+			SELECT
+				event_time,
+				'death' as event_type,
+				server_id,
+				weapon,
+				damage,
+				teamkill,
+				attacker_name as other_name,
+				attacker_steam as other_steam_id,
+				attacker_eos as other_eos_id,
+				attacker_team as other_team,
+				attacker_squad as other_squad,
+				victim_team as player_team,
+				victim_squad as player_squad
+			FROM squad_aegis.server_player_died_events
+			WHERE %s
+		) ORDER BY event_time DESC
+		LIMIT ? OFFSET ?
+	`, killWhereClause, deathWhereClause)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, limit, offset)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	defer rows.Close()
+
+	events := []CombatHistoryEntry{}
+	serverNameCache := make(map[string]string)
+
+	for rows.Next() {
+		var entry CombatHistoryEntry
+		var teamkillInt uint8
+		err := rows.Scan(
+			&entry.EventTime,
+			&entry.EventType,
+			&entry.ServerID,
+			&entry.Weapon,
+			&entry.Damage,
+			&teamkillInt,
+			&entry.OtherName,
+			&entry.OtherSteamID,
+			&entry.OtherEOSID,
+			&entry.OtherTeam,
+			&entry.OtherSquad,
+			&entry.PlayerTeam,
+			&entry.PlayerSquad,
+		)
+		if err != nil {
+			continue
+		}
+		entry.Teamkill = teamkillInt == 1
+
+		// Get server name from cache or database
+		if name, ok := serverNameCache[entry.ServerID]; ok {
+			entry.ServerName = name
+		} else {
+			var serverName string
+			if err := s.Dependencies.DB.QueryRow(`SELECT name FROM servers WHERE id = $1`, entry.ServerID).Scan(&serverName); err == nil {
+				serverNameCache[entry.ServerID] = serverName
+				entry.ServerName = serverName
+			}
+		}
+
+		events = append(events, entry)
+	}
+
+	responses.Success(c, "Combat history fetched successfully", &gin.H{
+		"events": events,
+		"page":   page,
+		"limit":  limit,
 	})
 }

@@ -18,6 +18,7 @@ import PlayerSessionHistory from "~/components/player-profile/tabs/PlayerSession
 import PlayerNameHistory from "~/components/player-profile/tabs/PlayerNameHistory.vue";
 import PlayerRelatedPlayers from "~/components/player-profile/tabs/PlayerRelatedPlayers.vue";
 import PlayerStatistics from "~/components/player-profile/tabs/PlayerStatistics.vue";
+import PlayerCombatHistory from "~/components/player-profile/tabs/PlayerCombatHistory.vue";
 
 const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
@@ -217,15 +218,18 @@ onMounted(async () => {
 
       <!-- Tabbed sections -->
       <Tabs default-value="chat" class="space-y-4">
-        <TabsList class="grid grid-cols-4 lg:grid-cols-7 w-full">
+        <TabsList class="grid grid-cols-4 lg:grid-cols-8 w-full">
           <TabsTrigger value="chat" class="text-xs sm:text-sm">Chat</TabsTrigger>
+          <TabsTrigger value="combat" class="text-xs sm:text-sm"
+            >Combat</TabsTrigger
+          >
           <TabsTrigger value="violations" class="text-xs sm:text-sm"
             >Violations</TabsTrigger
           >
           <TabsTrigger value="teamkills" class="text-xs sm:text-sm"
             >Teamkills</TabsTrigger
           >
-          <TabsTrigger value="sessions" class="text-xs sm:text-sm"
+          <TabsTrigger value="sessions" class="text-xs sm:text-sm hidden lg:flex"
             >Sessions</TabsTrigger
           >
           <TabsTrigger value="names" class="text-xs sm:text-sm hidden lg:flex"
@@ -240,7 +244,8 @@ onMounted(async () => {
         </TabsList>
 
         <!-- Mobile-only additional tabs -->
-        <TabsList class="grid grid-cols-3 w-full lg:hidden">
+        <TabsList class="grid grid-cols-4 w-full lg:hidden">
+          <TabsTrigger value="sessions" class="text-xs sm:text-sm">Sessions</TabsTrigger>
           <TabsTrigger value="names" class="text-xs sm:text-sm">Names</TabsTrigger>
           <TabsTrigger value="related" class="text-xs sm:text-sm"
             >Related</TabsTrigger
@@ -253,6 +258,10 @@ onMounted(async () => {
             :player-id="(route.params.playerId as string)"
             :initial-messages="player.chat_history || []"
           />
+        </TabsContent>
+
+        <TabsContent value="combat">
+          <PlayerCombatHistory :player-id="(route.params.playerId as string)" />
         </TabsContent>
 
         <TabsContent value="violations">

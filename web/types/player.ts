@@ -147,6 +147,23 @@ export interface SessionHistoryEntry {
   ongoing: boolean;
 }
 
+export interface CombatHistoryEntry {
+  event_time: string;
+  event_type: "kill" | "death";
+  server_id: string;
+  server_name?: string;
+  weapon: string;
+  damage: number;
+  teamkill: boolean;
+  other_name: string;
+  other_steam_id?: string;
+  other_eos_id?: string;
+  other_team: string;
+  other_squad: string;
+  player_team: string;
+  player_squad: string;
+}
+
 export interface RelatedPlayer {
   steam_id: string;
   eos_id: string;
