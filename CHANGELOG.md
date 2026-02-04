@@ -8,6 +8,8 @@
 
 ### Misc
 
+- feat(players): add dedicated alts page and view-all link, reduce widget limit ([43c9ca0](https://github.com/Codycody31/squad-aegis/commit/43c9ca0dd14f9d12e6068078dad66f5217df41a7))
+- feat(players): add wounded/damaged combat event types ([3d5675b](https://github.com/Codycody31/squad-aegis/commit/3d5675bf78e5c7bd8e7333a9c30e675a3077780d))
 - refactor(players): query shared IPs then fetch players per IP ([48c4721](https://github.com/Codycody31/squad-aegis/commit/48c4721a127a61b5ebdb1cbb47304fb54f1b410b))
 - feat(players): add player UI components and alt-groups endpoint ([5672849](https://github.com/Codycody31/squad-aegis/commit/567284973994b4b8922b9c3873efe46ebd2b84a4))
 - feat(player): add combat history API and UI ([fa5ca2a](https://github.com/Codycody31/squad-aegis/commit/fa5ca2ad6f4ba55de09c7564757e563170abbdba))
