@@ -1,10 +1,14 @@
 # Changelog
 
-## [0.6.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.6.1) - 2026-02-04
+## [0.7.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.0) - 2026-02-04
 
 ### ❤️ Thanks to all contributors! ❤️
 
 @Codycody31, @Insidious Fiddler
+
+### ✨ Features
+
+- feat(workflow-stats): Add server-side computation of workflow execution stats [[#135](https://github.com/Codycody31/squad-aegis/pull/135)]
 
 ### 📚 Documentation
 
