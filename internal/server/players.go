@@ -1899,78 +1899,115 @@ func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSte
 
 // getPlayerNameHistory retrieves all names used by the player
 // Aggregates names from multiple event tables for comprehensive history
+// Uses linked_identifiers CTE to capture names from ALL linked steam/eos IDs
 func (s *Server) getPlayerNameHistory(c *gin.Context, playerID string, isSteamID bool) ([]NameHistoryEntry, error) {
-	// Build where clauses for different table column naming conventions
-	whereClause := "steam = ?"
-	playerWhereClause := "player_steam = ?"
-	attackerWhereClause := "attacker_steam = ?"
-	victimWhereClause := "victim_steam = ?"
-	reviverWhereClause := "reviver_steam = ?"
+	// Build seed where clause - matches either steam or eos depending on input type
+	seedWhereClause := "steam = ?"
+	seedPlayerWhereClause := "player_steam = ?"
+	seedAttackerWhereClause := "attacker_steam = ?"
+	seedVictimWhereClause := "victim_steam = ?"
 	if !isSteamID {
-		whereClause = "eos = ?"
-		playerWhereClause = "player_eos = ?"
-		attackerWhereClause = "attacker_eos = ?"
-		victimWhereClause = "victim_eos = ?"
-		reviverWhereClause = "reviver_eos = ?"
+		seedWhereClause = "eos = ?"
+		seedPlayerWhereClause = "player_eos = ?"
+		seedAttackerWhereClause = "attacker_eos = ?"
+		seedVictimWhereClause = "victim_eos = ?"
 	}
 
-	// Query names from all event tables that have player names
+	// Query names from all event tables using linked identifiers
+	// Handles cases where player has: steam-only, eos-only, or both
 	query := fmt.Sprintf(`
-		WITH all_names AS (
+		WITH seed_identifiers AS (
+			-- Seed from multiple event tables to find ALL linked steam/eos IDs
+			SELECT steam, eos FROM squad_aegis.server_join_succeeded_events WHERE %[1]s
+			UNION ALL
+			SELECT steam, eos FROM squad_aegis.server_player_connected_events WHERE %[1]s
+			UNION ALL
+			SELECT steam, eos FROM squad_aegis.server_player_disconnected_events WHERE %[1]s
+			UNION ALL
+			SELECT player_steam as steam, player_eos as eos FROM squad_aegis.server_player_possess_events WHERE %[2]s
+			UNION ALL
+			SELECT attacker_steam as steam, attacker_eos as eos FROM squad_aegis.server_player_died_events WHERE %[3]s
+			UNION ALL
+			SELECT victim_steam as steam, victim_eos as eos FROM squad_aegis.server_player_died_events WHERE %[4]s
+		),
+		linked_identifiers AS (
+			SELECT
+				groupUniqArrayIf(steam, steam != '') as steam_ids,
+				groupUniqArrayIf(eos, eos != '') as eos_ids
+			FROM seed_identifiers
+		),
+		all_names AS (
 			-- Join succeeded events
 			SELECT player_suffix as name, event_time
 			FROM squad_aegis.server_join_succeeded_events
-			WHERE %[1]s AND player_suffix != ''
+			WHERE player_suffix != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 			UNION ALL
 			-- Disconnected events
 			SELECT player_suffix as name, event_time
 			FROM squad_aegis.server_player_disconnected_events
-			WHERE %[1]s AND player_suffix != ''
+			WHERE player_suffix != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 			UNION ALL
 			-- Possess events
 			SELECT player_suffix as name, event_time
 			FROM squad_aegis.server_player_possess_events
-			WHERE %[2]s AND player_suffix != ''
+			WHERE player_suffix != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND player_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND player_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 			UNION ALL
-			-- Damage dealt (as attacker)
+			-- Deaths (as attacker - kills)
 			SELECT attacker_name as name, event_time
-			FROM squad_aegis.server_player_damaged_events
-			WHERE %[3]s AND attacker_name != ''
-			UNION ALL
-			-- Damage taken (as victim)
-			SELECT victim_name as name, event_time
-			FROM squad_aegis.server_player_damaged_events
-			WHERE %[4]s AND victim_name != ''
+			FROM squad_aegis.server_player_died_events
+			WHERE attacker_name != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND attacker_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND attacker_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 			UNION ALL
 			-- Deaths (as victim)
 			SELECT victim_name as name, event_time
 			FROM squad_aegis.server_player_died_events
-			WHERE %[4]s AND victim_name != ''
+			WHERE victim_name != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND victim_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND victim_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 			UNION ALL
-			-- Kills (as attacker)
+			-- Wounded (as attacker)
 			SELECT attacker_name as name, event_time
-			FROM squad_aegis.server_player_died_events
-			WHERE %[3]s AND attacker_name != ''
+			FROM squad_aegis.server_player_wounded_events
+			WHERE attacker_name != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND attacker_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND attacker_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 			UNION ALL
 			-- Wounded (as victim)
 			SELECT victim_name as name, event_time
 			FROM squad_aegis.server_player_wounded_events
-			WHERE %[4]s AND victim_name != ''
+			WHERE victim_name != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND victim_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND victim_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 			UNION ALL
-			-- Wounded someone (as attacker)
-			SELECT attacker_name as name, event_time
-			FROM squad_aegis.server_player_wounded_events
-			WHERE %[3]s AND attacker_name != ''
-			UNION ALL
-			-- Revived someone (as reviver)
+			-- Revived (as reviver)
 			SELECT reviver_name as name, event_time
 			FROM squad_aegis.server_player_revived_events
-			WHERE %[5]s AND reviver_name != ''
+			WHERE reviver_name != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND reviver_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND reviver_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 			UNION ALL
-			-- Got revived (as victim)
+			-- Revived (as victim)
 			SELECT victim_name as name, event_time
 			FROM squad_aegis.server_player_revived_events
-			WHERE %[4]s AND victim_name != ''
+			WHERE victim_name != '' AND (
+				(length((SELECT steam_ids FROM linked_identifiers)) > 0 AND victim_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers))
+				OR (length((SELECT eos_ids FROM linked_identifiers)) > 0 AND victim_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers))
+			)
 		)
 		SELECT
 			name,
@@ -1981,15 +2018,13 @@ func (s *Server) getPlayerNameHistory(c *gin.Context, playerID string, isSteamID
 		WHERE name != ''
 		GROUP BY name
 		ORDER BY last_used DESC
-	`, whereClause, playerWhereClause, attackerWhereClause, victimWhereClause, reviverWhereClause)
+	`, seedWhereClause, seedPlayerWhereClause, seedAttackerWhereClause, seedVictimWhereClause)
 
+	// Pass playerID for each seed source (6 sources)
 	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query,
-		playerID, playerID, // join, disconnected
-		playerID,           // possess
-		playerID, playerID, // damaged (attacker, victim)
-		playerID, playerID, // died (victim, attacker)
-		playerID, playerID, // wounded (victim, attacker)
-		playerID, playerID, // revived (reviver, victim)
+		playerID, playerID, playerID, // join, connected, disconnected
+		playerID,                      // possess
+		playerID, playerID,            // died (attacker, victim)
 	)
 	if err != nil {
 		return nil, err
