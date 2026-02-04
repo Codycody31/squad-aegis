@@ -137,11 +137,14 @@ export interface TeamkillVictim {
 }
 
 export interface SessionHistoryEntry {
-  event_time: string;
+  connect_time: string;
+  disconnect_time?: string | null;
+  duration_seconds?: number | null;
   server_id: string;
   server_name?: string;
   ip?: string;
-  event_type: "connected" | "disconnected";
+  missing_disconnect: boolean;
+  ongoing: boolean;
 }
 
 export interface RelatedPlayer {

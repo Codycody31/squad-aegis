@@ -11,8 +11,22 @@ import {
 } from "~/components/ui/table";
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
-import { Loader2, ChevronLeft, ChevronRight, Network } from "lucide-vue-next";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/ui/tooltip";
+import {
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  Network,
+  AlertCircle,
+  Play,
+} from "lucide-vue-next";
 import type { SessionHistoryEntry } from "~/types/player";
+import { formatSessionDuration } from "~/utils/formatters";
 
 const props = defineProps<{
   playerId: string;
@@ -120,7 +134,10 @@ onMounted(() => {
         {{ error }}
       </div>
 
-      <div v-else-if="sessions.length === 0" class="text-center py-8 text-muted-foreground">
+      <div
+        v-else-if="sessions.length === 0"
+        class="text-center py-8 text-muted-foreground"
+      >
         No session history available
       </div>
 
@@ -130,10 +147,10 @@ onMounted(() => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Time</TableHead>
+                <TableHead>Connected</TableHead>
                 <TableHead>Server</TableHead>
                 <TableHead v-if="canViewIP">IP Address</TableHead>
-                <TableHead>Event</TableHead>
+                <TableHead>Duration</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -143,9 +160,11 @@ onMounted(() => {
                 class="hover:bg-muted/50"
               >
                 <TableCell>
-                  <div class="text-sm">{{ formatDate(session.event_time) }}</div>
+                  <div class="text-sm">
+                    {{ formatDate(session.connect_time) }}
+                  </div>
                   <div class="text-xs text-muted-foreground">
-                    {{ getTimeAgo(session.event_time) }}
+                    {{ getTimeAgo(session.connect_time) }}
                   </div>
                 </TableCell>
                 <TableCell>
@@ -159,11 +178,55 @@ onMounted(() => {
                   </code>
                 </TableCell>
                 <TableCell>
-                  <Badge
-                    :variant="session.event_type === 'connected' ? 'default' : 'secondary'"
-                  >
-                    {{ session.event_type }}
-                  </Badge>
+                  <div class="flex items-center gap-2">
+                    <!-- Ongoing session -->
+                    <template v-if="session.ongoing">
+                      <Badge variant="default" class="bg-green-600">
+                        <Play class="h-3 w-3 mr-1" />
+                        Ongoing
+                      </Badge>
+                    </template>
+
+                    <!-- Session with duration -->
+                    <template v-else-if="session.duration_seconds != null">
+                      <span>{{
+                        formatSessionDuration(session.duration_seconds)
+                      }}</span>
+
+                      <!-- Warning if missing disconnect -->
+                      <TooltipProvider v-if="session.missing_disconnect">
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <AlertCircle class="h-4 w-4 text-yellow-500" />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>
+                              Disconnect event may be missing. Duration is
+                              estimated.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </template>
+
+                    <!-- Unknown duration -->
+                    <template v-else>
+                      <span class="text-muted-foreground">Unknown</span>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger>
+                            <AlertCircle class="h-4 w-4 text-yellow-500" />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>
+                              Missing disconnect event. Duration cannot be
+                              calculated.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </template>
+                  </div>
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -178,13 +241,30 @@ onMounted(() => {
             class="border rounded-lg p-3 hover:bg-muted/30 transition-colors"
           >
             <div class="flex items-center justify-between mb-2">
-              <Badge
-                :variant="session.event_type === 'connected' ? 'default' : 'secondary'"
-              >
-                {{ session.event_type }}
-              </Badge>
+              <!-- Duration badge for mobile -->
+              <div class="flex items-center gap-2">
+                <template v-if="session.ongoing">
+                  <Badge variant="default" class="bg-green-600">
+                    <Play class="h-3 w-3 mr-1" />
+                    Ongoing
+                  </Badge>
+                </template>
+                <template v-else-if="session.duration_seconds != null">
+                  <Badge variant="secondary">
+                    {{ formatSessionDuration(session.duration_seconds) }}
+                  </Badge>
+                  <AlertCircle
+                    v-if="session.missing_disconnect"
+                    class="h-4 w-4 text-yellow-500"
+                  />
+                </template>
+                <template v-else>
+                  <Badge variant="outline">Unknown</Badge>
+                  <AlertCircle class="h-4 w-4 text-yellow-500" />
+                </template>
+              </div>
               <span class="text-xs text-muted-foreground">
-                {{ getTimeAgo(session.event_time) }}
+                {{ getTimeAgo(session.connect_time) }}
               </span>
             </div>
             <div class="space-y-1 text-sm">
@@ -193,12 +273,18 @@ onMounted(() => {
                 {{ session.server_name || "Unknown" }}
               </div>
               <div>
-                <span class="text-muted-foreground">Time: </span>
-                {{ formatDate(session.event_time) }}
+                <span class="text-muted-foreground">Connected: </span>
+                {{ formatDate(session.connect_time) }}
+              </div>
+              <div v-if="session.disconnect_time">
+                <span class="text-muted-foreground">Disconnected: </span>
+                {{ formatDate(session.disconnect_time) }}
               </div>
               <div v-if="canViewIP && session.ip">
                 <span class="text-muted-foreground">IP: </span>
-                <code class="text-xs bg-muted px-1 rounded">{{ session.ip }}</code>
+                <code class="text-xs bg-muted px-1 rounded">{{
+                  session.ip
+                }}</code>
               </div>
             </div>
           </div>
@@ -206,9 +292,7 @@ onMounted(() => {
 
         <!-- Pagination -->
         <div class="flex items-center justify-between mt-4 pt-4 border-t">
-          <div class="text-sm text-muted-foreground">
-            Page {{ page }}
-          </div>
+          <div class="text-sm text-muted-foreground">Page {{ page }}</div>
           <div class="flex gap-2">
             <Button
               variant="outline"

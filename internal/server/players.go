@@ -147,13 +147,16 @@ type TeamkillVictim struct {
 	LastTK       time.Time `json:"last_tk"`
 }
 
-// SessionHistoryEntry represents a connection session
+// SessionHistoryEntry represents a paired connection session
 type SessionHistoryEntry struct {
-	EventTime  time.Time `json:"event_time"`
-	ServerID   string    `json:"server_id"`
-	ServerName string    `json:"server_name,omitempty"`
-	IP         string    `json:"ip,omitempty"` // Only visible with permission
-	EventType  string    `json:"event_type"`   // "connected" or "disconnected"
+	ConnectTime       time.Time  `json:"connect_time"`
+	DisconnectTime    *time.Time `json:"disconnect_time,omitempty"`
+	DurationSeconds   *int64     `json:"duration_seconds,omitempty"`
+	ServerID          string     `json:"server_id"`
+	ServerName        string     `json:"server_name,omitempty"`
+	IP                string     `json:"ip,omitempty"` // Only visible with permission
+	MissingDisconnect bool       `json:"missing_disconnect"`
+	Ongoing           bool       `json:"ongoing"`
 }
 
 // RelatedPlayer represents a player potentially related (same IP)
@@ -1911,7 +1914,10 @@ func (s *Server) PlayerSessionHistory(c *gin.Context) {
 		whereClause = "eos = ?"
 	}
 
-	offset := (page - 1) * limit
+	// Fetch all events (connects and disconnects) ordered by time DESC
+	// We fetch more than needed to ensure proper pairing at page boundaries
+	bufferMultiplier := 3
+	fetchLimit := limit * bufferMultiplier
 
 	query := fmt.Sprintf(`
 		SELECT * FROM (
@@ -1931,39 +1937,114 @@ func (s *Server) PlayerSessionHistory(c *gin.Context) {
 			FROM squad_aegis.server_player_disconnected_events
 			WHERE %s
 		) ORDER BY event_time DESC
-		LIMIT ? OFFSET ?
+		LIMIT ?
 	`, whereClause, whereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, limit, offset)
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, fetchLimit)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 	defer rows.Close()
 
-	sessions := []SessionHistoryEntry{}
+	// Collect raw events
+	type rawEvent struct {
+		EventTime time.Time
+		ServerID  string
+		IP        string
+		EventType string
+	}
+	var events []rawEvent
 	for rows.Next() {
-		var session SessionHistoryEntry
-		var ip string
-		err := rows.Scan(&session.EventTime, &session.ServerID, &ip, &session.EventType)
-		if err != nil {
+		var e rawEvent
+		if err := rows.Scan(&e.EventTime, &e.ServerID, &e.IP, &e.EventType); err != nil {
+			continue
+		}
+		events = append(events, e)
+	}
+
+	// Pair connect events with their corresponding disconnect events
+	// Events are ordered newest first (DESC)
+	sessions := []SessionHistoryEntry{}
+	usedDisconnects := make(map[int]bool)
+
+	for i, e := range events {
+		if e.EventType != "connected" {
 			continue
 		}
 
-		// Only include IP if user has permission
+		session := SessionHistoryEntry{
+			ConnectTime: e.EventTime,
+			ServerID:    e.ServerID,
+		}
 		if canViewIPs {
-			session.IP = ip
+			session.IP = e.IP
 		}
 
-		// Get server name
-		serverNameQuery := `SELECT name FROM servers WHERE id = $1`
-		row := s.Dependencies.DB.QueryRow(serverNameQuery, session.ServerID)
-		var serverName string
-		if err := row.Scan(&serverName); err == nil {
-			session.ServerName = serverName
+		// Look for the first disconnect after this connect (searching forward in time-descending list means looking backward)
+		// In our DESC-ordered list, disconnects that happened AFTER connect are at indices BEFORE i
+		foundDisconnect := false
+		for j := i - 1; j >= 0; j-- {
+			if events[j].EventType == "disconnected" && !usedDisconnects[j] {
+				// Check if there's another connect between this disconnect and our connect
+				hasIntermediateConnect := false
+				for k := j + 1; k < i; k++ {
+					if events[k].EventType == "connected" {
+						hasIntermediateConnect = true
+						break
+					}
+				}
+
+				if !hasIntermediateConnect {
+					// This disconnect belongs to our connect
+					usedDisconnects[j] = true
+					disconnectTime := events[j].EventTime
+					session.DisconnectTime = &disconnectTime
+					duration := int64(disconnectTime.Sub(e.EventTime).Seconds())
+					session.DurationSeconds = &duration
+					foundDisconnect = true
+					break
+				}
+			}
+		}
+
+		if !foundDisconnect {
+			// Check if this is an ongoing session (connected within the last hour)
+			if time.Since(e.EventTime) < time.Hour {
+				session.Ongoing = true
+			} else {
+				session.MissingDisconnect = true
+			}
 		}
 
 		sessions = append(sessions, session)
+	}
+
+	// Apply pagination to paired sessions
+	offset := (page - 1) * limit
+	end := offset + limit
+	if offset > len(sessions) {
+		sessions = []SessionHistoryEntry{}
+	} else {
+		if end > len(sessions) {
+			end = len(sessions)
+		}
+		sessions = sessions[offset:end]
+	}
+
+	// Cache server names to avoid repeated queries
+	serverNameCache := make(map[string]string)
+	for i := range sessions {
+		serverID := sessions[i].ServerID
+		if name, ok := serverNameCache[serverID]; ok {
+			sessions[i].ServerName = name
+		} else {
+			var serverName string
+			if err := s.Dependencies.DB.QueryRow(`SELECT name FROM servers WHERE id = $1`, serverID).Scan(&serverName); err == nil {
+				serverNameCache[serverID] = serverName
+				sessions[i].ServerName = serverName
+			}
+		}
 	}
 
 	responses.Success(c, "Session history fetched successfully", &gin.H{

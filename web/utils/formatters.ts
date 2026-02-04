@@ -52,4 +52,26 @@ export function relativeTimeFormat(date: Date): string {
   
   const diffInYears = Math.floor(diffInMonths / 12);
   return `${diffInYears} year${diffInYears === 1 ? '' : 's'} ago`;
+}
+
+/**
+ * Format a duration in seconds to a human-readable string
+ * e.g., "2h 15m", "45m", "1d 3h"
+ */
+export function formatSessionDuration(seconds: number): string {
+  if (seconds < 0) return "0s";
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
+
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 } 
