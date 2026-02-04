@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-02-04
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Insidious Fiddler
+
+### Misc
+
+- feat(motd): add server motd config, generator, uploader and UI ([b0f8a77](https://github.com/Codycody31/squad-aegis/commit/b0f8a77cbd560cd42444bd2550a842b32d411594))
+- fix(plugin_manager): sort plugin instances by creation time ([91fbb2f](https://github.com/Codycody31/squad-aegis/commit/91fbb2f48ef9572c6fc65f11d78eddcd45ec3429))
+- fix(plugin): skip calling UpdateConfig on disabled or stopped plugins ([b67e66d](https://github.com/Codycody31/squad-aegis/commit/b67e66d31ac117acc6a7064cf8cad9489daf128a))
+- feat(players): add friendly-fire metrics and UI ([c61e552](https://github.com/Codycody31/squad-aegis/commit/c61e552afacad24e1eaa4bf3c65bbd4ba19f0880))
+- chore: temp set postgres to 14 for dev... ([5d39d03](https://github.com/Codycody31/squad-aegis/commit/5d39d033b52519be60d6c78b54643e00b9125e7c))
+- refactor(identity)!: replace EventTime with FirstSeen and LastSeen fields ([77476a3](https://github.com/Codycody31/squad-aegis/commit/77476a3aeabe74ccf8404fda5093b2e8ae516127))
+- feat(identity): add identity resolver and periodic worker with migrations for player identity aggregration and consolidation ([804b34d](https://github.com/Codycody31/squad-aegis/commit/804b34dd1de6cebfb1d0298bb016989a032fd2e0))
+- feat(players): add dedicated alts page and view-all link, reduce widget limit ([43c9ca0](https://github.com/Codycody31/squad-aegis/commit/43c9ca0dd14f9d12e6068078dad66f5217df41a7))
+- feat(players): add wounded/damaged combat event types ([3d5675b](https://github.com/Codycody31/squad-aegis/commit/3d5675bf78e5c7bd8e7333a9c30e675a3077780d))
+- refactor(players): query shared IPs then fetch players per IP ([48c4721](https://github.com/Codycody31/squad-aegis/commit/48c4721a127a61b5ebdb1cbb47304fb54f1b410b))
+- feat(players): add player UI components and alt-groups endpoint ([5672849](https://github.com/Codycody31/squad-aegis/commit/567284973994b4b8922b9c3873efe46ebd2b84a4))
+- feat(player): add combat history API and UI ([fa5ca2a](https://github.com/Codycody31/squad-aegis/commit/fa5ca2ad6f4ba55de09c7564757e563170abbdba))
+- feat(sessions): pair connect/disconnect events and surface durations ([f6a20c0](https://github.com/Codycody31/squad-aegis/commit/f6a20c050064e05d5cd1ee26122d9bc522bfc4fd))
+- feat(rcon): add rule-logging and new RconAPI methods ([7d1ea89](https://github.com/Codycody31/squad-aegis/commit/7d1ea89ae73cc0c7c94c0b53b5c50f5a9c33d5e0))
+- feat(players): include disconnection events in player session history ([970b186](https://github.com/Codycody31/squad-aegis/commit/970b1863e3b0a0f2595de018e96b1df749472cb6))
+- refactor(chat_automod): remove hate speech category and config ([43a2d05](https://github.com/Codycody31/squad-aegis/commit/43a2d0563faf6c9d4945a93cf98d86f78aab3e88))
+- feat(player-profile): add admin fields, routes, types and UI components ([7c36e77](https://github.com/Codycody31/squad-aegis/commit/7c36e777ba619b4ab7c5ae97f353bdd2c1efbf77))
+- feat(auto_tk_warn,web): add attacker/victim placeholders and use runtime api ([15713a3](https://github.com/Codycody31/squad-aegis/commit/15713a344c66eadc49b83b88018b45551c51b01d))
+- feat(plugin): chat auto-mod ([e03a4f5](https://github.com/Codycody31/squad-aegis/commit/e03a4f518e918183ec827cea6f2a93e0a909425a))
+- refactor: fix incorrect permission checks on banned players and other conponents ([043ddb8](https://github.com/Codycody31/squad-aegis/commit/043ddb8669aaa0c4f1cb2c609d39ce4affc461c7))
+- chore: hopefully fix squad not loading remote ban lists cfg ([d7423c4](https://github.com/Codycody31/squad-aegis/commit/d7423c41f9d5d30095c9f00bda23dceabc1e7de6))
+- refactor: replace authFetch with useAuthFetchImperative for consistency in API calls ([0d40ac0](https://github.com/Codycody31/squad-aegis/commit/0d40ac0e3cd267e462723963a6a5c3b80a8dbf09))
+- chore: clean up unused imports and optimize component structure ([42a135b](https://github.com/Codycody31/squad-aegis/commit/42a135b5287e78438f0ec7339e4ec5885de9a441))
+- chore(server): implement transaction handling in ServerRolesAdd for atomic role creation and permission setting ([2807870](https://github.com/Codycody31/squad-aegis/commit/28078700f92895fab861c56c8f73324c879f3eeb))
+- chore: update licensing information from Elastic License 2.0 to GNU General Public License v3.0 (GPL-3.0) ([7794e32](https://github.com/Codycody31/squad-aegis/commit/7794e32a2625f160f312935b5dfbeeaf8651c6db))
+- feat(auth): enhance permission management with new methods and super admin checks ([aa22e80](https://github.com/Codycody31/squad-aegis/commit/aa22e8079973224b26417c44aefe0b028b921eef))
+- fix: rename MediaPreviewModal to EvidenceMediaPreviewModal for clarity ([4482b1d](https://github.com/Codycody31/squad-aegis/commit/4482b1d0240524c4de0f8e6be27f4ab1344fb975))
+- feat: add security check for copy buttons and improve user feedback with toast notifications ([db4cdc3](https://github.com/Codycody31/squad-aegis/commit/db4cdc3c8f3f2d7ad9b612971ca60bd9f5828399))
+- feat: implement media preview functionality for evidence files ([805d5d9](https://github.com/Codycody31/squad-aegis/commit/805d5d9b9348dddb1eda9c8e68c47b279b4fb2aa))
+- feat: add recent player joins endpoint and UI integration ([ca21e44](https://github.com/Codycody31/squad-aegis/commit/ca21e4473949fc20f1bbf604709a52e52cf7727a))
+- fix: ban expiration calculation using days instead of minutes ([7a9476d](https://github.com/Codycody31/squad-aegis/commit/7a9476dff07200f137e1b5db1f9341243ab9d41e))
+- fix: clean steam_id input and improve player selection handling ([eee8c50](https://github.com/Codycody31/squad-aegis/commit/eee8c50c4b908b6f53ad20bbd10f3a517c7d2898))
+- fix: enhance cookie handling for session authentication and improve player search input ([8eadb53](https://github.com/Codycody31/squad-aegis/commit/8eadb53c363d236199745d522709a526efcf67ed))
+- revert: remove BattleMetrics fallback for player name lookup (too slow) ([48db48c](https://github.com/Codycody31/squad-aegis/commit/48db48c3de8bf8c2a592d195ddc759af0d49a324))
+- fix: player name lookup and steam_id JSON encoding for ban list ([235e661](https://github.com/Codycody31/squad-aegis/commit/235e6613257dcfd7a4c481ce9d4ce51e2c166db3))
+- refactor: api calls to handle auth failures & changesto the banned players page ([3053dc3](https://github.com/Codycody31/squad-aegis/commit/3053dc3e55161ccb877b8bc803169ec798f40a39))
+- feat: add ban-with-evidence system for workflows and plugins ([1a1314d](https://github.com/Codycody31/squad-aegis/commit/1a1314d70b4dca9ab2a847ac6c4388018bce5c8a))
+- fix: missed setup for /cfg that allowed wrong format ([858fc0c](https://github.com/Codycody31/squad-aegis/commit/858fc0c1cd724bc5d1fb3b46bd5d27c5e1ce1201))
+- Revert "wip" ([510bac7](https://github.com/Codycody31/squad-aegis/commit/510bac7c82a0bacad254a21ee50894651b3a3f77))
+- fix: remote ban list file being incorrect format (?) ([85c602f](https://github.com/Codycody31/squad-aegis/commit/85c602f06425d65d87ca6cfdae20c9f901a66f38))
+- wip ([bdbafb0](https://github.com/Codycody31/squad-aegis/commit/bdbafb0115ce7e4360676cb104a31dc0ad41325b))
+
 ## [0.5.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.0) - 2025-12-24
 
 ### ❤️ Thanks to all contributors! ❤️
