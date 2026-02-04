@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-02-03
+## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-02-04
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,11 @@
 
 ### Misc
 
+- feat(sessions): pair connect/disconnect events and surface durations ([f6a20c0](https://github.com/Codycody31/squad-aegis/commit/f6a20c050064e05d5cd1ee26122d9bc522bfc4fd))
+- feat(rcon): add rule-logging and new RconAPI methods ([7d1ea89](https://github.com/Codycody31/squad-aegis/commit/7d1ea89ae73cc0c7c94c0b53b5c50f5a9c33d5e0))
+- feat(players): include disconnection events in player session history ([970b186](https://github.com/Codycody31/squad-aegis/commit/970b1863e3b0a0f2595de018e96b1df749472cb6))
+- refactor(chat_automod): remove hate speech category and config ([43a2d05](https://github.com/Codycody31/squad-aegis/commit/43a2d0563faf6c9d4945a93cf98d86f78aab3e88))
+- feat(player-profile): add admin fields, routes, types and UI components ([7c36e77](https://github.com/Codycody31/squad-aegis/commit/7c36e777ba619b4ab7c5ae97f353bdd2c1efbf77))
 - feat(auto_tk_warn,web): add attacker/victim placeholders and use runtime api ([15713a3](https://github.com/Codycody31/squad-aegis/commit/15713a344c66eadc49b83b88018b45551c51b01d))
 - feat(plugin): chat auto-mod ([e03a4f5](https://github.com/Codycody31/squad-aegis/commit/e03a4f518e918183ec827cea6f2a93e0a909425a))
 - refactor: fix incorrect permission checks on banned players and other conponents ([043ddb8](https://github.com/Codycody31/squad-aegis/commit/043ddb8669aaa0c4f1cb2c609d39ce4affc461c7))
