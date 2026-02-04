@@ -21,6 +21,13 @@ export interface PlayerProfile {
   risk_indicators: RiskIndicator[];
   name_history: NameHistoryEntry[];
   weapon_stats: WeaponStat[];
+
+  // Consolidated identity fields
+  canonical_id?: string;
+  all_steam_ids?: string[];
+  all_eos_ids?: string[];
+  all_names?: string[];
+  identity_status?: "resolved" | "pending";
 }
 
 export interface PlayerStatistics {
