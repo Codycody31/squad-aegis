@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -293,6 +294,11 @@ func (pm *PluginManager) GetPluginInstances(serverID uuid.UUID) []*PluginInstanc
 		}
 		instances = append(instances, &maskedInstance)
 	}
+
+	// Sort by created_at for stable ordering
+	sort.Slice(instances, func(i, j int) bool {
+		return instances[i].CreatedAt.Before(instances[j].CreatedAt)
+	})
 
 	return instances
 }
