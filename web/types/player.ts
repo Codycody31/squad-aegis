@@ -147,6 +147,23 @@ export interface SessionHistoryEntry {
   ongoing: boolean;
 }
 
+export interface CombatHistoryEntry {
+  event_time: string;
+  event_type: "kill" | "death";
+  server_id: string;
+  server_name?: string;
+  weapon: string;
+  damage: number;
+  teamkill: boolean;
+  other_name: string;
+  other_steam_id?: string;
+  other_eos_id?: string;
+  other_team: string;
+  other_squad: string;
+  player_team: string;
+  player_squad: string;
+}
+
 export interface RelatedPlayer {
   steam_id: string;
   eos_id: string;
@@ -154,6 +171,29 @@ export interface RelatedPlayer {
   relation_type: "same_ip";
   shared_sessions: number;
   is_banned: boolean;
+}
+
+export interface AltAccountPlayer {
+  steam_id: string;
+  eos_id: string;
+  player_name: string;
+  is_banned: boolean;
+  shared_sessions: number;
+  last_seen: string | null;
+}
+
+export interface AltAccountGroup {
+  group_id: string;
+  players: AltAccountPlayer[];
+  shared_ip_count: number;
+  last_activity: string | null;
+}
+
+export interface AltAccountGroupsResponse {
+  alt_groups: AltAccountGroup[];
+  total_groups: number;
+  page: number;
+  limit: number;
 }
 
 export interface PaginatedChatHistory {
