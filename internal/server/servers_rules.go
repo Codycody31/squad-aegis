@@ -521,7 +521,10 @@ func (s *Server) bulkUpdateServerRules(c *gin.Context) {
 	}
 
 	// Trigger MOTD auto-upload if enabled
-	s.TriggerMOTDUploadIfEnabled(c.Request.Context(), serverID)
+	motdAutoUploaded := s.TriggerMOTDUploadIfEnabled(c.Request.Context(), serverID)
 
-	c.JSON(http.StatusOK, updatedRules)
+	c.JSON(http.StatusOK, gin.H{
+		"rules":              updatedRules,
+		"motd_auto_uploaded": motdAutoUploaded,
+	})
 }
