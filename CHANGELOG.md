@@ -28,6 +28,7 @@
 
 ### Misc
 
+- Add Claude Code GitHub Workflow [[#147](https://github.com/Codycody31/squad-aegis/pull/147)]
 - Move Copy Config URL buttons to header and add HTTP support [[#145](https://github.com/Codycody31/squad-aegis/pull/145)]
 - chore(release-config): add changeTypes mapping for release notes ([9c0b975](https://github.com/Codycody31/squad-aegis/commit/9c0b975cba408ff096896ffdace575783009dd5b))
 
