@@ -32,6 +32,11 @@ import {
     FormMessage,
 } from "~/components/ui/form";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "~/components/ui/popover";
 import { Checkbox } from "~/components/ui/checkbox";
 import {
     Select,
@@ -83,6 +88,7 @@ const cleanupLoading = ref(false);
 const createFromTemplateLoading = ref(false);
 const selectedAdminType = ref("user");
 const editingAdmin = ref<ServerAdmin | null>(null);
+const showAdminCfgPopover = ref(false);
 const editingRole = ref<ServerRole | null>(null);
 
 // Interfaces
@@ -894,16 +900,8 @@ async function cleanupExpiredAdmins() {
 // Security check for copy buttons
 const canCopyConfigUrl = computed(() => isSecureOrLocalConnection());
 
-function copyAdminCfgUrl() {
-    if (!canCopyConfigUrl.value) {
-        toast({
-            title: "Copy Disabled",
-            description: "Config URL copying is only allowed on HTTPS or localhost connections",
-            variant: "destructive",
-        });
-        return;
-    }
-
+// Computed property for admin config URL
+const adminCfgUrl = computed(() => {
     const runtimeConfig = useRuntimeConfig();
     var url = "";
     if (runtimeConfig.public.backendApi.startsWith("/")) {
@@ -912,13 +910,27 @@ function copyAdminCfgUrl() {
     } else {
         url = `${runtimeConfig.public.backendApi}/servers/${serverId}/admins/cfg`;
     }
+    return url;
+});
 
-    navigator.clipboard.writeText(url);
+function copyAdminCfgUrl() {
+    if (!canCopyConfigUrl.value) {
+        // On HTTP, just open the popover to show the URL
+        showAdminCfgPopover.value = true;
+        return;
+    }
+
+    navigator.clipboard.writeText(adminCfgUrl.value);
 
     toast({
         title: "Success",
         description: "Admin configuration URL copied to clipboard",
     });
+}
+
+function selectAdminCfgUrl(event: Event) {
+    const input = event.target as HTMLInputElement;
+    input.select();
 }
 
 // Format date
@@ -1088,14 +1100,31 @@ onMounted(() => {
         <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0 mb-3 sm:mb-4">
             <h1 class="text-xl sm:text-2xl font-bold">Users & Roles</h1>
 
-            <Button
-                @click="copyAdminCfgUrl"
-                :disabled="!canCopyConfigUrl"
-                :title="canCopyConfigUrl ? 'Copy Admin Config URL' : 'Copy disabled - use HTTPS or localhost'"
-                class="w-full sm:w-auto text-sm sm:text-base"
-            >
-                Copy Admin Config URL
-            </Button>
+            <Popover v-model:open="showAdminCfgPopover">
+                <PopoverTrigger asChild>
+                    <Button
+                        @click="copyAdminCfgUrl"
+                        :title="canCopyConfigUrl ? 'Copy Admin Config URL' : 'Click to view URL (copy manually on HTTP)'"
+                        class="w-full sm:w-auto text-sm sm:text-base"
+                    >
+                        Copy Admin Config URL
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent v-if="!canCopyConfigUrl" class="w-80">
+                    <div class="space-y-2">
+                        <h4 class="font-medium text-sm">Admin Config URL</h4>
+                        <p class="text-xs text-muted-foreground">
+                            Automatic copying requires HTTPS or localhost. Please copy the URL manually:
+                        </p>
+                        <Input
+                            :value="adminCfgUrl"
+                            readonly
+                            @focus="selectAdminCfgUrl"
+                            class="text-xs"
+                        />
+                    </div>
+                </PopoverContent>
+            </Popover>
         </div>
 
         <div v-if="error" class="bg-red-500 text-white p-3 sm:p-4 rounded mb-3 sm:mb-4 text-sm sm:text-base">

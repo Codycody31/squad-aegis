@@ -53,6 +53,11 @@ import {
     TabsTrigger,
     TabsContent,
 } from "~/components/ui/tabs";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "~/components/ui/popover";
 import { Plus, Trash2 } from "lucide-vue-next";
 import { toTypedSchema } from "@vee-validate/zod";
 import * as z from "zod";
@@ -103,6 +108,7 @@ const isUploadingFile = ref(false);
 const evidenceTab = ref("events"); // 'events', 'files', 'text'
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const fileInputRefEdit = ref<HTMLInputElement | null>(null);
+const showBanCfgPopover = ref(false);
 
 // Player search state for add ban dialog
 const playerSearchQuery = ref("");
@@ -1357,16 +1363,8 @@ async function refreshData() {
 // Security check for copy buttons
 const canCopyConfigUrl = computed(() => isSecureOrLocalConnection());
 
-function copyBanCfgUrl() {
-    if (!canCopyConfigUrl.value) {
-        toast({
-            title: "Copy Disabled",
-            description: "Config URL copying is only allowed on HTTPS or localhost connections",
-            variant: "destructive",
-        });
-        return;
-    }
-
+// Computed property for ban config URL
+const banCfgUrl = computed(() => {
     var url = "";
     if (runtimeConfig.public.backendApi.startsWith("/")) {
         // Relative URL, construct full URL
@@ -1375,12 +1373,27 @@ function copyBanCfgUrl() {
     } else {
         url = `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/cfg`;
     }
-    navigator.clipboard.writeText(url);
+    return url;
+});
+
+function copyBanCfgUrl() {
+    if (!canCopyConfigUrl.value) {
+        // On HTTP, just open the popover to show the URL
+        showBanCfgPopover.value = true;
+        return;
+    }
+
+    navigator.clipboard.writeText(banCfgUrl.value);
 
     toast({
         title: "Success",
         description: "Ban configuration URL copied to clipboard",
     });
+}
+
+function selectBanCfgUrl(event: Event) {
+    const input = event.target as HTMLInputElement;
+    input.select();
 }
 </script>
 
@@ -1389,14 +1402,31 @@ function copyBanCfgUrl() {
         <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0 mb-3 sm:mb-4">
             <h1 class="text-xl sm:text-2xl font-bold">Banned Players</h1>
             <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <Button
-                    @click="copyBanCfgUrl"
-                    :disabled="!canCopyConfigUrl"
-                    :title="canCopyConfigUrl ? 'Copy Ban Config URL' : 'Copy disabled - use HTTPS or localhost'"
-                    class="w-full sm:w-auto text-sm sm:text-base"
-                >
-                    Copy Ban Config URL
-                </Button>
+                <Popover v-model:open="showBanCfgPopover">
+                    <PopoverTrigger asChild>
+                        <Button
+                            @click="copyBanCfgUrl"
+                            :title="canCopyConfigUrl ? 'Copy Ban Config URL' : 'Click to view URL (copy manually on HTTP)'"
+                            class="w-full sm:w-auto text-sm sm:text-base"
+                        >
+                            Copy Ban Config URL
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent v-if="!canCopyConfigUrl" class="w-80">
+                        <div class="space-y-2">
+                            <h4 class="font-medium text-sm">Ban Config URL</h4>
+                            <p class="text-xs text-muted-foreground">
+                                Automatic copying requires HTTPS or localhost. Please copy the URL manually:
+                            </p>
+                            <Input
+                                :value="banCfgUrl"
+                                readonly
+                                @focus="selectBanCfgUrl"
+                                class="text-xs"
+                            />
+                        </div>
+                    </PopoverContent>
+                </Popover>
                 <Form
                     ref="addBanFormRef"
                     v-slot="{ handleSubmit, values: formValues }"
