@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { generateUUID } from '~/utils/uuid'
 import { onBeforeRouteLeave } from 'vue-router'
 import { FileText, Layers, Download, Code, Upload, Save, ChevronDown, ChevronUp, Minimize2, Maximize2, Plus } from 'lucide-vue-next'
 import RuleComponent from '~/components/RuleComponent.vue'
@@ -130,7 +131,7 @@ async function fetchRules() {
 
 const addNewRule = (type: 'rule') => {
   const newRule: ServerRule = {
-    id: crypto.randomUUID(),
+    id: generateUUID(),
     server_id: serverId,
     parent_id: null,
     display_order: rules.value.length,
@@ -185,7 +186,7 @@ const handleFileImport = (event: Event) => {
         if (Array.isArray(importedRules)) {
           rules.value = importedRules.map((rule, index) => ({
             ...rule,
-            id: rule.id || crypto.randomUUID(),
+            id: rule.id || generateUUID(),
             display_order: index,
             server_id: serverId,
             created_at: rule.created_at || new Date().toISOString(),
@@ -231,7 +232,7 @@ const parseTextImport = (content: string): ServerRule[] => {
         importedRules.push(currentRule);
       }
       currentRule = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         server_id: serverId,
         display_order: importedRules.length,
         title: mainRuleMatch[2],
@@ -248,7 +249,7 @@ const parseTextImport = (content: string): ServerRule[] => {
     const subRuleMatch = trimmed.match(/^(\d+\.\d+)\.\s*(.+)$/);
     if (subRuleMatch && currentRule) {
       const subRule: ServerRule = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         server_id: currentRule.server_id,
         parent_id: currentRule.id,
         display_order: currentRule.sub_rules?.length || 0,
@@ -368,7 +369,7 @@ const addSubRule = (parentId: string) => {
     return rulesList.map(rule => {
       if (rule.id === parentId) {
         const newSubRule: ServerRule = {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           server_id: rule.server_id,
           parent_id: rule.id,
           display_order: rule.sub_rules?.length || 0,
@@ -407,7 +408,7 @@ const addAction = (ruleId: string) => {
     return rulesList.map(rule => {
       if (rule.id === ruleId) {
         const newAction: ServerRuleAction = {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           rule_id: rule.id,
           violation_count: 1,
           action_type: 'WARN',
