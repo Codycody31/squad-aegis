@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
+import { generateUUID } from "~/utils/uuid";
 import {
     Plus,
     Trash2,
@@ -252,7 +253,7 @@ function shouldShowField(field: any, stepConfig: Record<string, any>): boolean {
 
 // Helper functions
 function generateId(): string {
-    return crypto.randomUUID();
+    return generateUUID();
 }
 
 function getStepIcon(type: string) {
