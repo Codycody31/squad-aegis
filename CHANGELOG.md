@@ -11,6 +11,12 @@
 - feat(player): Improve name history retrieval with linked identifiers [[#141](https://github.com/Codycody31/squad-aegis/pull/141)]
 - feat(workflow-stats): Add server-side computation of workflow execution stats [[#135](https://github.com/Codycody31/squad-aegis/pull/135)]
 
+### 📈 Enhancement
+
+- refactor(uuid): Add fallback UUID generation utility [[#148](https://github.com/Codycody31/squad-aegis/pull/148)]
+- refactor(server): Add rule violation logging for manual bans [[#138](https://github.com/Codycody31/squad-aegis/pull/138)]
+- refactor(server): Optimize server rule hierarchy building [[#136](https://github.com/Codycody31/squad-aegis/pull/136)]
+
 ### 🐛 Bug Fixes
 
 - refactor/player-identity-search-improvements [[#140](https://github.com/Codycody31/squad-aegis/pull/140)]
@@ -20,11 +26,6 @@
 
 - docs: Remove GNU GPL license document [[#139](https://github.com/Codycody31/squad-aegis/pull/139)]
 - docs(claude): add claude.md guidance for claude code [[#134](https://github.com/Codycody31/squad-aegis/pull/134)]
-
-### 📈 Enhancement
-
-- refactor(server): Add rule violation logging for manual bans [[#138](https://github.com/Codycody31/squad-aegis/pull/138)]
-- refactor(server): Optimize server rule hierarchy building [[#136](https://github.com/Codycody31/squad-aegis/pull/136)]
 
 ### Misc
 
