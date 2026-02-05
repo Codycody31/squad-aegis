@@ -1389,6 +1389,14 @@ function copyBanCfgUrl() {
         <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 sm:gap-0 mb-3 sm:mb-4">
             <h1 class="text-xl sm:text-2xl font-bold">Banned Players</h1>
             <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                <Button
+                    @click="copyBanCfgUrl"
+                    :disabled="!canCopyConfigUrl"
+                    :title="canCopyConfigUrl ? 'Copy Ban Config URL' : 'Copy disabled - use HTTPS or localhost'"
+                    class="w-full sm:w-auto text-sm sm:text-base"
+                >
+                    Copy Ban Config URL
+                </Button>
                 <Form
                     ref="addBanFormRef"
                     v-slot="{ handleSubmit, values: formValues }"
@@ -2645,14 +2653,6 @@ function copyBanCfgUrl() {
                     class="w-full sm:w-auto text-sm sm:text-base"
                 >
                     {{ loading ? "Refreshing..." : "Refresh" }}
-                </Button>
-                <Button
-                    @click="copyBanCfgUrl"
-                    :disabled="!canCopyConfigUrl"
-                    :title="canCopyConfigUrl ? 'Copy Ban Config URL' : 'Copy disabled - use HTTPS or localhost'"
-                    class="w-full sm:w-auto text-sm sm:text-base"
-                >
-                    Copy Ban Config URL
                 </Button>
             </div>
         </div>
