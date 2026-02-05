@@ -1,10 +1,10 @@
 # Changelog
 
-## [0.7.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.0) - 2026-02-04
+## [0.7.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.0) - 2026-02-05
 
 ### ❤️ Thanks to all contributors! ❤️
 
-@Codycody31, @Insidious Fiddler
+@Codycody31, @Copilot, @Insidious Fiddler
 
 ### ✨ Features
 
@@ -28,6 +28,7 @@
 
 ### Misc
 
+- Move Copy Config URL buttons to header and add HTTP support [[#145](https://github.com/Codycody31/squad-aegis/pull/145)]
 - chore(release-config): add changeTypes mapping for release notes ([9c0b975](https://github.com/Codycody31/squad-aegis/commit/9c0b975cba408ff096896ffdace575783009dd5b))
 
 ## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-02-04
