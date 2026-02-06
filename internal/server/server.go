@@ -339,7 +339,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Server Workflows
 				workflowsGroup := serverGroup.Group("/workflows")
 				{
-					workflowsGroup.Use(server.RequirePermission(permissions.UIWorkflowsManage))
+					workflowsGroup.Use(server.RequireAnyPermission(permissions.UIWorkflowsManage, permissions.RCONManageServer))
 					workflowsGroup.GET("", server.ServerWorkflowsList)
 					workflowsGroup.POST("", server.ServerWorkflowCreate)
 

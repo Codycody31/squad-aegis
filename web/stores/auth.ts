@@ -117,12 +117,6 @@ export const useAuthStore = defineStore("auth", {
       return false;
     },
 
-    // DEPRECATED: Use hasPermission instead
-    // Kept for backward compatibility
-    getServerPermission(serverId: string, permission: string): boolean {
-      return this.hasPermission(serverId, permission);
-    },
-
     setUser(user: User) {
       this.user = user;
     },
