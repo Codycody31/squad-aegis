@@ -524,7 +524,7 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	}
 
 	// Check if user has access to this server
-	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
 		return
@@ -584,15 +584,22 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
-	_, err = r.ExecuteRaw("AdminReloadServerConfig")
-	if err != nil {
-		log.Error().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban")
-	}
-
-	// Also kick the player via RCON
-	err = r.KickPlayer(request.SteamId, request.Reason)
-	if err != nil {
-		log.Error().Err(err).Str("steamId", request.SteamId).Str("serverId", serverId.String()).Msg("Failed to kick player via RCON")
+	if server.BanEnforcementMode == "aegis" {
+		// In aegis mode, just kick the player now; the ban enforcer handles future connections
+		err = r.KickPlayer(request.SteamId, request.Reason)
+		if err != nil {
+			log.Error().Err(err).Str("steamId", request.SteamId).Str("serverId", serverId.String()).Msg("Failed to kick player via RCON")
+		}
+	} else {
+		// In server mode, reload config and send AdminBan
+		_, err = r.ExecuteRaw("AdminReloadServerConfig")
+		if err != nil {
+			log.Error().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban")
+		}
+		err = r.BanPlayer(request.SteamId, request.Duration, request.Reason)
+		if err != nil {
+			log.Error().Err(err).Str("steamId", request.SteamId).Str("serverId", serverId.String()).Msg("Failed to apply ban via RCON")
+		}
 	}
 
 	// Log rule violation to ClickHouse if rule_id is provided

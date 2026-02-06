@@ -25,6 +25,7 @@ export interface Server {
   rcon_ip_address: string | null;
   rcon_port: number;
   rcon_password: string;
+  ban_enforcement_mode: "server" | "aegis";
   created_at: string;
   updated_at: string;
 }
