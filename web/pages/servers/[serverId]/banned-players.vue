@@ -65,6 +65,8 @@ import { toast } from "~/components/ui/toast";
 import { canPreview, getMediaCategory } from "~/utils/mediaTypes";
 import { UI_PERMISSIONS } from "~/constants/permissions";
 
+definePageMeta({ middleware: ["auth"] });
+
 const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
 const route = useRoute();

@@ -29,6 +29,8 @@ import {
 } from "~/components/ui/dialog";
 import { Separator } from "~/components/ui/separator";
 
+definePageMeta({ middleware: ["auth"] });
+
 const route = useRoute();
 const serverId = route.params.serverId;
 

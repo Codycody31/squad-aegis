@@ -10,6 +10,8 @@ import { useToast } from "~/components/ui/toast"
 import { useAuthStore } from "~/stores/auth"
 import { UI_PERMISSIONS } from "~/constants/permissions"
 
+definePageMeta({ middleware: ["auth"] });
+
 interface ServerRuleAction {
   id: string;
   rule_id: string;
