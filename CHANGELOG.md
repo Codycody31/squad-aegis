@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.7.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.0) - 2026-02-06
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Claude, @Codycody31, @Copilot, @Insidious Fiddler
+
+### ✨ Features
+
+- feat(player): Improve name history retrieval with linked identifiers [[#141](https://github.com/Codycody31/squad-aegis/pull/141)]
+- feat(workflow-stats): Add server-side computation of workflow execution stats [[#135](https://github.com/Codycody31/squad-aegis/pull/135)]
+
+### 📈 Enhancement
+
+- refactor(uuid): Add fallback UUID generation utility [[#148](https://github.com/Codycody31/squad-aegis/pull/148)]
+- refactor(server): Add rule violation logging for manual bans [[#138](https://github.com/Codycody31/squad-aegis/pull/138)]
+- refactor(server): Optimize server rule hierarchy building [[#136](https://github.com/Codycody31/squad-aegis/pull/136)]
+
+### 🐛 Bug Fixes
+
+- Move Copy Config URL buttons to header and add HTTP support [[#145](https://github.com/Codycody31/squad-aegis/pull/145)]
+- refactor/player-identity-search-improvements [[#140](https://github.com/Codycody31/squad-aegis/pull/140)]
+- fix(server): MOTD auto-upload feedback on rule changes [[#137](https://github.com/Codycody31/squad-aegis/pull/137)]
+
+### 📚 Documentation
+
+- docs: Remove GNU GPL license document [[#139](https://github.com/Codycody31/squad-aegis/pull/139)]
+- docs(claude): add claude.md guidance for claude code [[#134](https://github.com/Codycody31/squad-aegis/pull/134)]
+
+### 📦️ Dependency
+
+- chore(deps): bump next from 16.0.1 to 16.1.5 in /docs [[#142](https://github.com/Codycody31/squad-aegis/pull/142)]
+
+### Misc
+
+- feat(bans): add aegis ban enforcement mode and in-process ban enforcer ([2399c53](https://github.com/Codycody31/squad-aegis/commit/2399c531bb20ab68e13513148c955e4ccfe2a641))
+- refactor: adding manual ban also triggers AdminBan (for now) ([17de6d4](https://github.com/Codycody31/squad-aegis/commit/17de6d46023641caef186e3d0893ac19e041c978))
+- Add permission tooltip system for disabled UI elements [[#150](https://github.com/Codycody31/squad-aegis/pull/150)]
+- Use PBAC permissions for rules management and sidebar visibility [[#151](https://github.com/Codycody31/squad-aegis/pull/151)]
+- Add Claude Code GitHub Workflow [[#147](https://github.com/Codycody31/squad-aegis/pull/147)]
+- chore(release-config): add changeTypes mapping for release notes ([9c0b975](https://github.com/Codycody31/squad-aegis/commit/9c0b975cba408ff096896ffdace575783009dd5b))
+
 ## [0.5.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.5.1) - 2026-02-04
 
 ### ❤️ Thanks to all contributors! ❤️
