@@ -6,6 +6,7 @@ import {
     ContextMenuItem,
     ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import PermissionContextMenuItem from "@/components/PermissionContextMenuItem.vue";
 import {
     Dialog,
     DialogContent,
@@ -296,22 +297,6 @@ async function executeBulkAction() {
         closeActionDialog();
     }
 }
-
-const hasKickPermission = computed(() =>
-    authStore.hasPermission(props.serverId as string, UI_PERMISSIONS.PLAYERS_KICK)
-);
-
-const hasBanPermission = computed(() =>
-    authStore.hasPermission(props.serverId as string, UI_PERMISSIONS.BANS_CREATE)
-);
-
-const hasWarnPermission = computed(() =>
-    authStore.hasPermission(props.serverId as string, UI_PERMISSIONS.PLAYERS_WARN)
-);
-
-const hasMovePermission = computed(() =>
-    authStore.hasPermission(props.serverId as string, UI_PERMISSIONS.PLAYERS_MOVE)
-);
 </script>
 
 <template>
@@ -326,37 +311,44 @@ const hasMovePermission = computed(() =>
                 }}
                 selected
             </div>
-            <ContextMenuItem
+            <PermissionContextMenuItem
                 @click="openActionDialog('warn')"
-                v-if="hasWarnPermission"
+                :permission="UI_PERMISSIONS.PLAYERS_WARN"
+                :server-id="serverId as string"
             >
                 <Icon
                     name="lucide:alert-triangle"
                     class="mr-2 h-4 w-4 text-yellow-500"
                 />
                 <span>Warn Players</span>
-            </ContextMenuItem>
-            <ContextMenuItem
+            </PermissionContextMenuItem>
+            <PermissionContextMenuItem
                 @click="openActionDialog('move')"
-                v-if="hasMovePermission"
+                :permission="UI_PERMISSIONS.PLAYERS_MOVE"
+                :server-id="serverId as string"
             >
                 <Icon name="lucide:move" class="mr-2 h-4 w-4 text-blue-500" />
                 <span>Move to Other Team</span>
-            </ContextMenuItem>
-            <ContextMenuItem
+            </PermissionContextMenuItem>
+            <PermissionContextMenuItem
                 @click="openActionDialog('kick')"
-                v-if="hasKickPermission"
+                :permission="UI_PERMISSIONS.PLAYERS_KICK"
+                :server-id="serverId as string"
             >
                 <Icon
                     name="lucide:log-out"
                     class="mr-2 h-4 w-4 text-orange-500"
                 />
                 <span>Kick Players</span>
-            </ContextMenuItem>
-            <ContextMenuItem @click="openActionDialog('ban')" v-if="hasBanPermission">
+            </PermissionContextMenuItem>
+            <PermissionContextMenuItem
+                @click="openActionDialog('ban')"
+                :permission="UI_PERMISSIONS.BANS_CREATE"
+                :server-id="serverId as string"
+            >
                 <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
                 <span>Ban Players</span>
-            </ContextMenuItem>
+            </PermissionContextMenuItem>
             <ContextMenuItem @click="emit('clear-selection')">
                 <Icon name="lucide:x" class="mr-2 h-4 w-4" />
                 <span>Clear Selection</span>
