@@ -327,11 +327,13 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Server MOTD
 				motdGroup := serverGroup.Group("/motd")
 				{
+					motdManagePerm := server.RequireAnyPermission(permissions.UIMOTDManage, permissions.RCONManageServer)
+
 					motdGroup.GET("", server.getMOTDConfig)
-					motdGroup.PUT("", server.RequirePermission(permissions.UIMOTDManage), server.updateMOTDConfig)
+					motdGroup.PUT("", motdManagePerm, server.updateMOTDConfig)
 					motdGroup.GET("/preview", server.previewMOTD)
-					motdGroup.POST("/upload", server.RequirePermission(permissions.UIMOTDManage), server.uploadMOTD)
-					motdGroup.POST("/test-connection", server.RequirePermission(permissions.UIMOTDManage), server.testMOTDConnection)
+					motdGroup.POST("/upload", motdManagePerm, server.uploadMOTD)
+					motdGroup.POST("/test-connection", motdManagePerm, server.testMOTDConnection)
 				}
 
 				// Server Workflows
