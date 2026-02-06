@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.1) - 2026-02-06
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### 🐛 Bug Fixes
+
+- fix: previous permission sysytem references causing problems [[#153](https://github.com/Codycody31/squad-aegis/pull/153)]
+
 ## [0.7.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.0) - 2026-02-06
 
 ### ❤️ Thanks to all contributors! ❤️
