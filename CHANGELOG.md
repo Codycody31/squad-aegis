@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.7.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.0) - 2026-02-05
+## [0.7.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.0) - 2026-02-06
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -26,6 +26,10 @@
 
 - docs: Remove GNU GPL license document [[#139](https://github.com/Codycody31/squad-aegis/pull/139)]
 - docs(claude): add claude.md guidance for claude code [[#134](https://github.com/Codycody31/squad-aegis/pull/134)]
+
+### 📦️ Dependency
+
+- chore(deps): bump next from 16.0.1 to 16.1.5 in /docs [[#142](https://github.com/Codycody31/squad-aegis/pull/142)]
 
 ### Misc
 
