@@ -317,6 +317,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Switch } from "~/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 
+definePageMeta({ middleware: ["auth"] });
+
 interface MOTDConfig {
     id: string;
     server_id: string;

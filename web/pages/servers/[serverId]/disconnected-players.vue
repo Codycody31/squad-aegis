@@ -8,6 +8,8 @@ import { useToast } from "~/components/ui/toast";
 import type { Player } from "~/types";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
 
+definePageMeta({ middleware: ["auth"] });
+
 const authStore = useAuthStore();
 const route = useRoute();
 const serverId = route.params.serverId;

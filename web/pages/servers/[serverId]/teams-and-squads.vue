@@ -13,6 +13,8 @@ import { Progress } from "~/components/ui/progress";
 import { Switch } from "~/components/ui/switch";
 import { Label } from "~/components/ui/label";
 
+definePageMeta({ middleware: ["auth"] });
+
 const route = useRoute();
 const serverId = route.params.serverId;
 const { toast } = useToast();

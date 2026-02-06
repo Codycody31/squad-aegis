@@ -9,6 +9,8 @@ import {
   DialogTitle,
 } from "~/components/ui/dialog";
 
+definePageMeta({ middleware: ["auth"] });
+
 const route = useRoute();
 const serverId = route.params.serverId;
 
