@@ -24,7 +24,7 @@ interface Props {
    * Whether the user has the required permission
    * If not provided, will use authStore to check
    */
-  hasPermission?: boolean;
+  hasPermission?: boolean | null;
   /**
    * Custom tooltip message to display when permission is denied
    */
@@ -39,14 +39,16 @@ interface Props {
   inset?: boolean;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  hasPermission: null,
+});
 
 const authStore = useAuthStore();
 
 // Determine if user has permission
 const userHasPermission = computed(() => {
   // If hasPermission prop is explicitly provided, use it
-  if (props.hasPermission !== undefined) {
+  if (props.hasPermission != null) {
     return props.hasPermission;
   }
 
