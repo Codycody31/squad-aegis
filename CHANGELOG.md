@@ -4,7 +4,7 @@
 
 ### ❤️ Thanks to all contributors! ❤️
 
-@Codycody31, @Copilot, @Insidious Fiddler
+@Claude, @Codycody31, @Copilot, @Insidious Fiddler
 
 ### ✨ Features
 
@@ -34,6 +34,7 @@
 
 ### Misc
 
+- Add permission tooltip system for disabled UI elements [[#150](https://github.com/Codycody31/squad-aegis/pull/150)]
 - Use PBAC permissions for rules management and sidebar visibility [[#151](https://github.com/Codycody31/squad-aegis/pull/151)]
 - Add Claude Code GitHub Workflow [[#147](https://github.com/Codycody31/squad-aegis/pull/147)]
 - chore(release-config): add changeTypes mapping for release notes ([9c0b975](https://github.com/Codycody31/squad-aegis/commit/9c0b975cba408ff096896ffdace575783009dd5b))
