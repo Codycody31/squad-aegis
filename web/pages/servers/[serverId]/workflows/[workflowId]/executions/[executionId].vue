@@ -1193,6 +1193,7 @@ onMounted(() => {
 
 // Page metadata
 definePageMeta({
+    middleware: ["auth"],
     layout: "default",
 });
 

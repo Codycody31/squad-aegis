@@ -39,6 +39,8 @@ import {
 } from "~/components/ui/select";
 import { toast } from "~/components/ui/toast";
 
+definePageMeta({ middleware: ["auth"] });
+
 const route = useRoute();
 const serverId = route.params.serverId;
 const authStore = useAuthStore();
