@@ -58,8 +58,18 @@ import {
     type PermissionCategory,
 } from "@/constants/permissions";
 
+definePageMeta({
+    middleware: ["auth"],
+});
+
 const route = useRoute();
 const serverId = route.params.serverId;
+const authStore = useAuthStore();
+
+// Redirect non-super-admins away from this page
+if (!authStore.isSuperAdmin) {
+    navigateTo(`/servers/${serverId}`);
+}
 
 const activeTab = ref("roles");
 const loading = ref({

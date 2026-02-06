@@ -102,6 +102,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 				&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword,
 				&server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress, &server.LogSourceType, &server.LogFilePath,
 				&server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword, &server.LogPollFrequency, &server.LogReadFromStart,
+				&server.BanEnforcementMode,
 			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to scan row: %w", err)

@@ -289,23 +289,25 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Plugin management routes for specific servers
 				pluginGroup := serverGroup.Group("/plugins")
 				{
+					pluginManagePerm := server.RequireAnyPermission(permissions.UIPluginsManage, permissions.RCONManageServer)
+
 					pluginGroup.GET("", server.ServerPluginList)
-					pluginGroup.GET("/logs", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginLogsAll)
-					pluginGroup.GET("/logs/ws", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginLogsAllWebSocket)
-					pluginGroup.POST("", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginCreate)
+					pluginGroup.GET("/logs", pluginManagePerm, server.ServerPluginLogsAll)
+					pluginGroup.GET("/logs/ws", pluginManagePerm, server.ServerPluginLogsAllWebSocket)
+					pluginGroup.POST("", pluginManagePerm, server.ServerPluginCreate)
 					pluginGroup.GET("/:pluginId", server.ServerPluginGet)
-					pluginGroup.PUT("/:pluginId", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginUpdate)
-					pluginGroup.POST("/:pluginId/enable", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginEnable)
-					pluginGroup.POST("/:pluginId/disable", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDisable)
-					pluginGroup.DELETE("/:pluginId", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDelete)
-					pluginGroup.GET("/:pluginId/logs", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginLogs)
-					pluginGroup.GET("/:pluginId/logs/ws", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginLogsWebSocket)
+					pluginGroup.PUT("/:pluginId", pluginManagePerm, server.ServerPluginUpdate)
+					pluginGroup.POST("/:pluginId/enable", pluginManagePerm, server.ServerPluginEnable)
+					pluginGroup.POST("/:pluginId/disable", pluginManagePerm, server.ServerPluginDisable)
+					pluginGroup.DELETE("/:pluginId", pluginManagePerm, server.ServerPluginDelete)
+					pluginGroup.GET("/:pluginId/logs", pluginManagePerm, server.ServerPluginLogs)
+					pluginGroup.GET("/:pluginId/logs/ws", pluginManagePerm, server.ServerPluginLogsWebSocket)
 					pluginGroup.GET("/:pluginId/metrics", server.ServerPluginMetrics)
-					pluginGroup.GET("/:pluginId/data", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDataGet)
-					pluginGroup.POST("/:pluginId/data", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDataSet)
-					pluginGroup.DELETE("/:pluginId/data", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDataClear)
-					pluginGroup.DELETE("/:pluginId/data/:key", server.RequirePermission(permissions.UIPluginsManage), server.ServerPluginDataDelete)
-					
+					pluginGroup.GET("/:pluginId/data", pluginManagePerm, server.ServerPluginDataGet)
+					pluginGroup.POST("/:pluginId/data", pluginManagePerm, server.ServerPluginDataSet)
+					pluginGroup.DELETE("/:pluginId/data", pluginManagePerm, server.ServerPluginDataClear)
+					pluginGroup.DELETE("/:pluginId/data/:key", pluginManagePerm, server.ServerPluginDataDelete)
+
 					// Plugin command endpoints
 					pluginGroup.GET("/:pluginId/commands", server.ServerPluginCommandsList)
 					pluginGroup.POST("/:pluginId/commands/:commandId/execute", server.ServerPluginCommandExecute)
@@ -325,17 +327,19 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Server MOTD
 				motdGroup := serverGroup.Group("/motd")
 				{
+					motdManagePerm := server.RequireAnyPermission(permissions.UIMOTDManage, permissions.RCONManageServer)
+
 					motdGroup.GET("", server.getMOTDConfig)
-					motdGroup.PUT("", server.RequirePermission(permissions.UIMOTDManage), server.updateMOTDConfig)
+					motdGroup.PUT("", motdManagePerm, server.updateMOTDConfig)
 					motdGroup.GET("/preview", server.previewMOTD)
-					motdGroup.POST("/upload", server.RequirePermission(permissions.UIMOTDManage), server.uploadMOTD)
-					motdGroup.POST("/test-connection", server.RequirePermission(permissions.UIMOTDManage), server.testMOTDConnection)
+					motdGroup.POST("/upload", motdManagePerm, server.uploadMOTD)
+					motdGroup.POST("/test-connection", motdManagePerm, server.testMOTDConnection)
 				}
 
 				// Server Workflows
 				workflowsGroup := serverGroup.Group("/workflows")
 				{
-					workflowsGroup.Use(server.RequirePermission(permissions.UIWorkflowsManage))
+					workflowsGroup.Use(server.RequireAnyPermission(permissions.UIWorkflowsManage, permissions.RCONManageServer))
 					workflowsGroup.GET("", server.ServerWorkflowsList)
 					workflowsGroup.POST("", server.ServerWorkflowCreate)
 
@@ -378,11 +382,10 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			}
 		}
 
-		// Global plugin and connector management routes
+		// Global plugin management routes (read-only metadata, available to any authenticated user)
 		pluginsGroup := apiGroup.Group("/plugins")
 		{
 			pluginsGroup.Use(server.AuthSession)
-			pluginsGroup.Use(server.AuthIsSuperAdmin())
 
 			pluginsGroup.GET("/available", server.PluginListAvailable)
 		}
