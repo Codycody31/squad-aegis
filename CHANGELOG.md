@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix: lock down all routes with PBAC permissions and fix Permission components [[#155](https://github.com/Codycody31/squad-aegis/pull/155)]
 - fix: previous permission sysytem references causing problems [[#153](https://github.com/Codycody31/squad-aegis/pull/153)]
 
 ## [0.7.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.0) - 2026-02-06
