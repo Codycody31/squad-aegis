@@ -255,6 +255,46 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Ban Enforcement Section -->
+                        <div class="border-t pt-4 mt-4">
+                            <div class="grid grid-cols-4 items-center gap-4 mb-4">
+                                <div class="text-right">
+                                    <h4 class="text-sm font-medium">Ban Enforcement</h4>
+                                    <p class="text-xs text-muted-foreground mt-1">
+                                        How bans are enforced
+                                    </p>
+                                </div>
+                                <div class="col-span-3">
+                                    <p class="text-xs text-muted-foreground">
+                                        Choose whether the game server or Squad Aegis handles ban enforcement.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-4 items-center gap-4">
+                                <label for="ban_enforcement_mode" class="text-right"
+                                    >Enforcement Mode</label
+                                >
+                                <Select v-model="serverForm.ban_enforcement_mode">
+                                    <SelectTrigger class="col-span-3">
+                                        <SelectValue placeholder="Select enforcement mode" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="server">Server (AdminBan via RCON)</SelectItem>
+                                        <SelectItem value="aegis">Squad Aegis (watch connections + kick)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div class="grid grid-cols-4 items-center gap-4 mt-2">
+                                <div></div>
+                                <p class="col-span-3 text-xs text-muted-foreground">
+                                    <strong>Server mode:</strong> Bans are sent via AdminBan RCON command. The game server enforces them via its remote ban list.<br />
+                                    <strong>Aegis mode:</strong> Squad Aegis monitors player connections and automatically kicks banned players when they join.
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="flex justify-end">
@@ -444,7 +484,7 @@ const serverForm = ref({
     rcon_ip_address: "",
     rcon_port: "",
     rcon_password: "",
-    
+
     // Log configuration fields
     log_source_type: "",
     log_file_path: "",
@@ -454,6 +494,9 @@ const serverForm = ref({
     log_password: "",
     log_poll_frequency: 5,
     log_read_from_start: false,
+
+    // Ban enforcement
+    ban_enforcement_mode: "server" as string,
 });
 
 const isUpdating = ref(false);
@@ -482,7 +525,7 @@ const fetchServerDetails = async () => {
                 game_port: data.data.server.game_port,
                 rcon_port: data.data.server.rcon_port,
                 rcon_password: data.data.server.rcon_password,
-                
+
                 // Log configuration fields
                 log_source_type: data.data.server.log_source_type || "",
                 log_file_path: data.data.server.log_file_path || "",
@@ -492,6 +535,9 @@ const fetchServerDetails = async () => {
                 log_password: data.data.server.log_password || "",
                 log_poll_frequency: data.data.server.log_poll_frequency || 5,
                 log_read_from_start: data.data.server.log_read_from_start || false,
+
+                // Ban enforcement
+                ban_enforcement_mode: data.data.server.ban_enforcement_mode || "server",
             };
             
             // Update selected log source type for conditional rendering

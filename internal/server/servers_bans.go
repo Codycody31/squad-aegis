@@ -260,12 +260,21 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
-	// Also apply the ban via RCON if the server is online
+	// Apply the ban via RCON if the server is online
 	if server != nil {
 		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-		err = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
-		if err != nil {
-			log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to apply ban via RCON")
+		if server.BanEnforcementMode == "aegis" {
+			// In aegis mode, just kick the player now; the ban enforcer handles future connections
+			err = r.KickPlayer(request.SteamID, request.Reason)
+			if err != nil {
+				log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to kick player via RCON")
+			}
+		} else {
+			// In server mode, send AdminBan so the game server enforces the ban
+			err = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
+			if err != nil {
+				log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to apply ban via RCON")
+			}
 		}
 	}
 
@@ -377,9 +386,9 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		return
 	}
 
-	// Also remove the ban via RCON if the server is online
+	// Also remove the ban via RCON if the server is online and using server-side enforcement
 	steamIDStr := strconv.FormatInt(steamIDInt, 10)
-	if server != nil {
+	if server != nil && server.BanEnforcementMode != "aegis" {
 		r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
 		if err == nil {
 			defer r.Close()

@@ -18,11 +18,11 @@ func CreateServer(ctx context.Context, database db.Executor, server *models.Serv
 	sql, args, err := psql.Insert("servers").Columns(
 		"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
 		"log_source_type", "log_file_path", "log_host", "log_port", "log_username", "log_password",
-		"log_poll_frequency", "log_read_from_start", "created_at", "updated_at",
+		"log_poll_frequency", "log_read_from_start", "ban_enforcement_mode", "created_at", "updated_at",
 	).Values(
 		server.Id, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword,
 		server.LogSourceType, server.LogFilePath, server.LogHost, server.LogPort, server.LogUsername, server.LogPassword,
-		server.LogPollFrequency, server.LogReadFromStart, server.CreatedAt, server.UpdatedAt,
+		server.LogPollFrequency, server.LogReadFromStart, server.BanEnforcementMode, server.CreatedAt, server.UpdatedAt,
 	).ToSql()
 	if err != nil {
 		return nil, err
@@ -70,6 +70,7 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword,
 			&server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress, &server.LogSourceType, &server.LogFilePath,
 			&server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword, &server.LogPollFrequency, &server.LogReadFromStart,
+			&server.BanEnforcementMode,
 		)
 		if err != nil {
 			return nil, err
@@ -142,6 +143,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconPort, &server.RconPassword,
 			&server.CreatedAt, &server.UpdatedAt, &server.RconIpAddress, &server.LogSourceType, &server.LogFilePath,
 			&server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword, &server.LogPollFrequency, &server.LogReadFromStart,
+			&server.BanEnforcementMode,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
@@ -319,14 +321,14 @@ func UpdateServer(ctx context.Context, db *sql.DB, server *models.Server) error 
 	_, err := db.ExecContext(ctx, `
 		UPDATE servers
 		SET name = $1, ip_address = $2, game_port = $3, rcon_ip_address = $4, rcon_port = $5, rcon_password = $6,
-		    log_source_type = $7, log_file_path = $8, log_host = $9, log_port = $10, log_username = $11, 
+		    log_source_type = $7, log_file_path = $8, log_host = $9, log_port = $10, log_username = $11,
 		    log_password = $12, log_poll_frequency = $13, log_read_from_start = $14,
-		    updated_at = $15
-		WHERE id = $16
+		    ban_enforcement_mode = $15, updated_at = $16
+		WHERE id = $17
 	`, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword,
 		server.LogSourceType, server.LogFilePath, server.LogHost, server.LogPort, server.LogUsername,
 		server.LogPassword, server.LogPollFrequency, server.LogReadFromStart,
-		time.Now(), server.Id)
+		server.BanEnforcementMode, time.Now(), server.Id)
 
 	if err != nil {
 		return fmt.Errorf("failed to update server: %w", err)

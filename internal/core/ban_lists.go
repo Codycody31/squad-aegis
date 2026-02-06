@@ -458,3 +458,55 @@ func IsIgnoredSteamID(ctx context.Context, database db.Executor, steamID string)
 
 	return count > 0, nil
 }
+
+// GetActiveBanForServer checks if a steam ID has an active (non-expired) ban
+// on the given server, including bans from subscribed ban lists.
+// Returns nil if no active ban is found.
+func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID uuid.UUID, steamID string) (*models.ServerBan, error) {
+	query := `
+		SELECT sb.id, sb.reason, sb.duration, sb.created_at
+		FROM server_bans sb
+		WHERE sb.steam_id = $1
+		AND (sb.duration = 0 OR sb.created_at + (sb.duration || ' days')::interval > NOW())
+		AND (
+			sb.server_id = $2
+			OR sb.ban_list_id IN (
+				SELECT sbls.ban_list_id
+				FROM server_ban_list_subscriptions sbls
+				WHERE sbls.server_id = $2
+			)
+		)
+		ORDER BY sb.created_at DESC
+		LIMIT 1
+	`
+
+	var ban models.ServerBan
+	err := database.QueryRowContext(ctx, query, steamID, serverID).Scan(
+		&ban.ID, &ban.Reason, &ban.Duration, &ban.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	ban.SteamID = steamID
+	ban.ServerID = serverID
+	ban.Permanent = ban.Duration == 0
+	if !ban.Permanent {
+		ban.ExpiresAt = ban.CreatedAt.AddDate(0, 0, ban.Duration)
+	}
+
+	return &ban, nil
+}
+
+// GetServerBanEnforcementMode returns the ban enforcement mode for a server.
+// Returns "server" as the default if not found.
+func GetServerBanEnforcementMode(ctx context.Context, database db.Executor, serverID uuid.UUID) (string, error) {
+	var mode string
+	err := database.QueryRowContext(ctx,
+		"SELECT ban_enforcement_mode FROM servers WHERE id = $1", serverID,
+	).Scan(&mode)
+	if err != nil {
+		return "server", err
+	}
+	return mode, nil
+}

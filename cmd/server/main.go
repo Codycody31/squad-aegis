@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/ban_enforcer"
 	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/db"
@@ -234,6 +235,11 @@ func run(ctx context.Context) error {
 	if err := workflowManager.Start(); err != nil {
 		return fmt.Errorf("failed to start workflow manager: %w", err)
 	}
+
+	// Create and start ban enforcer (watches player connections, kicks banned players in aegis mode)
+	banEnforcer := ban_enforcer.NewBanEnforcer(ctx, database, eventManager, rconManager)
+	banEnforcer.Start()
+	defer banEnforcer.Stop()
 
 	// Initialize storage
 	log.Info().Str("type", config.Config.Storage.Type).Msg("Initializing storage...")

@@ -62,6 +62,7 @@ interface Server {
   game_port: number;
   rcon_ip_address: string | null;
   rcon_port: number;
+  ban_enforcement_mode: "server" | "aegis";
   created_at: string;
   updated_at: string;
 }
