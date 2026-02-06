@@ -3,9 +3,9 @@ import { ref } from "vue";
 import {
     DropdownMenu,
     DropdownMenuContent,
-    DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import PermissionDropdownMenuItem from "@/components/PermissionDropdownMenuItem.vue";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -16,9 +16,9 @@ import {
     DialogTitle,
 } from "~/components/ui/dialog";
 import { useToast } from "~/components/ui/toast";
+import { RCON_PERMISSIONS } from "~/constants/permissions";
 
 const { toast } = useToast();
-const authStore = useAuthStore();
 
 interface Squad {
     id: number;
@@ -210,52 +210,40 @@ async function executeSquadAction() {
             </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-            <DropdownMenuItem
+            <PermissionDropdownMenuItem
                 @click="openActionDialog('swap-team')"
-                v-if="
-                    authStore.getServerPermission(
-                        serverId as string,
-                        'forceteamchange',
-                    )
-                "
+                :permission="RCON_PERMISSIONS.FORCE_TEAM_CHANGE"
+                :server-id="serverId as string"
             >
                 <Icon
                     name="lucide:repeat"
                     class="mr-2 h-4 w-4 text-blue-500"
                 />
                 <span>Swap to Other Team</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
+            </PermissionDropdownMenuItem>
+            <PermissionDropdownMenuItem
                 v-if="squad.name.trim().toUpperCase() === 'COMMAND SQUAD'"
                 @click="openActionDialog('demote-commander')"
-                v-show="
-                    authStore.getServerPermission(
-                        serverId as string,
-                        'kick',
-                    )
-                "
+                :permission="RCON_PERMISSIONS.DEMOTE_COMMANDER"
+                :server-id="serverId as string"
             >
                 <Icon
                     name="lucide:user-minus"
                     class="mr-2 h-4 w-4 text-orange-500"
                 />
                 <span>Demote Commander</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
+            </PermissionDropdownMenuItem>
+            <PermissionDropdownMenuItem
                 @click="openActionDialog('disband')"
-                v-if="
-                    authStore.getServerPermission(
-                        serverId as string,
-                        'kick',
-                    )
-                "
+                :permission="RCON_PERMISSIONS.DISBAND_SQUAD"
+                :server-id="serverId as string"
             >
                 <Icon
                     name="lucide:x-circle"
                     class="mr-2 h-4 w-4 text-red-500"
                 />
                 <span>Disband Squad</span>
-            </DropdownMenuItem>
+            </PermissionDropdownMenuItem>
         </DropdownMenuContent>
     </DropdownMenu>
 
