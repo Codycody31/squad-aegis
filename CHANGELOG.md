@@ -34,6 +34,7 @@
 
 ### Misc
 
+- refactor: adding manual ban also triggers AdminBan (for now) ([17de6d4](https://github.com/Codycody31/squad-aegis/commit/17de6d46023641caef186e3d0893ac19e041c978))
 - Add permission tooltip system for disabled UI elements [[#150](https://github.com/Codycody31/squad-aegis/pull/150)]
 - Use PBAC permissions for rules management and sidebar visibility [[#151](https://github.com/Codycody31/squad-aegis/pull/151)]
 - Add Claude Code GitHub Workflow [[#147](https://github.com/Codycody31/squad-aegis/pull/147)]
