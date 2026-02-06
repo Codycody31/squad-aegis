@@ -92,8 +92,6 @@ const isSuperAdmin = computed(() => {
 
 // Check if a navigation item should be visible based on permissions
 const shouldShowNavItem = (item: NavigationItem): boolean => {
-  let passedOnePermissionCheck = false;
-
   // If it's just a heading, always show it
   if (item.heading && (!item.items || item.items.length === 0)) {
     return true;
@@ -105,24 +103,18 @@ const shouldShowNavItem = (item: NavigationItem): boolean => {
   }
 
   // If the route is admin-only and user is not super admin, hide it
-  if (item.permissions?.includes("super_admin") && !isSuperAdmin.value) {
-    passedOnePermissionCheck = false;
-  } else if (isSuperAdmin.value) {
+  if (item.permissions?.includes("super_admin")) {
+    return isSuperAdmin.value;
+  }
+
+  if (isSuperAdmin.value) {
     return true;
   }
 
-  const serverPerms = authStore.getServerPermissions(activeServer.value?.id ?? "");
-  if (serverPerms) {
-    if (item.permissions?.some((perm) => serverPerms.includes(perm))) {
-      passedOnePermissionCheck = true;
-    }
-  }
+  const serverId = activeServer.value?.id;
+  if (!serverId) return false;
 
-  if (passedOnePermissionCheck) {
-    return true;
-  }
-
-  return false;
+  return authStore.hasAnyPermission(serverId, ...(item.permissions ?? []));
 };
 
 // Fetch servers

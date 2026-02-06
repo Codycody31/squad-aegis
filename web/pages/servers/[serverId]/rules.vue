@@ -8,6 +8,7 @@ import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card"
 import { useToast } from "~/components/ui/toast"
 import { useAuthStore } from "~/stores/auth"
+import { UI_PERMISSIONS } from "~/constants/permissions"
 
 interface ServerRuleAction {
   id: string;
@@ -41,22 +42,10 @@ const serverId = route.params.serverId as string;
 const { toast } = useToast();
 const authStore = useAuthStore();
 
-// Check if user has manageserver permission
-const canManage = computed(() => {
-  const user = authStore.user;
-  // Super admins have all permissions
-  if (user?.super_admin) {
-    return true;
-  }
-  
-  const serverPerms = authStore.getServerPermissions(serverId);
-  if (!serverPerms || serverPerms.length === 0) {
-    return false;
-  }
-  
-  // Check if user has manageserver permission or wildcard permission
-  return serverPerms.includes('manageserver') || serverPerms.includes('*');
-});
+// Check if user can manage rules using the PBAC permission system
+const canManage = computed(() =>
+  authStore.hasPermission(serverId, UI_PERMISSIONS.RULES_MANAGE)
+);
 
 // state
 const loading = ref<boolean>(true);
