@@ -316,9 +316,16 @@ func NewSquadRconWithConnection(manager *rcon_manager.RconManager, serverID uuid
 	}, nil
 }
 
-// BanPlayer bans a player from the server
+// BanPlayer bans a player from the server.
+// Duration is in days: 0 for permanent, >0 for that many days.
 func (s *SquadRcon) BanPlayer(steamId string, duration int, reason string) error {
-	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %dd %s", steamId, duration, reason))
+	var durationStr string
+	if duration == 0 {
+		durationStr = "0"
+	} else {
+		durationStr = fmt.Sprintf("%dd", duration)
+	}
+	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %s %s", steamId, durationStr, reason))
 	return err
 }
 
