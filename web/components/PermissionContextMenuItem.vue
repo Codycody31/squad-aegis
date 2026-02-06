@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   ContextMenuItem,
-  type ContextMenuItemProps,
 } from "@/components/ui/context-menu";
 import {
   Tooltip,
@@ -12,7 +11,7 @@ import type { Permission } from "@/constants/permissions";
 import { getPermissionDeniedMessage } from "@/lib/permissions";
 import type { HTMLAttributes } from "vue";
 
-interface Props extends ContextMenuItemProps {
+interface Props {
   /**
    * The permission required for this action
    */

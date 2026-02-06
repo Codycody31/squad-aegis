@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   DropdownMenuItem,
-  type DropdownMenuItemProps,
 } from "@/components/ui/dropdown-menu";
 import {
   Tooltip,
@@ -12,7 +11,7 @@ import type { Permission } from "@/constants/permissions";
 import { getPermissionDeniedMessage } from "@/lib/permissions";
 import type { HTMLAttributes } from "vue";
 
-interface Props extends DropdownMenuItemProps {
+interface Props {
   /**
    * The permission required for this action
    */
