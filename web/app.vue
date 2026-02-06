@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Toaster from '@/components/ui/toast/Toaster.vue'
+import TooltipProvider from '@/components/ui/tooltip/TooltipProvider.vue'
 
 useHead({
   titleTemplate: (titleChunk) => {
@@ -17,9 +18,11 @@ if (useCookie(runtimeConfig.public.sessionCookieName as string).value) {
 
 <template>
   <div>
-    <NuxtLayout>
-      <NuxtPage />
-    </NuxtLayout>
-    <Toaster />
+    <TooltipProvider>
+      <NuxtLayout>
+        <NuxtPage />
+      </NuxtLayout>
+      <Toaster />
+    </TooltipProvider>
   </div>
 </template>

@@ -6,6 +6,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import PermissionDropdownMenuItem from "@/components/PermissionDropdownMenuItem.vue";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -501,43 +502,42 @@ function copyToClipboard(text: string) {
                 <span>Copy EOS ID</span>
             </DropdownMenuItem>
             <template v-if="player.sinceDisconnect == ''">
-                <DropdownMenuItem
+                <PermissionDropdownMenuItem
                     @click="openActionDialog('warn')"
-                    v-if="
-                        authStore.hasPermission(
-                            serverId as string,
-                            UI_PERMISSIONS.PLAYERS_WARN,
-                        )
-                    "
+                    :permission="UI_PERMISSIONS.PLAYERS_WARN"
+                    :server-id="serverId as string"
                 >
                     <Icon
                         name="lucide:alert-triangle"
                         class="mr-2 h-4 w-4 text-yellow-500"
                     />
                     <span>Warn Player</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
+                </PermissionDropdownMenuItem>
+                <PermissionDropdownMenuItem
                     @click="openActionDialog('move')"
-                    v-if="
-                        authStore.hasPermission(
-                            serverId as string,
-                            UI_PERMISSIONS.PLAYERS_MOVE,
-                        )
-                    "
+                    :permission="UI_PERMISSIONS.PLAYERS_MOVE"
+                    :server-id="serverId as string"
                 >
                     <Icon
                         name="lucide:move"
                         class="mr-2 h-4 w-4 text-blue-500"
                     />
                     <span>Move to Other Team</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
+                </PermissionDropdownMenuItem>
+                <PermissionDropdownMenuItem
                     @click="openActionDialog('remove-from-squad')"
-                    v-if="
+                    :permission="UI_PERMISSIONS.PLAYERS_KICK"
+                    :server-id="serverId as string"
+                    :has-permission="
                         authStore.hasPermission(
                             serverId as string,
                             UI_PERMISSIONS.PLAYERS_KICK,
                         ) && player.squadId != 0
+                    "
+                    :tooltip-message="
+                        player.squadId === 0
+                            ? 'Player is not in a squad'
+                            : undefined
                     "
                 >
                     <Icon
@@ -545,30 +545,27 @@ function copyToClipboard(text: string) {
                         class="mr-2 h-4 w-4 text-red-500"
                     />
                     <span>Remove from Squad</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
+                </PermissionDropdownMenuItem>
+                <PermissionDropdownMenuItem
                     @click="openActionDialog('kick')"
-                    v-if="
-                        authStore.hasPermission(
-                            serverId as string,
-                            UI_PERMISSIONS.PLAYERS_KICK,
-                        )
-                    "
+                    :permission="UI_PERMISSIONS.PLAYERS_KICK"
+                    :server-id="serverId as string"
                 >
                     <Icon
                         name="lucide:log-out"
                         class="mr-2 h-4 w-4 text-orange-500"
                     />
                     <span>Kick Player</span>
-                </DropdownMenuItem>
+                </PermissionDropdownMenuItem>
             </template>
-            <DropdownMenuItem
+            <PermissionDropdownMenuItem
                 @click="openActionDialog('ban')"
-                v-if="authStore.hasPermission(serverId as string, UI_PERMISSIONS.BANS_CREATE)"
+                :permission="UI_PERMISSIONS.BANS_CREATE"
+                :server-id="serverId as string"
             >
                 <Icon name="lucide:ban" class="mr-2 h-4 w-4 text-red-500" />
                 <span>Ban Player</span>
-            </DropdownMenuItem>
+            </PermissionDropdownMenuItem>
         </DropdownMenuContent>
     </DropdownMenu>
 
