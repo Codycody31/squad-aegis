@@ -40,7 +40,7 @@ export default [
     to: {
       name: "servers-serverId-users-and-roles",
     },
-    permissions: [UI_PERMISSIONS.USERS_MANAGE, UI_PERMISSIONS.ROLES_MANAGE],
+    permissions: ["super_admin"],
   },
   {
     title: "Console",
