@@ -4,12 +4,16 @@
 
 ### ❤️ Thanks to all contributors! ❤️
 
-@Codycody31
+@Codycody31, @Insidious Fiddler
 
 ### 🐛 Bug Fixes
 
 - Add default UUID for server_roles.id and update role insertion [[#165](https://github.com/Codycody31/squad-aegis/pull/165)]
 - fix: enforce permission scope separation (ui: vs rcon:) and drop unused api: category [[#157](https://github.com/Codycody31/squad-aegis/pull/157)]
+
+### Misc
+
+- Set PGDATA env var for Postgres container (#164) ([a60f572](https://github.com/Codycody31/squad-aegis/commit/a60f5724dbe94878e0aa336708788880c8727f42))
 
 ## [0.7.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.1) - 2026-02-06
 
