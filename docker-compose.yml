@@ -9,7 +9,7 @@ services:
       - POSTGRES_USER=squad-aegis
       - POSTGRES_PASSWORD=squad-aegis
       - POSTGRES_DB=squad-aegis
-      - POSTGRES_INITDB_ARGS=
+      - PGDATA=/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U squad-aegis"]
       interval: 10s
