@@ -1,7 +1,7 @@
 // Permission constants for the PBAC system
 // These must stay in sync with internal/permissions/permissions.go
 
-export type PermissionCategory = "system" | "ui" | "api" | "rcon";
+export type PermissionCategory = "system" | "ui" | "rcon";
 
 // Wildcard permission grants all access
 export const PERMISSION_WILDCARD = "*";
@@ -38,21 +38,6 @@ export const UI_PERMISSIONS = {
   MOTD_MANAGE: "ui:motd:manage",
 } as const;
 
-// API Permissions - Control access to API endpoints
-export const API_PERMISSIONS = {
-  SERVERS_READ: "api:servers:read",
-  SERVERS_WRITE: "api:servers:write",
-  BANS_READ: "api:bans:read",
-  BANS_WRITE: "api:bans:write",
-  PLAYERS_READ: "api:players:read",
-  RCON_EXECUTE: "api:rcon:execute",
-  PLUGINS_MANAGE: "api:plugins:manage",
-  WORKFLOWS_MANAGE: "api:workflows:manage",
-  RULES_MANAGE: "api:rules:manage",
-  EVIDENCE_UPLOAD: "api:evidence:upload",
-  EVIDENCE_READ: "api:evidence:read",
-} as const;
-
 // RCON/Squad Permissions - Map to Squad's admin.cfg permissions
 export const RCON_PERMISSIONS = {
   RESERVE: "rcon:reserve",
@@ -83,7 +68,6 @@ export const RCON_PERMISSIONS = {
 export const Permissions = {
   WILDCARD: PERMISSION_WILDCARD,
   UI: UI_PERMISSIONS,
-  API: API_PERMISSIONS,
   RCON: RCON_PERMISSIONS,
 } as const;
 
@@ -91,7 +75,6 @@ export const Permissions = {
 export type Permission =
   | typeof PERMISSION_WILDCARD
   | (typeof UI_PERMISSIONS)[keyof typeof UI_PERMISSIONS]
-  | (typeof API_PERMISSIONS)[keyof typeof API_PERMISSIONS]
   | (typeof RCON_PERMISSIONS)[keyof typeof RCON_PERMISSIONS];
 
 // Maps RCON permission codes to Squad's admin.cfg format
@@ -127,8 +110,6 @@ export function getPermissionCategory(permission: string): PermissionCategory {
   switch (prefix) {
     case "ui":
       return "ui";
-    case "api":
-      return "api";
     case "rcon":
       return "rcon";
     default:
@@ -146,11 +127,6 @@ export function isUiPermission(permission: string): boolean {
   return permission.startsWith("ui:");
 }
 
-// Helper to check if permission is API type
-export function isApiPermission(permission: string): boolean {
-  return permission.startsWith("api:");
-}
-
 // Helper to convert RCON permission to Squad format
 export function toSquadPermission(permission: string): string | null {
   return SQUAD_PERMISSION_MAP[permission] || null;
@@ -160,7 +136,6 @@ export function toSquadPermission(permission: string): string | null {
 export const PERMISSION_CATEGORY_NAMES: Record<PermissionCategory, string> = {
   system: "System",
   ui: "User Interface",
-  api: "API Access",
   rcon: "RCON / Squad Server",
 };
 
@@ -168,6 +143,5 @@ export const PERMISSION_CATEGORY_NAMES: Record<PermissionCategory, string> = {
 export const ALL_PERMISSIONS: Permission[] = [
   PERMISSION_WILDCARD,
   ...Object.values(UI_PERMISSIONS),
-  ...Object.values(API_PERMISSIONS),
   ...Object.values(RCON_PERMISSIONS),
 ];
