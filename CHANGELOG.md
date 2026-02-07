@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.2](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.2) - 2026-02-07
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### 🐛 Bug Fixes
+
+- fix: enforce permission scope separation (ui: vs rcon:) and drop unused api: category [[#157](https://github.com/Codycody31/squad-aegis/pull/157)]
+
 ## [0.7.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.1) - 2026-02-06
 
 ### ❤️ Thanks to all contributors! ❤️
