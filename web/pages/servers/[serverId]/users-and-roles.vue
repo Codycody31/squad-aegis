@@ -1086,8 +1086,6 @@ const getPermissionCategoryColor = (permCode: string): string => {
     switch (category) {
         case "ui":
             return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
-        case "api":
-            return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
         case "rcon":
             return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
         default:

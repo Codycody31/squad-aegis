@@ -215,24 +215,24 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			serverGroup := serversGroup.Group("/:serverId")
 			{
 				serverGroup.GET("", server.ServerGet)
-				serverGroup.PUT("", server.RequireAnyPermission(permissions.UISettingsManage, permissions.RCONManageServer), server.ServerUpdate)
+				serverGroup.PUT("", server.RequirePermission(permissions.UISettingsManage), server.ServerUpdate)
 				serverGroup.DELETE("", server.AuthIsSuperAdmin(), server.ServerDelete)
 
 				serverGroup.GET("/metrics", server.ServerMetrics)
 				serverGroup.GET("/metrics/history", server.ServerMetricsHistory)
 				serverGroup.GET("/status", server.ServerStatus)
-				serverGroup.GET("/audit-logs", server.RequirePermission(permissions.RCONManageServer), server.ServerAuditLogs)
+				serverGroup.GET("/audit-logs", server.RequirePermission(permissions.UIAuditLogsView), server.ServerAuditLogs)
 
 				serverGroup.GET("/rcon/commands", server.RconCommandList)
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)
-				serverGroup.POST("/rcon/execute", server.RequireAnyPermission(permissions.UIConsoleExecute, permissions.RCONManageServer), server.ServerRconExecute)
+				serverGroup.POST("/rcon/execute", server.RequirePermission(permissions.UIConsoleExecute), server.ServerRconExecute)
 				serverGroup.GET("/rcon/server-population", server.ServerRconServerPopulation)
 				serverGroup.GET("/rcon/available-layers", server.ServerRconAvailableLayers)
-				serverGroup.GET("/rcon/events", server.RequirePermission(permissions.RCONManageServer), server.ServerRconEvents)
-				serverGroup.POST("/rcon/force-restart", server.RequirePermission(permissions.RCONManageServer), server.ServerRconForceRestart)
+				serverGroup.GET("/rcon/events", server.RequirePermission(permissions.UIConsoleView), server.ServerRconEvents)
+				serverGroup.POST("/rcon/force-restart", server.RequirePermission(permissions.UISettingsManage), server.ServerRconForceRestart)
 
 				// Log watcher management
-				serverGroup.POST("/logwatcher/restart", server.RequirePermission(permissions.RCONManageServer), server.ServerLogwatcherRestart)
+				serverGroup.POST("/logwatcher/restart", server.RequirePermission(permissions.UISettingsManage), server.ServerLogwatcherRestart)
 
 				// Live feeds for chat, connections, and teamkills
 				serverGroup.GET("/feeds", server.RequirePermission(permissions.UIFeedsView), server.ServerFeeds)
@@ -265,9 +265,9 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.DELETE("/bans/:banId", server.RequirePermission(permissions.UIBansDelete), server.ServerBansRemove)
 
 				// Ban list subscription management
-				serverGroup.GET("/ban-list-subscriptions", server.RequirePermission(permissions.RCONManageServer), server.ServerBanListSubscriptions)
-				serverGroup.POST("/ban-list-subscriptions", server.RequirePermission(permissions.RCONManageServer), server.ServerBanListSubscriptionCreate)
-				serverGroup.DELETE("/ban-list-subscriptions/:banListId", server.RequirePermission(permissions.RCONManageServer), server.ServerBanListSubscriptionDelete)
+				serverGroup.GET("/ban-list-subscriptions", server.RequirePermission(permissions.UIBanListsView), server.ServerBanListSubscriptions)
+				serverGroup.POST("/ban-list-subscriptions", server.RequirePermission(permissions.UIBanListsManage), server.ServerBanListSubscriptionCreate)
+				serverGroup.DELETE("/ban-list-subscriptions/:banListId", server.RequirePermission(permissions.UIBanListsManage), server.ServerBanListSubscriptionDelete)
 
 				// Player action endpoints
 				serverGroup.POST("/rcon/kick-player", server.RequirePermission(permissions.UIPlayersKick), server.ServerRconKickPlayer)
@@ -289,8 +289,8 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Plugin management routes for specific servers
 				pluginGroup := serverGroup.Group("/plugins")
 				{
-					pluginManagePerm := server.RequireAnyPermission(permissions.UIPluginsManage, permissions.RCONManageServer)
-					pluginViewPerm := server.RequireAnyPermission(permissions.UIPluginsView, permissions.RCONManageServer)
+					pluginManagePerm := server.RequirePermission(permissions.UIPluginsManage)
+					pluginViewPerm := server.RequirePermission(permissions.UIPluginsView)
 
 					pluginGroup.GET("", pluginViewPerm, server.ServerPluginList)
 					pluginGroup.GET("/logs", pluginManagePerm, server.ServerPluginLogsAll)
@@ -328,11 +328,11 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Server MOTD
 				motdGroup := serverGroup.Group("/motd")
 				{
-					motdManagePerm := server.RequireAnyPermission(permissions.UIMOTDManage, permissions.RCONManageServer)
+					motdManagePerm := server.RequirePermission(permissions.UIMOTDManage)
 
-					motdGroup.GET("", server.RequireAnyPermission(permissions.UIMOTDView, permissions.RCONManageServer), server.getMOTDConfig)
+					motdGroup.GET("", server.RequirePermission(permissions.UIMOTDView), server.getMOTDConfig)
 					motdGroup.PUT("", motdManagePerm, server.updateMOTDConfig)
-					motdGroup.GET("/preview", server.RequireAnyPermission(permissions.UIMOTDView, permissions.RCONManageServer), server.previewMOTD)
+					motdGroup.GET("/preview", server.RequirePermission(permissions.UIMOTDView), server.previewMOTD)
 					motdGroup.POST("/upload", motdManagePerm, server.uploadMOTD)
 					motdGroup.POST("/test-connection", motdManagePerm, server.testMOTDConnection)
 				}
@@ -340,7 +340,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				// Server Workflows
 				workflowsGroup := serverGroup.Group("/workflows")
 				{
-					workflowsGroup.Use(server.RequireAnyPermission(permissions.UIWorkflowsManage, permissions.RCONManageServer))
+					workflowsGroup.Use(server.RequirePermission(permissions.UIWorkflowsManage))
 					workflowsGroup.GET("", server.ServerWorkflowsList)
 					workflowsGroup.POST("", server.ServerWorkflowCreate)
 

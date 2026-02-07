@@ -1,4 +1,4 @@
-import { UI_PERMISSIONS, RCON_PERMISSIONS } from "@/constants/permissions";
+import { UI_PERMISSIONS } from "@/constants/permissions";
 
 export default [
   { heading: "Server" },
@@ -48,7 +48,7 @@ export default [
     to: {
       name: "servers-serverId-console",
     },
-    permissions: [UI_PERMISSIONS.CONSOLE_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
+    permissions: [UI_PERMISSIONS.CONSOLE_VIEW],
   },
   {
     title: "Feeds",
@@ -72,7 +72,7 @@ export default [
     to: {
       name: "servers-serverId-audit-logs",
     },
-    permissions: [UI_PERMISSIONS.AUDIT_LOGS_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
+    permissions: [UI_PERMISSIONS.AUDIT_LOGS_VIEW],
   },
   {
     title: "Rules",
@@ -88,7 +88,7 @@ export default [
     to: {
       name: "servers-serverId-motd",
     },
-    permissions: [UI_PERMISSIONS.MOTD_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
+    permissions: [UI_PERMISSIONS.MOTD_VIEW],
   },
   {
     title: "Plugins",
@@ -96,7 +96,7 @@ export default [
     to: {
       name: "servers-serverId-plugins",
     },
-    permissions: [UI_PERMISSIONS.PLUGINS_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
+    permissions: [UI_PERMISSIONS.PLUGINS_VIEW],
   },
   {
     title: "Workflows",
@@ -104,7 +104,7 @@ export default [
     to: {
       name: "servers-serverId-workflows",
     },
-    permissions: [UI_PERMISSIONS.WORKFLOWS_VIEW, RCON_PERMISSIONS.MANAGE_SERVER],
+    permissions: [UI_PERMISSIONS.WORKFLOWS_VIEW],
   },
   {
     title: "Settings",
