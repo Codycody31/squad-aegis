@@ -12,7 +12,6 @@ type Category string
 const (
 	CategorySystem Category = "system"
 	CategoryUI     Category = "ui"
-	CategoryAPI    Category = "api"
 	CategoryRCON   Category = "rcon"
 )
 
@@ -49,21 +48,6 @@ const (
 	UIBanListsManage  Permission = "ui:ban_lists:manage"
 	UIMOTDView        Permission = "ui:motd:view"
 	UIMOTDManage      Permission = "ui:motd:manage"
-)
-
-// API Permissions - Control access to API endpoints.
-const (
-	APIServersRead     Permission = "api:servers:read"
-	APIServersWrite    Permission = "api:servers:write"
-	APIBansRead        Permission = "api:bans:read"
-	APIBansWrite       Permission = "api:bans:write"
-	APIPlayersRead     Permission = "api:players:read"
-	APIRconExecute     Permission = "api:rcon:execute"
-	APIPluginsManage   Permission = "api:plugins:manage"
-	APIWorkflowsManage Permission = "api:workflows:manage"
-	APIRulesManage     Permission = "api:rules:manage"
-	APIEvidenceUpload  Permission = "api:evidence:upload"
-	APIEvidenceRead    Permission = "api:evidence:read"
 )
 
 // RCON/Squad Permissions - Map to Squad's admin.cfg permissions.
@@ -158,8 +142,6 @@ func (p Permission) GetCategory() Category {
 	switch parts[0] {
 	case "ui":
 		return CategoryUI
-	case "api":
-		return CategoryAPI
 	case "rcon":
 		return CategoryRCON
 	default:
@@ -186,11 +168,6 @@ func (p Permission) IsUI() bool {
 	return p.GetCategory() == CategoryUI
 }
 
-// IsAPI returns true if this is an API permission.
-func (p Permission) IsAPI() bool {
-	return p.GetCategory() == CategoryAPI
-}
-
 // IsWildcard returns true if this is the wildcard permission.
 func (p Permission) IsWildcard() bool {
 	return p == Wildcard
@@ -213,10 +190,6 @@ func AllPermissions() []Permission {
 		UIPlayersView, UIPlayersKick, UIPlayersWarn, UIPlayersMove,
 		UIRulesView, UIRulesManage, UIBanListsView, UIBanListsManage,
 		UIMOTDView, UIMOTDManage,
-		// API
-		APIServersRead, APIServersWrite, APIBansRead, APIBansWrite,
-		APIPlayersRead, APIRconExecute, APIPluginsManage, APIWorkflowsManage,
-		APIRulesManage, APIEvidenceUpload, APIEvidenceRead,
 		// RCON
 		RCONReserve, RCONBalance, RCONCanSeeAdminChat, RCONManageServer,
 		RCONTeamChange, RCONChat, RCONCameraman, RCONKick, RCONBan,
@@ -236,15 +209,6 @@ func UIPermissions() []Permission {
 		UIPlayersView, UIPlayersKick, UIPlayersWarn, UIPlayersMove,
 		UIRulesView, UIRulesManage, UIBanListsView, UIBanListsManage,
 		UIMOTDView, UIMOTDManage,
-	}
-}
-
-// APIPermissions returns all API permissions.
-func APIPermissions() []Permission {
-	return []Permission{
-		APIServersRead, APIServersWrite, APIBansRead, APIBansWrite,
-		APIPlayersRead, APIRconExecute, APIPluginsManage, APIWorkflowsManage,
-		APIRulesManage, APIEvidenceUpload, APIEvidenceRead,
 	}
 }
 

@@ -1,10 +1,6 @@
 import { computed, type ComputedRef } from "vue";
 import { useAuthStore } from "@/stores/auth";
-import {
-  type Permission,
-  UI_PERMISSIONS,
-  RCON_PERMISSIONS,
-} from "@/constants/permissions";
+import { type Permission, UI_PERMISSIONS } from "@/constants/permissions";
 
 /**
  * Composable for checking permissions in Vue components.
@@ -158,14 +154,6 @@ export function usePermissions(serverId?: string | ComputedRef<string>) {
     hasPermission(UI_PERMISSIONS.BAN_LISTS_MANAGE)
   );
 
-  // RCON Server permissions
-  const canManageServer = computed(() =>
-    hasPermission(RCON_PERMISSIONS.MANAGE_SERVER)
-  );
-  const canChangeMap = computed(() =>
-    hasPermission(RCON_PERMISSIONS.CHANGE_MAP)
-  );
-
   return {
     // Core checks
     isSuperAdmin,
@@ -220,9 +208,5 @@ export function usePermissions(serverId?: string | ComputedRef<string>) {
     // Ban Lists
     canViewBanLists,
     canManageBanLists,
-
-    // RCON Server
-    canManageServer,
-    canChangeMap,
   };
 }

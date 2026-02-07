@@ -27,7 +27,6 @@ export function formatPermissionName(permission: Permission | string): string {
   if (actionParts.length === 1 && actionParts[0] === "*") {
     const categoryNames: Record<string, string> = {
       ui: "All UI Permissions",
-      api: "All API Permissions",
       rcon: "All RCON Permissions",
       system: "All System Permissions",
     };
