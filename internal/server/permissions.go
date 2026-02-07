@@ -127,12 +127,11 @@ func (s *Server) ServerRoleCreateFromTemplate(c *gin.Context) {
 	defer tx.Rollback()
 
 	// Insert the new role
-	var roleId uuid.UUID
-	err = tx.QueryRowContext(c.Request.Context(), `
-		INSERT INTO server_roles (server_id, name, permissions, is_admin, created_at)
-		VALUES ($1, $2, '', $3, NOW())
-		RETURNING id
-	`, serverId, req.Name, template.IsAdmin).Scan(&roleId)
+	roleId := uuid.New()
+	_, err = tx.ExecContext(c.Request.Context(), `
+		INSERT INTO server_roles (id, server_id, name, permissions, is_admin, created_at)
+		VALUES ($1, $2, $3, '', $4, NOW())
+	`, roleId, serverId, req.Name, template.IsAdmin)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
