@@ -280,8 +280,15 @@ func GetLogParsers() []LogParser {
 						}
 					}
 
-					// Get attacker by EOS ID using PlayerTracker
-					if attacker, exists := playerTracker.GetPlayerByEOSID(args[6]); exists {
+					// Get attacker by EOS ID first, then by controller, then by suffix if not found
+					attacker, attackerExists := playerTracker.GetPlayerByEOSID(args[6])
+					if !attackerExists {
+						attacker, attackerExists = playerTracker.GetPlayerByController(args[8])
+					}
+					if !attackerExists && args[5] != "" {
+						attacker, attackerExists = playerTracker.GetPlayerByPlayerSuffix(args[5])
+					}
+					if attackerExists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Attacker = &event_manager.PlayerInfo{
 							PlayerController: attacker.PlayerController,
@@ -432,6 +439,9 @@ func GetLogParsers() []LogParser {
 					attacker, exists := playerTracker.GetPlayerByEOSID(args[6])
 					if !exists {
 						attacker, exists = playerTracker.GetPlayerByController(args[5])
+					}
+					if !exists && existingData.AttackerName != "" {
+						attacker, exists = playerTracker.GetPlayerByPlayerSuffix(existingData.AttackerName)
 					}
 					if exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
@@ -674,6 +684,9 @@ func GetLogParsers() []LogParser {
 					attacker, exists := playerTracker.GetPlayerByEOSID(args[6])
 					if !exists {
 						attacker, exists = playerTracker.GetPlayerByController(args[5])
+					}
+					if !exists && existingData.AttackerName != "" {
+						attacker, exists = playerTracker.GetPlayerByPlayerSuffix(existingData.AttackerName)
 					}
 					if exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
