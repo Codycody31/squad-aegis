@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/player_tracker"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // LogParser represents a log parser with a regex and a handler function
@@ -457,8 +458,8 @@ func GetLogParsers() []LogParser {
 						}
 
 						// Populate explicit attacker fields
-						eventManagerData.AttackerEOS = attacker.EOSID
-						eventManagerData.AttackerSteam = attacker.SteamID
+						eventManagerData.AttackerEOS = utils.ReturnOldIfEmpty(eventManagerData.AttackerEOS, attacker.EOSID)
+						eventManagerData.AttackerSteam = utils.ReturnOldIfEmpty(eventManagerData.AttackerSteam, attacker.SteamID)
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
@@ -702,8 +703,8 @@ func GetLogParsers() []LogParser {
 						}
 
 						// Populate explicit attacker fields
-						eventManagerData.AttackerEOS = attacker.EOSID
-						eventManagerData.AttackerSteam = attacker.SteamID
+						eventManagerData.AttackerEOS = utils.ReturnOldIfEmpty(eventManagerData.AttackerEOS, attacker.EOSID)
+						eventManagerData.AttackerSteam = utils.ReturnOldIfEmpty(eventManagerData.AttackerSteam, attacker.SteamID)
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
