@@ -155,6 +155,10 @@ func (pt *PlayerTracker) playerByControllerKey(controller string) string {
 	return fmt.Sprintf("squad-aegis:player-tracker:%s:player-by-controller:%s", pt.serverID.String(), controller)
 }
 
+func (pt *PlayerTracker) playerBySuffixKey(suffix string) string {
+	return fmt.Sprintf("squad-aegis:player-tracker:%s:player-by-suffix:%s", pt.serverID.String(), suffix)
+}
+
 func (pt *PlayerTracker) teamKey(teamID string) string {
 	return fmt.Sprintf("squad-aegis:player-tracker:%s:team:%s", pt.serverID.String(), teamID)
 }
@@ -820,6 +824,13 @@ func (pt *PlayerTracker) storePlayer(player *PlayerInfo) error {
 		}
 	}
 
+	// Store player by suffix (log name)
+	if player.PlayerSuffix != "" {
+		if err := pt.valkeyClient.Set(pt.ctx, pt.playerBySuffixKey(player.PlayerSuffix), player.EOSID, playerTTL); err != nil {
+			return err
+		}
+	}
+
 	// Store player by controller
 	if player.PlayerController != "" {
 		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByControllerKey(player.PlayerController), player.EOSID, playerTTL); err != nil {
@@ -923,6 +934,19 @@ func (pt *PlayerTracker) GetPlayerByName(name string) (*PlayerInfo, bool) {
 	defer pt.mu.RUnlock()
 
 	eosID, err := pt.valkeyClient.Get(pt.ctx, pt.playerByNameKey(name))
+	if err != nil {
+		return nil, false
+	}
+
+	return pt.GetPlayerByEOSID(eosID)
+}
+
+// GetPlayerByPlayerSuffix retrieves player information by player suffix (log name)
+func (pt *PlayerTracker) GetPlayerByPlayerSuffix(suffix string) (*PlayerInfo, bool) {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+
+	eosID, err := pt.valkeyClient.Get(pt.ctx, pt.playerBySuffixKey(suffix))
 	if err != nil {
 		return nil, false
 	}
@@ -1178,6 +1202,10 @@ func (pt *PlayerTracker) UpdatePlayerFromLog(eosID, steamID, name, playerControl
 			updated = true
 		}
 		if playerSuffix != "" && player.PlayerSuffix != playerSuffix {
+			// Suffix changed, remove old suffix index
+			if player.PlayerSuffix != "" {
+				pt.valkeyClient.Del(pt.ctx, pt.playerBySuffixKey(player.PlayerSuffix))
+			}
 			player.PlayerSuffix = playerSuffix
 			updated = true
 		}
@@ -1215,6 +1243,9 @@ func (pt *PlayerTracker) UpdatePlayerFromLog(eosID, steamID, name, playerControl
 						existingPlayer.PlayerController = playerController
 					}
 					if playerSuffix != "" && existingPlayer.PlayerSuffix != playerSuffix {
+						if existingPlayer.PlayerSuffix != "" {
+							pt.valkeyClient.Del(pt.ctx, pt.playerBySuffixKey(existingPlayer.PlayerSuffix))
+						}
 						existingPlayer.PlayerSuffix = playerSuffix
 					}
 					existingPlayer.LastUpdated = time.Now()
