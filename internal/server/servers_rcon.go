@@ -584,22 +584,9 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
-	if server.BanEnforcementMode == "aegis" {
-		// In aegis mode, just kick the player now; the ban enforcer handles future connections
-		err = r.KickPlayer(request.SteamId, request.Reason)
-		if err != nil {
-			log.Error().Err(err).Str("steamId", request.SteamId).Str("serverId", serverId.String()).Msg("Failed to kick player via RCON")
-		}
-	} else {
-		// In server mode, reload config and send AdminBan
-		_, err = r.ExecuteRaw("AdminReloadServerConfig")
-		if err != nil {
-			log.Error().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban")
-		}
-		err = r.BanPlayer(request.SteamId, request.Duration, request.Reason)
-		if err != nil {
-			log.Error().Err(err).Str("steamId", request.SteamId).Str("serverId", serverId.String()).Msg("Failed to apply ban via RCON")
-		}
+	err = r.BanPlayer(request.SteamId, request.Duration, request.Reason)
+	if err != nil {
+		log.Error().Err(err).Str("steamId", request.SteamId).Str("serverId", serverId.String()).Msg("Failed to apply ban via RCON")
 	}
 
 	// Log rule violation to ClickHouse if rule_id is provided
@@ -626,6 +613,10 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:player:ban", auditData)
+
+	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
+		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after RCON ban")
+	}
 
 	responses.Success(c, "Player banned successfully", &gin.H{
 		"banId": banID,

@@ -25,6 +25,7 @@ type UploadConfig struct {
 // Uploader interface for file upload implementations
 type Uploader interface {
 	Upload(ctx context.Context, content string) error
+	Read(ctx context.Context) (string, error)
 	TestConnection(ctx context.Context) error
 	Close() error
 }
@@ -105,6 +106,26 @@ func (u *SFTPUploader) Upload(ctx context.Context, content string) error {
 	}
 
 	return nil
+}
+
+// Read reads the content of the remote file
+func (u *SFTPUploader) Read(ctx context.Context) (string, error) {
+	if u.sftpClient == nil {
+		return "", fmt.Errorf("SFTP client not connected")
+	}
+
+	file, err := u.sftpClient.Open(u.config.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open remote file: %v", err)
+	}
+	defer file.Close()
+
+	var buf strings.Builder
+	if _, err := io.Copy(&buf, file); err != nil {
+		return "", fmt.Errorf("failed to read remote file: %v", err)
+	}
+
+	return buf.String(), nil
 }
 
 // TestConnection verifies the connection is working
@@ -193,6 +214,26 @@ func (u *FTPUploader) Upload(ctx context.Context, content string) error {
 	}
 
 	return nil
+}
+
+// Read reads the content of the remote file
+func (u *FTPUploader) Read(ctx context.Context) (string, error) {
+	if u.conn == nil {
+		return "", fmt.Errorf("FTP connection not established")
+	}
+
+	resp, err := u.conn.Retr(u.config.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to retrieve remote file: %v", err)
+	}
+	defer resp.Close()
+
+	var buf strings.Builder
+	if _, err := io.Copy(&buf, resp); err != nil {
+		return "", fmt.Errorf("failed to read remote file: %v", err)
+	}
+
+	return buf.String(), nil
 }
 
 // TestConnection verifies the connection is working

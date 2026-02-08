@@ -89,9 +89,9 @@ const formSchema = toTypedSchema(
       .max(65535, "Port must be between 1 and 65535"),
     rcon_password: z.string().min(1, "RCON password is required"),
     
-    // Log configuration fields
-    log_source_type: z.enum(["local", "sftp", "ftp"]).optional().nullable(),
-    log_file_path: z.string().optional().nullable(),
+    // Log & file access configuration fields
+    log_source_type: z.enum(["local", "sftp", "ftp"], { required_error: "Log source type is required" }),
+    squad_game_path: z.string().min(1, "SquadGame base path is required"),
     log_host: z.string().optional().nullable(),
     log_port: z.coerce.number().min(1).max(65535).optional().nullable(),
     log_username: z.string().optional().nullable(),
@@ -112,14 +112,14 @@ const form = useForm({
     rcon_port: 21114,
     rcon_password: "",
     
-    // Log configuration defaults
-    log_source_type: null,
-    log_file_path: null,
+    // Log & file access defaults
+    log_source_type: undefined,
+    squad_game_path: "",
     log_host: null,
     log_port: null,
     log_username: null,
     log_password: null,
-    log_poll_frequency: 5,
+    log_poll_frequency: 2,
     log_read_from_start: false,
   },
 });
@@ -180,7 +180,7 @@ async function fetchServers() {
 async function addServer(values: any) {
   const {
     name, ip_address, game_port, rcon_ip_address, rcon_port, rcon_password,
-    log_source_type, log_file_path, log_host, log_port, log_username,
+    log_source_type, squad_game_path, log_host, log_port, log_username,
     log_password, log_poll_frequency, log_read_from_start
   } = values;
 
@@ -202,7 +202,7 @@ async function addServer(values: any) {
 
           // Log configuration
           log_source_type: log_source_type || null,
-          log_file_path: log_file_path || null,
+          squad_game_path: squad_game_path || null,
           log_host: log_host || null,
           log_port: log_port ? parseInt(log_port) : null,
           log_username: log_username || null,
@@ -296,13 +296,13 @@ function refreshData() {
             game_port: 7787,
             rcon_port: 21114,
             rcon_password: '',
-            log_source_type: null,
-            log_file_path: null,
+            log_source_type: undefined,
+            squad_game_path: '',
             log_host: null,
             log_port: null,
             log_username: null,
             log_password: null,
-            log_poll_frequency: 5,
+    log_poll_frequency: 2,
             log_read_from_start: false,
           }"
         >
@@ -410,11 +410,14 @@ function refreshData() {
                     </FormItem>
                   </FormField>
 
-                  <!-- Log Configuration Section -->
+                  <!-- Log & File Access Configuration Section -->
                   <div class="border-t pt-4 mt-4">
-                    <h4 class="text-sm font-medium mb-3">Log Configuration (Optional)</h4>
+                    <h4 class="text-sm font-medium mb-3">Log & File Access</h4>
                     <p class="text-xs text-muted-foreground mb-4">
-                      Configure log monitoring to enable advanced event tracking and analytics.
+                      Configure file access for log monitoring, event tracking, and Bans.cfg management.
+                    </p>
+                    <p class="text-xs text-muted-foreground mb-4">
+                      Log source and base path are required for ban enforcement and config sync.
                     </p>
 
                     <FormField name="log_source_type" v-slot="{ componentField }">
@@ -433,27 +436,29 @@ function refreshData() {
                           </SelectContent>
                         </Select>
                         <FormDescription>
-                          Choose how to access your server's log files
+                          "Local" if Aegis runs on the same machine as your Squad server.
+                          "SFTP" or "FTP" for remote server access.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
                     </FormField>
 
-                    <FormField name="log_file_path" v-slot="{ componentField }" v-if="selectedLogSourceType">
+                    <FormField name="squad_game_path" v-slot="{ componentField }" v-if="selectedLogSourceType">
                       <FormItem>
-                        <FormLabel>Log File Path</FormLabel>
+                        <FormLabel>SquadGame Base Path</FormLabel>
                         <FormControl>
                           <Input
                             :placeholder="selectedLogSourceType === 'local' 
-                              ? '/path/to/SquadGame.log' 
-                              : '/remote/path/to/SquadGame.log'"
+                              ? '/home/squad/serverfiles/SquadGame' 
+                              : '/SquadGame'"
                             v-bind="componentField"
                           />
                         </FormControl>
                         <FormDescription>
-                          {{ selectedLogSourceType === 'local' 
-                            ? 'Full path to the Squad log file on the local system' 
-                            : 'Path to the Squad log file on the remote server' }}
+                          Base path to the SquadGame folder. Aegis derives log and config paths from this (Saved/Logs, ServerConfig).
+                        </FormDescription>
+                        <FormDescription v-if="selectedLogSourceType === 'local'">
+                          When running in Docker, this folder must be mounted into the container and readable by Aegis.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -534,12 +539,12 @@ function refreshData() {
                           <FormControl>
                             <Input
                               type="number"
-                              placeholder="5"
+                              placeholder="2"
                               v-bind="componentField"
                             />
                           </FormControl>
                           <FormDescription>
-                            How often to check for new log entries (1-300 seconds)
+                            How often to check for new log entries (1-300 seconds). 2-4 seconds recommended for fast enforcement; higher values can delay kicks.
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -565,6 +570,7 @@ function refreshData() {
                         <FormMessage />
                       </FormItem>
                     </FormField>
+
                   </div>
                 </div>
                 <DialogFooter>
