@@ -252,9 +252,12 @@ func (p *DiscordKillFeedPlugin) sendKillFeedEmbed(event *event_manager.LogPlayer
 	}
 
 	// Extract attacker name from player controller (fallback if no separate name field)
-	attackerName := event.AttackerPlayerController
-	attackerSteamID := event.AttackerSteam
-	attackerEOSID := event.AttackerEOS
+	attackerName := event.Attacker.PlayerSuffix
+	attackerSteamID := event.Attacker.SteamID
+	attackerEOSID := event.Attacker.EOSID
+	victimName := event.Victim.PlayerSuffix
+	victimSteamID := event.Victim.SteamID
+	victimEOSID := event.Victim.EOSID
 
 	// Default values for missing data
 	if attackerSteamID == "" {
@@ -263,10 +266,14 @@ func (p *DiscordKillFeedPlugin) sendKillFeedEmbed(event *event_manager.LogPlayer
 	if attackerEOSID == "" {
 		attackerEOSID = "Unknown"
 	}
-
-	victimName := event.VictimName
 	if victimName == "" {
 		victimName = "Unknown"
+	}
+	if victimSteamID == "" {
+		victimSteamID = "Unknown"
+	}
+	if victimEOSID == "" {
+		victimEOSID = "Unknown"
 	}
 
 	fields := []*discord.DiscordEmbedField{
@@ -296,12 +303,12 @@ func (p *DiscordKillFeedPlugin) sendKillFeedEmbed(event *event_manager.LogPlayer
 		},
 		{
 			Name:   "Victim's SteamID",
-			Value:  "Unknown", // Victim SteamID not available in this event
+			Value:  victimSteamID,
 			Inline: true,
 		},
 		{
 			Name:   "Victim's EosID",
-			Value:  "Unknown", // Victim EOS ID not available in this event
+			Value:  victimEOSID,
 			Inline: true,
 		},
 	}
