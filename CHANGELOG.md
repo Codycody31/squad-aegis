@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix(discord-kill-feed): Use new event attacker/victim struct [[#167](https://github.com/Codycody31/squad-aegis/pull/167)]
 - Fix attacker lookup and player suffix tracking [[#166](https://github.com/Codycody31/squad-aegis/pull/166)]
 - Set PGDATA env var for Postgres container [[#164](https://github.com/Codycody31/squad-aegis/pull/164)]
 - Add default UUID for server_roles.id and update role insertion [[#165](https://github.com/Codycody31/squad-aegis/pull/165)]
