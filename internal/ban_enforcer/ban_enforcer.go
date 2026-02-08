@@ -12,8 +12,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 )
 
-// BanEnforcer watches for player connections and kicks banned players
-// when a server is configured with ban_enforcement_mode = "aegis".
+// BanEnforcer watches for player connections and kicks banned players.
 type BanEnforcer struct {
 	db           *sql.DB
 	eventManager *event_manager.EventManager
@@ -91,16 +90,6 @@ func (b *BanEnforcer) handlePlayerConnected(event event_manager.Event) {
 	}
 
 	serverID := event.ServerID
-
-	// Check if this server uses aegis enforcement
-	mode, err := core.GetServerBanEnforcementMode(b.ctx, b.db, serverID)
-	if err != nil {
-		log.Debug().Err(err).Str("serverId", serverID.String()).Msg("Failed to get ban enforcement mode, skipping")
-		return
-	}
-	if mode != "aegis" {
-		return
-	}
 
 	// Check for an active ban on this server (including subscribed ban lists)
 	ban, err := core.GetActiveBanForServer(b.ctx, b.db, serverID, steamID)

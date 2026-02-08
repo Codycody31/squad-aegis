@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -223,7 +225,7 @@ func (m *LogwatcherManager) createLogSource(config LogSourceConfig) (LogSource, 
 			config.Port = 22 // Default SFTP port
 		}
 		if config.PollFrequency == 0 {
-			config.PollFrequency = 5 * time.Second // Default poll frequency
+			config.PollFrequency = 2 * time.Second // Default poll frequency
 		}
 		return NewSFTPSource(config.Host, config.Port, config.Username, config.Password,
 			config.FilePath, config.PollFrequency, config.ReadFromStart), nil
@@ -236,7 +238,7 @@ func (m *LogwatcherManager) createLogSource(config LogSourceConfig) (LogSource, 
 			config.Port = 21 // Default FTP port
 		}
 		if config.PollFrequency == 0 {
-			config.PollFrequency = 5 * time.Second // Default poll frequency
+			config.PollFrequency = 2 * time.Second // Default poll frequency
 		}
 		return NewFTPSource(config.Host, config.Port, config.Username, config.Password,
 			config.FilePath, config.PollFrequency, config.ReadFromStart), nil
@@ -332,10 +334,10 @@ func (m *LogwatcherManager) calculateReconnectDelay(attempts int) time.Duration 
 func (m *LogwatcherManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 	// Get all servers from the database with log configuration
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, log_source_type, log_file_path, log_host, log_port, log_username,
+		SELECT id, log_source_type, squad_game_path, log_host, log_port, log_username,
 		       log_password, log_poll_frequency, log_read_from_start
 		FROM servers
-		WHERE log_source_type IS NOT NULL AND log_file_path IS NOT NULL AND log_file_path != ''
+		WHERE log_source_type IS NOT NULL AND squad_game_path IS NOT NULL AND squad_game_path != ''
 	`)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query servers for log connections")
@@ -346,27 +348,27 @@ func (m *LogwatcherManager) ConnectToAllServers(ctx context.Context, db *sql.DB)
 	// Connect to each server
 	for rows.Next() {
 		var id uuid.UUID
-		var logSourceType, logFilePath *string
+		var logSourceType, squadGamePath *string
 		var logHost, logUsername, logPassword *string
 		var logPort *int
 		var logPollFrequency *int // in seconds
 		var logReadFromStart *bool
 
-		if err := rows.Scan(&id, &logSourceType, &logFilePath, &logHost, &logPort,
+		if err := rows.Scan(&id, &logSourceType, &squadGamePath, &logHost, &logPort,
 			&logUsername, &logPassword, &logPollFrequency, &logReadFromStart); err != nil {
 			log.Error().Err(err).Msg("Failed to scan server log configuration")
 			continue
 		}
 
 		// Skip if essential fields are missing
-		if logSourceType == nil || logFilePath == nil {
+		if logSourceType == nil || squadGamePath == nil {
 			continue
 		}
 
 		// Build log source config
 		config := LogSourceConfig{
 			Type:          LogSourceType(*logSourceType),
-			FilePath:      *logFilePath,
+			FilePath:      buildLogFilePath(*squadGamePath, logSourceType),
 			ReadFromStart: false, // Default value
 		}
 
@@ -409,6 +411,15 @@ func (m *LogwatcherManager) ConnectToAllServers(ctx context.Context, db *sql.DB)
 	if err := rows.Err(); err != nil {
 		log.Error().Err(err).Msg("Error iterating server log configuration rows")
 	}
+}
+
+func buildLogFilePath(basePath string, logSourceType *string) string {
+	useSlash := logSourceType != nil && (*logSourceType == "sftp" || *logSourceType == "ftp")
+	relPath := "Saved/Logs/SquadGame.log"
+	if useSlash {
+		return path.Join(basePath, relPath)
+	}
+	return filepath.Join(basePath, filepath.FromSlash(relPath))
 }
 
 // GetConnectionStats returns statistics about log connections

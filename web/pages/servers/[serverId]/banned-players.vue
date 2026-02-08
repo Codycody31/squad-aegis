@@ -534,11 +534,15 @@ async function removeBan(banId: string) {
             throw new Error(fetchError.value.message || "Failed to remove ban");
         }
 
+        toast({
+            title: "Success",
+            description: "Ban removed successfully",
+        });
+
         // Refresh the banned players list
         fetchBannedPlayers();
     } catch (err: any) {
         error.value = err.message || "An error occurred while removing the ban";
-        console.error(err);
     } finally {
         loading.value = false;
     }
@@ -1348,10 +1352,12 @@ function formatFileSize(bytes: number): string {
 
 // Setup auto-refresh
 onMounted(async () => {
-    await fetchBanLists();
-    await fetchServerBanListSubscriptions();
-    await fetchBannedPlayers();
-    await fetchServerRules();
+    await Promise.all([
+        fetchBanLists(),
+        fetchServerBanListSubscriptions(),
+        fetchBannedPlayers(),
+        fetchServerRules(),
+    ]);
 });
 
 // Manual refresh function
