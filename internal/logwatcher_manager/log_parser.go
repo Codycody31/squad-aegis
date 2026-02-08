@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/player_tracker"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // LogParser represents a log parser with a regex and a handler function
@@ -250,10 +251,13 @@ func GetLogParsers() []LogParser {
 
 				// Extra logic before publishing the event (similar to JavaScript)
 
-				// Get victim by name
+				// Get victim by name (try RCON name first, then log suffix)
 				if playerTracker != nil {
-					if victim, exists := playerTracker.GetPlayerByName(args[3]); exists {
-						// eventManagerData.Victim = victim
+					victim, victimFound := playerTracker.GetPlayerByName(args[3])
+					if !victimFound {
+						victim, victimFound = playerTracker.GetPlayerByPlayerSuffix(args[3])
+					}
+					if victimFound {
 						// Populate explicit victim fields
 						eventManagerData.Victim = &event_manager.PlayerInfo{
 							PlayerController: victim.PlayerController,
@@ -277,8 +281,15 @@ func GetLogParsers() []LogParser {
 						}
 					}
 
-					// Get attacker by EOS ID using PlayerTracker
-					if attacker, exists := playerTracker.GetPlayerByEOSID(args[6]); exists {
+					// Get attacker by EOS ID first, then by controller, then by suffix if not found
+					attacker, attackerExists := playerTracker.GetPlayerByEOSID(args[6])
+					if !attackerExists {
+						attacker, attackerExists = playerTracker.GetPlayerByController(args[8])
+					}
+					if !attackerExists && args[5] != "" {
+						attacker, attackerExists = playerTracker.GetPlayerByPlayerSuffix(args[5])
+					}
+					if attackerExists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Attacker = &event_manager.PlayerInfo{
 							PlayerController: attacker.PlayerController,
@@ -394,9 +405,13 @@ func GetLogParsers() []LogParser {
 
 				// Extra logic before publishing the event (similar to JavaScript)
 
-				// Get victim by name using PlayerTracker
+				// Get victim by name using PlayerTracker (try RCON name first, then log suffix)
 				if playerTracker != nil {
-					if victim, exists := playerTracker.GetPlayerByName(args[3]); exists {
+					victim, exists := playerTracker.GetPlayerByName(args[3])
+					if !exists {
+						victim, exists = playerTracker.GetPlayerByPlayerSuffix(args[3])
+					}
+					if exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Victim = &event_manager.PlayerInfo{
 							PlayerController: victim.PlayerController,
@@ -421,8 +436,15 @@ func GetLogParsers() []LogParser {
 						}
 					}
 
-					// Get attacker by EOS ID first, then by controller if not found using PlayerTracker
-					if attacker, exists := playerTracker.GetPlayerByEOSID(args[6]); exists {
+					// Get attacker by EOS ID first, then by controller, then by suffix if not found
+					attacker, exists := playerTracker.GetPlayerByEOSID(args[6])
+					if !exists {
+						attacker, exists = playerTracker.GetPlayerByController(args[5])
+					}
+					if !exists && existingData.AttackerName != "" {
+						attacker, exists = playerTracker.GetPlayerByPlayerSuffix(existingData.AttackerName)
+					}
+					if exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Attacker = &event_manager.PlayerInfo{
 							PlayerController: attacker.PlayerController,
@@ -434,29 +456,10 @@ func GetLogParsers() []LogParser {
 							TeamID:           attacker.TeamID,
 							SquadID:          attacker.SquadID,
 						}
-						// Populate explicit attacker fields
-						eventManagerData.AttackerTeam = attacker.TeamID
-						eventManagerData.AttackerSquad = attacker.SquadID
-						eventManagerData.AttackerName = attacker.PlayerSuffix
 
-						// if AttackerName is empty, try attacker.Name
-						if strings.TrimSpace(eventManagerData.AttackerName) == "" {
-							eventManagerData.AttackerName = attacker.Name
-							eventManagerData.Attacker.PlayerSuffix = attacker.Name
-						}
-					} else if attacker, exists := playerTracker.GetPlayerByController(args[5]); exists {
-						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
-						eventManagerData.Attacker = &event_manager.PlayerInfo{
-							PlayerController: attacker.PlayerController,
-							IP:               "", // Not available in PlayerTracker
-							SteamID:          attacker.SteamID,
-							EOSID:            attacker.EOSID,
-							PlayerSuffix:     attacker.PlayerSuffix,
-							Controller:       attacker.PlayerController,
-							TeamID:           attacker.TeamID,
-							SquadID:          attacker.SquadID,
-						}
 						// Populate explicit attacker fields
+						eventManagerData.AttackerEOS = utils.ReturnOldIfEmpty(eventManagerData.AttackerEOS, attacker.EOSID)
+						eventManagerData.AttackerSteam = utils.ReturnOldIfEmpty(eventManagerData.AttackerSteam, attacker.SteamID)
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
@@ -647,9 +650,13 @@ func GetLogParsers() []LogParser {
 
 				// Extra logic before publishing the event (similar to JavaScript)
 
-				// Get victim by name using PlayerTracker
+				// Get victim by name using PlayerTracker (try RCON name first, then log suffix)
 				if playerTracker != nil {
-					if victim, exists := playerTracker.GetPlayerByName(args[3]); exists {
+					victim, exists := playerTracker.GetPlayerByName(args[3])
+					if !exists {
+						victim, exists = playerTracker.GetPlayerByPlayerSuffix(args[3])
+					}
+					if exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Victim = &event_manager.PlayerInfo{
 							PlayerController: victim.PlayerController,
@@ -674,8 +681,15 @@ func GetLogParsers() []LogParser {
 						}
 					}
 
-					// Get attacker by EOS ID first, then by controller if not found using PlayerTracker
-					if attacker, exists := playerTracker.GetPlayerByEOSID(args[6]); exists {
+					// Get attacker by EOS ID first, then by controller, then by suffix if not found
+					attacker, exists := playerTracker.GetPlayerByEOSID(args[6])
+					if !exists {
+						attacker, exists = playerTracker.GetPlayerByController(args[5])
+					}
+					if !exists && existingData.AttackerName != "" {
+						attacker, exists = playerTracker.GetPlayerByPlayerSuffix(existingData.AttackerName)
+					}
+					if exists {
 						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 						eventManagerData.Attacker = &event_manager.PlayerInfo{
 							PlayerController: attacker.PlayerController,
@@ -689,28 +703,8 @@ func GetLogParsers() []LogParser {
 						}
 
 						// Populate explicit attacker fields
-						eventManagerData.AttackerTeam = attacker.TeamID
-						eventManagerData.AttackerSquad = attacker.SquadID
-						eventManagerData.AttackerName = attacker.PlayerSuffix
-
-						// if AttackerName is empty, try attacker.Name
-						if strings.TrimSpace(eventManagerData.AttackerName) == "" {
-							eventManagerData.AttackerName = attacker.Name
-							eventManagerData.Attacker.PlayerSuffix = attacker.Name
-						}
-					} else if attacker, exists := playerTracker.GetPlayerByController(args[5]); exists {
-						// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
-						eventManagerData.Attacker = &event_manager.PlayerInfo{
-							PlayerController: attacker.PlayerController,
-							IP:               "", // Not available in PlayerTracker
-							SteamID:          attacker.SteamID,
-							EOSID:            attacker.EOSID,
-							PlayerSuffix:     attacker.PlayerSuffix,
-							Controller:       attacker.PlayerController,
-							TeamID:           attacker.TeamID,
-							SquadID:          attacker.SquadID,
-						}
-						// Populate explicit attacker fields
+						eventManagerData.AttackerEOS = utils.ReturnOldIfEmpty(eventManagerData.AttackerEOS, attacker.EOSID)
+						eventManagerData.AttackerSteam = utils.ReturnOldIfEmpty(eventManagerData.AttackerSteam, attacker.SteamID)
 						eventManagerData.AttackerTeam = attacker.TeamID
 						eventManagerData.AttackerSquad = attacker.SquadID
 						eventManagerData.AttackerName = attacker.PlayerSuffix
