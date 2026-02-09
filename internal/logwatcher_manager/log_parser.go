@@ -555,9 +555,9 @@ func GetLogParsers() []LogParser {
 					eventStore.StorePlayerData(player.SteamID, playerData)
 				}
 
-				// Update player tracker with PlayerSuffix data
+				// Update player tracker with PlayerSuffix data (eosID, steamID, name, playerController, playerSuffix)
 				if playerTracker != nil && player.EOSID != "" {
-					playerTracker.UpdatePlayerFromLog(player.EOSID, args[3], "", "", args[3])
+					playerTracker.UpdatePlayerFromLog(player.EOSID, player.SteamID, "", player.PlayerController, args[3])
 				}
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])

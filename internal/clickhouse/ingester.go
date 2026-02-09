@@ -326,22 +326,23 @@ func (i *EventIngester) ingestPlayerConnected(events []*IngestEvent) error {
 	}
 
 	query := `INSERT INTO squad_aegis.server_player_connected_events
-		(id, event_time, server_id, chain_id, player_controller, ip, steam, eos, ingested_at) VALUES`
+		(id, event_time, server_id, chain_id, player_controller, ip, steam, eos, player_suffix, ingested_at) VALUES`
 
 	values := make([]string, 0, len(events))
-	args := make([]interface{}, 0, len(events)*9)
+	args := make([]interface{}, 0, len(events)*10)
 
 	for _, event := range events {
-		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		values = append(values, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 		// Extract data from structured event data
-		var chainID, playerController, ip, steam, eos string
+		var chainID, playerController, ip, steam, eos, playerSuffix string
 		if connectedData, ok := event.Data.(*event_manager.LogPlayerConnectedData); ok {
 			chainID = connectedData.ChainID
 			playerController = connectedData.PlayerController
 			ip = connectedData.IPAddress
 			steam = connectedData.SteamID
 			eos = connectedData.EOSID
+			playerSuffix = connectedData.PlayerSuffix
 		}
 
 		args = append(args,
@@ -353,6 +354,7 @@ func (i *EventIngester) ingestPlayerConnected(events []*IngestEvent) error {
 			ip,
 			steam,
 			eos,
+			playerSuffix,
 			time.Now(),
 		)
 	}
