@@ -96,6 +96,12 @@ func (wm *WorkflowManager) Start() error {
 	return nil
 }
 
+// sanitizeRCONParam strips double quotes from a value used in RCON commands
+// to prevent breaking out of quoted parameters or injecting additional arguments.
+func sanitizeRCONParam(s string) string {
+	return strings.ReplaceAll(s, "\"", "")
+}
+
 // Stop stops the workflow manager
 func (wm *WorkflowManager) Stop() {
 	wm.mutex.Lock()
@@ -1218,7 +1224,7 @@ func (wm *WorkflowManager) executeAdminBroadcastAction(context *models.WorkflowE
 		Msg("Executing admin broadcast")
 
 	// Execute admin broadcast command
-	command := fmt.Sprintf("AdminBroadcast %s", message)
+	command := fmt.Sprintf("AdminBroadcast %s", sanitizeRCONParam(message))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to execute admin broadcast: %w", err)
@@ -1258,7 +1264,7 @@ func (wm *WorkflowManager) executeChatMessageAction(context *models.WorkflowExec
 		Msg("Sending chat message to player")
 
 	// Execute chat message command
-	command := fmt.Sprintf("AdminChatMessage \"%s\" %s", targetPlayer, message)
+	command := fmt.Sprintf("AdminChatMessage \"%s\" %s", sanitizeRCONParam(targetPlayer), sanitizeRCONParam(message))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to send chat message: %w", err)
@@ -1299,7 +1305,7 @@ func (wm *WorkflowManager) executeKickPlayerAction(context *models.WorkflowExecu
 		Msg("Kicking player")
 
 	// Execute kick command
-	command := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+	command := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to kick player: %w", err)
@@ -1346,7 +1352,7 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 		Msg("Banning player")
 
 	// Execute ban command (duration in days)
-	command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, duration, reason)
+	command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", sanitizeRCONParam(playerId), duration, sanitizeRCONParam(reason))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to ban player: %w", err)
@@ -1527,14 +1533,14 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 	}
 
 	// Execute RCON ban
-	command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, duration, reason)
+	command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", sanitizeRCONParam(playerId), duration, sanitizeRCONParam(reason))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
 	}
 
 	// Kick player
-	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 	_, kickErr := wm.rconManager.ExecuteCommand(context.ServerID, kickCommand)
 
 	// Store results
@@ -1577,7 +1583,7 @@ func (wm *WorkflowManager) executeWarnPlayerAction(context *models.WorkflowExecu
 		Msg("Warning player")
 
 	// Execute warn command
-	command := fmt.Sprintf("AdminWarn \"%s\" %s", playerId, message)
+	command := fmt.Sprintf("AdminWarn \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(message))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to warn player: %w", err)
@@ -3262,7 +3268,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		command := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+		command := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 
 		log.Info().
 			Str("execution_id", workflowContext.ExecutionID.String()).
@@ -3290,7 +3296,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, float64(duration), reason)
+		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", sanitizeRCONParam(playerId), float64(duration), sanitizeRCONParam(reason))
 
 		log.Info().
 			Str("execution_id", workflowContext.ExecutionID.String()).
@@ -3456,14 +3462,14 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 			Msg("LUA script banning player with evidence")
 
 		// Execute RCON ban
-		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", steamID, float64(duration), reason)
+		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", sanitizeRCONParam(steamID), float64(duration), sanitizeRCONParam(reason))
 		_, err = wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
 			log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
 		}
 
 		// Kick player
-		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", steamID, reason)
+		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(steamID), sanitizeRCONParam(reason))
 		_, _ = wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
 
 		// Return ban ID and nil error
@@ -3480,7 +3486,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		command := fmt.Sprintf("AdminWarn \"%s\" %s", playerId, message)
+		command := fmt.Sprintf("AdminWarn \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(message))
 
 		log.Info().
 			Str("execution_id", workflowContext.ExecutionID.String()).
@@ -3505,7 +3511,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		// Replace variables
 		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		command := fmt.Sprintf("AdminBroadcast %s", message)
+		command := fmt.Sprintf("AdminBroadcast %s", sanitizeRCONParam(message))
 
 		log.Info().
 			Str("execution_id", workflowContext.ExecutionID.String()).
@@ -3900,7 +3906,7 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 		reason := L.OptString(2, "Kicked by workflow")
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		command := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+		command := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
 			L.Push(lua.LBool(false))
@@ -3919,7 +3925,7 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 		reason := L.OptString(3, "Banned by workflow")
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, float64(duration), reason)
+		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", sanitizeRCONParam(playerId), float64(duration), sanitizeRCONParam(reason))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
 			L.Push(lua.LBool(false))
@@ -3937,7 +3943,7 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 		message := L.CheckString(2)
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		command := fmt.Sprintf("AdminWarn \"%s\" %s", playerId, message)
+		command := fmt.Sprintf("AdminWarn \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(message))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
 			L.Push(lua.LBool(false))
@@ -3953,7 +3959,7 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 	L.SetGlobal("rcon_broadcast", L.NewFunction(func(L *lua.LState) int {
 		message := L.CheckString(1)
 		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		command := fmt.Sprintf("AdminBroadcast %s", message)
+		command := fmt.Sprintf("AdminBroadcast %s", sanitizeRCONParam(message))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
 			L.Push(lua.LBool(false))
