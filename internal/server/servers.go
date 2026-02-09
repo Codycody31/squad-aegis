@@ -71,11 +71,6 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		request.LogPollFrequency = &defaultPoll
 	}
 
-	banMode := "server"
-	if request.BanEnforcementMode != nil && *request.BanEnforcementMode == "aegis" {
-		banMode = "aegis"
-	}
-
 	serverToCreate := models.Server{
 		Id:            uuid.New(),
 		Name:          request.Name,
@@ -94,9 +89,6 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		LogPollFrequency: request.LogPollFrequency,
 		LogReadFromStart: request.LogReadFromStart,
 		SquadGamePath:    request.SquadGamePath,
-
-		BanEnforcementMode: banMode,
-		BansCfgPath:        request.BansCfgPath,
 
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -566,13 +558,6 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 	server.LogPollFrequency = request.LogPollFrequency
 	server.LogReadFromStart = request.LogReadFromStart
 	server.SquadGamePath = request.SquadGamePath
-
-	// Update ban enforcement mode if provided
-	if request.BanEnforcementMode != nil {
-		if *request.BanEnforcementMode == "aegis" || *request.BanEnforcementMode == "server" {
-			server.BanEnforcementMode = *request.BanEnforcementMode
-		}
-	}
 
 	// Update server in database
 	if err := core.UpdateServer(c.Request.Context(), s.Dependencies.DB, server); err != nil {
