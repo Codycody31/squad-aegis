@@ -18,12 +18,12 @@ func CreateServer(ctx context.Context, database db.Executor, server *models.Serv
 	sql, args, err := psql.Insert("servers").Columns(
 		"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
 		"log_source_type", "log_host", "log_port", "log_username", "log_password",
-		"log_poll_frequency", "log_read_from_start", "squad_game_path", "ban_enforcement_mode",
+		"log_poll_frequency", "log_read_from_start", "squad_game_path",
 		"created_at", "updated_at",
 	).Values(
 		server.Id, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword,
 		server.LogSourceType, server.LogHost, server.LogPort, server.LogUsername, server.LogPassword,
-		server.LogPollFrequency, server.LogReadFromStart, server.SquadGamePath, server.BanEnforcementMode,
+		server.LogPollFrequency, server.LogReadFromStart, server.SquadGamePath,
 		server.CreatedAt, server.UpdatedAt,
 	).ToSql()
 	if err != nil {
@@ -50,7 +50,7 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 		sql, args, err = psql.Select(
 			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
-			"log_poll_frequency", "log_read_from_start", "squad_game_path", "ban_enforcement_mode",
+			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
 		).From("servers").ToSql()
 		if err != nil {
@@ -60,7 +60,7 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 		sql, args, err = psql.Select(
 			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
-			"log_poll_frequency", "log_read_from_start", "squad_game_path", "ban_enforcement_mode",
+			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
 		).From("servers").Where(squirrel.Expr("id IN (SELECT server_id FROM server_admins WHERE user_id = $1)", user.Id)).ToSql()
 		if err != nil {
@@ -81,7 +81,7 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 		err = rows.Scan(
 			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword,
 			&server.LogSourceType, &server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword,
-			&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath, &server.BanEnforcementMode,
+			&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath,
 			&server.CreatedAt, &server.UpdatedAt,
 		)
 		if err != nil {
@@ -99,7 +99,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 		sql, args, err := psql.Select(
 			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
-			"log_poll_frequency", "log_read_from_start", "squad_game_path", "ban_enforcement_mode",
+			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
 		).From("servers").Where(squirrel.Eq{"id": serverId}).ToSql()
 		if err != nil {
@@ -118,7 +118,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 			err = rows.Scan(
 				&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword,
 				&server.LogSourceType, &server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword,
-				&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath, &server.BanEnforcementMode,
+				&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath,
 				&server.CreatedAt, &server.UpdatedAt,
 			)
 			if err != nil {
@@ -140,7 +140,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 		sql, args, err = psql.Select(
 			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
-			"log_poll_frequency", "log_read_from_start", "squad_game_path", "ban_enforcement_mode",
+			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
 		).From("servers").Where(squirrel.Eq{"id": serverId}).ToSql()
 		if err != nil {
@@ -150,7 +150,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 		sql, args, err = psql.Select(
 			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
-			"log_poll_frequency", "log_read_from_start", "squad_game_path", "ban_enforcement_mode",
+			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
 		).From("servers").Where(squirrel.Eq{"id": serverId}).Where(squirrel.Expr("id IN (SELECT server_id FROM server_admins WHERE user_id = $2)", user.Id)).ToSql()
 		if err != nil {
@@ -170,7 +170,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 		err = rows.Scan(
 			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword,
 			&server.LogSourceType, &server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword,
-			&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath, &server.BanEnforcementMode,
+			&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath,
 			&server.CreatedAt, &server.UpdatedAt,
 		)
 		if err != nil {
@@ -351,12 +351,12 @@ func UpdateServer(ctx context.Context, db *sql.DB, server *models.Server) error 
 		SET name = $1, ip_address = $2, game_port = $3, rcon_ip_address = $4, rcon_port = $5, rcon_password = $6,
 		    log_source_type = $7, log_host = $8, log_port = $9, log_username = $10,
 		    log_password = $11, log_poll_frequency = $12, log_read_from_start = $13,
-		    squad_game_path = $14, ban_enforcement_mode = $15, updated_at = $16
-		WHERE id = $17
+		    squad_game_path = $14, updated_at = $15
+		WHERE id = $16
 	`, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword,
 		server.LogSourceType, server.LogHost, server.LogPort, server.LogUsername,
 		server.LogPassword, server.LogPollFrequency, server.LogReadFromStart,
-		server.SquadGamePath, server.BanEnforcementMode, time.Now(), server.Id)
+		server.SquadGamePath, time.Now(), server.Id)
 
 	if err != nil {
 		return fmt.Errorf("failed to update server: %w", err)

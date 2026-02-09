@@ -34,8 +34,6 @@ export interface Server {
   log_poll_frequency: number | null;
   log_read_from_start: boolean | null;
   squad_game_path: string | null;
-  // Ban enforcement
-  ban_enforcement_mode: "server" | "aegis";
   created_at: string;
   updated_at: string;
 }

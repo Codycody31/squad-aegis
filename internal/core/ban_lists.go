@@ -498,15 +498,3 @@ func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID u
 	return &ban, nil
 }
 
-// GetServerBanEnforcementMode returns the ban enforcement mode for a server.
-// Returns "server" as the default if not found.
-func GetServerBanEnforcementMode(ctx context.Context, database db.Executor, serverID uuid.UUID) (string, error) {
-	var mode string
-	err := database.QueryRowContext(ctx,
-		"SELECT ban_enforcement_mode FROM servers WHERE id = $1", serverID,
-	).Scan(&mode)
-	if err != nil {
-		return "server", err
-	}
-	return mode, nil
-}
