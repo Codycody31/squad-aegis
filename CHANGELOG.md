@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.8.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.0) - 2026-02-13
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### 📈 Enhancement
+
+- refactor(server): Update role member retrieval for config generation [[#172](https://github.com/Codycody31/squad-aegis/pull/172)]
+
+### 🐛 Bug Fixes
+
+- fix(discord-kill-feed): Use new event attacker/victim struct [[#167](https://github.com/Codycody31/squad-aegis/pull/167)]
+- Fix attacker lookup and player suffix tracking [[#166](https://github.com/Codycody31/squad-aegis/pull/166)]
+- Set PGDATA env var for Postgres container [[#164](https://github.com/Codycody31/squad-aegis/pull/164)]
+- Add default UUID for server_roles.id and update role insertion [[#165](https://github.com/Codycody31/squad-aegis/pull/165)]
+- fix: enforce permission scope separation (ui: vs rcon:) and drop unused api: category [[#157](https://github.com/Codycody31/squad-aegis/pull/157)]
+
 ## [0.7.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.1) - 2026-02-06
 
 ### ❤️ Thanks to all contributors! ❤️
