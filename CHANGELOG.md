@@ -1,10 +1,14 @@
 # Changelog
 
-## [0.7.2](https://github.com/Codycody31/squad-aegis/releases/tag/0.7.2) - 2026-02-08
+## [0.8.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.0) - 2026-02-13
 
 ### ❤️ Thanks to all contributors! ❤️
 
 @Codycody31
+
+### 📈 Enhancement
+
+- refactor(server): Update role member retrieval for config generation [[#172](https://github.com/Codycody31/squad-aegis/pull/172)]
 
 ### 🐛 Bug Fixes
 
