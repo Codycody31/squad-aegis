@@ -399,7 +399,7 @@ func GetAllActiveServerRoleMembers(ctx context.Context, database db.Executor, se
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 	sql, args, err := psql.Select("sa.id", "sa.server_id", "sa.user_id", "sa.steam_id", "sa.server_role_id", "sa.expires_at", "sa.notes", "sa.created_at").
 		From("server_admins sa").
-		Join("server_roles sr ON sa.server_role_id = sr.id").
+		Join("server_roles sr ON sa.server_role_id = sr.id AND sr.server_id = sa.server_id").
 		Where(squirrel.Eq{"sa.server_id": serverId}).
 		Where(squirrel.Or{
 			squirrel.Eq{"sa.expires_at": nil},
@@ -424,6 +424,10 @@ func GetAllActiveServerRoleMembers(ctx context.Context, database db.Executor, se
 			return nil, err
 		}
 		members = append(members, &member)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return members, nil

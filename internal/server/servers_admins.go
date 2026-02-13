@@ -503,9 +503,9 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 	}
 
 	// Get all active role members for config generation (both admin and non-admin roles like whitelist, seeder, VIP)
-	admins, err := core.GetAllActiveServerRoleMembers(c.Request.Context(), s.Dependencies.DB, serverId)
+	roleMembers, err := core.GetAllActiveServerRoleMembers(c.Request.Context(), s.Dependencies.DB, serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to get server admins", &gin.H{"error": err.Error()})
+		responses.BadRequest(c, "Failed to get server role members", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -529,19 +529,19 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 		}
 	}
 
-	// Write admin entries
-	for _, admin := range admins {
+	// Write role member entries (admins, whitelist, seeders, etc.)
+	for _, member := range roleMembers {
 		roleName := ""
 
 		for _, role := range roles {
-			if role.Id == admin.ServerRoleId {
+			if role.Id == member.ServerRoleId {
 				roleName = role.Name
 				break
 			}
 		}
 
-		if admin.UserId != nil {
-			user, err := core.GetUserById(c.Request.Context(), s.Dependencies.DB, *admin.UserId, admin.UserId)
+		if member.UserId != nil {
+			user, err := core.GetUserById(c.Request.Context(), s.Dependencies.DB, *member.UserId, member.UserId)
 			if err != nil {
 				responses.BadRequest(c, "Failed to get user", &gin.H{"error": err.Error()})
 				return
@@ -553,8 +553,8 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 			}
 
 			configBuilder.WriteString(fmt.Sprintf("Admin=%d:%s // %s\n", user.SteamId, roleName, user.Username))
-		} else if admin.SteamId != nil {
-			configBuilder.WriteString(fmt.Sprintf("Admin=%d:%s // Unknown\n", *admin.SteamId, roleName))
+		} else if member.SteamId != nil {
+			configBuilder.WriteString(fmt.Sprintf("Admin=%d:%s // Unknown\n", *member.SteamId, roleName))
 		}
 	}
 
