@@ -391,3 +391,40 @@ func GetActiveServerAdmins(ctx context.Context, database db.Executor, serverId u
 
 	return admins, nil
 }
+
+// GetAllActiveServerRoleMembers retrieves all active (non-expired) role members for a server
+// Includes all roles regardless of is_admin flag, used for admin.cfg generation where
+// both admin and non-admin roles (whitelist, seeder, VIP, etc.) must appear
+func GetAllActiveServerRoleMembers(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]*models.ServerAdmin, error) {
+	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
+	sql, args, err := psql.Select("sa.id", "sa.server_id", "sa.user_id", "sa.steam_id", "sa.server_role_id", "sa.expires_at", "sa.notes", "sa.created_at").
+		From("server_admins sa").
+		Join("server_roles sr ON sa.server_role_id = sr.id").
+		Where(squirrel.Eq{"sa.server_id": serverId}).
+		Where(squirrel.Or{
+			squirrel.Eq{"sa.expires_at": nil},
+			squirrel.Gt{"sa.expires_at": time.Now()},
+		}).ToSql()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := database.QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := []*models.ServerAdmin{}
+
+	for rows.Next() {
+		var member models.ServerAdmin
+		err = rows.Scan(&member.Id, &member.ServerId, &member.UserId, &member.SteamId, &member.ServerRoleId, &member.ExpiresAt, &member.Notes, &member.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		members = append(members, &member)
+	}
+
+	return members, nil
+}

@@ -502,8 +502,8 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 		return
 	}
 
-	// Get admins (only active ones for config generation - is_admin=true roles only)
-	admins, err := core.GetActiveServerAdmins(c.Request.Context(), s.Dependencies.DB, serverId)
+	// Get all active role members for config generation (both admin and non-admin roles like whitelist, seeder, VIP)
+	admins, err := core.GetAllActiveServerRoleMembers(c.Request.Context(), s.Dependencies.DB, serverId)
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server admins", &gin.H{"error": err.Error()})
 		return
