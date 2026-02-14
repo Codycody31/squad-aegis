@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.1) - 2026-02-14
+
+### ❤️ Thanks to all contributors! ❤️
+
+@wish131400
+
+### 🐛 Bug Fixes
+
+- fix(ui): normalize optional log fields for server settings [[#176](https://github.com/Codycody31/squad-aegis/pull/176)]
+
 ## [0.8.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.0) - 2026-02-13
 
 ### ❤️ Thanks to all contributors! ❤️
