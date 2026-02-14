@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -488,6 +489,20 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
 		return
+	}
+
+	// Normalize and validate optional log source type from UI payload.
+	if request.LogSourceType != nil {
+		logSourceType := strings.TrimSpace(*request.LogSourceType)
+		switch logSourceType {
+		case "":
+			request.LogSourceType = nil
+		case "local", "sftp", "ftp":
+			request.LogSourceType = &logSourceType
+		default:
+			responses.BadRequest(c, "Invalid log source type", &gin.H{"error": "log_source_type must be one of: local, sftp, ftp"})
+			return
+		}
 	}
 
 	// Validate request
