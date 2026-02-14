@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix(server): validate server settings log source type [[#175](https://github.com/Codycody31/squad-aegis/pull/175)]
 - fix(ui): normalize optional log fields for server settings [[#176](https://github.com/Codycody31/squad-aegis/pull/176)]
 
 ## [0.8.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.0) - 2026-02-13
