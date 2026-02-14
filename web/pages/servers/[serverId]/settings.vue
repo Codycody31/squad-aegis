@@ -571,13 +571,43 @@ const fetchServerStatus = async () => {
 const updateServer = async () => {
     isUpdating.value = true;
     try {
+        const logSourceType = (serverForm.value.log_source_type || "").trim();
+        const isRemoteLogSource =
+            logSourceType === "sftp" || logSourceType === "ftp";
+
+        // Normalize optional log fields so empty strings are sent as null.
+        // Backend DB constraint only allows log_source_type in local/sftp/ftp or NULL.
+        const payload = {
+            ...serverForm.value,
+            log_source_type: logSourceType || null,
+            log_file_path: logSourceType
+                ? serverForm.value.log_file_path || null
+                : null,
+            log_host: isRemoteLogSource ? serverForm.value.log_host || null : null,
+            log_port: isRemoteLogSource
+                ? serverForm.value.log_port || null
+                : null,
+            log_username: isRemoteLogSource
+                ? serverForm.value.log_username || null
+                : null,
+            log_password: isRemoteLogSource
+                ? serverForm.value.log_password || null
+                : null,
+            log_poll_frequency: isRemoteLogSource
+                ? serverForm.value.log_poll_frequency || null
+                : null,
+            log_read_from_start: logSourceType
+                ? serverForm.value.log_read_from_start
+                : null,
+        };
+
         const response = await fetch(`/api/servers/${serverId}`, {
             method: "PUT",
             headers: {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify(serverForm.value),
+            body: JSON.stringify(payload),
         });
 
         const data = await response.json();
