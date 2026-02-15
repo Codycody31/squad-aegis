@@ -187,6 +187,7 @@ func (s *Server) formatEventForFeed(event event_manager.Event, feedTypes []strin
 		if connData, ok := event.Data.(*event_manager.LogPlayerConnectedData); ok {
 			feedEvent.Data = map[string]interface{}{
 				"player_controller": connData.PlayerController,
+				"player_suffix":     connData.PlayerSuffix,
 				"ip_address":        connData.IPAddress,
 				"steam_id":          connData.SteamID,
 				"eos_id":            connData.EOSID,
