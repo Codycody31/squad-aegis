@@ -3,6 +3,8 @@ package server
 import (
 	"testing"
 	"time"
+
+	"go.codycody31.dev/squad-aegis/internal/models"
 )
 
 func TestParseBansCfg_FullFormat(t *testing.T) {
@@ -29,7 +31,7 @@ System [SteamID 0] Banned:76561198000000003:1893456000 //Teamkilling`
 		t.Errorf("expected reason 'Cheating', got %q", entries[0].Reason)
 	}
 
-	// Second entry: timed ban
+	// Second entry: timed ban (future)
 	if entries[1].SteamID != "76561198000000003" {
 		t.Errorf("expected steam ID 76561198000000003, got %s", entries[1].SteamID)
 	}
@@ -42,12 +44,7 @@ System [SteamID 0] Banned:76561198000000003:1893456000 //Teamkilling`
 }
 
 func TestParseBansCfg_ExpiredBans(t *testing.T) {
-	// Use a past timestamp
-	pastTimestamp := time.Now().Add(-24 * time.Hour).Unix()
-	content := `Admin [SteamID 0] Banned:76561198000000001:` + time.Unix(pastTimestamp, 0).Format("") + ` //Expired`
-
-	// Actually use a known past timestamp directly
-	content = "Admin [SteamID 0] Banned:76561198000000001:1000000000 //Old ban"
+	content := "Admin [SteamID 0] Banned:76561198000000001:1000000000 //Old ban"
 
 	entries, unparseable := parseBansCfg(content)
 
@@ -126,6 +123,7 @@ func TestParseBansCfg_NoReason(t *testing.T) {
 }
 
 func TestParseBansCfg_InvalidSteamID(t *testing.T) {
+	// 31-char string that's not a valid hex EOS ID or numeric Steam ID
 	content := `Admin [SteamID 0] Banned:notanumber:0 //Bad ID`
 
 	entries, unparseable := parseBansCfg(content)
@@ -152,16 +150,7 @@ func TestParseBansCfg_InvalidExpiry(t *testing.T) {
 }
 
 func TestParseBansCfg_MixedContent(t *testing.T) {
-	futureTimestamp := time.Now().Add(30 * 24 * time.Hour).Unix()
-	content := `# Ban list
-Admin [SteamID 76561198000000001] Banned:76561198000000010:0 //Permanent cheater
-
-System [SteamID 0] Banned:76561198000000011:` + time.Unix(futureTimestamp, 0).Format("") + ` //Temp ban
-garbage line
-Admin [SteamID 0] Banned:76561198000000012:1000000000 //Old expired ban
-`
-	// Fix: use a proper future timestamp
-	content = "# Ban list\nAdmin [SteamID 76561198000000001] Banned:76561198000000010:0 //Permanent cheater\n\nSystem [SteamID 0] Banned:76561198000000011:9999999999 //Future temp ban\ngarbage line\nAdmin [SteamID 0] Banned:76561198000000012:1000000000 //Old expired ban\n"
+	content := "# Ban list\nAdmin [SteamID 76561198000000001] Banned:76561198000000010:0 //Permanent cheater\n\nSystem [SteamID 0] Banned:76561198000000011:9999999999 //Future temp ban\ngarbage line\nAdmin [SteamID 0] Banned:76561198000000012:1000000000 //Old expired ban\n"
 
 	entries, unparseable := parseBansCfg(content)
 
@@ -172,14 +161,17 @@ Admin [SteamID 0] Banned:76561198000000012:1000000000 //Old expired ban
 		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 
-	// Check permanent ban
+	// Check permanent ban (expiry = 0)
 	if !entries[0].Permanent {
 		t.Error("first entry should be permanent")
 	}
 
-	// Check future temp ban
-	if entries[1].Permanent || entries[1].Expired {
-		t.Error("second entry should be non-permanent, non-expired")
+	// Check 9999999999 — should be treated as permanent (threshold-based)
+	if !entries[1].Permanent {
+		t.Error("second entry (9999999999) should be treated as permanent")
+	}
+	if entries[1].Expired {
+		t.Error("second entry should not be expired")
 	}
 
 	// Check expired ban
@@ -189,7 +181,6 @@ Admin [SteamID 0] Banned:76561198000000012:1000000000 //Old expired ban
 }
 
 func TestParseBansCfg_ReasonWithColons(t *testing.T) {
-	// The reason may contain colons after the "//" prefix
 	content := `Admin [SteamID 0] Banned:76561198000000001:0 //Reason: with colons: in it`
 
 	entries, unparseable := parseBansCfg(content)
@@ -213,5 +204,227 @@ func TestParseBansCfg_EmptyFile(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+func TestParseBansCfg_EOSID(t *testing.T) {
+	content := `N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:10403758725 //Griefing
+N/A Banned:0002c835e7db4415b9f823b95b5b90b6:1765307819 //Spawn camping`
+
+	entries, unparseable := parseBansCfg(content)
+
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	// First entry: EOS ID, far-future expiry (treated as permanent)
+	if entries[0].EOSID != "0002adb8a89b4d1d970a3cd1e4569092" {
+		t.Errorf("expected EOS ID 0002adb8a89b4d1d970a3cd1e4569092, got %s", entries[0].EOSID)
+	}
+	if entries[0].SteamID != "" {
+		t.Errorf("expected empty steam ID for EOS entry, got %s", entries[0].SteamID)
+	}
+	if !entries[0].Permanent {
+		t.Error("expected EOS ban with 10403758725 expiry to be treated as permanent")
+	}
+
+	// Second entry: EOS ID, future timed ban
+	if entries[1].EOSID != "0002c835e7db4415b9f823b95b5b90b6" {
+		t.Errorf("expected EOS ID 0002c835e7db4415b9f823b95b5b90b6, got %s", entries[1].EOSID)
+	}
+}
+
+func TestParseBansCfg_PermanentThreshold(t *testing.T) {
+	// Test various permanent representations
+	content := `Admin [SteamID 0] Banned:76561198000000001:0 //Permanent via zero
+Admin [SteamID 0] Banned:76561198000000002:9999999999 //Permanent via far future`
+
+	entries, unparseable := parseBansCfg(content)
+
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	if !entries[0].Permanent {
+		t.Error("expiry=0 should be permanent")
+	}
+	if !entries[1].Permanent {
+		t.Error("expiry=9999999999 should be treated as permanent")
+	}
+	if entries[0].Expired || entries[1].Expired {
+		t.Error("permanent bans should not be marked as expired")
+	}
+}
+
+func TestParseBansCfg_AutoBanDetection(t *testing.T) {
+	content := `N/A Banned:0002c6fc68c04dad8ad44cb9c83b2187:1766283597 //Automatic Teamkill Kick
+Admin [SteamID 0] Banned:76561198000000001:0 //Manual ban
+N/A Banned:76561199857143702:1758370309 //Automatic Server Rule Violation`
+
+	entries, unparseable := parseBansCfg(content)
+
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	if !entries[0].IsAutoBan {
+		t.Error("'Automatic Teamkill Kick' should be classified as auto-ban")
+	}
+	if entries[1].IsAutoBan {
+		t.Error("manual ban should NOT be classified as auto-ban")
+	}
+	if !entries[2].IsAutoBan {
+		t.Error("'Automatic Server Rule Violation' should be classified as auto-ban")
+	}
+}
+
+func TestParseBansCfg_MixedSteamAndEOS(t *testing.T) {
+	// Real-world Bans.cfg with mixed identifier types
+	content := `insidiousfiddler [SteamID 76561199047801300] Banned:76561199814503607:1763087080 //2.3 | No toxicity/harassment. Help new players | 1 day
+insidiousfiddler [SteamID 76561199047801300] Banned:76561199817970666:9999999999 //Community Health, racism
+envixity [SteamID 76561199151514762] Banned:76561199857143702:1758370309 //Griefing / Trolling | Length: 7 days
+N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:10403758725 //Griefing
+N/A Banned:0002c835e7db4415b9f823b95b5b90b6:1765307819 //Spawn camping
+N/A Banned:0002c6fc68c04dad8ad44cb9c83b2187:1766283597 //Automatic Teamkill Kick`
+
+	entries, unparseable := parseBansCfg(content)
+
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 6 {
+		t.Fatalf("expected 6 entries, got %d", len(entries))
+	}
+
+	// Steam ID entries
+	if entries[0].SteamID != "76561199814503607" || entries[0].EOSID != "" {
+		t.Errorf("entry 0: expected Steam ID only, got steam=%q eos=%q", entries[0].SteamID, entries[0].EOSID)
+	}
+
+	// 9999999999 = permanent
+	if !entries[1].Permanent {
+		t.Error("entry 1: 9999999999 should be permanent")
+	}
+
+	// EOS entries
+	if entries[3].EOSID != "0002adb8a89b4d1d970a3cd1e4569092" || entries[3].SteamID != "" {
+		t.Errorf("entry 3: expected EOS ID only, got steam=%q eos=%q", entries[3].SteamID, entries[3].EOSID)
+	}
+
+	// Auto-ban
+	if !entries[5].IsAutoBan {
+		t.Error("entry 5: should be classified as auto-ban")
+	}
+	if entries[4].IsAutoBan {
+		t.Error("entry 4: 'Spawn camping' should NOT be auto-ban")
+	}
+}
+
+func TestParseBansCfg_DuplicateEOSIDs(t *testing.T) {
+	content := `N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:0 //First
+N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:0 //Duplicate`
+
+	entries, _ := parseBansCfg(content)
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry (deduplicated), got %d", len(entries))
+	}
+	if entries[0].Reason != "First" {
+		t.Errorf("expected first occurrence to win, got reason %q", entries[0].Reason)
+	}
+}
+
+func TestParseBansCfg_NAPrefixFormat(t *testing.T) {
+	// "N/A" prefix is common for server-generated bans
+	content := `N/A Banned:76561199857143702:1758370309 //Griefing / Trolling | Length: 7 days`
+
+	entries, unparseable := parseBansCfg(content)
+
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].SteamID != "76561199857143702" {
+		t.Errorf("expected steam ID 76561199857143702, got %s", entries[0].SteamID)
+	}
+}
+
+func TestParseBansCfg_ReasonWithPipe(t *testing.T) {
+	// Reasons often contain pipe-separated metadata
+	content := `admin [SteamID 76561199047801300] Banned:76561199814503607:1763087080 //2.3 | No toxicity/harassment. Help new players | 1 day`
+
+	entries, unparseable := parseBansCfg(content)
+
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Reason != "2.3 | No toxicity/harassment. Help new players | 1 day" {
+		t.Errorf("expected full reason with pipes, got %q", entries[0].Reason)
+	}
+}
+
+func TestIsHex(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{"0002adb8a89b4d1d970a3cd1e4569092", true},
+		{"abcdef0123456789ABCDEF0123456789", true},
+		{"0000000000000000000000000000000g", false}, // 'g' is not hex
+		{"", false},
+		{"76561199814503607", false}, // numeric but not 32 chars (handled separately in parser)
+	}
+
+	for _, tt := range tests {
+		result := isHex(tt.input)
+		if result != tt.expected {
+			t.Errorf("isHex(%q) = %v, want %v", tt.input, result, tt.expected)
+		}
+	}
+}
+
+func TestCategorizeBans(t *testing.T) {
+	now := time.Now()
+	futureExpiry := now.Add(30 * 24 * time.Hour).Unix()
+
+	entries := []models.CfgBanEntry{
+		{SteamID: "1001", Reason: "new steam ban", Permanent: true},
+		{SteamID: "1002", Reason: "existing steam ban", Permanent: true},
+		{EOSID: "aabbccdd11223344aabbccdd11223344", Reason: "new eos ban", ExpiryTimestamp: futureExpiry},
+		{EOSID: "eeff00112233445566778899aabbccdd", Reason: "existing eos ban", Permanent: true},
+		{SteamID: "1003", Reason: "expired", Expired: true},
+		{SteamID: "1004", Reason: "Automatic Teamkill Kick", IsAutoBan: true},
+	}
+
+	existingSteamIDs := map[string]bool{"1002": true}
+	existingEOSIDs := map[string]bool{"eeff00112233445566778899aabbccdd": true}
+
+	newBans, existingBans, expiredBans, autoBans := categorizeBans(entries, existingSteamIDs, existingEOSIDs)
+
+	if len(newBans) != 2 {
+		t.Errorf("expected 2 new bans, got %d", len(newBans))
+	}
+	if len(existingBans) != 2 {
+		t.Errorf("expected 2 existing bans, got %d", len(existingBans))
+	}
+	if len(expiredBans) != 1 {
+		t.Errorf("expected 1 expired ban, got %d", len(expiredBans))
+	}
+	if len(autoBans) != 1 {
+		t.Errorf("expected 1 auto-ban, got %d", len(autoBans))
 	}
 }

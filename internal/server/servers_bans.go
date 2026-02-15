@@ -850,7 +850,7 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 
 func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (string, error) {
 	rows, err := s.Dependencies.DB.QueryContext(ctx, `
-		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
+		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.server_id = $1
@@ -863,14 +863,15 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 	var banCfg strings.Builder
 	now := time.Now()
 	for rows.Next() {
-		var steamIDInt int64
+		var steamIDInt sql.NullInt64
+		var eosIDStr sql.NullString
 		var reason string
 		var duration int
 		var createdAt time.Time
 		var adminID sql.NullString
 		var adminUsername sql.NullString
 		var adminSteamIDInt sql.NullInt64
-		if err := rows.Scan(&steamIDInt, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt); err != nil {
+		if err := rows.Scan(&steamIDInt, &eosIDStr, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt); err != nil {
 			return "", err
 		}
 
@@ -881,7 +882,15 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 			continue
 		}
 
-		steamIDStr := strconv.FormatInt(steamIDInt, 10)
+		// Determine the banned player ID (prefer Steam ID, fall back to EOS ID)
+		var bannedID string
+		if steamIDInt.Valid {
+			bannedID = strconv.FormatInt(steamIDInt.Int64, 10)
+		} else if eosIDStr.Valid {
+			bannedID = eosIDStr.String
+		} else {
+			continue
+		}
 
 		// Build admin info
 		adminInfo := "System"
@@ -908,7 +917,7 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 		}
 
 		banCfg.WriteString(fmt.Sprintf("%s [SteamID %s] Banned:%s:%s%s\n",
-			adminInfo, adminSteamID, steamIDStr, expiryTimestamp, reasonComment))
+			adminInfo, adminSteamID, bannedID, expiryTimestamp, reasonComment))
 	}
 
 	return banCfg.String(), nil

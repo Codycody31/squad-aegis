@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math"
 	"os"
@@ -18,18 +19,39 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
+// permanentThresholdYears defines how far in the future an expiry timestamp
+// must be to be treated as a permanent ban. Timestamps like 9999999999 (year 2286)
+// are used by Squad servers to represent permanent bans.
+const permanentThresholdYears = 50
+
+// isHex returns true if s consists entirely of hexadecimal characters.
+func isHex(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // parseBansCfg parses the content of a Squad Bans.cfg file into structured entries.
 // Returns the parsed entries and the count of lines that could not be parsed.
 //
-// Expected format:
+// Supported ID formats:
+//   - Steam ID (numeric, e.g., 76561198000000001)
+//   - EOS ID (32-character hex, e.g., 0002adb8a89b4d1d970a3cd1e4569092)
 //
-//	AdminName [SteamID X] Banned:<steamId>:<expiryTimestamp> //<reason>
+// Expected line format:
+//
+//	AdminName [SteamID X] Banned:<id>:<expiryTimestamp> //<reason>
+//	N/A Banned:<id>:<expiryTimestamp> //<reason>
 func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
 	lines := strings.Split(content, "\n")
 	var entries []models.CfgBanEntry
 	seen := make(map[string]bool)
 	unparseable := 0
 	now := time.Now()
+	permanentThreshold := now.AddDate(permanentThresholdYears, 0, 0).Unix()
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -44,7 +66,7 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
 			continue
 		}
 
-		// Extract reason from "//" suffix before parsing steamId:expiry
+		// Extract reason from "//" suffix before parsing id:expiry
 		reason := ""
 		if commentIdx := strings.Index(afterBanned, "//"); commentIdx >= 0 {
 			reason = strings.TrimSpace(afterBanned[commentIdx+2:])
@@ -53,23 +75,29 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
 
 		afterBanned = strings.TrimSpace(afterBanned)
 
-		// Split into steamId and expiryTimestamp
+		// Split into id and expiryTimestamp
 		parts := strings.SplitN(afterBanned, ":", 2)
 		if len(parts) != 2 {
 			unparseable++
 			continue
 		}
 
-		steamID := strings.TrimSpace(parts[0])
+		idStr := strings.TrimSpace(parts[0])
 		expiryStr := strings.TrimSpace(parts[1])
 
-		if steamID == "" {
+		if idStr == "" {
 			unparseable++
 			continue
 		}
 
-		// Validate steamID is numeric
-		if _, err := strconv.ParseInt(steamID, 10, 64); err != nil {
+		// Classify the identifier as Steam ID or EOS ID
+		steamID := ""
+		eosID := ""
+		if len(idStr) == 32 && isHex(idStr) {
+			eosID = idStr
+		} else if _, err := strconv.ParseInt(idStr, 10, 64); err == nil {
+			steamID = idStr
+		} else {
 			unparseable++
 			continue
 		}
@@ -81,21 +109,28 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
 			continue
 		}
 
-		// Deduplicate by SteamID (first occurrence wins)
-		if seen[steamID] {
+		// Deduplicate by identifier (first occurrence wins)
+		dedupKey := steamID
+		if dedupKey == "" {
+			dedupKey = "eos:" + eosID
+		}
+		if seen[dedupKey] {
 			continue
 		}
-		seen[steamID] = true
+		seen[dedupKey] = true
 
-		permanent := expiryTimestamp == 0
+		permanent := expiryTimestamp == 0 || expiryTimestamp >= permanentThreshold
 		expired := !permanent && now.After(time.Unix(expiryTimestamp, 0))
+		isAutoBan := strings.HasPrefix(reason, "Automatic ")
 
 		entries = append(entries, models.CfgBanEntry{
 			SteamID:         steamID,
+			EOSID:           eosID,
 			ExpiryTimestamp: expiryTimestamp,
 			Reason:          reason,
 			Permanent:       permanent,
 			Expired:         expired,
+			IsAutoBan:       isAutoBan,
 			RawLine:         line,
 		})
 	}
@@ -158,33 +193,44 @@ func (s *Server) readBansCfg(ctx context.Context, server *models.Server) (string
 	}
 }
 
-// getExistingBanSteamIDs returns a set of SteamIDs that already have active bans for this server.
-func (s *Server) getExistingBanSteamIDs(ctx context.Context, serverID uuid.UUID) (map[string]bool, error) {
+// getExistingBanIDs returns sets of Steam IDs and EOS IDs that already have bans for this server.
+func (s *Server) getExistingBanIDs(ctx context.Context, serverID uuid.UUID) (steamIDs map[string]bool, eosIDs map[string]bool, err error) {
 	rows, err := s.Dependencies.DB.QueryContext(ctx, `
-		SELECT steam_id FROM server_bans WHERE server_id = $1
+		SELECT steam_id, eos_id FROM server_bans WHERE server_id = $1
 	`, serverID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query existing bans: %w", err)
+		return nil, nil, fmt.Errorf("failed to query existing bans: %w", err)
 	}
 	defer rows.Close()
 
-	existing := make(map[string]bool)
+	steamIDs = make(map[string]bool)
+	eosIDs = make(map[string]bool)
 	for rows.Next() {
-		var steamIDInt int64
-		if err := rows.Scan(&steamIDInt); err != nil {
-			return nil, fmt.Errorf("failed to scan steam ID: %w", err)
+		var steamIDInt sql.NullInt64
+		var eosIDStr sql.NullString
+		if err := rows.Scan(&steamIDInt, &eosIDStr); err != nil {
+			return nil, nil, fmt.Errorf("failed to scan ban IDs: %w", err)
 		}
-		existing[strconv.FormatInt(steamIDInt, 10)] = true
+		if steamIDInt.Valid {
+			steamIDs[strconv.FormatInt(steamIDInt.Int64, 10)] = true
+		}
+		if eosIDStr.Valid {
+			eosIDs[eosIDStr.String] = true
+		}
 	}
-	return existing, nil
+	return steamIDs, eosIDs, nil
 }
 
-// categorizeBans splits parsed Bans.cfg entries into new, existing, and expired categories.
-func categorizeBans(entries []models.CfgBanEntry, existingSteamIDs map[string]bool) (newBans, existingBans, expiredBans []models.CfgBanEntry) {
+// categorizeBans splits parsed Bans.cfg entries into new, existing, expired, and auto-ban categories.
+// Auto-bans are always filtered out regardless of other criteria.
+func categorizeBans(entries []models.CfgBanEntry, existingSteamIDs, existingEOSIDs map[string]bool) (newBans, existingBans, expiredBans, autoBans []models.CfgBanEntry) {
 	for _, entry := range entries {
-		if entry.Expired {
+		if entry.IsAutoBan {
+			autoBans = append(autoBans, entry)
+		} else if entry.Expired {
 			expiredBans = append(expiredBans, entry)
-		} else if existingSteamIDs[entry.SteamID] {
+		} else if (entry.SteamID != "" && existingSteamIDs[entry.SteamID]) ||
+			(entry.EOSID != "" && existingEOSIDs[entry.EOSID]) {
 			existingBans = append(existingBans, entry)
 		} else {
 			newBans = append(newBans, entry)
@@ -233,13 +279,13 @@ func (s *Server) ServerBanImportPreview(c *gin.Context) {
 
 	entries, unparseableCount := parseBansCfg(content)
 
-	existingSteamIDs, err := s.getExistingBanSteamIDs(c.Request.Context(), serverID)
+	existingSteamIDs, existingEOSIDs, err := s.getExistingBanIDs(c.Request.Context(), serverID)
 	if err != nil {
 		responses.BadRequest(c, "Failed to query existing bans", &gin.H{"error": err.Error()})
 		return
 	}
 
-	newBans, existingBans, expiredBans := categorizeBans(entries, existingSteamIDs)
+	newBans, existingBans, expiredBans, autoBans := categorizeBans(entries, existingSteamIDs, existingEOSIDs)
 
 	responses.Success(c, "Import preview generated", &gin.H{
 		"preview": models.BanImportPreview{
@@ -248,6 +294,7 @@ func (s *Server) ServerBanImportPreview(c *gin.Context) {
 			NewBans:          newBans,
 			ExistingBans:     existingBans,
 			ExpiredBans:      expiredBans,
+			AutoBans:         autoBans,
 			UnparseableCount: unparseableCount,
 		},
 	})
@@ -289,17 +336,17 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 
 	entries, _ := parseBansCfg(content)
 
-	existingSteamIDs, err := s.getExistingBanSteamIDs(c.Request.Context(), serverID)
+	existingSteamIDs, existingEOSIDs, err := s.getExistingBanIDs(c.Request.Context(), serverID)
 	if err != nil {
 		responses.BadRequest(c, "Failed to query existing bans", &gin.H{"error": err.Error()})
 		return
 	}
 
-	newBans, existingBans, expiredBans := categorizeBans(entries, existingSteamIDs)
+	newBans, existingBans, expiredBans, autoBans := categorizeBans(entries, existingSteamIDs, existingEOSIDs)
 
 	result := models.BanImportResult{
 		SkippedCount: len(existingBans),
-		ExpiredCount: len(expiredBans),
+		ExpiredCount: len(expiredBans) + len(autoBans),
 	}
 
 	if len(newBans) == 0 {
@@ -329,18 +376,33 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 			reason = "Imported from Bans.cfg"
 		}
 
-		steamIDInt, err := strconv.ParseInt(ban.SteamID, 10, 64)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("invalid Steam ID %s: %v", ban.SteamID, err))
-			continue
+		// Prepare nullable ID pointers
+		var steamIDPtr *int64
+		var eosIDPtr *string
+
+		if ban.SteamID != "" {
+			v, err := strconv.ParseInt(ban.SteamID, 10, 64)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("invalid Steam ID %s: %v", ban.SteamID, err))
+				continue
+			}
+			steamIDPtr = &v
+		}
+		if ban.EOSID != "" {
+			eosIDPtr = &ban.EOSID
+		}
+
+		banID := fmt.Sprintf("import-%s", ban.SteamID)
+		if ban.SteamID == "" {
+			banID = fmt.Sprintf("import-%s", ban.EOSID)
 		}
 
 		_, err = tx.ExecContext(c.Request.Context(), `
-			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		`, uuid.New(), serverID, user.Id, steamIDInt, reason, duration, now, now)
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`, uuid.New(), serverID, user.Id, steamIDPtr, eosIDPtr, reason, duration, now, now)
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("failed to insert ban for %s: %v", ban.SteamID, err))
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to insert ban for %s: %v", banID, err))
 			continue
 		}
 

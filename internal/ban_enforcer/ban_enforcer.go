@@ -85,20 +85,22 @@ func (b *BanEnforcer) handlePlayerConnected(event event_manager.Event) {
 	}
 
 	steamID := data.SteamID
-	if steamID == "" {
+	eosID := data.EOSID
+	if steamID == "" && eosID == "" {
 		return
 	}
 
 	serverID := event.ServerID
 
 	// Check for an active ban on this server (including subscribed ban lists)
-	ban, err := core.GetActiveBanForServer(b.ctx, b.db, serverID, steamID)
+	// Checks both Steam ID and EOS ID in a single query
+	ban, err := core.GetActiveBanForServer(b.ctx, b.db, serverID, steamID, eosID)
 	if err != nil {
 		// sql.ErrNoRows means no active ban - this is the normal case
 		if err == sql.ErrNoRows {
 			return
 		}
-		log.Error().Err(err).Str("steamId", steamID).Str("serverId", serverID.String()).Msg("Failed to check active ban")
+		log.Error().Err(err).Str("steamId", steamID).Str("eosId", eosID).Str("serverId", serverID.String()).Msg("Failed to check active ban")
 		return
 	}
 
@@ -108,11 +110,18 @@ func (b *BanEnforcer) handlePlayerConnected(event event_manager.Event) {
 		reason = "You are banned from this server"
 	}
 
-	kickCmd := fmt.Sprintf("AdminKick %s %s", steamID, reason)
+	// Prefer Steam ID for kick command, fall back to EOS ID
+	kickID := steamID
+	if kickID == "" {
+		kickID = eosID
+	}
+
+	kickCmd := fmt.Sprintf("AdminKick %s %s", kickID, reason)
 	_, err = b.rconManager.ExecuteCommand(serverID, kickCmd)
 	if err != nil {
 		log.Error().Err(err).
 			Str("steamId", steamID).
+			Str("eosId", eosID).
 			Str("serverId", serverID.String()).
 			Str("banId", ban.ID).
 			Msg("Failed to kick banned player")
@@ -121,6 +130,7 @@ func (b *BanEnforcer) handlePlayerConnected(event event_manager.Event) {
 
 	log.Info().
 		Str("steamId", steamID).
+		Str("eosId", eosID).
 		Str("serverId", serverID.String()).
 		Str("banId", ban.ID).
 		Bool("permanent", ban.Permanent).

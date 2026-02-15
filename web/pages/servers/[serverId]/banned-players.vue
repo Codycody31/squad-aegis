@@ -1407,10 +1407,12 @@ function selectBanCfgUrl(event: Event) {
 // ---- Ban Import from Bans.cfg ----
 interface CfgBanEntry {
     steam_id: string;
+    eos_id: string;
     expiry_timestamp: number;
     reason: string;
     permanent: boolean;
     expired: boolean;
+    is_auto_ban: boolean;
     raw_line: string;
 }
 
@@ -1420,6 +1422,7 @@ interface BanImportPreviewData {
     new_bans: CfgBanEntry[];
     existing_bans: CfgBanEntry[];
     expired_bans: CfgBanEntry[];
+    auto_bans: CfgBanEntry[];
     unparseable_count: number;
 }
 
@@ -1563,7 +1566,7 @@ async function executeImport() {
                             <template v-else>
                                 <p class="text-sm text-muted-foreground">File: <code class="bg-muted px-1 py-0.5 rounded text-xs">{{ importPreview.cfg_path }}</code></p>
 
-                                <div class="grid grid-cols-3 gap-3">
+                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                     <Card>
                                         <CardContent class="p-3 text-center">
                                             <div class="text-2xl font-bold">{{ importPreview.new_bans?.length || 0 }}</div>
@@ -1582,6 +1585,12 @@ async function executeImport() {
                                             <div class="text-xs text-muted-foreground">Expired (skip)</div>
                                         </CardContent>
                                     </Card>
+                                    <Card>
+                                        <CardContent class="p-3 text-center">
+                                            <div class="text-2xl font-bold">{{ importPreview.auto_bans?.length || 0 }}</div>
+                                            <div class="text-xs text-muted-foreground">Auto-bans (skip)</div>
+                                        </CardContent>
+                                    </Card>
                                 </div>
 
                                 <div v-if="importPreview.unparseable_count > 0" class="text-xs text-muted-foreground">
@@ -1595,14 +1604,17 @@ async function executeImport() {
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
-                                                    <TableHead class="text-xs">Steam ID</TableHead>
+                                                    <TableHead class="text-xs">Player ID</TableHead>
                                                     <TableHead class="text-xs">Reason</TableHead>
                                                     <TableHead class="text-xs">Type</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
-                                                <TableRow v-for="ban in importPreview.new_bans" :key="ban.steam_id">
-                                                    <TableCell class="text-xs font-mono">{{ ban.steam_id }}</TableCell>
+                                                <TableRow v-for="ban in importPreview.new_bans" :key="ban.steam_id || ban.eos_id">
+                                                    <TableCell class="text-xs font-mono">
+                                                        {{ ban.steam_id || ban.eos_id }}
+                                                        <Badge v-if="ban.eos_id" variant="outline" class="ml-1 text-[10px] px-1 py-0">EOS</Badge>
+                                                    </TableCell>
                                                     <TableCell class="text-xs">{{ ban.reason || '(no reason)' }}</TableCell>
                                                     <TableCell class="text-xs">
                                                         <Badge :variant="ban.permanent ? 'destructive' : 'secondary'">
@@ -1615,8 +1627,13 @@ async function executeImport() {
                                     </div>
                                 </div>
 
-                                <div v-else class="text-sm text-muted-foreground py-2">
-                                    No new bans to import. All entries in Bans.cfg are already in the database or expired.
+                                <!-- Auto-bans info -->
+                                <div v-if="importPreview.auto_bans?.length" class="text-xs text-muted-foreground">
+                                    {{ importPreview.auto_bans.length }} automatic server ban(s) (e.g., teamkill kicks) will be skipped.
+                                </div>
+
+                                <div v-if="!importPreview.new_bans?.length" class="text-sm text-muted-foreground py-2">
+                                    No new bans to import. All entries in Bans.cfg are already in the database, expired, or are automatic server bans.
                                 </div>
                             </template>
                         </div>

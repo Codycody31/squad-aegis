@@ -37,6 +37,7 @@ type ServerBan struct {
 	AdminName    string        `json:"admin_name"`
 	AdminSteamID string        `json:"admin_steam_id,omitempty"`
 	SteamID      string        `json:"steam_id"`
+	EOSID        string        `json:"eos_id,omitempty"`
 	Name         string        `json:"name"`
 	Reason       string        `json:"reason"`
 	Duration     int           `json:"duration"`
@@ -303,11 +304,13 @@ type IgnoredSteamIDUpdateRequest struct {
 
 // CfgBanEntry represents a parsed entry from a Squad Bans.cfg file.
 type CfgBanEntry struct {
-	SteamID         string `json:"steam_id"`
-	ExpiryTimestamp int64  `json:"expiry_timestamp"` // Unix timestamp, 0 = permanent
+	SteamID         string `json:"steam_id"`          // May be empty for EOS-only bans
+	EOSID           string `json:"eos_id"`            // May be empty for Steam-only bans
+	ExpiryTimestamp int64  `json:"expiry_timestamp"`  // Unix timestamp, 0 = permanent
 	Reason          string `json:"reason"`
 	Permanent       bool   `json:"permanent"`
 	Expired         bool   `json:"expired"`
+	IsAutoBan       bool   `json:"is_auto_ban"`       // Server-generated (e.g., teamkill kicks)
 	RawLine         string `json:"raw_line"`
 }
 
@@ -318,6 +321,7 @@ type BanImportPreview struct {
 	NewBans          []CfgBanEntry `json:"new_bans"`
 	ExistingBans     []CfgBanEntry `json:"existing_bans"`
 	ExpiredBans      []CfgBanEntry `json:"expired_bans"`
+	AutoBans         []CfgBanEntry `json:"auto_bans"`
 	UnparseableCount int           `json:"unparseable_count"`
 }
 

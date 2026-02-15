@@ -2,7 +2,10 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Masterminds/squirrel"
@@ -459,29 +462,58 @@ func IsIgnoredSteamID(ctx context.Context, database db.Executor, steamID string)
 	return count > 0, nil
 }
 
-// GetActiveBanForServer checks if a steam ID has an active (non-expired) ban
+// GetActiveBanForServer checks if a steam ID or EOS ID has an active (non-expired) ban
 // on the given server, including bans from subscribed ban lists.
+// At least one of steamID or eosID must be non-empty.
 // Returns nil if no active ban is found.
-func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID uuid.UUID, steamID string) (*models.ServerBan, error) {
-	query := `
+func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID uuid.UUID, steamID string, eosID string) (*models.ServerBan, error) {
+	// Build identifier conditions dynamically to avoid PostgreSQL cast issues.
+	// Passing "" to $1::bigint fails even with a "$1 != ''" guard because
+	// PostgreSQL does not guarantee short-circuit evaluation of AND/OR.
+	var idConditions []string
+	args := []any{}
+	argIdx := 1
+
+	if steamID != "" {
+		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid steam ID %q: %w", steamID, err)
+		}
+		idConditions = append(idConditions, fmt.Sprintf("sb.steam_id = $%d", argIdx))
+		args = append(args, steamIDInt)
+		argIdx++
+	}
+	if eosID != "" {
+		idConditions = append(idConditions, fmt.Sprintf("sb.eos_id = $%d", argIdx))
+		args = append(args, eosID)
+		argIdx++
+	}
+	if len(idConditions) == 0 {
+		return nil, sql.ErrNoRows
+	}
+
+	serverPlaceholder := fmt.Sprintf("$%d", argIdx)
+	args = append(args, serverID)
+
+	query := fmt.Sprintf(`
 		SELECT sb.id, sb.reason, sb.duration, sb.created_at
 		FROM server_bans sb
-		WHERE sb.steam_id = $1
+		WHERE (%s)
 		AND (sb.duration = 0 OR sb.created_at + (sb.duration || ' days')::interval > NOW())
 		AND (
-			sb.server_id = $2
+			sb.server_id = %s
 			OR sb.ban_list_id IN (
 				SELECT sbls.ban_list_id
 				FROM server_ban_list_subscriptions sbls
-				WHERE sbls.server_id = $2
+				WHERE sbls.server_id = %s
 			)
 		)
 		ORDER BY sb.created_at DESC
 		LIMIT 1
-	`
+	`, strings.Join(idConditions, " OR "), serverPlaceholder, serverPlaceholder)
 
 	var ban models.ServerBan
-	err := database.QueryRowContext(ctx, query, steamID, serverID).Scan(
+	err := database.QueryRowContext(ctx, query, args...).Scan(
 		&ban.ID, &ban.Reason, &ban.Duration, &ban.CreatedAt,
 	)
 	if err != nil {
