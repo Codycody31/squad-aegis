@@ -39,6 +39,7 @@ func (d RconPlayerKickedData) GetEventType() EventType { return EventTypeRconPla
 // RconPlayerBannedData represents RCON player banned event data
 type RconPlayerBannedData struct {
 	PlayerID   string `json:"player_id,omitempty"`
+	EosID      string `json:"eos_id,omitempty"`
 	SteamID    string `json:"steam_id,omitempty"`
 	PlayerName string `json:"player_name"`
 	Interval   int    `json:"interval"`

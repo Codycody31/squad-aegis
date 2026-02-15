@@ -178,9 +178,9 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		return
 	}
 
-	// Validate request
-	if request.SteamID == "" {
-		responses.BadRequest(c, "Steam ID is required", &gin.H{"error": "Steam ID is required"})
+	// Validate request - at least one player identifier required
+	if request.SteamID == "" && request.EOSID == "" {
+		responses.BadRequest(c, "Steam ID or EOS ID is required", &gin.H{"error": "At least one player identifier (steam_id or eos_id) is required"})
 		return
 	}
 
@@ -194,65 +194,65 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		return
 	}
 
-	// Convert SteamID to int64
-	steamID, err := strconv.ParseInt(request.SteamID, 10, 64)
-	if err != nil {
-		responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
-		return
+	// Detect and validate player ID types
+	var steamIDVal interface{}
+	var eosIDVal interface{}
+	if request.SteamID != "" {
+		steamID, parseErr := strconv.ParseInt(request.SteamID, 10, 64)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
+			return
+		}
+		steamIDVal = steamID
+	}
+	if request.EOSID != "" {
+		if len(request.EOSID) != 32 {
+			responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
+			return
+		}
+		eosIDVal = request.EOSID
 	}
 
-	// Insert the ban into the database (using steam_id directly)
+	// Determine the player ID to use for RCON commands (prefer Steam ID)
+	rconPlayerID := request.SteamID
+	if rconPlayerID == "" {
+		rconPlayerID = request.EOSID
+	}
+
+	// Build INSERT query dynamically
 	var banID uuid.UUID = uuid.New()
 	now := time.Now()
 
-	query := `
-		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, evidence_text, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id
-	`
-	args := []interface{}{banID, serverId, user.Id, steamID, request.Reason, request.Duration, request.EvidenceText, now, now}
+	columns := "id, server_id, admin_id, steam_id, eos_id, reason, duration, evidence_text, created_at, updated_at"
+	placeholders := "$1, $2, $3, $4, $5, $6, $7, $8, $9, $10"
+	args := []interface{}{banID, serverId, user.Id, steamIDVal, eosIDVal, request.Reason, request.Duration, request.EvidenceText, now, now}
+	nextParam := 11
 
-	// Add rule_id and ban_list_id if provided
 	if request.RuleID != nil && *request.RuleID != "" {
-		ruleUUID, err := uuid.Parse(*request.RuleID)
-		if err != nil {
-			responses.BadRequest(c, "Invalid rule ID format", &gin.H{"error": err.Error()})
+		ruleUUID, parseErr := uuid.Parse(*request.RuleID)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid rule ID format", &gin.H{"error": parseErr.Error()})
 			return
 		}
-
-		if request.BanListID != nil && *request.BanListID != "" {
-			banListUUID, err := uuid.Parse(*request.BanListID)
-			if err != nil {
-				responses.BadRequest(c, "Invalid ban list ID format", &gin.H{"error": err.Error()})
-				return
-			}
-			query = `
-				INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, ban_list_id, evidence_text, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-				RETURNING id
-			`
-			args = append(args[:6], ruleUUID, banListUUID, request.EvidenceText, now, now)
-		} else {
-			query = `
-				INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, evidence_text, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-				RETURNING id
-			`
-			args = append(args[:6], ruleUUID, request.EvidenceText, now, now)
-		}
-	} else if request.BanListID != nil && *request.BanListID != "" {
-		banListUUID, err := uuid.Parse(*request.BanListID)
-		if err != nil {
-			responses.BadRequest(c, "Invalid ban list ID format", &gin.H{"error": err.Error()})
-			return
-		}
-		query = `
-			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, ban_list_id, evidence_text, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			RETURNING id
-		`
-		args = append(args[:6], banListUUID, request.EvidenceText, now, now)
+		columns += ", rule_id"
+		placeholders += fmt.Sprintf(", $%d", nextParam)
+		args = append(args, ruleUUID)
+		nextParam++
 	}
+
+	if request.BanListID != nil && *request.BanListID != "" {
+		banListUUID, parseErr := uuid.Parse(*request.BanListID)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid ban list ID format", &gin.H{"error": parseErr.Error()})
+			return
+		}
+		columns += ", ban_list_id"
+		placeholders += fmt.Sprintf(", $%d", nextParam)
+		args = append(args, banListUUID)
+		nextParam++
+	}
+
+	query := fmt.Sprintf(`INSERT INTO server_bans (%s) VALUES (%s) RETURNING id`, columns, placeholders)
 
 	var returnedBanID string
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&returnedBanID)
@@ -273,14 +273,14 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	// Apply the ban via RCON if the server is online
 	if server != nil {
 		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-		err = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
+		err = r.BanPlayer(rconPlayerID, request.Duration, request.Reason)
 		if err != nil {
-			log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to apply ban via RCON")
+			log.Error().Err(err).Str("playerID", rconPlayerID).Str("serverId", server.Id.String()).Msg("Failed to apply ban via RCON")
 		}
 	}
 
-	// Log rule violation to ClickHouse if rule ID is provided
-	if request.RuleID != nil && *request.RuleID != "" {
+	// Log rule violation to ClickHouse if rule ID is provided (Steam ID only - ClickHouse schema requires UInt64)
+	if request.RuleID != nil && *request.RuleID != "" && request.SteamID != "" {
 		if err := s.logRuleViolation(c.Request.Context(), serverId, request.SteamID, request.RuleID, &user.Id, "BAN"); err != nil {
 			log.Warn().Err(err).Str("steamId", request.SteamID).Str("ruleId", *request.RuleID).Msg("Failed to log rule violation for manual ban")
 			// Don't fail the ban creation if violation logging fails
@@ -290,10 +290,15 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"banId":         banID.String(),
-		"steamId":       request.SteamID,
 		"reason":        request.Reason,
 		"duration":      request.Duration,
 		"evidenceCount": len(request.Evidence),
+	}
+	if request.SteamID != "" {
+		auditData["steamId"] = request.SteamID
+	}
+	if request.EOSID != "" {
+		auditData["eosId"] = request.EOSID
 	}
 
 	// Add rule ID to audit log if provided

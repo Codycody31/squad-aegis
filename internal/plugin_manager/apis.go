@@ -740,10 +740,15 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 		return "", fmt.Errorf("invalid event ID format: %w", err)
 	}
 
-	// Convert playerID to int64
-	steamID, err := strconv.ParseInt(playerID, 10, 64)
-	if err != nil {
-		return "", fmt.Errorf("invalid Steam ID format: %w", err)
+	// Detect player ID type (Steam ID or EOS ID)
+	var steamIDVal interface{}
+	var eosIDVal interface{}
+	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
+		steamIDVal = sid
+	} else if len(playerID) == 32 {
+		eosIDVal = playerID
+	} else {
+		return "", fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}
 
 	// Start transaction
@@ -757,11 +762,12 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 	banID := uuid.New()
 	now := time.Now()
 
-	banQuery := `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
+	banQuery := `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
 	_, err = tx.Exec(banQuery,
 		banID,
 		api.serverID,
-		steamID,
+		steamIDVal,
+		eosIDVal,
 		reason,
 		durationDays,
 		now,
@@ -817,10 +823,15 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 
 // storeBanInDatabase stores the ban information in the database
 func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration time.Duration) error {
-	// Convert playerID (which should be a Steam ID) to int64
-	steamID, err := strconv.ParseInt(playerID, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid Steam ID format: %w", err)
+	// Detect player ID type (Steam ID or EOS ID)
+	var steamIDVal interface{}
+	var eosIDVal interface{}
+	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
+		steamIDVal = sid
+	} else if len(playerID) == 32 {
+		eosIDVal = playerID
+	} else {
+		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}
 
 	// Convert duration to days for database storage
@@ -830,14 +841,15 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 	// We use NULL for admin_id since this is a plugin-initiated ban, not a specific user
 	now := time.Now()
 	query := `
-		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at)
-		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
 	`
 
-	_, err = api.db.Exec(query,
+	_, err := api.db.Exec(query,
 		uuid.New(),   // id
 		api.serverID, // server_id
-		steamID,      // steam_id
+		steamIDVal,   // steam_id (nil if EOS-only)
+		eosIDVal,     // eos_id (nil if Steam-only)
 		reason,       // reason
 		durationDays, // duration in days
 		now,          // created_at
@@ -869,8 +881,8 @@ func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, acti
 
 	steamID, err := strconv.ParseInt(playerID, 10, 64)
 	if err != nil {
-		log.Warn().Err(err).Str("player_id", playerID).Msg("Invalid Steam ID format, skipping violation log")
-		return nil
+		log.Warn().Err(err).Str("player_id", playerID).Msg("Non-numeric player ID (likely EOS ID), skipping ClickHouse violation log")
+		return nil // ClickHouse schema requires UInt64 for player_steam_id; EOS IDs not supported yet
 	}
 
 	query := `

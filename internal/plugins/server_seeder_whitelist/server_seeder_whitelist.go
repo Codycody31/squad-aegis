@@ -461,7 +461,11 @@ func (p *ServerSeederWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager
 		return nil
 	}
 
-	return p.sendProgressToPlayer(event.SteamID)
+	playerID := event.SteamID
+	if playerID == "" {
+		playerID = event.EosID
+	}
+	return p.sendProgressToPlayer(playerID)
 }
 
 // handlePlayerConnected tracks when players connect for statistics
@@ -584,6 +588,9 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 			continue
 		}
 
+		// Resolve preferred ID for RCON calls (SteamID with EOS ID fallback)
+		playerPreferredID := player.PreferredID()
+
 		record, exists := p.playerProgress[steamID]
 		if !exists {
 			record = &PlayerProgressRecord{
@@ -620,8 +627,8 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 		for _, threshold := range notificationThresholds {
 			thresholdFloat := float64(threshold)
 			if oldPercentage < thresholdFloat && newPercentage >= thresholdFloat {
-				// Player crossed a notification threshold
-				go p.sendProgressNotification(steamID, player.Name, newPercentage, newProgress >= whitelistThreshold)
+				// Player crossed a notification threshold - use preferred ID for RCON call
+				go p.sendProgressNotification(playerPreferredID, player.Name, newPercentage, newProgress >= whitelistThreshold)
 				break
 			}
 		}

@@ -34,6 +34,17 @@ func isHex(s string) bool {
 	return len(s) > 0
 }
 
+// isEOSID returns true if the string looks like an EOS ID (32-char hex).
+func isEOSID(s string) bool {
+	return len(s) == 32 && isHex(s)
+}
+
+// isSteamID returns true if the string looks like a Steam ID (numeric, parses to int64).
+func isSteamID(s string) bool {
+	_, err := strconv.ParseInt(s, 10, 64)
+	return err == nil
+}
+
 // parseBansCfg parses the content of a Squad Bans.cfg file into structured entries.
 // Returns the parsed entries and the count of lines that could not be parsed.
 //

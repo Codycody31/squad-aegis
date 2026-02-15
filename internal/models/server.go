@@ -140,6 +140,7 @@ type ServerRole struct {
 
 type ServerBanCreateRequest struct {
 	SteamID      string                  `json:"steam_id"`
+	EOSID        string                  `json:"eos_id,omitempty"`
 	Reason       string                  `json:"reason"`
 	Duration     int                     `json:"duration"`
 	RuleID       *string                 `json:"rule_id,omitempty"`

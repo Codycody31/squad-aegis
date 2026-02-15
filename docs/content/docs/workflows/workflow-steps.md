@@ -81,7 +81,7 @@ Kicks a player from the server.
 
 **Configuration:**
 
-- `player_id` (required) - Player ID (Steam ID or player name) to kick
+- `player_id` (required) - Player ID (Steam ID, EOS ID, or player name) to kick
 - `reason` (optional) - Reason for the kick
 
 **Example:**
@@ -104,7 +104,7 @@ Bans a player from the server.
 
 **Configuration:**
 
-- `player_id` (required) - Player ID (Steam ID or player name) to ban
+- `player_id` (required) - Player ID (Steam ID, EOS ID, or player name) to ban
 - `duration` (required) - Ban duration in days (0 = permanent)
 - `reason` (optional) - Reason for the ban
 
@@ -129,7 +129,7 @@ Bans a player and automatically links the triggering event as evidence in the da
 
 **Configuration:**
 
-- `player_id` (required) - Player ID (Steam ID or player name) to ban
+- `player_id` (required) - Player ID (Steam ID, EOS ID, or player name) to ban
 - `duration` (required) - Ban duration in days (0 = permanent)
 - `reason` (optional) - Reason for the ban
 - `rule_id` (optional) - Server rule UUID to associate with the ban
@@ -600,8 +600,8 @@ In most text fields, you can use variable replacement syntax to access dynamic d
 **Player Events:**
 
 - `${trigger_event.player_name}` - Player name
-- `${trigger_event.steam_id}` - Player's Steam ID
-- `${trigger_event.eos_id}` - Player's Epic Online Services ID
+- `${trigger_event.steam_id}` - Player's Steam ID (may be empty for EOS-only players)
+- `${trigger_event.eos_id}` - Player's Epic Online Services ID (may be empty for Steam-only players)
 
 **Admin Events:**
 
@@ -714,10 +714,10 @@ This workflow demonstrates:
 #### Common RCON Commands
 
 - `AdminBroadcast <message>` - Broadcast message to all players
-- `AdminWarn <steam_id> <message>` - Send warning to specific player
-- `AdminKick <steam_id> <reason>` - Kick player from server
-- `AdminBan <steam_id> <duration> <reason>` - Ban player (duration in minutes)
-- `AdminForceTeamChange <steam_id>` - Force player to switch teams
+- `AdminWarn <player_id> <message>` - Send warning to specific player (accepts Steam ID or EOS ID)
+- `AdminKick <player_id> <reason>` - Kick player from server (accepts Steam ID or EOS ID)
+- `AdminBan <player_id> <duration> <reason>` - Ban player (accepts Steam ID or EOS ID, duration in minutes)
+- `AdminForceTeamChange <player_id>` - Force player to switch teams (accepts Steam ID or EOS ID)
 - `AdminChangeMap <layer>` - Change the current map layer
 - `AdminSetMaxNumPlayers <number>` - Set maximum player count
 - `AdminSlowMo <multiplier>` - Change game speed (admin testing)

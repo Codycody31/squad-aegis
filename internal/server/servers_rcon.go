@@ -408,11 +408,11 @@ func (s *Server) logRuleViolation(ctx context.Context, serverId uuid.UUID, steam
 		return nil // Don't fail the action if rule ID is invalid
 	}
 
-	// Parse steam ID to uint64
+	// Parse steam ID to uint64 (ClickHouse schema requires UInt64, so EOS-only players are skipped)
 	steamIdInt, err := strconv.ParseInt(steamId, 10, 64)
 	if err != nil {
-		log.Warn().Err(err).Str("steam_id", steamId).Msg("Invalid steam ID format, skipping violation log")
-		return nil // Don't fail the action if steam ID is invalid
+		log.Warn().Err(err).Str("player_id", steamId).Msg("Non-numeric player ID (likely EOS ID), skipping ClickHouse violation log")
+		return nil // ClickHouse schema requires UInt64 for player_steam_id; EOS IDs not supported yet
 	}
 
 	query := `

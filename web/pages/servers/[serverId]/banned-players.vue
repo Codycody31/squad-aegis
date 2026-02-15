@@ -146,6 +146,7 @@ interface BannedPlayer {
     admin_id: string;
     admin_name: string;
     steam_id: string;
+    eos_id?: string;
     name: string;
     reason: string;
     duration: number;
@@ -174,9 +175,11 @@ const formSchema = toTypedSchema(
     z.object({
         steam_id: z
             .string()
-            .min(17, "Steam ID must be at least 17 characters")
-            .max(17, "Steam ID must be exactly 17 characters")
-            .regex(/^\d+$/, "Steam ID must contain only numbers"),
+            .min(1, "Player ID is required")
+            .refine(
+                (val) => /^\d{17}$/.test(val) || /^[0-9a-fA-F]{32}$/.test(val),
+                "Must be a 17-digit Steam ID or 32-character hex EOS ID"
+            ),
         reason: z.string().optional(), // Now optional - will be auto-generated when rule is selected
         duration: z.number().min(0, "Duration must be at least 0"),
         ban_list_id: z.string().optional(),
@@ -329,7 +332,8 @@ const filteredBannedPlayers = computed(() => {
         filtered = filtered.filter(
             (player) =>
                 player.name.toLowerCase().includes(query) ||
-                player.steam_id.includes(query) ||
+                player.steam_id?.includes(query) ||
+                player.eos_id?.toLowerCase().includes(query) ||
                 player.reason.toLowerCase().includes(query),
         );
     }
@@ -392,8 +396,8 @@ async function addBan(values: any) {
     const runtimeConfig = useRuntimeConfig();
 
     try {
-        // Clean and validate steam_id
-        const cleanId = cleanSteamId(steam_id);
+        // Clean and validate player ID (Steam ID or EOS ID)
+        const playerIds = cleanPlayerId(steam_id);
 
         // Check if a valid rule is selected (not __none__ sentinel value)
         const hasValidRule = rule_id && rule_id.trim() && rule_id !== "__none__";
@@ -410,10 +414,15 @@ async function addBan(values: any) {
         }
 
         const requestBody: any = {
-            steam_id: cleanId,
             reason: finalReason,
             duration,
         };
+        if (playerIds.steamId) {
+            requestBody.steam_id = playerIds.steamId;
+        }
+        if (playerIds.eosId) {
+            requestBody.eos_id = playerIds.eosId;
+        }
 
         // Add ban_list_id if selected
         if (ban_list_id && ban_list_id.trim()) {
@@ -1122,26 +1131,32 @@ function calculateSuggestedDuration() {
 }
 
 // Function to open evidence dialog
-// Helper function to clean and validate steam_id
-function cleanSteamId(steamId: string | number | undefined | null): string {
-    if (!steamId) {
-        throw new Error("Steam ID is required");
+// Helper function to clean and validate a player ID (Steam ID or EOS ID)
+function cleanPlayerId(playerId: string | number | undefined | null): { steamId?: string; eosId?: string; rconId: string } {
+    if (!playerId) {
+        throw new Error("Player ID is required");
     }
-    // Remove any quotes, whitespace, and ensure it's a number string
-    const cleaned = String(steamId).trim().replace(/['"]/g, '');
-    
-    // Validate it's a valid number
-    if (!/^\d+$/.test(cleaned)) {
-        throw new Error("Steam ID must be a valid number");
+    // Remove any quotes and whitespace
+    const cleaned = String(playerId).trim().replace(/['"]/g, '');
+
+    // Check if it's a Steam ID (17-digit number)
+    if (/^\d{17}$/.test(cleaned)) {
+        return { steamId: cleaned, rconId: cleaned };
     }
-    
-    return cleaned;
+
+    // Check if it's an EOS ID (32-char hex)
+    if (/^[0-9a-fA-F]{32}$/.test(cleaned)) {
+        return { eosId: cleaned, rconId: cleaned };
+    }
+
+    throw new Error("Must be a 17-digit Steam ID or 32-character hex EOS ID");
 }
 
 // Function to search evidence inline (no longer opens a dialog)
 async function searchEvidenceInline(steamId: string) {
     try {
-        const cleanId = cleanSteamId(steamId);
+        const playerIds = cleanPlayerId(steamId);
+        const cleanId = playerIds.rconId;
         evidenceSearchSteamId.value = cleanId;
         isSearchingEvidence.value = true;
         evidenceSearchResults.value = [];
@@ -1781,14 +1796,14 @@ async function executeImport() {
                                                         </div>
                                                     </div>
 
-                                                    <!-- Steam ID Input - always present for form binding, hidden when player selected -->
+                                                    <!-- Player ID Input - always present for form binding, hidden when player selected -->
                                                     <Input
                                                         v-bind="componentField"
                                                         :class="{ 'hidden': selectedPlayer }"
-                                                        placeholder="Or enter Steam ID: 76561198012345678"
+                                                        placeholder="Steam ID (76561198012345678) or EOS ID (32-char hex)"
                                                         @input="(e: Event) => {
                                                             const target = e.target as HTMLInputElement;
-                                                            if (target.value.length === 17) {
+                                                            if (target.value.length === 17 && /^\d+$/.test(target.value)) {
                                                                 fetchPlayerBanHistory(target.value);
                                                             }
                                                         }"
@@ -1796,7 +1811,7 @@ async function executeImport() {
                                                 </div>
                                             </FormControl>
                                             <FormDescription v-if="!selectedPlayer">
-                                                Search for a player by name, or enter their Steam ID directly
+                                                Search for a player by name, or enter their Steam ID or EOS ID directly
                                             </FormDescription>
                                             <FormMessage />
                                         </FormItem>
@@ -2337,12 +2352,19 @@ async function executeImport() {
                                                 >
                                                 {{ editingBan.player_name }}
                                             </p>
-                                            <p>
+                                            <p v-if="editingBan.steam_id">
                                                 <span
                                                     class="text-muted-foreground"
                                                     >Steam ID:</span
                                                 >
                                                 {{ editingBan.steam_id }}
+                                            </p>
+                                            <p v-if="editingBan.eos_id">
+                                                <span
+                                                    class="text-muted-foreground"
+                                                    >EOS ID:</span
+                                                >
+                                                {{ editingBan.eos_id }}
                                             </p>
                                         </div>
                                     </div>
@@ -2729,9 +2751,13 @@ async function executeImport() {
                             <!-- Ban Info -->
                             <div class="border rounded-md p-3 bg-muted/50">
                                 <div class="grid grid-cols-2 gap-2 text-sm">
-                                    <div>
+                                    <div v-if="viewingBanEvidence.steam_id">
                                         <span class="text-muted-foreground">Steam ID:</span>
                                         <span class="ml-2 font-medium">{{ viewingBanEvidence.steam_id }}</span>
+                                    </div>
+                                    <div v-if="viewingBanEvidence.eos_id">
+                                        <span class="text-muted-foreground">EOS ID:</span>
+                                        <span class="ml-2 font-medium">{{ viewingBanEvidence.eos_id }}</span>
                                     </div>
                                     <div>
                                         <span class="text-muted-foreground">Reason:</span>
@@ -2959,7 +2985,7 @@ async function executeImport() {
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-3 sm:mb-4">
                     <Input
                         v-model="searchQuery"
-                        placeholder="Search by Steam ID, or reason..."
+                        placeholder="Search by Steam ID, EOS ID, or reason..."
                         class="flex-grow text-sm sm:text-base"
                     />
                     <div class="flex items-center space-x-2">
@@ -3011,7 +3037,7 @@ async function executeImport() {
                         <Table class="min-w-full">
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead class="text-xs sm:text-sm">Steam ID</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Player ID</TableHead>
                                     <TableHead class="text-xs sm:text-sm">Reason</TableHead>
                                     <TableHead class="text-xs sm:text-sm">Rule</TableHead>
                                     <TableHead class="text-xs sm:text-sm">Evidence</TableHead>
@@ -3031,19 +3057,37 @@ async function executeImport() {
                                 >
                                     <TableCell>
                                         <RouterLink
+                                            v-if="player.steam_id"
                                             :to="`/players/${player.steam_id}`"
                                             class="hover:underline"
                                         >
                                             <div class="font-medium text-sm sm:text-base text-primary">
-                                                {{ player.name && player.name !== player.steam_id ? player.name : player.steam_id }}
+                                                {{ player.name && player.name !== player.steam_id && player.name !== player.eos_id ? player.name : (player.steam_id || player.eos_id) }}
                                             </div>
                                             <div
-                                                v-if="player.name && player.name !== player.steam_id"
+                                                v-if="player.name && player.name !== player.steam_id && player.name !== player.eos_id"
                                                 class="text-xs text-muted-foreground"
                                             >
                                                 {{ player.steam_id }}
                                             </div>
+                                            <div
+                                                v-if="player.eos_id"
+                                                class="text-xs text-muted-foreground"
+                                            >
+                                                EOS: {{ player.eos_id }}
+                                            </div>
                                         </RouterLink>
+                                        <div v-else>
+                                            <div class="font-medium text-sm sm:text-base">
+                                                {{ player.name && player.name !== player.eos_id ? player.name : player.eos_id }}
+                                            </div>
+                                            <div
+                                                v-if="player.eos_id && player.name && player.name !== player.eos_id"
+                                                class="text-xs text-muted-foreground"
+                                            >
+                                                EOS: {{ player.eos_id }}
+                                            </div>
+                                        </div>
                                     </TableCell>
                                     <TableCell class="text-xs sm:text-sm">{{ player.reason }}</TableCell>
                                     <TableCell>
@@ -3151,19 +3195,31 @@ async function executeImport() {
                         <div class="flex items-start justify-between gap-2 mb-2">
                             <div class="flex-1 min-w-0">
                                 <RouterLink
+                                    v-if="player.steam_id"
                                     :to="`/players/${player.steam_id}`"
                                     class="hover:underline"
                                 >
                                     <div class="font-semibold text-sm sm:text-base mb-1 text-primary">
-                                        {{ player.name && player.name !== player.steam_id ? player.name : player.steam_id }}
+                                        {{ player.name && player.name !== player.steam_id && player.name !== player.eos_id ? player.name : (player.steam_id || player.eos_id) }}
                                     </div>
                                     <div
-                                        v-if="player.name && player.name !== player.steam_id"
+                                        v-if="player.name && player.name !== player.steam_id && player.name !== player.eos_id"
                                         class="text-xs text-muted-foreground mb-2"
                                     >
                                         {{ player.steam_id }}
                                     </div>
                                 </RouterLink>
+                                <div v-else class="mb-1">
+                                    <div class="font-semibold text-sm sm:text-base">
+                                        {{ player.name && player.name !== player.eos_id ? player.name : player.eos_id }}
+                                    </div>
+                                    <div
+                                        v-if="player.eos_id && player.name && player.name !== player.eos_id"
+                                        class="text-xs text-muted-foreground mb-2"
+                                    >
+                                        EOS: {{ player.eos_id }}
+                                    </div>
+                                </div>
                                 <div class="space-y-1.5">
                                     <div>
                                         <span class="text-xs text-muted-foreground">Reason: </span>

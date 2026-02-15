@@ -470,12 +470,18 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 	// Get rule ID for violation logging
 	ruleID := p.getRuleIDPtr()
 
+	// Use EOS ID as fallback when Steam ID is empty for RCON calls
+	playerID := chatEvent.SteamID
+	if playerID == "" {
+		playerID = chatEvent.EosID
+	}
+
 	var actionErr error
 	switch action.Action {
 	case "WARN":
-		actionErr = p.apis.RconAPI.WarnPlayerWithRule(chatEvent.SteamID, message, ruleID)
+		actionErr = p.apis.RconAPI.WarnPlayerWithRule(playerID, message, ruleID)
 	case "KICK":
-		actionErr = p.apis.RconAPI.KickPlayerWithRule(chatEvent.SteamID, message, ruleID)
+		actionErr = p.apis.RconAPI.KickPlayerWithRule(playerID, message, ruleID)
 	case "BAN":
 		actionErr = p.executeBan(chatEvent, eventID, message, action.BanDurationDays, ruleID)
 	}
@@ -527,9 +533,15 @@ func (p *ChatAutoModPlugin) getRuleIDPtr() *string {
 func (p *ChatAutoModPlugin) executeBan(chatEvent *event_manager.RconChatMessageData, eventID uuid.UUID, reason string, durationDays int, ruleID *string) error {
 	duration := time.Duration(durationDays*24) * time.Hour
 
+	// Use EOS ID as fallback when Steam ID is empty for RCON calls
+	playerID := chatEvent.SteamID
+	if playerID == "" {
+		playerID = chatEvent.EosID
+	}
+
 	// Use BanWithEvidenceAndRule to link the chat message as evidence and log rule violation
 	banID, err := p.apis.RconAPI.BanWithEvidenceAndRule(
-		chatEvent.SteamID,
+		playerID,
 		reason,
 		duration,
 		eventID.String(),

@@ -279,11 +279,31 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 		admins = []*plugin_manager.AdminInfo{}
 	}
 
+	// Get player list to resolve preferred IDs for RCON calls
+	players, err := p.apis.ServerAPI.GetPlayers()
+	if err != nil {
+		p.apis.LogAPI.Error("Failed to get player list for ID resolution", err, nil)
+		players = []*plugin_manager.PlayerInfo{}
+	}
+
+	// Build a map of SteamID -> preferred ID from the player list
+	steamIDToPreferredID := make(map[string]string)
+	for _, player := range players {
+		if player.SteamID != "" {
+			steamIDToPreferredID[player.SteamID] = player.PreferredID()
+		}
+	}
+
 	onlineAdmins := []string{}
 	for _, admin := range admins {
 		// Exclude the requesting player from notifications
 		if admin.SteamID != event.SteamID && admin.IsOnline {
-			onlineAdmins = append(onlineAdmins, admin.SteamID)
+			// Use preferred ID (EOS ID fallback) for RCON calls
+			adminID := admin.SteamID
+			if preferredID, ok := steamIDToPreferredID[admin.SteamID]; ok {
+				adminID = preferredID
+			}
+			onlineAdmins = append(onlineAdmins, adminID)
 		}
 	}
 
@@ -303,8 +323,12 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 		return err
 	}
 
-	// Send in-game response
-	if err := p.sendInGameResponse(event.SteamID, onlineAdmins); err != nil {
+	// Send in-game response using preferred ID for RCON call
+	playerID := event.SteamID
+	if playerID == "" {
+		playerID = event.EosID
+	}
+	if err := p.sendInGameResponse(playerID, onlineAdmins); err != nil {
 		p.apis.LogAPI.Error("Failed to send in-game response", err, map[string]interface{}{
 			"player": event.PlayerName,
 		})

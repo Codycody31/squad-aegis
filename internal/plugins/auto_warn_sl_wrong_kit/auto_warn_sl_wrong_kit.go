@@ -556,7 +556,7 @@ func (p *AutoWarnSLWrongKitPlugin) warningLoop(tracker *PlayerTracker) {
 			timeLeftFormatted := p.formatDuration(timeLeft)
 			message := fmt.Sprintf("%s - %s", warningMessage, timeLeftFormatted)
 
-			if err := p.apis.RconAPI.SendWarningToPlayer(tracker.Player.SteamID, message); err != nil {
+			if err := p.apis.RconAPI.SendWarningToPlayer(tracker.Player.PreferredID(), message); err != nil {
 				p.apis.LogAPI.Error("Failed to send warning to player", err, map[string]interface{}{
 					"player":   tracker.Player.Name,
 					"steam_id": tracker.Player.SteamID,
@@ -596,7 +596,7 @@ func (p *AutoWarnSLWrongKitPlugin) kickLoop(tracker *PlayerTracker) {
 		// Take action based on configuration
 		if shouldKick {
 			// Kick the player
-			if err := p.apis.RconAPI.KickPlayer(tracker.Player.SteamID, kickMessage); err != nil {
+			if err := p.apis.RconAPI.KickPlayer(tracker.Player.PreferredID(), kickMessage); err != nil {
 				p.apis.LogAPI.Error("Failed to kick squad leader with wrong kit", err, map[string]interface{}{
 					"player":   tracker.Player.Name,
 					"steam_id": tracker.Player.SteamID,

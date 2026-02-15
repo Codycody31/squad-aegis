@@ -318,20 +318,20 @@ func NewSquadRconWithConnection(manager *rcon_manager.RconManager, serverID uuid
 
 // BanPlayer bans a player from the server.
 // Duration is in days: 0 for permanent, >0 for that many days.
-func (s *SquadRcon) BanPlayer(steamId string, duration int, reason string) error {
+func (s *SquadRcon) BanPlayer(playerID string, duration int, reason string) error {
 	var durationStr string
 	if duration == 0 {
 		durationStr = "0"
 	} else {
 		durationStr = fmt.Sprintf("%dd", duration)
 	}
-	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %s %s", steamId, durationStr, reason))
+	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %s %s", playerID, durationStr, reason))
 	return err
 }
 
 // KickPlayer kicks a player from the server
-func (s *SquadRcon) KickPlayer(steamId string, reason string) error {
-	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminKick %s %s", steamId, reason))
+func (s *SquadRcon) KickPlayer(playerID string, reason string) error {
+	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminKick %s %s", playerID, reason))
 	return err
 }
 

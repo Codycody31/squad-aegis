@@ -1045,6 +1045,11 @@ func (p *TeamBalancerPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEv
 
 // handleTeamBalancerCommand processes !teambalancer commands
 func (p *TeamBalancerPlugin) handleTeamBalancerCommand(event *event_manager.RconChatMessageData) error {
+	playerID := event.SteamID
+	if playerID == "" {
+		playerID = event.EosID
+	}
+
 	parts := strings.Fields(strings.ToLower(event.Message))
 	subcommand := ""
 	if len(parts) > 1 {
@@ -1064,22 +1069,22 @@ func (p *TeamBalancerPlugin) handleTeamBalancerCommand(event *event_manager.Rcon
 		}
 
 		if !isAdmin {
-			p.apis.RconAPI.SendWarningToPlayer(event.SteamID, "You must be an admin to use this command.")
+			p.apis.RconAPI.SendWarningToPlayer(playerID, "You must be an admin to use this command.")
 			return nil
 		}
 	}
 
 	switch subcommand {
 	case "", "status":
-		return p.handleStatusCommand(event.SteamID)
+		return p.handleStatusCommand(playerID)
 	case "on":
-		return p.handleToggleCommand(event.SteamID, true)
+		return p.handleToggleCommand(playerID, true)
 	case "off":
-		return p.handleToggleCommand(event.SteamID, false)
+		return p.handleToggleCommand(playerID, false)
 	case "diag":
-		return p.handleDiagCommand(event.SteamID)
+		return p.handleDiagCommand(playerID)
 	default:
-		p.apis.RconAPI.SendWarningToPlayer(event.SteamID, "Unknown command. Use: status, on, off, diag")
+		p.apis.RconAPI.SendWarningToPlayer(playerID, "Unknown command. Use: status, on, off, diag")
 	}
 
 	return nil
@@ -1087,6 +1092,11 @@ func (p *TeamBalancerPlugin) handleTeamBalancerCommand(event *event_manager.Rcon
 
 // handleScrambleCommand processes !scramble commands
 func (p *TeamBalancerPlugin) handleScrambleCommand(event *event_manager.RconChatMessageData) error {
+	playerID := event.SteamID
+	if playerID == "" {
+		playerID = event.EosID
+	}
+
 	// Check admin status
 	isAdmin, err := p.isPlayerAdmin(event.SteamID)
 	if err != nil {
@@ -1097,7 +1107,7 @@ func (p *TeamBalancerPlugin) handleScrambleCommand(event *event_manager.RconChat
 	}
 
 	if !isAdmin {
-		p.apis.RconAPI.SendWarningToPlayer(event.SteamID, "You must be an admin to use this command.")
+		p.apis.RconAPI.SendWarningToPlayer(playerID, "You must be an admin to use this command.")
 		return nil
 	}
 
@@ -1117,7 +1127,7 @@ func (p *TeamBalancerPlugin) handleScrambleCommand(event *event_manager.RconChat
 	}
 
 	if isCancel {
-		return p.handleCancelScramble(event.SteamID)
+		return p.handleCancelScramble(playerID)
 	}
 
 	p.mu.Lock()
@@ -1127,7 +1137,7 @@ func (p *TeamBalancerPlugin) handleScrambleCommand(event *event_manager.RconChat
 		if p.scrambleInProgress {
 			status = "executing"
 		}
-		p.apis.RconAPI.SendWarningToPlayer(event.SteamID, fmt.Sprintf("Scramble already %s. Use !scramble cancel to cancel.", status))
+		p.apis.RconAPI.SendWarningToPlayer(playerID, fmt.Sprintf("Scramble already %s. Use !scramble cancel to cancel.", status))
 		return nil
 	}
 	p.mu.Unlock()
@@ -1145,7 +1155,7 @@ func (p *TeamBalancerPlugin) handleScrambleCommand(event *event_manager.RconChat
 		p.broadcast(msg)
 	}
 
-	p.apis.RconAPI.SendWarningToPlayer(event.SteamID, "Scramble initiated.")
+	p.apis.RconAPI.SendWarningToPlayer(playerID, "Scramble initiated.")
 
 	go p.initiateScramble(hasDry, hasDry || hasNow)
 

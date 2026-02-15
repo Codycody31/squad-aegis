@@ -482,7 +482,11 @@ func (p *SquadLeaderWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager.
 		return nil
 	}
 
-	return p.sendProgressToPlayer(event.SteamID)
+	playerID := event.SteamID
+	if playerID == "" {
+		playerID = event.EosID
+	}
+	return p.sendProgressToPlayer(playerID)
 }
 
 // handlePlayerConnected tracks when players connect for statistics
@@ -720,13 +724,18 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 			continue
 		}
 
-		// Find player name
+		// Find player name and preferred ID for RCON calls
 		var playerName string
+		var playerPreferredID string
 		for _, player := range players {
 			if player.SteamID == steamID {
 				playerName = player.Name
+				playerPreferredID = player.PreferredID()
 				break
 			}
+		}
+		if playerPreferredID == "" {
+			playerPreferredID = steamID
 		}
 
 		// Update session check time
@@ -769,8 +778,8 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 		for _, threshold := range notificationThresholds {
 			thresholdFloat := float64(threshold)
 			if oldPercentage < thresholdFloat && newPercentage >= thresholdFloat {
-				// Player crossed a notification threshold
-				go p.sendProgressNotification(steamID, playerName, newPercentage, newProgress >= whitelistThreshold)
+				// Player crossed a notification threshold - use preferred ID for RCON call
+				go p.sendProgressNotification(playerPreferredID, playerName, newPercentage, newProgress >= whitelistThreshold)
 				break
 			}
 		}

@@ -434,6 +434,15 @@ type PlayerInfo struct {
 	IsOnline      bool   `json:"is_online"`
 }
 
+// PreferredID returns the best available player identifier for RCON commands.
+// Prefers Steam ID, falls back to EOS ID.
+func (p *PlayerInfo) PreferredID() string {
+	if p.SteamID != "" {
+		return p.SteamID
+	}
+	return p.EOSID
+}
+
 // AdminInfo contains admin information
 type AdminInfo struct {
 	ID       string             `json:"id"`

@@ -1466,9 +1466,16 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 
 	// Create ban in database
 	banID := uuid.New()
-	steamID, err := strconv.ParseInt(playerId, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid steam ID format: %w", err)
+
+	// Detect player ID type (Steam ID or EOS ID)
+	var steamIDVal interface{}
+	var eosIDVal interface{}
+	if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
+		steamIDVal = sid
+	} else if len(playerId) == 32 {
+		eosIDVal = playerId
+	} else {
+		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}
 
 	// Start transaction
@@ -1489,11 +1496,11 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 		if err != nil {
 			return fmt.Errorf("invalid rule ID format: %w", err)
 		}
-		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
-		banArgs = []interface{}{banID, context.ServerID, steamID, reason, int(duration), ruleUUID, now, now}
+		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9)`
+		banArgs = []interface{}{banID, context.ServerID, steamIDVal, eosIDVal, reason, int(duration), ruleUUID, now, now}
 	} else {
-		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
-		banArgs = []interface{}{banID, context.ServerID, steamID, reason, int(duration), now, now}
+		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
+		banArgs = []interface{}{banID, context.ServerID, steamIDVal, eosIDVal, reason, int(duration), now, now}
 	}
 
 	_, err = tx.ExecContext(wm.ctx, banQuery, banArgs...)
@@ -3374,10 +3381,17 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 
 		// Create ban in database
 		banID := uuid.New()
-		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
-		if err != nil {
+
+		// Detect player ID type (Steam ID or EOS ID)
+		var steamIDVal interface{}
+		var eosIDVal interface{}
+		if sid, parseErr := strconv.ParseInt(steamID, 10, 64); parseErr == nil {
+			steamIDVal = sid
+		} else if len(steamID) == 32 {
+			eosIDVal = steamID
+		} else {
 			L.Push(lua.LNil)
-			L.Push(lua.LString(fmt.Sprintf("invalid steam ID format: %v", err)))
+			L.Push(lua.LString("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID"))
 			return 2
 		}
 
@@ -3403,11 +3417,11 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 				L.Push(lua.LString(fmt.Sprintf("invalid rule ID format: %v", err)))
 				return 2
 			}
-			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
-			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDInt, reason, int(duration), ruleUUID, now, now}
+			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9)`
+			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDVal, eosIDVal, reason, int(duration), ruleUUID, now, now}
 		} else {
-			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
-			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDInt, reason, int(duration), now, now}
+			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
+			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDVal, eosIDVal, reason, int(duration), now, now}
 		}
 
 		_, err = tx.ExecContext(wm.ctx, banQuery, banArgs...)
