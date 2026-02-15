@@ -8,6 +8,7 @@
 
 ### 📈 Enhancement
 
+- refactor(logwatcher): add log watcher server connection status func [[#179](https://github.com/Codycody31/squad-aegis/pull/179)]
 - refactor: Add player suffix tracking for player_connected event [[#168](https://github.com/Codycody31/squad-aegis/pull/168)]
 
 ### 🐛 Bug Fixes
