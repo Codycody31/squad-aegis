@@ -8,6 +8,7 @@
 
 ### 📈 Enhancement
 
+- refactor(settings.vue): show proper server status for components (rcon/game port, log source, etc) [[#181](https://github.com/Codycody31/squad-aegis/pull/181)]
 - refactor(dashboard.vue): add proper status tracking displayment for game/rcon ports & other components [[#180](https://github.com/Codycody31/squad-aegis/pull/180)]
 - refactor(server): rebuild server online status detection with separated game/rcon port and log status checks [[#178](https://github.com/Codycody31/squad-aegis/pull/178)]
 - refactor(logwatcher): add log watcher server connection status func [[#179](https://github.com/Codycody31/squad-aegis/pull/179)]
