@@ -19,7 +19,12 @@ definePageMeta({
 });
 
 const runtimeConfig = useRuntimeConfig();
-const serverStatus = ref<Record<string, { rcon: boolean }>>({});
+type DashboardServerStatus = {
+    gamePort: boolean;
+    rcon: boolean;
+};
+
+const serverStatus = ref<Record<string, DashboardServerStatus>>({});
 const servers = ref<Server[]>([]);
 const loading = ref(true);
 const stats = ref({
@@ -27,6 +32,26 @@ const stats = ref({
     totalPlayers: 0,
     totalBans: 0,
     activeServers: 0,
+});
+
+const statusList = computed(() => Object.values(serverStatus.value));
+const allGamePortsOnline = computed(() =>
+    statusList.value.every((status) => status.gamePort),
+);
+const allRconOnline = computed(() =>
+    statusList.value.every((status) => status.rcon),
+);
+const systemHealthy = computed(
+    () => allGamePortsOnline.value && allRconOnline.value,
+);
+const systemStatusMessage = computed(() => {
+    if (!allGamePortsOnline.value) {
+        return "Some game ports are offline";
+    }
+    if (!allRconOnline.value) {
+        return "Some RCON connections are offline";
+    }
+    return "All systems operational";
 });
 
 // Fetch servers data
@@ -88,7 +113,7 @@ const fetchAllServerStats = async () => {
 
     // Update stats
     stats.value.activeServers = servers.value.filter(
-        (server) => serverStatus.value[server.id]?.rcon,
+        (server) => serverStatus.value[server.id]?.gamePort,
     ).length;
     stats.value.totalPlayers = totalPlayers;
     stats.value.totalBans = totalBans;
@@ -241,11 +266,7 @@ fetchServers();
                             </p>
                             <h3 class="text-2xl sm:text-3xl font-bold mt-1 text-green-500">
                                 {{
-                                    Object.values(serverStatus).every(
-                                        (status) => status.rcon,
-                                    )
-                                        ? "Healthy"
-                                        : "Degraded"
+                                    systemHealthy ? "Healthy" : "Degraded"
                                 }}
                             </h3>
                         </div>
@@ -258,11 +279,7 @@ fetchServers();
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
-                                v-if="
-                                    Object.values(serverStatus).every(
-                                        (status) => status.rcon,
-                                    )
-                                "
+                                v-if="systemHealthy"
                             >
                                 <path
                                     stroke-linecap="round"
@@ -290,13 +307,7 @@ fetchServers();
                     </div>
                     <div class="mt-3 sm:mt-4">
                         <p class="text-xs sm:text-sm text-muted-foreground">
-                            {{
-                                Object.values(serverStatus).some(
-                                    (status) => !status.rcon,
-                                )
-                                    ? "Some servers are offline"
-                                    : "All systems operational"
-                            }}
+                            {{ systemStatusMessage }}
                         </p>
                     </div>
                 </CardContent>
@@ -342,30 +353,48 @@ fetchServers();
                                     <TableCell class="text-xs sm:text-sm">{{ server.game_port }}</TableCell>
                                     <TableCell class="text-xs sm:text-sm">{{ server.rcon_ip_address || "Unknown" }}</TableCell>
                                     <TableCell class="text-xs sm:text-sm">{{ server.rcon_port }}</TableCell>
-                                    <TableCell>
-                                        <span
-                                            class="px-2 py-1 rounded-full text-xs font-medium"
-                                            :class="
-                                                serverStatus[server.id]?.rcon
-                                                    ? 'bg-green-100 text-green-800'
-                                                    : 'bg-red-100 text-red-800'
-                                            "
-                                        >
-                                            {{
-                                                serverStatus[server.id]?.rcon
-                                                    ? "Online"
-                                                    : "Offline"
-                                            }}
-                                        </span>
-                                    </TableCell>
-                                    <TableCell class="text-right">
-                                        <NuxtLink :to="`/servers/${server.id}`">
-                                            <button
-                                                class="px-3 py-1 bg-primary text-primary-foreground rounded-md text-xs sm:text-sm"
+                                    <TableCell class="align-middle">
+                                        <div class="flex items-center gap-1.5 flex-wrap">
+                                            <span
+                                                class="px-2 py-1 rounded-full text-xs font-medium"
+                                                :class="
+                                                    serverStatus[server.id]?.gamePort
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : 'bg-red-100 text-red-800'
+                                                "
                                             >
-                                                Manage
-                                            </button>
-                                        </NuxtLink>
+                                                {{
+                                                    serverStatus[server.id]?.gamePort
+                                                        ? "Game Online"
+                                                        : "Game Offline"
+                                                }}
+                                            </span>
+                                            <span
+                                                class="px-2 py-1 rounded-full text-xs font-medium"
+                                                :class="
+                                                    serverStatus[server.id]?.rcon
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : 'bg-red-100 text-red-800'
+                                                "
+                                            >
+                                                {{
+                                                    serverStatus[server.id]?.rcon
+                                                        ? "RCON Online"
+                                                        : "RCON Offline"
+                                                }}
+                                            </span>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell class="text-right align-middle">
+                                        <div class="flex items-center justify-end">
+                                            <NuxtLink :to="`/servers/${server.id}`" class="inline-flex">
+                                                <button
+                                                    class="inline-flex items-center px-3 py-1 bg-primary text-primary-foreground rounded-md text-xs sm:text-sm"
+                                                >
+                                                    Manage
+                                                </button>
+                                            </NuxtLink>
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             </TableBody>
@@ -405,6 +434,20 @@ fetchServers();
                                             <span
                                                 class="px-2 py-1 rounded-full text-xs font-medium"
                                                 :class="
+                                                    serverStatus[server.id]?.gamePort
+                                                        ? 'bg-green-100 text-green-800'
+                                                        : 'bg-red-100 text-red-800'
+                                                "
+                                            >
+                                                {{
+                                                    serverStatus[server.id]?.gamePort
+                                                        ? "Game Online"
+                                                        : "Game Offline"
+                                                }}
+                                            </span>
+                                            <span
+                                                class="px-2 py-1 rounded-full text-xs font-medium"
+                                                :class="
                                                     serverStatus[server.id]?.rcon
                                                         ? 'bg-green-100 text-green-800'
                                                         : 'bg-red-100 text-red-800'
@@ -412,8 +455,8 @@ fetchServers();
                                             >
                                                 {{
                                                     serverStatus[server.id]?.rcon
-                                                        ? "Online"
-                                                        : "Offline"
+                                                        ? "RCON Online"
+                                                        : "RCON Offline"
                                                 }}
                                             </span>
                                         </div>
