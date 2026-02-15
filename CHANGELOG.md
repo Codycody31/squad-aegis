@@ -4,7 +4,7 @@
 
 ### ❤️ Thanks to all contributors! ❤️
 
-@Codycody31, @wish131400
+@Codycody31, @Insidious Fiddler, @wish131400
 
 ### 📈 Enhancement
 
@@ -18,6 +18,10 @@
 
 - fix(server): validate server settings log source type [[#175](https://github.com/Codycody31/squad-aegis/pull/175)]
 - fix(ui): normalize optional log fields for server settings [[#176](https://github.com/Codycody31/squad-aegis/pull/176)]
+
+### Misc
+
+- fix(migrations): comment breaking query... ([72155dc](https://github.com/Codycody31/squad-aegis/commit/72155dc3321394ccde2d07649a453a79a60c9a04))
 
 ## [0.8.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.0) - 2026-02-13
 
