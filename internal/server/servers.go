@@ -4,10 +4,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jlaffaye/ftp"
+	"github.com/pkg/sftp"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -16,7 +22,27 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
+	"golang.org/x/crypto/ssh"
 )
+
+const (
+	statusUDPProbeTimeout  = 1500 * time.Millisecond
+	statusRCONProbeTimeout = 5 * time.Second
+	statusLogProbeTimeout  = 5 * time.Second
+)
+
+type serverOnlineStatus struct {
+	GamePort     bool               `json:"gamePort"`
+	Rcon         bool               `json:"rcon"`
+	LogTransport logTransportStatus `json:"logTransport"`
+}
+
+type logTransportStatus struct {
+	Enabled    bool   `json:"enabled"`
+	SourceType string `json:"sourceType,omitempty"`
+	Healthy    bool   `json:"healthy"`
+	Reason     string `json:"reason,omitempty"`
+}
 
 func (s *Server) ServersList(c *gin.Context) {
 	user := s.getUserFromSession(c)
@@ -283,29 +309,272 @@ func (s *Server) ServerStatus(c *gin.Context) {
 		return
 	}
 
-	// Get server status and metrics if possible
-	serverStatus := map[string]interface{}{}
+	includeLogProbe := strings.EqualFold(c.Query("log_probe"), "true") || c.Query("log_probe") == "1"
+	serverStatus := s.validateServerOnline(server, includeLogProbe)
+	responses.Success(c, "Server status fetched successfully", &gin.H{"status": serverStatus})
+}
 
-	// pinger, err := probing.NewPinger(server.IpAddress)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// err = pinger.Run() // Blocks until finished.
-	// if err != nil {
-	// 	serverStatus["ping"] = false
-	// } else {
-	// 	serverStatus["ping"] = true
-	// }
+func (s *Server) validateServerOnline(server *models.Server, includeLogProbe bool) serverOnlineStatus {
+	return serverOnlineStatus{
+		GamePort:     checkUDPPort(server.IpAddress, server.GamePort),
+		Rcon:         s.testRconFunctionality(server),
+		LogTransport: s.testLogTransportFunctionality(server, includeLogProbe),
+	}
+}
 
-	rconClient, err := squadRcon.NewSquadRconWithConnection(s.Dependencies.RconManager, serverUUID, server.IpAddress, server.RconPort, server.RconPassword)
-	if err == nil {
-		serverStatus["rcon"] = true
-		defer rconClient.Close()
-	} else {
-		serverStatus["rcon"] = false
+func (s *Server) testRconFunctionality(server *models.Server) bool {
+	rconIP := server.IpAddress
+	if server.RconIpAddress != nil && *server.RconIpAddress != "" {
+		rconIP = *server.RconIpAddress
 	}
 
-	responses.Success(c, "Server status fetched successfully", &gin.H{"status": serverStatus})
+	if err := s.Dependencies.RconManager.ConnectToServer(server.Id, rconIP, server.RconPort, server.RconPassword); err != nil {
+		return false
+	}
+
+	_, err := s.Dependencies.RconManager.ExecuteCommandWithTimeout(server.Id, "ShowServerInfo", statusRCONProbeTimeout)
+	return err == nil
+}
+
+func (s *Server) testLogTransportFunctionality(server *models.Server, includeLogProbe bool) logTransportStatus {
+	status := buildBaseLogTransportStatus(server)
+	if !status.Enabled {
+		return status
+	}
+
+	if s.Dependencies.LogwatcherManager != nil {
+		if connStatus, err := s.Dependencies.LogwatcherManager.GetServerConnectionStatus(server.Id); err == nil {
+			status.Healthy = connStatus.Connected
+			if !status.Healthy && !includeLogProbe {
+				status.Reason = "logwatcher_disconnected"
+			}
+			if status.Healthy {
+				status.Reason = ""
+			}
+		}
+	}
+
+	if !includeLogProbe {
+		if !status.Healthy && status.Reason == "" {
+			status.Reason = "probe_not_requested"
+		}
+		return status
+	}
+
+	filePath := trimmedStringPtr(server.LogFilePath)
+	switch logwatcher_manager.LogSourceType(status.SourceType) {
+	case logwatcher_manager.LogSourceTypeLocal:
+		return probeLocalLogTransport(filePath, status)
+	case logwatcher_manager.LogSourceTypeSFTP:
+		return probeSFTPLogTransport(server, filePath, status)
+	case logwatcher_manager.LogSourceTypeFTP:
+		return probeFTPLogTransport(server, filePath, status)
+	default:
+		status.Healthy = false
+		status.Reason = "unsupported_source_type"
+		return status
+	}
+}
+
+func buildBaseLogTransportStatus(server *models.Server) logTransportStatus {
+	sourceType := trimmedStringPtr(server.LogSourceType)
+	filePath := trimmedStringPtr(server.LogFilePath)
+	if sourceType == "" || filePath == "" {
+		return logTransportStatus{
+			Enabled: false,
+			Healthy: false,
+			Reason:  "not_configured",
+		}
+	}
+
+	return logTransportStatus{
+		Enabled:    true,
+		SourceType: strings.ToLower(sourceType),
+		Healthy:    false,
+	}
+}
+
+func probeLocalLogTransport(filePath string, status logTransportStatus) logTransportStatus {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+
+	if info.IsDir() {
+		status.Healthy = false
+		status.Reason = "log_path_is_directory"
+		return status
+	}
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+	defer file.Close()
+
+	var buffer [1]byte
+	if _, err := file.Read(buffer[:]); err != nil && !errors.Is(err, io.EOF) {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+
+	status.Healthy = true
+	status.Reason = ""
+	return status
+}
+
+func probeSFTPLogTransport(server *models.Server, filePath string, status logTransportStatus) logTransportStatus {
+	host := trimmedStringPtr(server.LogHost)
+	username := trimmedStringPtr(server.LogUsername)
+	password := trimmedStringPtr(server.LogPassword)
+	if host == "" || username == "" || password == "" {
+		status.Healthy = false
+		status.Reason = "missing_sftp_credentials"
+		return status
+	}
+
+	port := 22
+	if server.LogPort != nil && *server.LogPort > 0 {
+		port = *server.LogPort
+	}
+
+	clientConfig := &ssh.ClientConfig{
+		User:            username,
+		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         statusLogProbeTimeout,
+	}
+
+	sshConn, err := ssh.Dial("tcp", net.JoinHostPort(host, strconv.Itoa(port)), clientConfig)
+	if err != nil {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+	defer sshConn.Close()
+
+	sftpClient, err := sftp.NewClient(sshConn)
+	if err != nil {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+	defer sftpClient.Close()
+
+	if _, err := sftpClient.Stat(filePath); err != nil {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+
+	status.Healthy = true
+	status.Reason = ""
+	return status
+}
+
+func probeFTPLogTransport(server *models.Server, filePath string, status logTransportStatus) logTransportStatus {
+	host := trimmedStringPtr(server.LogHost)
+	username := trimmedStringPtr(server.LogUsername)
+	password := trimmedStringPtr(server.LogPassword)
+	if host == "" || username == "" || password == "" {
+		status.Healthy = false
+		status.Reason = "missing_ftp_credentials"
+		return status
+	}
+
+	port := 21
+	if server.LogPort != nil && *server.LogPort > 0 {
+		port = *server.LogPort
+	}
+
+	ftpConn, err := ftp.Dial(net.JoinHostPort(host, strconv.Itoa(port)), ftp.DialWithTimeout(statusLogProbeTimeout))
+	if err != nil {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+	defer ftpConn.Quit()
+
+	if err := ftpConn.Login(username, password); err != nil {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+
+	if _, err := ftpConn.FileSize(filePath); err != nil {
+		status.Healthy = false
+		status.Reason = mapProbeErrorReason(err)
+		return status
+	}
+
+	status.Healthy = true
+	status.Reason = ""
+	return status
+}
+
+func trimmedStringPtr(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func mapProbeErrorReason(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	errText := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(errText, "permission"), strings.Contains(errText, "denied"):
+		return "permission_denied"
+	case strings.Contains(errText, "auth"), strings.Contains(errText, "login"), strings.Contains(errText, "password"):
+		return "authentication_failed"
+	case strings.Contains(errText, "no such file"), strings.Contains(errText, "not found"), strings.Contains(errText, "cannot find"):
+		return "log_file_not_found"
+	case strings.Contains(errText, "timeout"), strings.Contains(errText, "deadline exceeded"):
+		return "timeout"
+	case strings.Contains(errText, "refused"), strings.Contains(errText, "unreachable"), strings.Contains(errText, "reset"):
+		return "connection_failed"
+	default:
+		return "probe_failed"
+	}
+}
+
+func checkUDPPort(ipAddress string, port int) bool {
+	address := net.JoinHostPort(ipAddress, strconv.Itoa(port))
+	conn, err := net.DialTimeout("udp", address, statusUDPProbeTimeout)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	if err := conn.SetDeadline(time.Now().Add(statusUDPProbeTimeout)); err != nil {
+		return false
+	}
+
+	if _, err := conn.Write([]byte{0x00}); err != nil {
+		return false
+	}
+
+	// UDP is connectionless, so a read timeout means no ICMP error was observed.
+	var buffer [1]byte
+	_, err = conn.Read(buffer[:])
+	if err == nil {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	return false
 }
 
 // ServerDelete handles deleting a server
