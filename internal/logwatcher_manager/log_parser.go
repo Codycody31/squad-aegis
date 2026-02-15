@@ -169,6 +169,26 @@ func GetLogParsers() []LogParser {
 		{
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: PostLogin: NewPlayer: BP_PlayerController_C .+PersistentLevel\.([^\s]+) \(IP: ([\d.]+) \| Online IDs:(?: EOS: ([^ )]+))?(?: steam: ([^ )]+))?\)`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface, playerTracker *player_tracker.PlayerTracker) {
+				var playerSuffix string
+				if playerTracker != nil {
+					if args[5] != "" {
+						if playerInfo, ok := playerTracker.GetPlayerByEOSID(args[5]); ok {
+							playerSuffix = playerInfo.PlayerSuffix
+							if playerSuffix == "" {
+								playerSuffix = playerInfo.Name
+							}
+						}
+					}
+					if playerSuffix == "" && args[3] != "" {
+						if playerInfo, ok := playerTracker.GetPlayerByController(args[3]); ok {
+							playerSuffix = playerInfo.PlayerSuffix
+							if playerSuffix == "" {
+								playerSuffix = playerInfo.Name
+							}
+						}
+					}
+				}
+
 				// Build player data
 				player := &JoinRequestData{
 					PlayerController: args[3],
@@ -184,6 +204,7 @@ func GetLogParsers() []LogParser {
 					IP:               args[4],
 					SteamID:          args[6],
 					EOSID:            args[5],
+					PlayerSuffix:     playerSuffix,
 				})
 
 				// Update player tracker with PlayerController data
@@ -197,6 +218,7 @@ func GetLogParsers() []LogParser {
 					ChainID:          strings.TrimSpace(args[2]),
 					PlayerController: args[3],
 					IPAddress:        args[4],
+					PlayerSuffix:     playerSuffix,
 					SteamID:          args[6],
 					EOSID:            args[5],
 				}
@@ -514,6 +536,7 @@ func GetLogParsers() []LogParser {
 					PlayerSuffix: args[3],
 					EOSID:        player.EOSID,
 					SteamID:      player.SteamID,
+					IPAddress:    player.IP,
 				}
 
 				// Update player data with suffix and store it
@@ -532,9 +555,9 @@ func GetLogParsers() []LogParser {
 					eventStore.StorePlayerData(player.SteamID, playerData)
 				}
 
-				// Update player tracker with PlayerSuffix data
+				// Update player tracker with PlayerSuffix data (eosID, steamID, name, playerController, playerSuffix)
 				if playerTracker != nil && player.EOSID != "" {
-					playerTracker.UpdatePlayerFromLog(player.EOSID, args[3], "", "", args[3])
+					playerTracker.UpdatePlayerFromLog(player.EOSID, player.SteamID, "", player.PlayerController, args[3])
 				}
 
 				eventManager.PublishEvent(serverID, eventManagerData, args[0])

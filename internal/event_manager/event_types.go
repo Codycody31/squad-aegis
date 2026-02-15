@@ -115,6 +115,7 @@ type LogPlayerConnectedData struct {
 	ChainID          string `json:"chain_id"`
 	PlayerController string `json:"player_controller"`
 	IPAddress        string `json:"ip_address"`
+	PlayerSuffix     string `json:"player_suffix,omitempty"`
 	SteamID          string `json:"steam_id,omitempty"`
 	EOSID            string `json:"eos_id,omitempty"`
 }
