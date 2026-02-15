@@ -388,6 +388,12 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		log.Warn().Err(err).Str("steamId", steamIDStr).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after unban")
 	}
 
+	// Reload server config so the game server picks up the updated Bans.cfg
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+	if _, err := r.ExecuteRaw("AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after unban")
+	}
+
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"banId":    banId.String(),

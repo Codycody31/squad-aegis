@@ -1403,6 +1403,95 @@ function selectBanCfgUrl(event: Event) {
     const input = event.target as HTMLInputElement;
     input.select();
 }
+
+// ---- Ban Import from Bans.cfg ----
+interface CfgBanEntry {
+    steam_id: string;
+    expiry_timestamp: number;
+    reason: string;
+    permanent: boolean;
+    expired: boolean;
+    raw_line: string;
+}
+
+interface BanImportPreviewData {
+    cfg_available: boolean;
+    cfg_path: string;
+    new_bans: CfgBanEntry[];
+    existing_bans: CfgBanEntry[];
+    expired_bans: CfgBanEntry[];
+    unparseable_count: number;
+}
+
+interface BanImportResultData {
+    imported_count: number;
+    skipped_count: number;
+    expired_count: number;
+    errors: string[];
+}
+
+const showImportDialog = ref(false);
+const importStep = ref<'preview' | 'result'>('preview');
+const importLoading = ref(false);
+const importPreview = ref<BanImportPreviewData | null>(null);
+const importResult = ref<BanImportResultData | null>(null);
+const importError = ref<string | null>(null);
+
+async function openImportDialog() {
+    showImportDialog.value = true;
+    importStep.value = 'preview';
+    importPreview.value = null;
+    importResult.value = null;
+    importError.value = null;
+    importLoading.value = true;
+
+    try {
+        const response = await fetch(`/api/servers/${serverId}/bans/import-preview`, {
+            headers: { Authorization: `Bearer ${authStore.token}` },
+        });
+        const data = await response.json();
+
+        if (data.code === 200) {
+            importPreview.value = data.data.preview;
+        } else {
+            importError.value = data.message || 'Failed to fetch preview';
+        }
+    } catch (e: any) {
+        importError.value = e.message || 'Failed to connect';
+    } finally {
+        importLoading.value = false;
+    }
+}
+
+async function executeImport() {
+    importLoading.value = true;
+    importError.value = null;
+
+    try {
+        const response = await fetch(`/api/servers/${serverId}/bans/import`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${authStore.token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ confirm: true }),
+        });
+        const data = await response.json();
+
+        if (data.code === 200) {
+            importResult.value = data.data.result;
+            importStep.value = 'result';
+            // Refresh bans list
+            fetchBannedPlayers();
+        } else {
+            importError.value = data.message || 'Import failed';
+        }
+    } catch (e: any) {
+        importError.value = e.message || 'Failed to connect';
+    } finally {
+        importLoading.value = false;
+    }
+}
 </script>
 
 <template>
@@ -1435,6 +1524,148 @@ function selectBanCfgUrl(event: Event) {
                         </div>
                     </PopoverContent>
                 </Popover>
+                <Button
+                    v-if="authStore.hasPermission(serverId as string, UI_PERMISSIONS.BANS_CREATE)"
+                    variant="outline"
+                    class="w-full sm:w-auto text-sm sm:text-base"
+                    @click="openImportDialog"
+                >
+                    Import from Bans.cfg
+                </Button>
+
+                <!-- Import from Bans.cfg Dialog -->
+                <Dialog v-model:open="showImportDialog">
+                    <DialogContent class="w-[95vw] sm:max-w-[600px] max-h-[80vh] overflow-y-auto p-4 sm:p-6">
+                        <DialogHeader>
+                            <DialogTitle>Import Bans from Bans.cfg</DialogTitle>
+                            <DialogDescription>
+                                Import existing bans from the game server's Bans.cfg file into the Aegis database.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <!-- Loading -->
+                        <div v-if="importLoading" class="py-8 text-center text-muted-foreground">
+                            Loading...
+                        </div>
+
+                        <!-- Error -->
+                        <div v-else-if="importError" class="py-4">
+                            <p class="text-destructive text-sm">{{ importError }}</p>
+                        </div>
+
+                        <!-- Preview Step -->
+                        <div v-else-if="importStep === 'preview' && importPreview" class="space-y-4 py-4">
+                            <div v-if="!importPreview.cfg_available" class="text-sm text-muted-foreground">
+                                <p>File access is not configured for this server.</p>
+                                <p class="mt-1">Configure the SquadGame base path and log source type in server settings to enable Bans.cfg import.</p>
+                            </div>
+
+                            <template v-else>
+                                <p class="text-sm text-muted-foreground">File: <code class="bg-muted px-1 py-0.5 rounded text-xs">{{ importPreview.cfg_path }}</code></p>
+
+                                <div class="grid grid-cols-3 gap-3">
+                                    <Card>
+                                        <CardContent class="p-3 text-center">
+                                            <div class="text-2xl font-bold">{{ importPreview.new_bans?.length || 0 }}</div>
+                                            <div class="text-xs text-muted-foreground">New bans</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent class="p-3 text-center">
+                                            <div class="text-2xl font-bold">{{ importPreview.existing_bans?.length || 0 }}</div>
+                                            <div class="text-xs text-muted-foreground">Already in DB</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent class="p-3 text-center">
+                                            <div class="text-2xl font-bold">{{ importPreview.expired_bans?.length || 0 }}</div>
+                                            <div class="text-xs text-muted-foreground">Expired (skip)</div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+
+                                <div v-if="importPreview.unparseable_count > 0" class="text-xs text-muted-foreground">
+                                    {{ importPreview.unparseable_count }} line(s) could not be parsed and will be skipped.
+                                </div>
+
+                                <!-- New bans preview table -->
+                                <div v-if="importPreview.new_bans?.length" class="space-y-2">
+                                    <h4 class="text-sm font-medium">Bans to import:</h4>
+                                    <div class="max-h-48 overflow-y-auto border rounded">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead class="text-xs">Steam ID</TableHead>
+                                                    <TableHead class="text-xs">Reason</TableHead>
+                                                    <TableHead class="text-xs">Type</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                <TableRow v-for="ban in importPreview.new_bans" :key="ban.steam_id">
+                                                    <TableCell class="text-xs font-mono">{{ ban.steam_id }}</TableCell>
+                                                    <TableCell class="text-xs">{{ ban.reason || '(no reason)' }}</TableCell>
+                                                    <TableCell class="text-xs">
+                                                        <Badge :variant="ban.permanent ? 'destructive' : 'secondary'">
+                                                            {{ ban.permanent ? 'Permanent' : 'Timed' }}
+                                                        </Badge>
+                                                    </TableCell>
+                                                </TableRow>
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                </div>
+
+                                <div v-else class="text-sm text-muted-foreground py-2">
+                                    No new bans to import. All entries in Bans.cfg are already in the database or expired.
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- Result Step -->
+                        <div v-else-if="importStep === 'result' && importResult" class="space-y-4 py-4">
+                            <div class="grid grid-cols-3 gap-3">
+                                <Card>
+                                    <CardContent class="p-3 text-center">
+                                        <div class="text-2xl font-bold text-green-600">{{ importResult.imported_count }}</div>
+                                        <div class="text-xs text-muted-foreground">Imported</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardContent class="p-3 text-center">
+                                        <div class="text-2xl font-bold">{{ importResult.skipped_count }}</div>
+                                        <div class="text-xs text-muted-foreground">Skipped</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardContent class="p-3 text-center">
+                                        <div class="text-2xl font-bold">{{ importResult.expired_count }}</div>
+                                        <div class="text-xs text-muted-foreground">Expired</div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+
+                            <div v-if="importResult.errors?.length" class="space-y-1">
+                                <p class="text-sm font-medium text-destructive">Errors:</p>
+                                <ul class="text-xs text-destructive list-disc pl-4">
+                                    <li v-for="(err, i) in importResult.errors" :key="i">{{ err }}</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <DialogFooter>
+                            <template v-if="importStep === 'preview' && importPreview?.cfg_available && (importPreview?.new_bans?.length || 0) > 0">
+                                <Button variant="outline" @click="showImportDialog = false">Cancel</Button>
+                                <Button @click="executeImport" :disabled="importLoading">
+                                    Import {{ importPreview?.new_bans?.length }} Ban(s)
+                                </Button>
+                            </template>
+                            <template v-else>
+                                <Button @click="showImportDialog = false">Close</Button>
+                            </template>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
                 <Form
                     ref="addBanFormRef"
                     v-slot="{ handleSubmit, values: formValues }"

@@ -300,3 +300,36 @@ type IgnoredSteamIDCreateRequest struct {
 type IgnoredSteamIDUpdateRequest struct {
 	Reason *string `json:"reason"`
 }
+
+// CfgBanEntry represents a parsed entry from a Squad Bans.cfg file.
+type CfgBanEntry struct {
+	SteamID         string `json:"steam_id"`
+	ExpiryTimestamp int64  `json:"expiry_timestamp"` // Unix timestamp, 0 = permanent
+	Reason          string `json:"reason"`
+	Permanent       bool   `json:"permanent"`
+	Expired         bool   `json:"expired"`
+	RawLine         string `json:"raw_line"`
+}
+
+// BanImportPreview is the response for the ban import preview endpoint.
+type BanImportPreview struct {
+	CfgAvailable     bool          `json:"cfg_available"`
+	CfgPath          string        `json:"cfg_path"`
+	NewBans          []CfgBanEntry `json:"new_bans"`
+	ExistingBans     []CfgBanEntry `json:"existing_bans"`
+	ExpiredBans      []CfgBanEntry `json:"expired_bans"`
+	UnparseableCount int           `json:"unparseable_count"`
+}
+
+// BanImportRequest is the request body for the ban import execute endpoint.
+type BanImportRequest struct {
+	Confirm bool `json:"confirm"`
+}
+
+// BanImportResult is the response for the ban import execute endpoint.
+type BanImportResult struct {
+	ImportedCount int      `json:"imported_count"`
+	SkippedCount  int      `json:"skipped_count"`
+	ExpiredCount  int      `json:"expired_count"`
+	Errors        []string `json:"errors"`
+}

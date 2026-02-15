@@ -992,6 +992,13 @@ func validateSquadGamePath(value interface{}) error {
 		return fmt.Errorf("SquadGame base path is required")
 	}
 
+	if strings.Contains(trimmed, "..") {
+		return fmt.Errorf("SquadGame base path must not contain path traversal sequences (..)")
+	}
+
+	// Store trimmed value back
+	*pathValue = trimmed
+
 	normalized := strings.ToLower(strings.TrimRight(trimmed, `/\`))
 	if strings.HasSuffix(normalized, ".log") || strings.HasSuffix(normalized, ".cfg") {
 		return fmt.Errorf("SquadGame base path must be a folder, not a file")

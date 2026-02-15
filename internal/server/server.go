@@ -263,6 +263,8 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.POST("/bans", server.RequirePermission(permissions.UIBansCreate), server.ServerBansAdd)
 				serverGroup.PUT("/bans/:banId", server.RequirePermission(permissions.UIBansEdit), server.ServerBansUpdate)
 				serverGroup.DELETE("/bans/:banId", server.RequirePermission(permissions.UIBansDelete), server.ServerBansRemove)
+				serverGroup.GET("/bans/import-preview", server.RequirePermission(permissions.UIBansCreate), server.ServerBanImportPreview)
+				serverGroup.POST("/bans/import", server.RequirePermission(permissions.UIBansCreate), server.ServerBanImportExecute)
 
 				// Ban list subscription management
 				serverGroup.GET("/ban-list-subscriptions", server.RequirePermission(permissions.UIBanListsView), server.ServerBanListSubscriptions)
