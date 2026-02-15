@@ -6,15 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	rcon "github.com/SquadGO/squad-rcon-go/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
+	"go.codycody31.dev/squad-aegis/internal/file_upload"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
@@ -263,18 +264,9 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	// Apply the ban via RCON if the server is online
 	if server != nil {
 		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-		if server.BanEnforcementMode == "aegis" {
-			// In aegis mode, just kick the player now; the ban enforcer handles future connections
-			err = r.KickPlayer(request.SteamID, request.Reason)
-			if err != nil {
-				log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to kick player via RCON")
-			}
-		} else {
-			// In server mode, send AdminBan so the game server enforces the ban
-			err = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
-			if err != nil {
-				log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to apply ban via RCON")
-			}
+		err = r.BanPlayer(request.SteamID, request.Duration, request.Reason)
+		if err != nil {
+			log.Error().Err(err).Str("steamId", request.SteamID).Str("serverId", server.Id.String()).Msg("Failed to apply ban via RCON")
 		}
 	}
 
@@ -308,6 +300,10 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:create", auditData)
 
+	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
+		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after ban")
+	}
+
 	responses.Success(c, "Ban created successfully", &gin.H{
 		"banId": banID.String(),
 	})
@@ -338,7 +334,7 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		return
 	}
 
-	// Get the ban details first (to get the Steam ID for RCON unban)
+	// Get the ban details first
 	var steamIDInt int64
 	var reason string
 	var duration int
@@ -386,22 +382,10 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		return
 	}
 
-	// Also remove the ban via RCON if the server is online and using server-side enforcement
 	steamIDStr := strconv.FormatInt(steamIDInt, 10)
-	if server != nil && server.BanEnforcementMode != "aegis" {
-		r, err := rcon.NewRcon(rcon.RconConfig{Host: server.IpAddress, Password: server.RconPassword, Port: strconv.Itoa(server.RconPort), AutoReconnect: true, AutoReconnectDelay: 5})
-		if err == nil {
-			defer r.Close()
 
-			// Execute the unban command
-			unbanCommand := fmt.Sprintf("AdminUnban %s", steamIDStr)
-			cmdResponse := r.Execute(unbanCommand)
-			if cmdResponse == "" {
-				log.Error().Msgf("Failed to execute unban command for banId %s: %s", banId.String(), unbanCommand)
-			} else {
-				log.Info().Msgf("Unban command executed for banId %s: %s", banId.String(), unbanCommand)
-			}
-		}
+	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
+		log.Warn().Err(err).Str("steamId", steamIDStr).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after unban")
 	}
 
 	// Create detailed audit log
@@ -415,6 +399,65 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:delete", auditData)
 
 	responses.Success(c, "Ban removed successfully", nil)
+}
+
+// syncBansCfg writes a complete Bans.cfg for this server using server_bans only.
+func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
+	if server == nil || server.SquadGamePath == nil || *server.SquadGamePath == "" {
+		return nil // No base path configured, nothing to do
+	}
+	if server.LogSourceType == nil || *server.LogSourceType == "" {
+		return nil // No log source configured, can't access files
+	}
+
+	content, err := s.buildServerBansCfg(ctx, server.Id)
+	if err != nil {
+		return err
+	}
+
+	bansCfgPath := buildBansCfgPath(*server.SquadGamePath, server.LogSourceType)
+
+	switch *server.LogSourceType {
+	case "sftp", "ftp":
+		if server.LogHost == nil || server.LogUsername == nil || server.LogPassword == nil {
+			return fmt.Errorf("missing SFTP/FTP credentials for Bans.cfg editing")
+		}
+		port := 22
+		if *server.LogSourceType == "ftp" {
+			port = 21
+		}
+		if server.LogPort != nil {
+			port = *server.LogPort
+		}
+
+		uploader, err := file_upload.NewUploader(file_upload.UploadConfig{
+			Protocol: *server.LogSourceType,
+			Host:     *server.LogHost,
+			Port:     port,
+			Username: *server.LogUsername,
+			Password: *server.LogPassword,
+			FilePath: bansCfgPath,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to connect for Bans.cfg editing: %w", err)
+		}
+		defer uploader.Close()
+
+		if err := uploader.Upload(ctx, content); err != nil {
+			return fmt.Errorf("failed to write Bans.cfg: %w", err)
+		}
+
+		log.Info().Str("serverId", server.Id.String()).Msg("Synced Bans.cfg via " + *server.LogSourceType)
+
+	case "local":
+		if err := os.WriteFile(bansCfgPath, []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to write local Bans.cfg: %w", err)
+		}
+
+		log.Info().Str("serverId", server.Id.String()).Msg("Synced local Bans.cfg")
+	}
+
+	return nil
 }
 
 // ServerBansUpdate handles updating an existing ban
@@ -768,6 +811,12 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:update", auditData)
 
+	if server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user); err == nil {
+		if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
+			log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after ban update")
+		}
+	}
+
 	responses.Success(c, "Ban updated successfully", &gin.H{
 		"ban": updatedBan,
 	})
@@ -782,22 +831,30 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 		return
 	}
 
-	// Query the database for active bans
-	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
+	content, err := s.buildServerBansCfg(c.Request.Context(), serverId)
+	if err != nil {
+		responses.BadRequest(c, "Failed to query bans", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Set the content type and send the response
+	c.Header("Content-Type", "text/plain")
+	c.String(http.StatusOK, content)
+}
+
+func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (string, error) {
+	rows, err := s.Dependencies.DB.QueryContext(ctx, `
 		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.server_id = $1
 	`, serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to query bans", &gin.H{"error": err.Error()})
-		return
+		return "", err
 	}
 	defer rows.Close()
 
-	// Generate the ban config file
 	var banCfg strings.Builder
-
 	now := time.Now()
 	for rows.Next() {
 		var steamIDInt int64
@@ -807,22 +864,17 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 		var adminID sql.NullString
 		var adminUsername sql.NullString
 		var adminSteamIDInt sql.NullInt64
-		err := rows.Scan(&steamIDInt, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt)
-		if err != nil {
-			responses.BadRequest(c, "Failed to scan ban", &gin.H{"error": err.Error()})
-			return
+		if err := rows.Scan(&steamIDInt, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt); err != nil {
+			return "", err
 		}
 
 		unixTimeOfExpiry := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
 
 		// Skip expired bans
-		if duration > 0 {
-			if now.After(unixTimeOfExpiry) {
-				continue
-			}
+		if duration > 0 && now.After(unixTimeOfExpiry) {
+			continue
 		}
 
-		// Format the ban entry in official Squad format
 		steamIDStr := strconv.FormatInt(steamIDInt, 10)
 
 		// Build admin info
@@ -842,7 +894,6 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 			expiryTimestamp = strconv.FormatInt(unixTimeOfExpiry.Unix(), 10)
 		}
 
-		// Build the reason comment
 		reasonComment := ""
 		if reason != "" {
 			reasonComment = " //" + reason
@@ -854,9 +905,7 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 			adminInfo, adminSteamID, steamIDStr, expiryTimestamp, reasonComment))
 	}
 
-	// Set the content type and send the response
-	c.Header("Content-Type", "text/plain")
-	c.String(http.StatusOK, banCfg.String())
+	return banCfg.String(), nil
 }
 
 // loadBanEvidence loads all evidence records for a given ban

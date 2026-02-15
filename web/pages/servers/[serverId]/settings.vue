@@ -16,22 +16,19 @@
                 </p>
             </CardHeader>
             <CardContent>
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="flex items-center space-x-2">
-                        <div
-                            :class="[
-                                'w-3 h-3 rounded-full',
-                                serverStatus?.rcon
-                                    ? 'bg-green-500'
-                                    : 'bg-red-500',
-                            ]"
-                        ></div>
-                        <span class="text-sm">RCON Connection</span>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <div class="w-3 h-3 rounded-full bg-blue-500"></div>
-                        <span class="text-sm">Server Online</span>
-                    </div>
+                <div class="flex items-center space-x-2">
+                    <div
+                        :class="[
+                            'w-3 h-3 rounded-full',
+                            serverStatus?.rcon
+                                ? 'bg-green-500'
+                                : 'bg-red-500',
+                        ]"
+                    ></div>
+                    <span class="text-sm">RCON Connection</span>
+                    <span class="text-xs text-muted-foreground">
+                        {{ serverStatus?.rcon ? 'Connected' : 'Disconnected' }}
+                    </span>
                 </div>
             </CardContent>
         </Card>
@@ -77,14 +74,16 @@
                             <label for="game_port" class="text-right"
                                 >Game Port</label
                             >
-                            <Input
-                                id="game_port"
-                                v-model="serverForm.game_port"
-                                type="number"
-                                class="col-span-3"
-                                required
-                                placeholder="Default: 2302"
-                            />
+                            <div class="col-span-3">
+                                <Input
+                                    id="game_port"
+                                    v-model="serverForm.game_port"
+                                    type="number"
+                                    required
+                                    placeholder="Default: 7787"
+                                />
+                                <p class="text-xs text-muted-foreground mt-1">Default Squad game port is 7787</p>
+                            </div>
                         </div>
 
                         <div class="grid grid-cols-4 items-center gap-4">
@@ -103,41 +102,48 @@
                             <label for="rcon_port" class="text-right"
                                 >RCON Port</label
                             >
-                            <Input
-                                id="rcon_port"
-                                v-model="serverForm.rcon_port"
-                                type="number"
-                                class="col-span-3"
-                                required
-                                placeholder="Default: 2302"
-                            />
+                            <div class="col-span-3">
+                                <Input
+                                    id="rcon_port"
+                                    v-model="serverForm.rcon_port"
+                                    type="number"
+                                    required
+                                    placeholder="Default: 21114"
+                                />
+                                <p class="text-xs text-muted-foreground mt-1">Default Squad RCON port is 21114</p>
+                            </div>
                         </div>
 
                         <div class="grid grid-cols-4 items-center gap-4">
                             <label for="rcon_password" class="text-right"
                                 >RCON Password</label
                             >
-                            <Input
-                                id="rcon_password"
-                                v-model="serverForm.rcon_password"
-                                type="password"
-                                class="col-span-3"
-                                placeholder="••••••••"
-                            />
+                            <div class="col-span-3">
+                                <Input
+                                    id="rcon_password"
+                                    v-model="serverForm.rcon_password"
+                                    type="password"
+                                    placeholder="••••••••"
+                                />
+                                <p class="text-xs text-muted-foreground mt-1">Found in your server's Rcon.cfg file</p>
+                            </div>
                         </div>
 
-                        <!-- Log Configuration Section -->
+                        <!-- Log & File Access Configuration Section -->
                         <div class="border-t pt-4 mt-4">
                             <div class="grid grid-cols-4 items-center gap-4 mb-4">
                                 <div class="text-right">
-                                    <h4 class="text-sm font-medium">Log Configuration</h4>
+                                    <h4 class="text-sm font-medium">Log & File Access</h4>
                                     <p class="text-xs text-muted-foreground mt-1">
-                                        Optional log monitoring setup
+                                        Required
                                     </p>
                                 </div>
                                 <div class="col-span-3">
                                     <p class="text-xs text-muted-foreground">
-                                        Configure log monitoring to enable advanced event tracking and analytics.
+                                        Configure file access for log monitoring, event tracking, and Bans.cfg management.
+                                    </p>
+                                    <p class="text-xs text-muted-foreground mt-1">
+                                        Log source and base path are required for ban enforcement and config sync.
                                     </p>
                                 </div>
                             </div>
@@ -146,30 +152,42 @@
                                 <label for="log_source_type" class="text-right"
                                     >Log Source Type</label
                                 >
-                                <Select v-model="selectedLogSourceType" @update:modelValue="(value) => { serverForm.log_source_type = value; selectedLogSourceType = value; }">
-                                    <SelectTrigger class="col-span-3">
-                                        <SelectValue placeholder="Select log source type" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="local">Local File</SelectItem>
-                                        <SelectItem value="sftp">SFTP</SelectItem>
-                                        <SelectItem value="ftp">FTP</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                <div class="col-span-3">
+                                    <Select v-model="selectedLogSourceType" @update:modelValue="(value) => { serverForm.log_source_type = value; selectedLogSourceType = value; }">
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select log source type" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="local">Local File</SelectItem>
+                                            <SelectItem value="sftp">SFTP</SelectItem>
+                                            <SelectItem value="ftp">FTP</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p class="text-xs text-muted-foreground mt-1">
+                                        "Local" if Aegis runs on the same machine as your Squad server. "SFTP" or "FTP" for remote server access.
+                                    </p>
+                                </div>
                             </div>
 
                             <div v-if="selectedLogSourceType" class="grid grid-cols-4 items-center gap-4 pt-4">
-                                <label for="log_file_path" class="text-right"
-                                    >Log File Path</label
+                                <label for="squad_game_path" class="text-right"
+                                    >SquadGame Base Path</label
                                 >
-                                <Input
-                                    id="log_file_path"
-                                    v-model="serverForm.log_file_path"
-                                    class="col-span-3"
-                                    :placeholder="selectedLogSourceType === 'local' 
-                                        ? '/path/to/SquadGame.log' 
-                                        : '/remote/path/to/SquadGame.log'"
-                                />
+                                <div class="col-span-3">
+                                    <Input
+                                        id="squad_game_path"
+                                        v-model="serverForm.squad_game_path"
+                                        :placeholder="selectedLogSourceType === 'local'
+                                            ? '/home/squad/serverfiles/SquadGame'
+                                            : '/SquadGame'"
+                                    />
+                                    <p class="text-xs text-muted-foreground mt-1">
+                                        Base path to the SquadGame folder. Aegis derives log and config paths from this.
+                                    </p>
+                                    <p v-if="selectedLogSourceType === 'local'" class="text-xs text-muted-foreground mt-1">
+                                        When running in Docker, this folder must be mounted into the container and readable by Aegis.
+                                    </p>
+                                </div>
                             </div>
 
                             <!-- Remote connection fields for SFTP/FTP -->
@@ -228,15 +246,19 @@
                                     <label for="log_poll_frequency" class="text-right"
                                         >Poll Frequency (sec)</label
                                     >
-                                    <Input
-                                        id="log_poll_frequency"
-                                        v-model="serverForm.log_poll_frequency"
-                                        type="number"
-                                        class="col-span-3"
-                                        placeholder="5"
-                                        min="1"
-                                        max="300"
-                                    />
+                                    <div class="col-span-3">
+                                        <Input
+                                            id="log_poll_frequency"
+                                            v-model="serverForm.log_poll_frequency"
+                                            type="number"
+                                        placeholder="2"
+                                            min="1"
+                                            max="300"
+                                        />
+                                        <p class="text-xs text-muted-foreground mt-1">
+                                        How often to check for new log entries. 2-4 seconds is recommended for fast enforcement, higher values can delay kicks.
+                                        </p>
+                                    </div>
                                 </div>
                             </template>
 
@@ -244,56 +266,22 @@
                                 <label for="log_read_from_start" class="text-right"
                                     >Read from start</label
                                 >
-                                <div class="col-span-3 flex items-center space-x-2">
-                                    <Checkbox
-                                        id="log_read_from_start"
-                                        v-model:checked="serverForm.log_read_from_start"
-                                    />
-                                    <label for="log_read_from_start" class="text-sm text-muted-foreground">
-                                        Process entire log file from beginning
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Ban Enforcement Section -->
-                        <div class="border-t pt-4 mt-4">
-                            <div class="grid grid-cols-4 items-center gap-4 mb-4">
-                                <div class="text-right">
-                                    <h4 class="text-sm font-medium">Ban Enforcement</h4>
-                                    <p class="text-xs text-muted-foreground mt-1">
-                                        How bans are enforced
-                                    </p>
-                                </div>
                                 <div class="col-span-3">
-                                    <p class="text-xs text-muted-foreground">
-                                        Choose whether the game server or Squad Aegis handles ban enforcement.
+                                    <div class="flex items-center space-x-2">
+                                        <Checkbox
+                                            id="log_read_from_start"
+                                            v-model:checked="serverForm.log_read_from_start"
+                                        />
+                                        <label for="log_read_from_start" class="text-sm text-muted-foreground">
+                                            Process entire log file from beginning
+                                        </label>
+                                    </div>
+                                    <p class="text-xs text-muted-foreground mt-1">
+                                        When enabled, processes the entire log file on restart. Useful for initial setup or recovering missed events.
                                     </p>
                                 </div>
                             </div>
 
-                            <div class="grid grid-cols-4 items-center gap-4">
-                                <label for="ban_enforcement_mode" class="text-right"
-                                    >Enforcement Mode</label
-                                >
-                                <Select v-model="serverForm.ban_enforcement_mode">
-                                    <SelectTrigger class="col-span-3">
-                                        <SelectValue placeholder="Select enforcement mode" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="server">Server (AdminBan via RCON)</SelectItem>
-                                        <SelectItem value="aegis">Squad Aegis (watch connections + kick)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            <div class="grid grid-cols-4 items-center gap-4 mt-2">
-                                <div></div>
-                                <p class="col-span-3 text-xs text-muted-foreground">
-                                    <strong>Server mode:</strong> Bans are sent via AdminBan RCON command. The game server enforces them via its remote ban list.<br />
-                                    <strong>Aegis mode:</strong> Squad Aegis monitors player connections and automatically kicks banned players when they join.
-                                </p>
-                            </div>
                         </div>
                     </div>
 
@@ -352,15 +340,8 @@
                 </p>
             </CardHeader>
             <CardContent>
-                <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div class="flex items-center space-x-2">
-                        <div class="w-3 h-3 rounded-full bg-blue-500"></div>
-                        <span class="text-sm">Log Source: {{ serverForm.log_source_type?.toUpperCase() }}</span>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <div class="w-3 h-3 rounded-full bg-green-500"></div>
-                        <span class="text-sm">Monitoring Active</span>
-                    </div>
+                <div class="mb-4">
+                    <span class="text-sm">Log Source: <strong>{{ serverForm.log_source_type?.toUpperCase() }}</strong></span>
                 </div>
                 <div class="flex justify-between items-center">
                     <p class="text-sm text-muted-foreground">
@@ -489,16 +470,13 @@ const serverForm = ref({
 
     // Log configuration fields
     log_source_type: "",
-    log_file_path: "",
+    squad_game_path: "",
     log_host: "",
     log_port: null,
     log_username: "",
     log_password: "",
-    log_poll_frequency: 5,
+    log_poll_frequency: 2,
     log_read_from_start: false,
-
-    // Ban enforcement
-    ban_enforcement_mode: "server" as string,
 });
 
 const isUpdating = ref(false);
@@ -530,18 +508,15 @@ const fetchServerDetails = async () => {
 
                 // Log configuration fields
                 log_source_type: data.data.server.log_source_type || "",
-                log_file_path: data.data.server.log_file_path || "",
+                squad_game_path: data.data.server.squad_game_path || "",
                 log_host: data.data.server.log_host || "",
                 log_port: data.data.server.log_port,
                 log_username: data.data.server.log_username || "",
                 log_password: data.data.server.log_password || "",
-                log_poll_frequency: data.data.server.log_poll_frequency || 5,
+                log_poll_frequency: data.data.server.log_poll_frequency || 2,
                 log_read_from_start: data.data.server.log_read_from_start || false,
-
-                // Ban enforcement
-                ban_enforcement_mode: data.data.server.ban_enforcement_mode || "server",
             };
-            
+
             // Update selected log source type for conditional rendering
             selectedLogSourceType.value = data.data.server.log_source_type || "";
         }

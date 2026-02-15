@@ -498,7 +498,7 @@ func (p *CBLPlugin) sendDiscordAlert(user *CBLUser, event *event_manager.LogPlay
 			},
 			{
 				Name:   "Risk Rating",
-				Value:  fmt.Sprintf("%d / 10", user.RiskRating),
+				Value:  fmt.Sprintf("%.2f / 10", user.RiskRating),
 				Inline: true,
 			},
 			{

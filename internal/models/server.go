@@ -17,16 +17,14 @@ type Server struct {
 
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`     // "local", "sftp", "ftp"
-	LogFilePath      *string `json:"log_file_path,omitempty"`       // Path to log file
 	LogHost          *string `json:"log_host,omitempty"`            // Host for SFTP/FTP
 	LogPort          *int    `json:"log_port,omitempty"`            // Port for SFTP/FTP
 	LogUsername      *string `json:"log_username,omitempty"`        // Username for SFTP/FTP
 	LogPassword      *string `json:"-"`                             // Password for SFTP/FTP (hidden in JSON)
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`  // Poll frequency in seconds for SFTP/FTP
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"` // Whether to read from start of file
+	SquadGamePath    *string `json:"squad_game_path,omitempty"`     // Base path to SquadGame folder
 
-	// Ban enforcement mode: "server" (AdminBan via RCON) or "aegis" (watch connections + kick)
-	BanEnforcementMode string `json:"ban_enforcement_mode"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -219,15 +217,14 @@ type ServerCreateRequest struct {
 
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`
-	LogFilePath      *string `json:"log_file_path,omitempty"`
 	LogHost          *string `json:"log_host,omitempty"`
 	LogPort          *int    `json:"log_port,omitempty"`
 	LogUsername      *string `json:"log_username,omitempty"`
 	LogPassword      *string `json:"log_password,omitempty"`
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
+	SquadGamePath    *string `json:"squad_game_path,omitempty"`
 
-	BanEnforcementMode *string `json:"ban_enforcement_mode,omitempty"` // "server" or "aegis"
 }
 
 type ServerRconExecuteRequest struct {
@@ -272,15 +269,14 @@ type ServerUpdateRequest struct {
 
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`
-	LogFilePath      *string `json:"log_file_path,omitempty"`
 	LogHost          *string `json:"log_host,omitempty"`
 	LogPort          *int    `json:"log_port,omitempty"`
 	LogUsername      *string `json:"log_username,omitempty"`
 	LogPassword      *string `json:"log_password,omitempty"`
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
+	SquadGamePath    *string `json:"squad_game_path,omitempty"`
 
-	BanEnforcementMode *string `json:"ban_enforcement_mode,omitempty"` // "server" or "aegis"
 }
 
 // IgnoredSteamID represents a Steam ID that should be ignored from remote ban sources

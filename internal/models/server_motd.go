@@ -21,7 +21,6 @@ type ServerMOTDConfig struct {
 	// Upload settings
 	UploadEnabled      bool   `json:"upload_enabled"`
 	AutoUploadOnChange bool   `json:"auto_upload_on_change"`
-	MOTDFilePath       string `json:"motd_file_path"`
 	UseLogCredentials  bool   `json:"use_log_credentials"`
 	UploadHost         *string `json:"upload_host,omitempty"`
 	UploadPort         *int    `json:"upload_port,omitempty"`
@@ -45,7 +44,6 @@ type ServerMOTDConfigUpdateRequest struct {
 	IncludeRuleDescriptions *bool   `json:"include_rule_descriptions,omitempty"`
 	UploadEnabled           *bool   `json:"upload_enabled,omitempty"`
 	AutoUploadOnChange      *bool   `json:"auto_upload_on_change,omitempty"`
-	MOTDFilePath            *string `json:"motd_file_path,omitempty"`
 	UseLogCredentials       *bool   `json:"use_log_credentials,omitempty"`
 	UploadHost              *string `json:"upload_host,omitempty"`
 	UploadPort              *int    `json:"upload_port,omitempty"`
