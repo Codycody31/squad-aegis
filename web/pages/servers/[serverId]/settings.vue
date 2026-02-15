@@ -16,7 +16,7 @@
                 </p>
             </CardHeader>
             <CardContent>
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div class="flex items-center space-x-2">
                         <div
                             :class="[
@@ -29,10 +29,43 @@
                         <span class="text-sm">RCON Connection</span>
                     </div>
                     <div class="flex items-center space-x-2">
-                        <div class="w-3 h-3 rounded-full bg-blue-500"></div>
-                        <span class="text-sm">Server Online</span>
+                        <div
+                            :class="[
+                                'w-3 h-3 rounded-full',
+                                serverStatus?.gamePort
+                                    ? 'bg-green-500'
+                                    : 'bg-red-500',
+                            ]"
+                        ></div>
+                        <span class="text-sm">Game Port</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <div
+                            :class="[
+                                'w-3 h-3 rounded-full',
+                                serverStatus?.logTransport?.enabled
+                                    ? (serverStatus?.logTransport?.healthy
+                                        ? 'bg-green-500'
+                                        : 'bg-red-500')
+                                    : 'bg-gray-500',
+                            ]"
+                        ></div>
+                        <span class="text-sm">
+                            Log Transport
+                            {{
+                                serverStatus?.logTransport?.sourceType
+                                    ? `(${serverStatus.logTransport.sourceType.toUpperCase()})`
+                                    : "(Not Configured)"
+                            }}
+                        </span>
                     </div>
                 </div>
+                <p
+                    v-if="serverStatus?.logTransport?.enabled && !serverStatus?.logTransport?.healthy"
+                    class="mt-2 text-xs text-muted-foreground"
+                >
+                    Log transport check: {{ serverStatus.logTransport.reason || "probe_failed" }}
+                </p>
             </CardContent>
         </Card>
 
@@ -358,8 +391,21 @@
                         <span class="text-sm">Log Source: {{ serverForm.log_source_type?.toUpperCase() }}</span>
                     </div>
                     <div class="flex items-center space-x-2">
-                        <div class="w-3 h-3 rounded-full bg-green-500"></div>
-                        <span class="text-sm">Monitoring Active</span>
+                        <div
+                            :class="[
+                                'w-3 h-3 rounded-full',
+                                serverStatus?.logTransport?.healthy
+                                    ? 'bg-green-500'
+                                    : 'bg-red-500',
+                            ]"
+                        ></div>
+                        <span class="text-sm">
+                            {{
+                                serverStatus?.logTransport?.healthy
+                                    ? "Monitoring Active"
+                                    : "Monitoring Issue"
+                            }}
+                        </span>
                     </div>
                 </div>
                 <div class="flex justify-between items-center">
@@ -556,7 +602,7 @@ const fetchServerDetails = async () => {
 
 // fetch server status
 const fetchServerStatus = async () => {
-    const response = await fetch(`/api/servers/${serverId}/status`, {
+    const response = await fetch(`/api/servers/${serverId}/status?log_probe=1`, {
         headers: {
             Authorization: `Bearer ${token}`,
         },
@@ -618,6 +664,7 @@ const updateServer = async () => {
                 variant: "default",
             });
             fetchServerDetails();
+            fetchServerStatus();
         } else {
             toast({
                 title: "Error",
@@ -659,6 +706,7 @@ const restartRcon = async () => {
                 variant: "default",
             });
             fetchServerDetails();
+            fetchServerStatus();
         } else {
             toast({
                 title: "Error",
@@ -701,6 +749,7 @@ const restartLogWatcher = async () => {
                 variant: "default",
             });
             fetchServerDetails();
+            fetchServerStatus();
         } else {
             toast({
                 title: "Error",
