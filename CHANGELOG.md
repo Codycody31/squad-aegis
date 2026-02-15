@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.0) - 2026-02-15
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31, @wish131400
+
+### 📈 Enhancement
+
+- refactor: Add player suffix tracking for player_connected event [[#168](https://github.com/Codycody31/squad-aegis/pull/168)]
+
+### 🐛 Bug Fixes
+
+- fix(server): validate server settings log source type [[#175](https://github.com/Codycody31/squad-aegis/pull/175)]
+- fix(ui): normalize optional log fields for server settings [[#176](https://github.com/Codycody31/squad-aegis/pull/176)]
+
 ## [0.8.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.0) - 2026-02-13
 
 ### ❤️ Thanks to all contributors! ❤️
