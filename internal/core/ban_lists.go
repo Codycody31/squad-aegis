@@ -191,9 +191,9 @@ func DeleteServerBanListSubscription(ctx context.Context, database db.Executor, 
 // Enhanced Ban Functions
 
 func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]models.ServerBan, error) {
-	sql := `
-		SELECT DISTINCT ON (sb.steam_id)
-			sb.id, sb.server_id, sb.admin_id, u.username, u.steam_id, sb.steam_id, sb.reason,
+	query := `
+		SELECT DISTINCT ON (COALESCE(sb.steam_id::text, sb.eos_id))
+			sb.id, sb.server_id, sb.admin_id, u.username, u.steam_id, sb.steam_id, sb.eos_id, sb.reason,
 			sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name,
 			sb.created_at, sb.updated_at
 		FROM server_bans sb
@@ -210,10 +210,10 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 				WHERE sbls.server_id = $1
 			)
 		)
-		ORDER BY sb.steam_id, sb.created_at DESC
+		ORDER BY COALESCE(sb.steam_id::text, sb.eos_id), sb.created_at DESC
 	`
 
-	rows, err := database.QueryContext(ctx, sql, serverId)
+	rows, err := database.QueryContext(ctx, query, serverId)
 	if err != nil {
 		return nil, err
 	}
@@ -222,25 +222,35 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 	var bans []models.ServerBan
 	for rows.Next() {
 		var ban models.ServerBan
-		var steamIDInt int64
-		var adminSteamIDInt int64
+		var steamIDInt sql.NullInt64
+		var eosIDStr sql.NullString
+		var adminSteamIDInt sql.NullInt64
 		var ruleIDStr, banListIDStr, banListNameStr *string
 
 		err := rows.Scan(
 			&ban.ID, &ban.ServerID, &ban.AdminID, &ban.AdminName, &adminSteamIDInt,
-			&steamIDInt, &ban.Reason, &ban.Duration, &ruleIDStr,
+			&steamIDInt, &eosIDStr, &ban.Reason, &ban.Duration, &ruleIDStr,
 			&banListIDStr, &banListNameStr, &ban.CreatedAt, &ban.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		// Convert steamID from int64 to string
-		ban.SteamID = fmt.Sprintf("%d", steamIDInt)
-		ban.Name = ban.SteamID
+		if steamIDInt.Valid {
+			ban.SteamID = fmt.Sprintf("%d", steamIDInt.Int64)
+		}
+		if eosIDStr.Valid {
+			ban.EOSID = eosIDStr.String
+		}
+		if ban.SteamID != "" {
+			ban.Name = ban.SteamID
+		} else {
+			ban.Name = ban.EOSID
+		}
 
-		// Convert admin steam ID if present
-		ban.AdminSteamID = fmt.Sprintf("%d", adminSteamIDInt)
+		if adminSteamIDInt.Valid {
+			ban.AdminSteamID = fmt.Sprintf("%d", adminSteamIDInt.Int64)
+		}
 
 		// Set optional fields
 		ban.RuleID = ruleIDStr
@@ -521,6 +531,7 @@ func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID u
 	}
 
 	ban.SteamID = steamID
+	ban.EOSID = eosID
 	ban.ServerID = serverID
 	ban.Permanent = ban.Duration == 0
 	if !ban.Permanent {

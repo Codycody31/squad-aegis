@@ -392,9 +392,9 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 			eosIDPtr = &ban.EOSID
 		}
 
-		banID := fmt.Sprintf("import-%s", ban.SteamID)
-		if ban.SteamID == "" {
-			banID = fmt.Sprintf("import-%s", ban.EOSID)
+		playerLabel := ban.SteamID
+		if playerLabel == "" {
+			playerLabel = ban.EOSID
 		}
 
 		_, err = tx.ExecContext(c.Request.Context(), `
@@ -402,7 +402,7 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		`, uuid.New(), serverID, user.Id, steamIDPtr, eosIDPtr, reason, duration, now, now)
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("failed to insert ban for %s: %v", banID, err))
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to insert ban for %s: %v", playerLabel, err))
 			continue
 		}
 

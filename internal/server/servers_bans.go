@@ -41,7 +41,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 
 	// Query the database for bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -59,7 +59,8 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	steamIDs := []string{}
 	for rows.Next() {
 		var ban models.ServerBan
-		var steamIDInt int64
+		var steamIDInt sql.NullInt64
+		var eosIDStr sql.NullString
 		var ruleID sql.NullString
 		var ruleTitle sql.NullString
 		var banListID sql.NullString
@@ -71,6 +72,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			&ban.AdminID,
 			&ban.AdminName,
 			&steamIDInt,
+			&eosIDStr,
 			&ban.Reason,
 			&ban.Duration,
 			&ruleID,
@@ -86,11 +88,17 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			return
 		}
 
-		// Convert steamID from int64 to string
-		ban.SteamID = strconv.FormatInt(steamIDInt, 10)
+		if steamIDInt.Valid {
+			ban.SteamID = strconv.FormatInt(steamIDInt.Int64, 10)
+		}
+		if eosIDStr.Valid {
+			ban.EOSID = eosIDStr.String
+		}
 
 		// Collect steam IDs for batch lookup
-		steamIDs = append(steamIDs, ban.SteamID)
+		if ban.SteamID != "" {
+			steamIDs = append(steamIDs, ban.SteamID)
+		}
 
 		// Set rule ID if present
 		if ruleID.Valid {
@@ -134,9 +142,10 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	for i := range bans {
 		if name, ok := playerNames[bans[i].SteamID]; ok {
 			bans[i].Name = name
-		} else {
-			// Fallback to steam ID if no name found
+		} else if bans[i].SteamID != "" {
 			bans[i].Name = bans[i].SteamID
+		} else {
+			bans[i].Name = bans[i].EOSID
 		}
 	}
 
@@ -335,16 +344,17 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	}
 
 	// Get the ban details first
-	var steamIDInt int64
+	var steamIDInt sql.NullInt64
+	var eosIDStr sql.NullString
 	var reason string
 	var duration int
 	var adminId uuid.UUID
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.reason, sb.duration, sb.admin_id
+		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.admin_id
 		FROM server_bans sb
 		WHERE sb.id = $1 AND sb.server_id = $2
-	`, banId, serverId).Scan(&steamIDInt, &reason, &duration, &adminId)
+	`, banId, serverId).Scan(&steamIDInt, &eosIDStr, &reason, &duration, &adminId)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
@@ -382,10 +392,17 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		return
 	}
 
-	steamIDStr := strconv.FormatInt(steamIDInt, 10)
+	var steamIDStr string
+	if steamIDInt.Valid {
+		steamIDStr = strconv.FormatInt(steamIDInt.Int64, 10)
+	}
+	var eosID string
+	if eosIDStr.Valid {
+		eosID = eosIDStr.String
+	}
 
 	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
-		log.Warn().Err(err).Str("steamId", steamIDStr).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after unban")
+		log.Warn().Err(err).Str("steamId", steamIDStr).Str("eosId", eosID).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after unban")
 	}
 
 	// Reload server config so the game server picks up the updated Bans.cfg
@@ -398,6 +415,7 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	auditData := map[string]interface{}{
 		"banId":    banId.String(),
 		"steamId":  steamIDStr,
+		"eosId":    eosID,
 		"reason":   reason,
 		"duration": duration,
 	}
@@ -492,7 +510,8 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 
 	// Get the current ban details first
 	var currentBan models.ServerBan
-	var steamIDInt int64
+	var steamIDInt sql.NullInt64
+	var eosIDStr sql.NullString
 	var ruleID sql.NullString
 	var ruleTitle sql.NullString
 	var banListID sql.NullString
@@ -500,7 +519,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var evidenceText sql.NullString
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -512,6 +531,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&currentBan.AdminID,
 		&currentBan.AdminName,
 		&steamIDInt,
+		&eosIDStr,
 		&currentBan.Reason,
 		&currentBan.Duration,
 		&ruleID,
@@ -531,9 +551,17 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		return
 	}
 
-	// Convert steamID from int64 to string
-	currentBan.SteamID = strconv.FormatInt(steamIDInt, 10)
-	currentBan.Name = currentBan.SteamID
+	if steamIDInt.Valid {
+		currentBan.SteamID = strconv.FormatInt(steamIDInt.Int64, 10)
+	}
+	if eosIDStr.Valid {
+		currentBan.EOSID = eosIDStr.String
+	}
+	if currentBan.SteamID != "" {
+		currentBan.Name = currentBan.SteamID
+	} else {
+		currentBan.Name = currentBan.EOSID
+	}
 
 	// Set rule ID if present
 	if ruleID.Valid {
@@ -730,7 +758,8 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 
 	// Get updated ban details for response and RCON
 	var updatedBan models.ServerBan
-	var updatedSteamIDInt int64
+	var updatedSteamIDInt sql.NullInt64
+	var updatedEOSIDStr sql.NullString
 	var updatedRuleID sql.NullString
 	var updatedRuleTitle sql.NullString
 	var updatedBanListID sql.NullString
@@ -738,7 +767,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var updatedEvidenceText sql.NullString
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, u.username, sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -750,6 +779,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&updatedBan.AdminID,
 		&updatedBan.AdminName,
 		&updatedSteamIDInt,
+		&updatedEOSIDStr,
 		&updatedBan.Reason,
 		&updatedBan.Duration,
 		&updatedRuleID,
@@ -765,9 +795,17 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		return
 	}
 
-	// Convert steamID from int64 to string
-	updatedBan.SteamID = strconv.FormatInt(updatedSteamIDInt, 10)
-	updatedBan.Name = updatedBan.SteamID
+	if updatedSteamIDInt.Valid {
+		updatedBan.SteamID = strconv.FormatInt(updatedSteamIDInt.Int64, 10)
+	}
+	if updatedEOSIDStr.Valid {
+		updatedBan.EOSID = updatedEOSIDStr.String
+	}
+	if updatedBan.SteamID != "" {
+		updatedBan.Name = updatedBan.SteamID
+	} else {
+		updatedBan.Name = updatedBan.EOSID
+	}
 
 	// Set rule ID if present
 	if updatedRuleID.Valid {
@@ -805,6 +843,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	auditData := map[string]interface{}{
 		"banId":        banId.String(),
 		"steamId":      updatedBan.SteamID,
+		"eosId":        updatedBan.EOSID,
 		"oldReason":    currentBan.Reason,
 		"newReason":    updatedBan.Reason,
 		"oldDuration":  currentBan.Duration,

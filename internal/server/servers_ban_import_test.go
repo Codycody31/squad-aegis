@@ -123,7 +123,7 @@ func TestParseBansCfg_NoReason(t *testing.T) {
 }
 
 func TestParseBansCfg_InvalidSteamID(t *testing.T) {
-	// 31-char string that's not a valid hex EOS ID or numeric Steam ID
+	// "notanumber" is neither a 32-char hex EOS ID nor a numeric Steam ID
 	content := `Admin [SteamID 0] Banned:notanumber:0 //Bad ID`
 
 	entries, unparseable := parseBansCfg(content)
