@@ -42,6 +42,13 @@ type LogwatcherManager struct {
 	cancel               context.CancelFunc
 }
 
+// ServerConnectionStatus represents current status of a single logwatcher connection.
+type ServerConnectionStatus struct {
+	Connected bool
+	Config    LogSourceConfig
+	LastUsed  time.Time
+}
+
 // NewLogwatcherManager creates a new logwatcher manager
 func NewLogwatcherManager(ctx context.Context, eventManager *event_manager.EventManager, valkeyClient *valkeyClient.Client, playerTrackerManager *player_tracker_manager.PlayerTrackerManager) *LogwatcherManager {
 	ctx, cancel := context.WithCancel(ctx)
@@ -493,6 +500,25 @@ func (m *LogwatcherManager) GetServerMetrics(serverID uuid.UUID) (map[string]int
 	}
 
 	return conn.Metrics.GetMetrics(), nil
+}
+
+// GetServerConnectionStatus returns connection status for a specific server.
+func (m *LogwatcherManager) GetServerConnectionStatus(serverID uuid.UUID) (ServerConnectionStatus, error) {
+	m.mu.RLock()
+	conn, exists := m.connections[serverID]
+	m.mu.RUnlock()
+	if !exists {
+		return ServerConnectionStatus{}, errors.New("server connection not found")
+	}
+
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+
+	return ServerConnectionStatus{
+		Connected: conn.Connected,
+		Config:    conn.Config,
+		LastUsed:  conn.LastUsed,
+	}, nil
 }
 
 // StartConnectionManager starts the connection manager
