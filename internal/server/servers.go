@@ -374,7 +374,7 @@ func (s *Server) testLogTransportFunctionality(server *models.Server, includeLog
 		return status
 	}
 
-	filePath := trimmedStringPtr(server.LogFilePath)
+	filePath := buildLogFilePath(*server.SquadGamePath, server.LogSourceType)
 	switch logwatcher_manager.LogSourceType(status.SourceType) {
 	case logwatcher_manager.LogSourceTypeLocal:
 		return probeLocalLogTransport(filePath, status)
@@ -391,8 +391,8 @@ func (s *Server) testLogTransportFunctionality(server *models.Server, includeLog
 
 func buildBaseLogTransportStatus(server *models.Server) logTransportStatus {
 	sourceType := trimmedStringPtr(server.LogSourceType)
-	filePath := trimmedStringPtr(server.LogFilePath)
-	if sourceType == "" || filePath == "" {
+	squadGamePath := trimmedStringPtr(server.SquadGamePath)
+	if sourceType == "" || squadGamePath == "" {
 		return logTransportStatus{
 			Enabled: false,
 			Healthy: false,
