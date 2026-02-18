@@ -24,13 +24,11 @@ export interface Server {
   game_port: number;
   rcon_ip_address: string | null;
   rcon_port: number;
-  rcon_password: string;
   // Log & file access
   log_source_type: "local" | "sftp" | "ftp" | null;
   log_host: string | null;
   log_port: number | null;
   log_username: string | null;
-  log_password: string | null;
   log_poll_frequency: number | null;
   log_read_from_start: boolean | null;
   squad_game_path: string | null;

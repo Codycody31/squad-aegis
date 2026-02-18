@@ -865,6 +865,12 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
 			log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after ban update")
 		}
+
+		// Reload server config so the game server picks up the updated Bans.cfg
+		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+		if _, err := r.ExecuteRaw("AdminReloadServerConfig"); err != nil {
+			log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban update")
+		}
 	}
 
 	responses.Success(c, "Ban updated successfully", &gin.H{

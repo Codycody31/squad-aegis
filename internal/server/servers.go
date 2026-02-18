@@ -136,32 +136,7 @@ func (s *Server) ServersCreate(c *gin.Context) {
 
 	// Connect to logwatcher if log configuration is provided
 	if server.LogSourceType != nil && server.SquadGamePath != nil {
-		config := logwatcher_manager.LogSourceConfig{
-			Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
-			FilePath:      buildLogFilePath(*server.SquadGamePath, server.LogSourceType),
-			ReadFromStart: false, // Default value
-		}
-
-		if server.LogHost != nil {
-			config.Host = *server.LogHost
-		}
-		if server.LogPort != nil {
-			config.Port = *server.LogPort
-		}
-		if server.LogUsername != nil {
-			config.Username = *server.LogUsername
-		}
-		if server.LogPassword != nil {
-			config.Password = *server.LogPassword
-		}
-		if server.LogPollFrequency != nil {
-			config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
-		}
-		if server.LogReadFromStart != nil {
-			config.ReadFromStart = *server.LogReadFromStart
-		}
-
-		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, config)
+		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, buildLogSourceConfig(server))
 	}
 
 	responses.Success(c, "Server created successfully", &gin.H{"server": server})
@@ -812,6 +787,14 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 			responses.BadRequest(c, "Invalid request payload", &gin.H{"errors": err})
 			return
 		}
+
+		// Require password if the server doesn't already have one stored
+		newPassword := request.LogPassword != nil && *request.LogPassword != ""
+		existingPassword := server.LogPassword != nil && *server.LogPassword != ""
+		if !newPassword && !existingPassword {
+			responses.BadRequest(c, "Invalid request payload", &gin.H{"errors": "log_password is required for SFTP/FTP"})
+			return
+		}
 	}
 
 	if request.LogPollFrequency == nil {
@@ -858,32 +841,7 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 
 	// Reconnect logwatcher if log configuration is provided
 	if server.LogSourceType != nil && server.SquadGamePath != nil {
-		config := logwatcher_manager.LogSourceConfig{
-			Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
-			FilePath:      buildLogFilePath(*server.SquadGamePath, server.LogSourceType),
-			ReadFromStart: false, // Default value
-		}
-
-		if server.LogHost != nil {
-			config.Host = *server.LogHost
-		}
-		if server.LogPort != nil {
-			config.Port = *server.LogPort
-		}
-		if server.LogUsername != nil {
-			config.Username = *server.LogUsername
-		}
-		if server.LogPassword != nil {
-			config.Password = *server.LogPassword
-		}
-		if server.LogPollFrequency != nil {
-			config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
-		}
-		if server.LogReadFromStart != nil {
-			config.ReadFromStart = *server.LogReadFromStart
-		}
-
-		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, config)
+		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, buildLogSourceConfig(server))
 	} else {
 		// Disconnect from logwatcher if log configuration is removed
 		_ = s.Dependencies.LogwatcherManager.DisconnectFromServer(server.Id)
@@ -937,33 +895,8 @@ func (s *Server) ServerLogwatcherRestart(c *gin.Context) {
 
 	// Then reconnect to the log watcher with current configuration
 	log.Info().Str("server_id", serverId.String()).Msg("Reconnecting to log watcher")
-	
-	config := logwatcher_manager.LogSourceConfig{
-		Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
-		FilePath:      buildLogFilePath(*server.SquadGamePath, server.LogSourceType),
-		ReadFromStart: false, // Default value
-	}
 
-	if server.LogHost != nil {
-		config.Host = *server.LogHost
-	}
-	if server.LogPort != nil {
-		config.Port = *server.LogPort
-	}
-	if server.LogUsername != nil {
-		config.Username = *server.LogUsername
-	}
-	if server.LogPassword != nil {
-		config.Password = *server.LogPassword
-	}
-	if server.LogPollFrequency != nil {
-		config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
-	}
-	if server.LogReadFromStart != nil {
-		config.ReadFromStart = *server.LogReadFromStart
-	}
-
-	err = s.Dependencies.LogwatcherManager.ConnectToServer(serverId, config)
+	err = s.Dependencies.LogwatcherManager.ConnectToServer(serverId, buildLogSourceConfig(server))
 	if err != nil {
 		responses.BadRequest(c, "Failed to reconnect to log watcher", &gin.H{"error": err.Error()})
 		return

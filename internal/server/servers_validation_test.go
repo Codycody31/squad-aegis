@@ -14,6 +14,9 @@ func TestValidateSquadGamePath(t *testing.T) {
 		"/home/squad/serverfiles/SquadGame/Saved/Logs/SquadGame.log",
 		"/home/squad/serverfiles/SquadGame/ServerConfig/Bans.cfg",
 		"/home/squad/serverfiles/SquadGame/ServerConfig",
+		"/home/squad/../../etc",
+		"/home/squad/serverfiles/../../../etc/passwd",
+		"../relative/path",
 	}
 
 	for _, value := range tests {
