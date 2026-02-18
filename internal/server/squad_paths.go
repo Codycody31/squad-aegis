@@ -3,6 +3,7 @@ package server
 import (
 	"path"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -13,7 +14,9 @@ const (
 
 func buildServerPath(basePath string, useSlash bool, relPath string) string {
 	if useSlash {
-		return path.Join(basePath, relPath)
+		// SFTP/FTP always use forward slashes. Normalize any Windows-style
+		// backslashes the user may have entered in their SquadGamePath.
+		return path.Join(strings.ReplaceAll(basePath, `\`, "/"), relPath)
 	}
 	return filepath.Join(basePath, filepath.FromSlash(relPath))
 }

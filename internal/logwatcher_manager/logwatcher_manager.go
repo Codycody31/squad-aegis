@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -424,7 +425,9 @@ func buildLogFilePath(basePath string, logSourceType *string) string {
 	useSlash := logSourceType != nil && (*logSourceType == "sftp" || *logSourceType == "ftp")
 	relPath := "Saved/Logs/SquadGame.log"
 	if useSlash {
-		return path.Join(basePath, relPath)
+		// SFTP/FTP always use forward slashes. Normalize any Windows-style
+		// backslashes the user may have entered in their SquadGamePath.
+		return path.Join(strings.ReplaceAll(basePath, `\`, "/"), relPath)
 	}
 	return filepath.Join(basePath, filepath.FromSlash(relPath))
 }
