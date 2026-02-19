@@ -20,22 +20,26 @@ import (
 
 // Request structs for player actions
 type KickPlayerRequest struct {
-	SteamId string `json:"steam_id" binding:"required"`
+	SteamId string `json:"steam_id"`
+	EosId   string `json:"eos_id"`
 	Reason  string `json:"reason"`
 }
 
 type WarnPlayerRequest struct {
-	SteamId string `json:"steam_id" binding:"required"`
+	SteamId string `json:"steam_id"`
+	EosId   string `json:"eos_id"`
 	Message string `json:"message" binding:"required"`
 }
 
 type MovePlayerRequest struct {
-	SteamId string `json:"steam_id" binding:"required"`
+	SteamId string `json:"steam_id"`
+	EosId   string `json:"eos_id"`
 }
 
 // Request structs for player actions with rule support
 type PlayerActionRequest struct {
-	SteamId string  `json:"steam_id" binding:"required"`
+	SteamId string  `json:"steam_id"`
+	EosId   string  `json:"eos_id"`
 	RuleId  *string `json:"rule_id"`
 }
 
@@ -53,6 +57,25 @@ type PlayerBanRequest struct {
 type PlayerWarnRequest struct {
 	PlayerActionRequest
 	Message string `json:"message" binding:"required"`
+}
+
+// resolveRCONPlayerID validates the provided identifiers and returns the ID to
+// use for RCON commands (prefers Steam ID). Returns the resolved ID and an
+// error message if validation fails.
+func resolveRCONPlayerID(steamId, eosId string) (rconID string, errMsg string) {
+	if steamId == "" && eosId == "" {
+		return "", "At least one player identifier (steam_id or eos_id) is required"
+	}
+	if steamId != "" {
+		if !utils.IsSteamID(steamId) {
+			return "", "Steam ID must be a valid 64-bit integer"
+		}
+		return steamId, ""
+	}
+	if !utils.IsEOSID(eosId) {
+		return "", "EOS ID must be a 32-character hex string"
+	}
+	return eosId, ""
 }
 
 // RconCommandList handles the listing of all commands that can be executed by the server
@@ -230,6 +253,12 @@ func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 		return
 	}
 
+	rconID, errMsg := resolveRCONPlayerID(request.SteamId, request.EosId)
+	if errMsg != "" {
+		responses.BadRequest(c, errMsg, nil)
+		return
+	}
+
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
 	if err != nil {
@@ -240,7 +269,7 @@ func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
 	// Format the kick command with sanitized parameters
-	kickCommand := "AdminKick " + utils.SanitizeRCONParam(request.SteamId)
+	kickCommand := "AdminKick " + utils.SanitizeRCONParam(rconID)
 	if request.Reason != "" {
 		kickCommand += " " + utils.SanitizeRCONParam(request.Reason)
 	}
@@ -255,6 +284,7 @@ func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
+		"eosId":   request.EosId,
 		"reason":  request.Reason,
 	}
 
@@ -273,6 +303,12 @@ func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 		return
 	}
 
+	rconID, errMsg := resolveRCONPlayerID(request.SteamId, request.EosId)
+	if errMsg != "" {
+		responses.BadRequest(c, errMsg, nil)
+		return
+	}
+
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
 	if err != nil {
@@ -281,7 +317,7 @@ func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 	}
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
-	response, err := r.ExecuteRaw("AdminWarn " + utils.SanitizeRCONParam(request.SteamId) + " " + utils.SanitizeRCONParam(request.Message))
+	response, err := r.ExecuteRaw("AdminWarn " + utils.SanitizeRCONParam(rconID) + " " + utils.SanitizeRCONParam(request.Message))
 	if err != nil {
 		responses.BadRequest(c, "Failed to warn player", &gin.H{"error": err.Error()})
 		return
@@ -290,6 +326,7 @@ func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
+		"eosId":   request.EosId,
 		"message": request.Message,
 	}
 
@@ -308,6 +345,12 @@ func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 		return
 	}
 
+	rconID, errMsg := resolveRCONPlayerID(request.SteamId, request.EosId)
+	if errMsg != "" {
+		responses.BadRequest(c, errMsg, nil)
+		return
+	}
+
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
 	if err != nil {
@@ -316,7 +359,7 @@ func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 	}
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
-	response, err := r.ExecuteRaw("AdminForceTeamChange " + request.SteamId)
+	response, err := r.ExecuteRaw("AdminForceTeamChange " + utils.SanitizeRCONParam(rconID))
 	if err != nil {
 		responses.BadRequest(c, "Failed to move player", &gin.H{"error": err.Error()})
 		return
@@ -325,6 +368,7 @@ func (s *Server) ServerRconMovePlayer(c *gin.Context) {
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
+		"eosId":   request.EosId,
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:command:move", auditData)
@@ -466,6 +510,12 @@ func (s *Server) ServerRconPlayerKick(c *gin.Context) {
 		return
 	}
 
+	rconID, errMsg := resolveRCONPlayerID(request.SteamId, request.EosId)
+	if errMsg != "" {
+		responses.BadRequest(c, errMsg, nil)
+		return
+	}
+
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
 	if err != nil {
@@ -476,7 +526,7 @@ func (s *Server) ServerRconPlayerKick(c *gin.Context) {
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
 	// Format the kick command with sanitized parameters
-	kickCommand := "AdminKick " + utils.SanitizeRCONParam(request.SteamId)
+	kickCommand := "AdminKick " + utils.SanitizeRCONParam(rconID)
 	if request.Reason != "" {
 		kickCommand += " " + utils.SanitizeRCONParam(request.Reason)
 	}
@@ -490,12 +540,13 @@ func (s *Server) ServerRconPlayerKick(c *gin.Context) {
 
 	// Log rule violation to ClickHouse if rule_id is provided
 	if request.RuleId != nil && *request.RuleId != "" {
-		s.logRuleViolation(c.Request.Context(), serverId, request.SteamId, request.RuleId, &user.Id, "KICK")
+		s.logRuleViolation(c.Request.Context(), serverId, rconID, request.RuleId, &user.Id, "KICK")
 	}
 
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
+		"eosId":   request.EosId,
 		"reason":  request.Reason,
 	}
 	if request.RuleId != nil && *request.RuleId != "" {
@@ -514,6 +565,12 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	var request PlayerBanRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	rconID, errMsg := resolveRCONPlayerID(request.SteamId, request.EosId)
+	if errMsg != "" {
+		responses.BadRequest(c, errMsg, nil)
 		return
 	}
 
@@ -541,41 +598,51 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 		return
 	}
 
-	// Convert SteamID to int64
-	steamID, err := strconv.ParseInt(request.SteamId, 10, 64)
-	if err != nil {
-		responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
-		return
+	// Validate and prepare identifiers for DB storage
+	var steamIDVal interface{}
+	var eosIDVal interface{}
+	if request.SteamId != "" {
+		steamID, parseErr := strconv.ParseInt(request.SteamId, 10, 64)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
+			return
+		}
+		steamIDVal = steamID
+	}
+	if request.EosId != "" {
+		if !utils.IsEOSID(request.EosId) {
+			responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
+			return
+		}
+		eosIDVal = request.EosId
 	}
 
 	// Duration is in days (0 for permanent)
 	durationDays := request.Duration
 
-	// Insert the ban into the database (using steam_id directly)
+	// Build INSERT query dynamically
 	var banID string
 	now := time.Now()
 
-	query := `
-		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id
-	`
-	args := []interface{}{uuid.New(), serverId, user.Id, steamID, request.Reason, durationDays, now, now}
+	columns := "id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at"
+	placeholders := "$1, $2, $3, $4, $5, $6, $7, $8, $9"
+	args := []interface{}{uuid.New(), serverId, user.Id, steamIDVal, eosIDVal, request.Reason, durationDays, now, now}
+	nextParam := 10
 
 	// Add rule_id if provided
 	if request.RuleId != nil && *request.RuleId != "" {
-		ruleUUID, err := uuid.Parse(*request.RuleId)
-		if err != nil {
-			responses.BadRequest(c, "Invalid rule ID format", &gin.H{"error": err.Error()})
+		ruleUUID, parseErr := uuid.Parse(*request.RuleId)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid rule ID format", &gin.H{"error": parseErr.Error()})
 			return
 		}
-		query = `
-			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			RETURNING id
-		`
-		args = append(args[:6], ruleUUID, now, now)
+		columns += ", rule_id"
+		placeholders += fmt.Sprintf(", $%d", nextParam)
+		args = append(args, ruleUUID)
+		nextParam++
 	}
+
+	query := fmt.Sprintf(`INSERT INTO server_bans (%s) VALUES (%s) RETURNING id`, columns, placeholders)
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&banID)
 	if err != nil {
@@ -585,22 +652,23 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
-	err = r.BanPlayer(request.SteamId, request.Duration, request.Reason)
+	err = r.BanPlayer(rconID, request.Duration, request.Reason)
 	if err != nil {
-		log.Error().Err(err).Str("steamId", request.SteamId).Str("serverId", serverId.String()).Msg("Failed to apply ban via RCON")
+		log.Error().Err(err).Str("playerId", rconID).Str("serverId", serverId.String()).Msg("Failed to apply ban via RCON")
 	}
 
 	// Log rule violation to ClickHouse if rule_id is provided
 	if request.RuleId != nil && *request.RuleId != "" {
-		s.logRuleViolation(c.Request.Context(), serverId, request.SteamId, request.RuleId, &user.Id, "BAN")
+		s.logRuleViolation(c.Request.Context(), serverId, rconID, request.RuleId, &user.Id, "BAN")
 	}
 
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"banId":    banID,
 		"steamId":  request.SteamId,
+		"eosId":    request.EosId,
 		"reason":   request.Reason,
-		"duration": durationDays, // Store duration in days in audit log
+		"duration": durationDays,
 	}
 
 	// Add expiry information if not permanent
@@ -634,6 +702,12 @@ func (s *Server) ServerRconPlayerWarn(c *gin.Context) {
 		return
 	}
 
+	rconID, errMsg := resolveRCONPlayerID(request.SteamId, request.EosId)
+	if errMsg != "" {
+		responses.BadRequest(c, errMsg, nil)
+		return
+	}
+
 	serverIdString := c.Param("serverId")
 	serverId, err := uuid.Parse(serverIdString)
 	if err != nil {
@@ -642,7 +716,7 @@ func (s *Server) ServerRconPlayerWarn(c *gin.Context) {
 	}
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
-	response, err := r.ExecuteRaw("AdminWarn " + utils.SanitizeRCONParam(request.SteamId) + " " + utils.SanitizeRCONParam(request.Message))
+	response, err := r.ExecuteRaw("AdminWarn " + utils.SanitizeRCONParam(rconID) + " " + utils.SanitizeRCONParam(request.Message))
 	if err != nil {
 		responses.BadRequest(c, "Failed to warn player", &gin.H{"error": err.Error()})
 		return
@@ -650,12 +724,13 @@ func (s *Server) ServerRconPlayerWarn(c *gin.Context) {
 
 	// Log rule violation to ClickHouse if rule_id is provided
 	if request.RuleId != nil && *request.RuleId != "" {
-		s.logRuleViolation(c.Request.Context(), serverId, request.SteamId, request.RuleId, &user.Id, "WARN")
+		s.logRuleViolation(c.Request.Context(), serverId, rconID, request.RuleId, &user.Id, "WARN")
 	}
 
 	// Create detailed audit log
 	auditData := map[string]interface{}{
 		"steamId": request.SteamId,
+		"eosId":   request.EosId,
 		"message": request.Message,
 	}
 	if request.RuleId != nil && *request.RuleId != "" {

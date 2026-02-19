@@ -347,6 +347,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/kick`;
                 payload = {
                     steam_id: props.player.steam_id,
+                    eos_id: props.player.eosId,
                     reason: actionReason.value,
                 };
                 if (
@@ -361,6 +362,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/ban`;
                 payload = {
                     steam_id: props.player.steam_id,
+                    eos_id: props.player.eosId,
                     reason: actionReason.value,
                     duration: actionDuration.value, // Duration in days
                 };
@@ -376,6 +378,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/warn`;
                 payload = {
                     steam_id: props.player.steam_id,
+                    eos_id: props.player.eosId,
                     message: actionReason.value,
                 };
                 if (
@@ -390,6 +393,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/move-player`;
                 payload = {
                     steam_id: props.player.steam_id,
+                    eos_id: props.player.eosId,
                 };
                 break;
             case "remove-from-squad":

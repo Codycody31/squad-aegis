@@ -204,6 +204,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/kick`;
                         payload = {
                             steam_id: player.steam_id,
+                            eos_id: player.eosId,
                             reason: actionReason.value,
                         };
                         if (
@@ -218,6 +219,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/ban`;
                         payload = {
                             steam_id: player.steam_id,
+                            eos_id: player.eosId,
                             reason: actionReason.value,
                             duration: actionDuration.value,
                         };
@@ -233,6 +235,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/warn`;
                         payload = {
                             steam_id: player.steam_id,
+                            eos_id: player.eosId,
                             message: actionReason.value,
                         };
                         if (
@@ -247,6 +250,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/move-player`;
                         payload = {
                             steam_id: player.steam_id,
+                            eos_id: player.eosId,
                         };
                         break;
                 }
