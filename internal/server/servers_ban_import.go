@@ -346,7 +346,8 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 	}
 
 	// Import in a transaction
-	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	ctx := c.Request.Context()
+	tx, err := s.Dependencies.DB.BeginTx(ctx, nil)
 	if err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to start transaction"})
 		return
@@ -355,6 +356,19 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 
 	now := time.Now()
 	for _, ban := range newBans {
+		// Check for context cancellation (e.g. client disconnect, request timeout)
+		// before each insert so we abort early rather than accumulating spurious
+		// insert errors and attempting a commit that is guaranteed to fail.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			log.Warn().
+				Err(ctxErr).
+				Str("serverId", serverID.String()).
+				Int("importedSoFar", result.ImportedCount).
+				Msg("Context cancelled during ban import; rolling back transaction")
+			responses.InternalServerError(c, ctxErr, &gin.H{"error": "Import aborted: request was cancelled or timed out"})
+			return
+		}
+
 		// Calculate duration: remaining days until expiry, or 0 for permanent
 		duration := 0
 		if !ban.Permanent {
@@ -388,7 +402,7 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 			playerLabel = ban.EOSID
 		}
 
-		_, err = tx.ExecContext(c.Request.Context(), `
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		`, uuid.New(), serverID, user.Id, steamIDPtr, eosIDPtr, reason, duration, now, now)
@@ -398,6 +412,19 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 		}
 
 		result.ImportedCount++
+	}
+
+	// Guard against a cancellation that occurred after the final insert but
+	// before the commit; committing with a cancelled context would fail with a
+	// confusing generic error.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		log.Warn().
+			Err(ctxErr).
+			Str("serverId", serverID.String()).
+			Int("importedSoFar", result.ImportedCount).
+			Msg("Context cancelled before ban import commit; rolling back transaction")
+		responses.InternalServerError(c, ctxErr, &gin.H{"error": "Import aborted: request was cancelled or timed out"})
+		return
 	}
 
 	if err := tx.Commit(); err != nil {
