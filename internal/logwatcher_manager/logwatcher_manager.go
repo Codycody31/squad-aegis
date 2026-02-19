@@ -374,7 +374,7 @@ func (m *LogwatcherManager) ConnectToAllServers(ctx context.Context, db *sql.DB)
 		// Build log source config
 		config := LogSourceConfig{
 			Type:          LogSourceType(*logSourceType),
-			FilePath:      buildLogFilePath(*squadGamePath, logSourceType),
+			FilePath:      utils.BuildSquadServerPath(*squadGamePath, utils.IsRemoteProtocolPtr(logSourceType), utils.SquadGameLogsRelPath),
 			ReadFromStart: false, // Default value
 		}
 
@@ -417,10 +417,6 @@ func (m *LogwatcherManager) ConnectToAllServers(ctx context.Context, db *sql.DB)
 	if err := rows.Err(); err != nil {
 		log.Error().Err(err).Msg("Error iterating server log configuration rows")
 	}
-}
-
-func buildLogFilePath(basePath string, logSourceType *string) string {
-	return utils.BuildSquadServerPath(basePath, utils.IsRemoteProtocolPtr(logSourceType), utils.SquadGameLogsRelPath)
 }
 
 // GetConnectionStats returns statistics about log connections

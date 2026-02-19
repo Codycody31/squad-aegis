@@ -18,6 +18,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
+	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
 // permanentThresholdYears defines how far in the future an expiry timestamp
@@ -435,6 +436,12 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 	// Sync Bans.cfg to reflect the merged state (DB is source of truth)
 	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
 		log.Warn().Err(err).Str("serverId", serverID.String()).Msg("Failed to sync Bans.cfg after import")
+	}
+
+	// Reload server config so the game server picks up the updated Bans.cfg
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+	if _, err := r.ExecuteRaw("AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("serverId", serverID.String()).Msg("Failed to reload server config after ban import")
 	}
 
 	// Audit log
