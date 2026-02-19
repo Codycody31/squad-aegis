@@ -430,7 +430,8 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	responses.Success(c, "Ban removed successfully", nil)
 }
 
-// syncBansCfg writes a complete Bans.cfg for this server using server_bans only.
+// syncBansCfg writes a Bans.cfg for this server, merging DB-tracked bans with
+// any external entries (auto-bans, in-game manual bans) already present in the file.
 func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
 	if server == nil || server.SquadGamePath == nil || *server.SquadGamePath == "" {
 		return nil // No base path configured, nothing to do
@@ -442,6 +443,23 @@ func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
 	content, err := s.buildServerBansCfg(ctx, server.Id)
 	if err != nil {
 		return err
+	}
+
+	// Preserve entries from the existing Bans.cfg that are not tracked in the DB
+	// (e.g., automatic teamkill bans, in-game manual bans not yet imported).
+	existingContent, readErr := s.readBansCfg(ctx, server)
+	if readErr == nil && existingContent != "" {
+		entries, _ := parseBansCfg(existingContent)
+		dbSteamIDs, dbEOSIDs, lookupErr := s.getExistingBanIDs(ctx, server.Id)
+		if lookupErr == nil {
+			for _, entry := range entries {
+				inDB := (entry.SteamID != "" && dbSteamIDs[entry.SteamID]) ||
+					(entry.EOSID != "" && dbEOSIDs[entry.EOSID])
+				if !inDB && !entry.Expired {
+					content += entry.RawLine + "\n"
+				}
+			}
+		}
 	}
 
 	bansCfgPath := buildBansCfgPath(*server.SquadGamePath, server.LogSourceType)
