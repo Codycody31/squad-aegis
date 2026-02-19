@@ -986,7 +986,8 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 
 		reasonComment := ""
 		if reason != "" {
-			reasonComment = " //" + reason
+			safeReason := strings.ReplaceAll(strings.ReplaceAll(reason, "\n", " "), "\r", " ")
+			reasonComment = " //" + safeReason
 		} else if duration == 0 {
 			reasonComment = " //Permanent ban"
 		}

@@ -108,7 +108,8 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 		// Build the reason comment
 		reasonComment := ""
 		if ban.Reason != "" {
-			reasonComment = " //" + ban.Reason
+			safeReason := strings.ReplaceAll(strings.ReplaceAll(ban.Reason, "\n", " "), "\r", " ")
+			reasonComment = " //" + safeReason
 		} else if ban.Duration == 0 {
 			reasonComment = " //Permanent ban"
 		}
@@ -166,7 +167,8 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 		// Build the reason comment
 		reasonComment := ""
 		if reason != "" {
-			reasonComment = " //" + reason
+			safeReason := strings.ReplaceAll(strings.ReplaceAll(reason, "\n", " "), "\r", " ")
+			reasonComment = " //" + safeReason
 		} else if duration == 0 {
 			reasonComment = " //Permanent ban"
 		}
