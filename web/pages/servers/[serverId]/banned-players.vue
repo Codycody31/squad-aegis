@@ -1164,9 +1164,14 @@ async function searchEvidenceInline(steamId: string) {
         const runtimeConfig = useRuntimeConfig();
 
         const params = new URLSearchParams({
-            steam_id: cleanId,
             event_type: evidenceSearchType.value,
         });
+        if (playerIds.steamId) {
+            params.set("steam_id", playerIds.steamId);
+        }
+        if (playerIds.eosId) {
+            params.set("eos_id", playerIds.eosId);
+        }
 
         const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/events/search?${params.toString()}`,

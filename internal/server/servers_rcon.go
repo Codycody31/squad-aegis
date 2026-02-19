@@ -441,8 +441,11 @@ func (s *Server) ServerRconForceRestart(c *gin.Context) {
 	responses.Success(c, "RCON connection restarted successfully", nil)
 }
 
-// logRuleViolation logs a rule violation to ClickHouse if rule_id is provided
-func (s *Server) logRuleViolation(ctx context.Context, serverId uuid.UUID, steamId string, ruleId *string, adminUserId *uuid.UUID, actionType string) error {
+// logRuleViolation logs a rule violation to ClickHouse if rule_id is provided.
+// playerId may be a Steam ID (numeric) or an EOS ID (hex). ClickHouse stores
+// player_steam_id as UInt64, so violations for EOS-only players are silently
+// skipped until the schema is extended.
+func (s *Server) logRuleViolation(ctx context.Context, serverId uuid.UUID, playerId string, ruleId *string, adminUserId *uuid.UUID, actionType string) error {
 	if ruleId == nil || *ruleId == "" {
 		return nil // No rule ID, skip logging
 	}
@@ -453,10 +456,10 @@ func (s *Server) logRuleViolation(ctx context.Context, serverId uuid.UUID, steam
 		return nil // Don't fail the action if rule ID is invalid
 	}
 
-	// Parse steam ID to uint64 (ClickHouse schema requires UInt64, so EOS-only players are skipped)
-	steamIdInt, err := strconv.ParseInt(steamId, 10, 64)
+	// Parse player ID to uint64 (ClickHouse schema requires UInt64, so EOS-only players are skipped)
+	steamIdInt, err := strconv.ParseInt(playerId, 10, 64)
 	if err != nil {
-		log.Warn().Err(err).Str("player_id", steamId).Msg("Non-numeric player ID (likely EOS ID), skipping ClickHouse violation log")
+		log.Warn().Err(err).Str("player_id", playerId).Msg("Non-numeric player ID (likely EOS ID), skipping ClickHouse violation log")
 		return nil // ClickHouse schema requires UInt64 for player_steam_id; EOS IDs not supported yet
 	}
 
@@ -483,7 +486,7 @@ func (s *Server) logRuleViolation(ctx context.Context, serverId uuid.UUID, steam
 	if err != nil {
 		log.Error().Err(err).
 			Str("server_id", serverId.String()).
-			Str("steam_id", steamId).
+			Str("player_id", playerId).
 			Str("rule_id", *ruleId).
 			Str("action_type", actionType).
 			Msg("Failed to log rule violation to ClickHouse")
@@ -492,7 +495,7 @@ func (s *Server) logRuleViolation(ctx context.Context, serverId uuid.UUID, steam
 
 	log.Info().
 		Str("server_id", serverId.String()).
-		Str("steam_id", steamId).
+		Str("player_id", playerId).
 		Str("rule_id", *ruleId).
 		Str("action_type", actionType).
 		Msg("Logged rule violation to ClickHouse")
@@ -843,17 +846,29 @@ func (s *Server) ServerRconPlayerEscalationSuggestion(c *gin.Context) {
 	}
 
 	steamId := c.Query("steam_id")
+	eosId := c.Query("eos_id")
 	ruleIdStr := c.Query("rule_id")
 
-	if steamId == "" {
-		responses.BadRequest(c, "Steam ID is required", &gin.H{"error": "steam_id parameter is required"})
+	if steamId == "" && eosId == "" {
+		responses.BadRequest(c, "Player identifier is required", &gin.H{"error": "steam_id or eos_id parameter is required"})
 		return
 	}
 
-	// Parse steam ID to uint64 for ClickHouse query
-	steamIdInt, err := strconv.ParseInt(steamId, 10, 64)
-	if err != nil {
-		responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
+	// ClickHouse violation table uses UInt64 for player_steam_id, so we can
+	// only query violation history when a valid Steam ID is provided.
+	var steamIdInt int64
+	hasSteamId := false
+	if steamId != "" {
+		parsed, parseErr := strconv.ParseInt(steamId, 10, 64)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
+			return
+		}
+		steamIdInt = parsed
+		hasSteamId = true
+	}
+	if eosId != "" && !utils.IsEOSID(eosId) {
+		responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
 		return
 	}
 
@@ -870,20 +885,23 @@ func (s *Server) ServerRconPlayerEscalationSuggestion(c *gin.Context) {
 		}
 
 		// Get violation count from ClickHouse for this player and rule
-		query := `
-			SELECT count(*) as violation_count
-			FROM squad_aegis.player_rule_violations
-			WHERE server_id = ? AND player_steam_id = ? AND rule_id = ?
-		`
+		// (only possible with a numeric Steam ID; EOS-only players get 0 violations)
+		if hasSteamId {
+			query := `
+				SELECT count(*) as violation_count
+				FROM squad_aegis.player_rule_violations
+				WHERE server_id = ? AND player_steam_id = ? AND rule_id = ?
+			`
 
-		var violationCount uint64
-		err = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, serverId, uint64(steamIdInt), ruleId.String()).Scan(&violationCount)
-		if err != nil {
-			if err != sql.ErrNoRows {
-				log.Warn().Err(err).Msg("Failed to query violation count, continuing without escalation suggestion")
+			var violationCount uint64
+			err = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, serverId, uint64(steamIdInt), ruleId.String()).Scan(&violationCount)
+			if err != nil {
+				if err != sql.ErrNoRows {
+					log.Warn().Err(err).Msg("Failed to query violation count, continuing without escalation suggestion")
+				}
+			} else {
+				suggestion.ViolationCount = int(violationCount)
 			}
-		} else {
-			suggestion.ViolationCount = int(violationCount)
 		}
 
 		// Get rule details and calculate rule number

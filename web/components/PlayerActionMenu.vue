@@ -137,8 +137,13 @@ function flattenRulesForDropdown(
 }
 
 // Fetch escalation suggestion when rule is selected
-async function fetchEscalationSuggestion(steamId: string, ruleId: string) {
-    if (!ruleId || !steamId || ruleId === "" || ruleId === "__none__") {
+async function fetchEscalationSuggestion(ruleId: string) {
+    if (!ruleId || ruleId === "" || ruleId === "__none__") {
+        escalationSuggestion.value = null;
+        return;
+    }
+
+    if (!props.player.steam_id && !props.player.eosId) {
         escalationSuggestion.value = null;
         return;
     }
@@ -156,8 +161,16 @@ async function fetchEscalationSuggestion(steamId: string, ruleId: string) {
     }
 
     try {
+        const params = new URLSearchParams({ rule_id: ruleId });
+        if (props.player.steam_id) {
+            params.set("steam_id", props.player.steam_id);
+        }
+        if (props.player.eosId) {
+            params.set("eos_id", props.player.eosId);
+        }
+
         const { data, error: fetchError } = await useFetch(
-            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/escalation-suggestion?steam_id=${steamId}&rule_id=${ruleId}`,
+            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/escalation-suggestion?${params.toString()}`,
             {
                 method: "GET",
                 headers: {
@@ -219,7 +232,7 @@ async function fetchEscalationSuggestion(steamId: string, ruleId: string) {
 // Handle rule selection
 function onRuleSelected(ruleId: string) {
     if (props.player && ruleId && ruleId !== "" && ruleId !== "__none__") {
-        fetchEscalationSuggestion(props.player.steam_id, ruleId);
+        fetchEscalationSuggestion(ruleId);
     } else {
         escalationSuggestion.value = null;
     }

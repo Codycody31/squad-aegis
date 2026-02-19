@@ -30,13 +30,14 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		return
 	}
 
-	// Get query parameters
+	// Get query parameters — accept either steam_id or eos_id
 	steamID := c.Query("steam_id")
+	eosID := c.Query("eos_id")
 	eventType := c.Query("event_type")
 	limitStr := c.DefaultQuery("limit", "50")
 
-	if steamID == "" {
-		responses.BadRequest(c, "steam_id is required", nil)
+	if steamID == "" && eosID == "" {
+		responses.BadRequest(c, "steam_id or eos_id is required", nil)
 		return
 	}
 
@@ -50,11 +51,16 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		limit = 50
 	}
 
-	// Convert Steam ID to uint64 for ClickHouse queries
-	steamIDInt, err := strconv.ParseUint(steamID, 10, 64)
-	if err != nil {
-		responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
-		return
+	// Determine which identifier to filter on
+	useSteamID := steamID != ""
+	var steamIDInt uint64
+	if useSteamID {
+		parsed, parseErr := strconv.ParseUint(steamID, 10, 64)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
+			return
+		}
+		steamIDInt = parsed
 	}
 
 	// Map event type to ClickHouse table and build query
@@ -64,8 +70,12 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 	switch eventType {
 	case "chat_message":
 		tableName = "server_player_chat_messages"
+		filterCol := "steam_id = ?"
+		if !useSteamID {
+			filterCol = "eos_id = ?"
+		}
 		query = fmt.Sprintf(`
-			SELECT 
+			SELECT
 				message_id,
 				sent_at as event_time,
 				player_name,
@@ -74,15 +84,19 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 				steam_id,
 				eos_id
 			FROM squad_aegis.%s
-			WHERE server_id = ? AND steam_id = ?
+			WHERE server_id = ? AND %s
 			ORDER BY sent_at DESC
 			LIMIT ?
-		`, tableName)
+		`, tableName, filterCol)
 
 	case "player_connected":
 		tableName = "server_player_connected_events"
+		filterCol := "pc.steam = ?"
+		if !useSteamID {
+			filterCol = "pc.eos = ?"
+		}
 		query = fmt.Sprintf(`
-			SELECT 
+			SELECT
 				pc.id,
 				pc.event_time,
 				pc.player_controller,
@@ -100,11 +114,11 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 					OR (pc.eos IS NOT NULL AND pc.eos = js.eos)
 				)
 				AND abs(toUnixTimestamp(pc.event_time) - toUnixTimestamp(js.event_time)) <= 10
-			WHERE pc.server_id = ? AND pc.steam = ?
+			WHERE pc.server_id = ? AND %s
 			GROUP BY pc.id, pc.event_time, pc.player_controller, pc.ip, pc.steam, pc.eos, pc.chain_id
 			ORDER BY pc.event_time DESC
 			LIMIT ?
-		`, tableName)
+		`, tableName, filterCol)
 
 	default:
 		responses.BadRequest(c, "Invalid event type", &gin.H{
@@ -115,13 +129,18 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		return
 	}
 
-	// Execute the query
-	// For player_connected, steam is a string column, so convert steamIDInt to string
+	// Build query args based on which identifier is being used
 	var queryArgs []interface{}
-	if eventType == "player_connected" {
-		queryArgs = []interface{}{serverId.String(), strconv.FormatUint(steamIDInt, 10), limit}
+	if useSteamID {
+		if eventType == "player_connected" {
+			// player_connected.steam is a string column
+			queryArgs = []interface{}{serverId.String(), strconv.FormatUint(steamIDInt, 10), limit}
+		} else {
+			// chat_messages.steam_id is UInt64
+			queryArgs = []interface{}{serverId.String(), steamIDInt, limit}
+		}
 	} else {
-		queryArgs = []interface{}{serverId.String(), steamIDInt, limit}
+		queryArgs = []interface{}{serverId.String(), eosID, limit}
 	}
 
 	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, queryArgs...)
@@ -191,10 +210,17 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		events = append(events, event)
 	}
 
-	responses.Success(c, "Events fetched successfully", &gin.H{
+	responseData := gin.H{
 		"events":     events,
 		"count":      len(events),
 		"event_type": eventType,
-		"steam_id":   steamID,
-	})
+	}
+	if steamID != "" {
+		responseData["steam_id"] = steamID
+	}
+	if eosID != "" {
+		responseData["eos_id"] = eosID
+	}
+
+	responses.Success(c, "Events fetched successfully", &responseData)
 }
