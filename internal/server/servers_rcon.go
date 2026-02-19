@@ -14,6 +14,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/commands"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
@@ -238,10 +239,10 @@ func (s *Server) ServerRconKickPlayer(c *gin.Context) {
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
-	// Format the kick command
-	kickCommand := "AdminKick " + request.SteamId
+	// Format the kick command with sanitized parameters
+	kickCommand := "AdminKick " + utils.SanitizeRCONParam(request.SteamId)
 	if request.Reason != "" {
-		kickCommand += " " + request.Reason
+		kickCommand += " " + utils.SanitizeRCONParam(request.Reason)
 	}
 
 	// Execute kick command
@@ -280,7 +281,7 @@ func (s *Server) ServerRconWarnPlayer(c *gin.Context) {
 	}
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
-	response, err := r.ExecuteRaw("AdminWarn " + request.SteamId + " " + request.Message)
+	response, err := r.ExecuteRaw("AdminWarn " + utils.SanitizeRCONParam(request.SteamId) + " " + utils.SanitizeRCONParam(request.Message))
 	if err != nil {
 		responses.BadRequest(c, "Failed to warn player", &gin.H{"error": err.Error()})
 		return
@@ -474,10 +475,10 @@ func (s *Server) ServerRconPlayerKick(c *gin.Context) {
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
 
-	// Format the kick command
-	kickCommand := "AdminKick " + request.SteamId
+	// Format the kick command with sanitized parameters
+	kickCommand := "AdminKick " + utils.SanitizeRCONParam(request.SteamId)
 	if request.Reason != "" {
-		kickCommand += " " + request.Reason
+		kickCommand += " " + utils.SanitizeRCONParam(request.Reason)
 	}
 
 	// Execute kick command
@@ -641,7 +642,7 @@ func (s *Server) ServerRconPlayerWarn(c *gin.Context) {
 	}
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
-	response, err := r.ExecuteRaw("AdminWarn " + request.SteamId + " " + request.Message)
+	response, err := r.ExecuteRaw("AdminWarn " + utils.SanitizeRCONParam(request.SteamId) + " " + utils.SanitizeRCONParam(request.Message))
 	if err != nil {
 		responses.BadRequest(c, "Failed to warn player", &gin.H{"error": err.Error()})
 		return

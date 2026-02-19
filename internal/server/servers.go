@@ -434,6 +434,10 @@ func probeSFTPLogTransport(server *models.Server, filePath string, status logTra
 	clientConfig := &ssh.ClientConfig{
 		User:            username,
 		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		// Intentionally skipping host key verification: this is a status probe
+		// against trusted, operator-configured infrastructure. The connection is
+		// short-lived and used only to check reachability, not to transfer
+		// sensitive data beyond the already-known credentials.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         statusLogProbeTimeout,
 	}

@@ -5,9 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/player_tracker_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	valkeyClient "go.codycody31.dev/squad-aegis/internal/valkey"
 )
 
@@ -422,14 +420,7 @@ func (m *LogwatcherManager) ConnectToAllServers(ctx context.Context, db *sql.DB)
 }
 
 func buildLogFilePath(basePath string, logSourceType *string) string {
-	useSlash := logSourceType != nil && (*logSourceType == "sftp" || *logSourceType == "ftp")
-	relPath := "Saved/Logs/SquadGame.log"
-	if useSlash {
-		// SFTP/FTP always use forward slashes. Normalize any Windows-style
-		// backslashes the user may have entered in their SquadGamePath.
-		return path.Join(strings.ReplaceAll(basePath, `\`, "/"), relPath)
-	}
-	return filepath.Join(basePath, filepath.FromSlash(relPath))
+	return utils.BuildSquadServerPath(basePath, utils.IsRemoteProtocolPtr(logSourceType), utils.SquadGameLogsRelPath)
 }
 
 // GetConnectionStats returns statistics about log connections

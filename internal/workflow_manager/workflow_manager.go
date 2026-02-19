@@ -97,10 +97,10 @@ func (wm *WorkflowManager) Start() error {
 	return nil
 }
 
-// sanitizeRCONParam strips double quotes from a value used in RCON commands
-// to prevent breaking out of quoted parameters or injecting additional arguments.
+// sanitizeRCONParam delegates to the shared utility that strips characters
+// dangerous in RCON commands (double quotes, newlines).
 func sanitizeRCONParam(s string) string {
-	return strings.ReplaceAll(s, "\"", "")
+	return utils.SanitizeRCONParam(s)
 }
 
 // Stop stops the workflow manager
