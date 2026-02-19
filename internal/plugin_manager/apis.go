@@ -15,6 +15,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
@@ -745,7 +746,7 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 	var eosIDVal interface{}
 	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
 		steamIDVal = sid
-	} else if len(playerID) == 32 {
+	} else if utils.IsEOSID(playerID) {
 		eosIDVal = playerID
 	} else {
 		return "", fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
@@ -828,7 +829,7 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 	var eosIDVal interface{}
 	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
 		steamIDVal = sid
-	} else if len(playerID) == 32 {
+	} else if utils.IsEOSID(playerID) {
 		eosIDVal = playerID
 	} else {
 		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")

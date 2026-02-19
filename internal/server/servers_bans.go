@@ -18,6 +18,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/file_upload"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
@@ -206,7 +207,7 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		steamIDVal = steamID
 	}
 	if request.EOSID != "" {
-		if len(request.EOSID) != 32 {
+		if !utils.IsEOSID(request.EOSID) {
 			responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
 			return
 		}
@@ -1166,7 +1167,7 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 	case "chat_message":
 		// For chat messages, record_id is message_id (UUID)
 		query = `
-			SELECT 
+			SELECT
 				message_id,
 				sent_at as event_time,
 				player_name,
@@ -1182,7 +1183,7 @@ func (s *Server) fetchEvidenceMetadataFromClickHouse(ctx context.Context, tableN
 
 	case "player_connected":
 		query = `
-			SELECT 
+			SELECT
 				id,
 				event_time,
 				player_controller,

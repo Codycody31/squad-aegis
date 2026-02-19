@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 func TestParseBansCfg_FullFormat(t *testing.T) {
@@ -390,7 +391,7 @@ func TestIsHex(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := isHex(tt.input)
+		result := utils.IsHex(tt.input)
 		if result != tt.expected {
 			t.Errorf("isHex(%q) = %v, want %v", tt.input, result, tt.expected)
 		}

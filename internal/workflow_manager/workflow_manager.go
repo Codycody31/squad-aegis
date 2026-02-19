@@ -21,6 +21,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // WorkflowManager manages workflow execution and lifecycle
@@ -1472,7 +1473,7 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 	var eosIDVal interface{}
 	if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
 		steamIDVal = sid
-	} else if len(playerId) == 32 {
+	} else if utils.IsEOSID(playerId) {
 		eosIDVal = playerId
 	} else {
 		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
@@ -3387,7 +3388,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		var eosIDVal interface{}
 		if sid, parseErr := strconv.ParseInt(steamID, 10, 64); parseErr == nil {
 			steamIDVal = sid
-		} else if len(steamID) == 32 {
+		} else if utils.IsEOSID(steamID) {
 			eosIDVal = steamID
 		} else {
 			L.Push(lua.LNil)

@@ -17,33 +17,13 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/file_upload"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // permanentThresholdYears defines how far in the future an expiry timestamp
 // must be to be treated as a permanent ban. Timestamps like 9999999999 (year 2286)
 // are used by Squad servers to represent permanent bans.
 const permanentThresholdYears = 50
-
-// isHex returns true if s consists entirely of hexadecimal characters.
-func isHex(s string) bool {
-	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-			return false
-		}
-	}
-	return len(s) > 0
-}
-
-// isEOSID returns true if the string looks like an EOS ID (32-char hex).
-func isEOSID(s string) bool {
-	return len(s) == 32 && isHex(s)
-}
-
-// isSteamID returns true if the string looks like a Steam ID (numeric, parses to int64).
-func isSteamID(s string) bool {
-	_, err := strconv.ParseInt(s, 10, 64)
-	return err == nil
-}
 
 // parseBansCfg parses the content of a Squad Bans.cfg file into structured entries.
 // Returns the parsed entries and the count of lines that could not be parsed.
@@ -104,7 +84,7 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
 		// Classify the identifier as Steam ID or EOS ID
 		steamID := ""
 		eosID := ""
-		if len(idStr) == 32 && isHex(idStr) {
+		if len(idStr) == 32 && utils.IsHex(idStr) {
 			eosID = idStr
 		} else if _, err := strconv.ParseInt(idStr, 10, 64); err == nil {
 			steamID = idStr
