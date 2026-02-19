@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 var (
@@ -325,13 +326,13 @@ func (s *SquadRcon) BanPlayer(playerID string, duration int, reason string) erro
 	} else {
 		durationStr = fmt.Sprintf("%dd", duration)
 	}
-	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %s %s", playerID, durationStr, reason))
+	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %s %s", utils.SanitizeRCONParam(playerID), durationStr, utils.SanitizeRCONParam(reason)))
 	return err
 }
 
 // KickPlayer kicks a player from the server
 func (s *SquadRcon) KickPlayer(playerID string, reason string) error {
-	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminKick %s %s", playerID, reason))
+	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminKick %s %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(reason)))
 	return err
 }
 
