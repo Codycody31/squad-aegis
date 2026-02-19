@@ -10,6 +10,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // BanEnforcer watches for player connections and kicks banned players.
@@ -116,7 +117,7 @@ func (b *BanEnforcer) handlePlayerConnected(event event_manager.Event) {
 		kickID = eosID
 	}
 
-	kickCmd := fmt.Sprintf("AdminKick %s %s", kickID, reason)
+	kickCmd := fmt.Sprintf("AdminKick %s %s", utils.SanitizeRCONParam(kickID), utils.SanitizeRCONParam(reason))
 	_, err = b.rconManager.ExecuteCommand(serverID, kickCmd)
 	if err != nil {
 		log.Error().Err(err).

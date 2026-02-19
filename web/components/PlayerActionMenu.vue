@@ -499,7 +499,7 @@ function copyToClipboard(text: string) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
             <RouterLink
-                :to="'/players/' + player.steam_id || player.eosId"
+                :to="'/players/' + (player.steam_id || player.eosId)"
                 as-child
             >
                 <DropdownMenuItem>

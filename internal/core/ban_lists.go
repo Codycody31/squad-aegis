@@ -260,7 +260,7 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 		// Calculate if ban is permanent and expiry date
 		ban.Permanent = ban.Duration == 0
 		if !ban.Permanent {
-			ban.ExpiresAt = ban.CreatedAt.Add(time.Duration(ban.Duration) * time.Minute)
+			ban.ExpiresAt = ban.CreatedAt.AddDate(0, 0, ban.Duration)
 		}
 
 		bans = append(bans, ban)

@@ -122,7 +122,7 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 		err = s.appendRemoteBans(c, banCfg, now)
 		if err != nil {
 			// Log error but don't fail the entire request
-			fmt.Printf("Warning: Failed to fetch remote bans: %v\n", err)
+			log.Warn().Err(err).Msg("Failed to fetch remote bans")
 		}
 	}
 
@@ -192,7 +192,7 @@ func (s *Server) appendRemoteBans(c *gin.Context, banCfg *strings.Builder, now t
 		err = s.fetchAndProcessRemoteBans(c, source.URL, banCfg, now)
 		if err != nil {
 			// Log error but continue with other sources
-			fmt.Printf("Warning: Failed to fetch from %s: %v\n", source.URL, err)
+			log.Warn().Err(err).Str("url", source.URL).Msg("Failed to fetch remote ban source")
 			continue
 		}
 	}

@@ -642,7 +642,7 @@ func (api *rconAPI) SendCommand(command string) (string, error) {
 }
 
 func (api *rconAPI) Broadcast(message string) error {
-	command := fmt.Sprintf("AdminBroadcast %s", message)
+	command := fmt.Sprintf("AdminBroadcast %s", utils.SanitizeRCONParam(message))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to send broadcast message: %w", err)
@@ -651,7 +651,7 @@ func (api *rconAPI) Broadcast(message string) error {
 }
 
 func (api *rconAPI) SendWarningToPlayer(playerID string, message string) error {
-	command := fmt.Sprintf("AdminWarn \"%s\" %s", playerID, message)
+	command := fmt.Sprintf("AdminWarn \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(message))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to send warning to player: %w", err)
@@ -660,7 +660,7 @@ func (api *rconAPI) SendWarningToPlayer(playerID string, message string) error {
 }
 
 func (api *rconAPI) KickPlayer(playerID string, reason string) error {
-	command := fmt.Sprintf("AdminKick \"%s\" %s", playerID, reason)
+	command := fmt.Sprintf("AdminKick \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(reason))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to kick player: %w", err)
@@ -669,7 +669,7 @@ func (api *rconAPI) KickPlayer(playerID string, reason string) error {
 }
 
 func (api *rconAPI) RemovePlayerFromSquad(playerID string) error {
-	command := fmt.Sprintf("AdminRemovePlayerFromSquad \"%s\"", playerID)
+	command := fmt.Sprintf("AdminRemovePlayerFromSquad \"%s\"", utils.SanitizeRCONParam(playerID))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to remove player from squad: %w", err)
@@ -678,7 +678,7 @@ func (api *rconAPI) RemovePlayerFromSquad(playerID string) error {
 }
 
 func (api *rconAPI) RemovePlayerFromSquadById(playerID string) error {
-	command := fmt.Sprintf("AdminRemovePlayerFromSquadById \"%s\"", playerID)
+	command := fmt.Sprintf("AdminRemovePlayerFromSquadById \"%s\"", utils.SanitizeRCONParam(playerID))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to remove player from squad: %w", err)
@@ -690,7 +690,7 @@ func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Dura
 	// Convert duration to days for Squad's ban system
 	durationDays := int(duration.Hours() / 24)
 
-	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", playerID, durationDays, reason)
+	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", utils.SanitizeRCONParam(playerID), durationDays, utils.SanitizeRCONParam(reason))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to ban player: %w", err)
@@ -809,14 +809,14 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 	}
 
 	// Execute RCON ban
-	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", playerID, durationDays, reason)
+	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", utils.SanitizeRCONParam(playerID), durationDays, utils.SanitizeRCONParam(reason))
 	_, err = api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
 	}
 
 	// Kick player
-	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", playerID, reason)
+	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(reason))
 	_, _ = api.rconManager.ExecuteCommand(api.serverID, kickCommand)
 
 	return banID.String(), nil
