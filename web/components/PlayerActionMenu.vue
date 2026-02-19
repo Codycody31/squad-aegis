@@ -703,9 +703,19 @@ function copyToClipboard(text: string) {
                 </div>
             </div>
 
+            <!-- Escalation Loading -->
+            <div
+                v-if="loadingEscalation"
+                class="p-3 bg-muted border rounded-lg text-sm text-muted-foreground flex items-center gap-2"
+            >
+                <Icon name="mdi:loading" class="h-4 w-4 animate-spin" />
+                Loading escalation suggestion...
+            </div>
+
             <!-- Escalation Suggestion -->
             <div
                 v-if="
+                    !loadingEscalation &&
                     escalationSuggestion &&
                     (actionType === 'kick' ||
                         actionType === 'ban' ||

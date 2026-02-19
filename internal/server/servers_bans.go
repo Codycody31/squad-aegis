@@ -85,7 +85,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			&ban.UpdatedAt,
 		)
 		if err != nil {
-			responses.BadRequest(c, "Failed to scan ban", &gin.H{"error": err.Error()})
+			responses.InternalServerError(c, err, nil)
 			return
 		}
 
@@ -266,7 +266,7 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	var returnedBanID string
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&returnedBanID)
 	if err != nil {
-		responses.BadRequest(c, "Failed to create ban", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
@@ -379,7 +379,7 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		if err == sql.ErrNoRows {
 			responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
 		} else {
-			responses.BadRequest(c, "Failed to get ban details", &gin.H{"error": err.Error()})
+			responses.InternalServerError(c, err, nil)
 		}
 		return
 	}
@@ -397,13 +397,13 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		WHERE id = $1 AND server_id = $2
 	`, banId, serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to delete ban", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		responses.BadRequest(c, "Failed to get rows affected", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
@@ -584,7 +584,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		if err == sql.ErrNoRows {
 			responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
 		} else {
-			responses.BadRequest(c, "Failed to get ban details", &gin.H{"error": err.Error()})
+			responses.InternalServerError(c, err, nil)
 		}
 		return
 	}
@@ -706,13 +706,13 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	// Execute the update
 	result, err := s.Dependencies.DB.ExecContext(c.Request.Context(), query, updateArgs...)
 	if err != nil {
-		responses.BadRequest(c, "Failed to update ban", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		responses.BadRequest(c, "Failed to get rows affected", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
@@ -829,7 +829,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&updatedBan.UpdatedAt,
 	)
 	if err != nil {
-		responses.BadRequest(c, "Failed to get updated ban details", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
@@ -922,7 +922,7 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 
 	content, err := s.buildServerBansCfg(c.Request.Context(), serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to query bans", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 

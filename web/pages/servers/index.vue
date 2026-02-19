@@ -92,10 +92,16 @@ const formSchema = toTypedSchema(
     log_source_type: z.enum(["local", "sftp", "ftp"], { required_error: "Log source type is required" }),
     squad_game_path: z.string().min(1, "SquadGame base path is required"),
     log_host: z.string().optional().nullable(),
-    log_port: z.coerce.number().min(1).max(65535).optional().nullable(),
+    log_port: z.preprocess(
+      (val) => (val === "" || val === null || val === undefined ? null : val),
+      z.coerce.number().min(1).max(65535).nullable(),
+    ).optional(),
     log_username: z.string().optional().nullable(),
     log_password: z.string().optional().nullable(),
-    log_poll_frequency: z.coerce.number().min(1).max(300).optional().nullable(),
+    log_poll_frequency: z.preprocess(
+      (val) => (val === "" || val === null || val === undefined ? null : val),
+      z.coerce.number().min(1).max(300).nullable(),
+    ).optional(),
     log_read_from_start: z.boolean().optional().nullable(),
   })
 );

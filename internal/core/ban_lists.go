@@ -455,8 +455,18 @@ func DeleteIgnoredSteamID(ctx context.Context, database db.Executor, id uuid.UUI
 		return err
 	}
 
-	_, err = database.ExecContext(ctx, sql, args...)
-	return err
+	result, err := database.ExecContext(ctx, sql, args...)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("ignored steam ID not found")
+	}
+	return nil
 }
 
 func IsIgnoredSteamID(ctx context.Context, database db.Executor, steamID string) (bool, error) {

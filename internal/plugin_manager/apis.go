@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -619,6 +620,7 @@ type rconAPI struct {
 	db               *sql.DB
 	rconManager      *rcon_manager.RconManager
 	clickhouseClient *clickhouse.Client
+	chWarnOnce       sync.Once
 }
 
 func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager, clickhouseClient *clickhouse.Client) RconAPI {
@@ -875,7 +877,9 @@ func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, acti
 	}
 
 	if api.clickhouseClient == nil {
-		log.Warn().Msg("ClickHouse client not available, skipping violation logging")
+		api.chWarnOnce.Do(func() {
+			log.Warn().Msg("ClickHouse client not available - violation logging is disabled")
+		})
 		return nil
 	}
 

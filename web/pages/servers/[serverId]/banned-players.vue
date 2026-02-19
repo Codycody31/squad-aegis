@@ -252,7 +252,7 @@ async function searchPlayers(query: string) {
             showPlayerDropdown.value = playerSearchResults.value.length > 0;
         }
     } catch (err: any) {
-        console.error("Failed to search players:", err);
+        toast({ title: "Player search failed", description: err.message || "An error occurred", variant: "destructive" });
         playerSearchResults.value = [];
     } finally {
         isSearchingPlayers.value = false;
