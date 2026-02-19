@@ -319,6 +319,12 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after ban")
 	}
 
+	// Reload server config so the game server picks up the updated Bans.cfg
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+	if _, err := r.ExecuteRaw("AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban")
+	}
+
 	responses.Success(c, "Ban created successfully", &gin.H{
 		"banId": banID.String(),
 	})

@@ -378,6 +378,9 @@ func (s *SFTPSource) connect() error {
 	config := &ssh.ClientConfig{
 		User:            s.username,
 		Auth:            []ssh.AuthMethod{},
+		// Intentionally skipping host key verification: this is a long-lived
+		// connection to trusted, operator-configured infrastructure used to
+		// stream server log data.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         5 * time.Second,
 	}

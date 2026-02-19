@@ -560,7 +560,7 @@ const fetchServerDetails = async () => {
                 rcon_ip_address: data.data.server.rcon_ip_address || "",
                 game_port: data.data.server.game_port,
                 rcon_port: data.data.server.rcon_port,
-                rcon_password: data.data.server.rcon_password,
+                rcon_password: "",
 
                 // Log configuration fields
                 log_source_type: data.data.server.log_source_type || "",
@@ -568,7 +568,7 @@ const fetchServerDetails = async () => {
                 log_host: data.data.server.log_host || "",
                 log_port: data.data.server.log_port,
                 log_username: data.data.server.log_username || "",
-                log_password: data.data.server.log_password || "",
+                log_password: "",
                 log_poll_frequency: data.data.server.log_poll_frequency || 2,
                 log_read_from_start: data.data.server.log_read_from_start || false,
             };
@@ -611,9 +611,6 @@ const updateServer = async () => {
         const payload = {
             ...serverForm.value,
             log_source_type: logSourceType || null,
-            log_file_path: logSourceType
-                ? serverForm.value.log_file_path || null
-                : null,
             log_host: isRemoteLogSource ? serverForm.value.log_host || null : null,
             log_port: isRemoteLogSource
                 ? serverForm.value.log_port || null
