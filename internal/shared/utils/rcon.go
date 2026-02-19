@@ -25,6 +25,13 @@ func SanitizeRCONParam(s string) string {
 	return s
 }
 
+// SanitizeAndQuoteRCONParam sanitizes a parameter and wraps it in double
+// quotes so multi-word values are treated as a single RCON argument.
+func SanitizeAndQuoteRCONParam(s string) string {
+	s = SanitizeRCONParam(s)
+	return `"` + s + `"`
+}
+
 func ParseRconCommandMessage(message rconTypes.Message) (CommandMessage, error) {
 	if !strings.HasPrefix(message.Message, "!") {
 		return CommandMessage{}, errors.New("message does not start with '!'")

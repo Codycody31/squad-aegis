@@ -1,6 +1,9 @@
 package utils
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 func ReturnOldIfEmpty(oldValue, newValue string) string {
 	if newValue == "" {
@@ -28,4 +31,12 @@ func IsEOSID(s string) bool {
 func IsSteamID(s string) bool {
 	_, err := strconv.ParseInt(s, 10, 64)
 	return err == nil
+}
+
+// SanitizeBanReason replaces newlines with spaces so ban reasons are safe for
+// single-line config formats like Bans.cfg.
+func SanitizeBanReason(reason string) string {
+	reason = strings.ReplaceAll(reason, "\n", " ")
+	reason = strings.ReplaceAll(reason, "\r", " ")
+	return reason
 }

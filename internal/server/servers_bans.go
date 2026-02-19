@@ -51,7 +51,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		ORDER BY sb.created_at DESC
 	`, serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to query bans", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 	defer rows.Close()
@@ -131,9 +131,17 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		}
 
 		// Load evidence records for this ban
-		ban.Evidence, _ = s.loadBanEvidence(c.Request.Context(), ban.ID)
+		evidence, evidenceErr := s.loadBanEvidence(c.Request.Context(), ban.ID)
+		if evidenceErr != nil {
+			log.Error().Err(evidenceErr).Str("ban_id", ban.ID).Msg("Failed to load ban evidence")
+		}
+		ban.Evidence = evidence
 
 		bans = append(bans, ban)
+	}
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
 	}
 
 	// Batch lookup player names from ClickHouse
@@ -986,8 +994,7 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 
 		reasonComment := ""
 		if reason != "" {
-			safeReason := strings.ReplaceAll(strings.ReplaceAll(reason, "\n", " "), "\r", " ")
-			reasonComment = " //" + safeReason
+			reasonComment = " //" + utils.SanitizeBanReason(reason)
 		} else if duration == 0 {
 			reasonComment = " //Permanent ban"
 		}

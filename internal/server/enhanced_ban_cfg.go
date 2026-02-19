@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // ServerBansCfgEnhanced handles generating the enhanced ban config file for the server
@@ -108,8 +109,7 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 		// Build the reason comment
 		reasonComment := ""
 		if ban.Reason != "" {
-			safeReason := strings.ReplaceAll(strings.ReplaceAll(ban.Reason, "\n", " "), "\r", " ")
-			reasonComment = " //" + safeReason
+			reasonComment = " //" + utils.SanitizeBanReason(ban.Reason)
 		} else if ban.Duration == 0 {
 			reasonComment = " //Permanent ban"
 		}
@@ -167,8 +167,7 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 		// Build the reason comment
 		reasonComment := ""
 		if reason != "" {
-			safeReason := strings.ReplaceAll(strings.ReplaceAll(reason, "\n", " "), "\r", " ")
-			reasonComment = " //" + safeReason
+			reasonComment = " //" + utils.SanitizeBanReason(reason)
 		} else if duration == 0 {
 			reasonComment = " //Permanent ban"
 		}

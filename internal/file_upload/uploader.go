@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,6 +12,18 @@ import (
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
+
+// validateFilePath rejects paths that contain traversal sequences or are not absolute.
+func validateFilePath(p string) error {
+	cleaned := filepath.Clean(p)
+	if strings.Contains(cleaned, "..") {
+		return fmt.Errorf("file path must not contain '..' traversal: %s", p)
+	}
+	if !filepath.IsAbs(cleaned) {
+		return fmt.Errorf("file path must be absolute: %s", p)
+	}
+	return nil
+}
 
 // UploadConfig holds configuration for file upload
 type UploadConfig struct {
@@ -32,6 +45,9 @@ type Uploader interface {
 
 // NewUploader creates the appropriate uploader based on protocol
 func NewUploader(config UploadConfig) (Uploader, error) {
+	if err := validateFilePath(config.FilePath); err != nil {
+		return nil, err
+	}
 	switch config.Protocol {
 	case "sftp":
 		return NewSFTPUploader(config)

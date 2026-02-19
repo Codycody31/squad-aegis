@@ -210,6 +210,9 @@ func (s *Server) getExistingBanIDs(ctx context.Context, serverID uuid.UUID) (ste
 			eosIDs[eosIDStr.String] = true
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("row iteration error: %w", err)
+	}
 	return steamIDs, eosIDs, nil
 }
 

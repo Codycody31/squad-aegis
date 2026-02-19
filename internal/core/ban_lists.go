@@ -265,6 +265,9 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 
 		bans = append(bans, ban)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
 
 	return bans, nil
 }
@@ -499,7 +502,7 @@ func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID u
 		argIdx++
 	}
 	if len(idConditions) == 0 {
-		return nil, sql.ErrNoRows
+		return nil, fmt.Errorf("at least one of steamID or eosID must be non-empty")
 	}
 
 	serverPlaceholder := fmt.Sprintf("$%d", argIdx)

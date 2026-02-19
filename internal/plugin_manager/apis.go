@@ -553,6 +553,11 @@ func (api *databaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Ro
 		return nil, fmt.Errorf("only SELECT queries are allowed")
 	}
 
+	// Reject multi-statement queries
+	if strings.Contains(query, ";") {
+		return nil, fmt.Errorf("multi-statement queries are not allowed")
+	}
+
 	// Prevent certain dangerous operations
 	if strings.Contains(trimmedQuery, "DROP") ||
 		strings.Contains(trimmedQuery, "DELETE") ||

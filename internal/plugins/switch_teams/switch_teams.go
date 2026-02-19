@@ -330,7 +330,7 @@ func (p *SwitchTeamsPlugin) tryImmediateSwitch(steamID, playerName, eosID string
 	}
 
 	// Switch the player
-	if err := p.switchPlayerToTeam(steamID, toTeam); err != nil {
+	if err := p.togglePlayerTeam(steamID); err != nil {
 		return fmt.Errorf("failed to switch player: %w", err)
 	}
 
@@ -351,8 +351,9 @@ func (p *SwitchTeamsPlugin) tryImmediateSwitch(steamID, playerName, eosID string
 	return nil
 }
 
-// switchPlayerToTeam moves a player to the specified team using RCON
-func (p *SwitchTeamsPlugin) switchPlayerToTeam(steamID string, teamID int) error {
+// togglePlayerTeam moves a player to the other team using RCON.
+// Squad's AdminForceTeamChange toggles the player's team automatically.
+func (p *SwitchTeamsPlugin) togglePlayerTeam(steamID string) error {
 	command := fmt.Sprintf("AdminForceTeamChange %s", steamID)
 	_, err := p.apis.RconAPI.SendCommand(command)
 	return err
