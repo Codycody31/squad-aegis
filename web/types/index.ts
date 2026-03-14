@@ -39,7 +39,7 @@ export interface Server {
 export interface ServerBan {
   id: string;
   server_id: string;
-  admin_id: string;
+  admin_id?: string;
   steam_id: string;
   eos_id?: string;
   reason: string;
