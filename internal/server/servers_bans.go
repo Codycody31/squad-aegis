@@ -431,7 +431,8 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	}
 
 	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
-		log.Warn().Err(err).Str("steamId", steamIDStr).Str("eosId", eosID).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after unban")
+		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after unban for server %s (steam_id=%s eos_id=%s): %w", serverId.String(), steamIDStr, eosID, err), nil)
+		return
 	}
 
 	// Reload server config so the game server picks up the updated Bans.cfg
