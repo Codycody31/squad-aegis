@@ -1468,16 +1468,16 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 	// Create ban in database
 	banID := uuid.New()
 
-	// Detect player ID type (Steam ID or EOS ID)
-	var steamIDVal interface{}
-	var eosIDVal interface{}
-	if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
-		steamIDVal = sid
-	} else if utils.IsEOSID(playerId) {
-		eosIDVal = playerId
-	} else {
-		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
-	}
+		// Detect player ID type (Steam ID or EOS ID)
+		var steamIDVal interface{}
+		var eosIDVal interface{}
+		if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
+			steamIDVal = sid
+		} else if normalizedEOSID := utils.NormalizeEOSID(playerId); utils.IsEOSID(normalizedEOSID) {
+			eosIDVal = normalizedEOSID
+		} else {
+			return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
+		}
 
 	// Start transaction
 	tx, err := wm.db.BeginTx(wm.ctx, nil)
@@ -3383,16 +3383,16 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		// Create ban in database
 		banID := uuid.New()
 
-		// Detect player ID type (Steam ID or EOS ID)
-		var steamIDVal interface{}
-		var eosIDVal interface{}
-		if sid, parseErr := strconv.ParseInt(steamID, 10, 64); parseErr == nil {
-			steamIDVal = sid
-		} else if utils.IsEOSID(steamID) {
-			eosIDVal = steamID
-		} else {
-			L.Push(lua.LNil)
-			L.Push(lua.LString("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID"))
+			// Detect player ID type (Steam ID or EOS ID)
+			var steamIDVal interface{}
+			var eosIDVal interface{}
+			if sid, parseErr := strconv.ParseInt(steamID, 10, 64); parseErr == nil {
+				steamIDVal = sid
+			} else if normalizedEOSID := utils.NormalizeEOSID(steamID); utils.IsEOSID(normalizedEOSID) {
+				eosIDVal = normalizedEOSID
+			} else {
+				L.Push(lua.LNil)
+				L.Push(lua.LString("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID"))
 			return 2
 		}
 

@@ -410,11 +410,12 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 		{
 			playersGroup.Use(server.AuthSession)
 
-			playersGroup.GET("", server.PlayersList)
-			playersGroup.GET("/stats", server.PlayersStats)
-			playersGroup.GET("/alt-groups", server.PlayersAltGroups)
-			playersGroup.GET("/:playerId", server.PlayerGet)
-			playersGroup.GET("/:playerId/chat", server.PlayerChatHistoryPaginated)
+				playersGroup.GET("", server.PlayersList)
+				playersGroup.GET("/stats", server.PlayersStats)
+				playersGroup.GET("/alt-groups", server.PlayersAltGroups)
+				playersGroup.GET("/:playerId", server.PlayerGet)
+				playersGroup.GET("/:playerId/ban-history", server.PlayerBanHistory)
+				playersGroup.GET("/:playerId/chat", server.PlayerChatHistoryPaginated)
 			playersGroup.GET("/:playerId/teamkills", server.PlayerTeamkillsAnalysis)
 			playersGroup.GET("/:playerId/sessions", server.PlayerSessionHistory)
 			playersGroup.GET("/:playerId/related", server.PlayerRelatedPlayers)

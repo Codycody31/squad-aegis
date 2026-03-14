@@ -33,7 +33,7 @@ type Server struct {
 type ServerBan struct {
 	ID           string        `json:"id"`
 	ServerID     uuid.UUID     `json:"server_id"`
-	AdminID      uuid.UUID     `json:"admin_id"`
+	AdminID      *uuid.UUID    `json:"admin_id,omitempty"`
 	AdminName    string        `json:"admin_name"`
 	AdminSteamID string        `json:"admin_steam_id,omitempty"`
 	SteamID      string        `json:"steam_id"`

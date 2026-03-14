@@ -429,3 +429,54 @@ func TestCategorizeBans(t *testing.T) {
 		t.Errorf("expected 1 auto-ban, got %d", len(autoBans))
 	}
 }
+
+func TestParseBansCfg_NormalizesEOSIDCase(t *testing.T) {
+	content := `N/A Banned:ABCDEF0123456789ABCDEF0123456789:0 //Uppercase EOS`
+
+	entries, unparseable := parseBansCfg(content)
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	if entries[0].EOSID != "abcdef0123456789abcdef0123456789" {
+		t.Fatalf("expected normalized lowercase EOS ID, got %q", entries[0].EOSID)
+	}
+}
+
+func TestCalculateImportedBanTimingPreservesExpiry(t *testing.T) {
+	now := time.Date(2026, time.March, 14, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		expiry   time.Time
+		wantDays int
+	}{
+		{
+			name:     "less than one day remaining rounds up to one day",
+			expiry:   now.Add(2 * time.Hour),
+			wantDays: 1,
+		},
+		{
+			name:     "more than one day remaining preserves original expiry",
+			expiry:   now.Add(25 * time.Hour),
+			wantDays: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			durationDays, createdAt := calculateImportedBanTiming(tt.expiry.Unix(), now)
+			if durationDays != tt.wantDays {
+				t.Fatalf("durationDays = %d, want %d", durationDays, tt.wantDays)
+			}
+
+			regeneratedExpiry := createdAt.AddDate(0, 0, durationDays)
+			if regeneratedExpiry.Unix() != tt.expiry.Unix() {
+				t.Fatalf("regenerated expiry = %d, want %d", regeneratedExpiry.Unix(), tt.expiry.Unix())
+			}
+		})
+	}
+}

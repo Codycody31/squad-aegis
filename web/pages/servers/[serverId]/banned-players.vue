@@ -143,7 +143,7 @@ interface BanEvidence {
 interface BannedPlayer {
     id: string;
     server_id: string;
-    admin_id: string;
+    admin_id?: string;
     admin_name: string;
     steam_id: string;
     eos_id?: string;
@@ -264,16 +264,16 @@ function selectPlayer(player: any) {
     selectedPlayer.value = player;
     playerSearchQuery.value = player.player_name || "";
 
-    // Ensure steam_id is a clean string (API might return it with quotes or as number)
-    const steamId = String(player.steam_id).replace(/"/g, "");
+    // Use the best available player identifier from search results.
+    const playerId = String(player.steam_id || player.eos_id || "").replace(/"/g, "");
     if (addBanFormRef.value) {
-        addBanFormRef.value.setFieldValue("steam_id", steamId);
+        addBanFormRef.value.setFieldValue("steam_id", playerId);
     }
     showPlayerDropdown.value = false;
 
     // Fetch ban history for the selected player
-    if (steamId) {
-        fetchPlayerBanHistory(steamId);
+    if (playerId) {
+        fetchPlayerBanHistory(playerId);
     }
 }
 
@@ -1061,8 +1061,8 @@ function flattenRulesForDropdown(
 }
 
 // Function to fetch player ban history
-async function fetchPlayerBanHistory(steamId: string) {
-    if (!steamId || steamId.length !== 17) {
+async function fetchPlayerBanHistory(playerId: string) {
+    if (!playerId) {
         playerHistory.value = [];
         return;
     }
@@ -1072,8 +1072,15 @@ async function fetchPlayerBanHistory(steamId: string) {
     const runtimeConfig = useRuntimeConfig();
 
     try {
+        const playerIds = cleanPlayerId(playerId);
+        const historyId = playerIds.steamId || playerIds.eosId || "";
+        if (!historyId) {
+            playerHistory.value = [];
+            return;
+        }
+
         const { data, error: fetchError } = await useAuthFetch<any>(
-            `${runtimeConfig.public.backendApi}/players/${steamId}/ban-history`,
+            `${runtimeConfig.public.backendApi}/players/${historyId}/ban-history`,
             {
                 method: "GET",
             },
@@ -1146,7 +1153,8 @@ function cleanPlayerId(playerId: string | number | undefined | null): { steamId?
 
     // Check if it's an EOS ID (32-char hex)
     if (/^[0-9a-fA-F]{32}$/.test(cleaned)) {
-        return { eosId: cleaned, rconId: cleaned };
+        const normalizedEOSID = cleaned.toLowerCase();
+        return { eosId: normalizedEOSID, rconId: normalizedEOSID };
     }
 
     throw new Error("Must be a 17-digit Steam ID or 32-character hex EOS ID");
@@ -1817,7 +1825,7 @@ async function executeImport() {
                                                         placeholder="Steam ID (76561198012345678) or EOS ID (32-char hex)"
                                                         @input="(e: Event) => {
                                                             const target = e.target as HTMLInputElement;
-                                                            if (target.value.length === 17 && /^\d+$/.test(target.value)) {
+                                                            if (/^\d{17}$/.test(target.value) || /^[0-9a-fA-F]{32}$/.test(target.value)) {
                                                                 fetchPlayerBanHistory(target.value);
                                                             }
                                                         }"
@@ -3071,8 +3079,8 @@ async function executeImport() {
                                 >
                                     <TableCell>
                                         <RouterLink
-                                            v-if="player.steam_id"
-                                            :to="`/players/${player.steam_id}`"
+                                            v-if="player.steam_id || player.eos_id"
+                                            :to="`/players/${player.steam_id || player.eos_id}`"
                                             class="hover:underline"
                                         >
                                             <div class="font-medium text-sm sm:text-base text-primary">
@@ -3209,8 +3217,8 @@ async function executeImport() {
                         <div class="flex items-start justify-between gap-2 mb-2">
                             <div class="flex-1 min-w-0">
                                 <RouterLink
-                                    v-if="player.steam_id"
-                                    :to="`/players/${player.steam_id}`"
+                                    v-if="player.steam_id || player.eos_id"
+                                    :to="`/players/${player.steam_id || player.eos_id}`"
                                     class="hover:underline"
                                 >
                                     <div class="font-semibold text-sm sm:text-base mb-1 text-primary">

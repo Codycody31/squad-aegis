@@ -753,8 +753,8 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 	var eosIDVal interface{}
 	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
 		steamIDVal = sid
-	} else if utils.IsEOSID(playerID) {
-		eosIDVal = playerID
+	} else if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
+		eosIDVal = normalizedEOSID
 	} else {
 		return "", fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}
@@ -836,8 +836,8 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 	var eosIDVal interface{}
 	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
 		steamIDVal = sid
-	} else if utils.IsEOSID(playerID) {
-		eosIDVal = playerID
+	} else if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
+		eosIDVal = normalizedEOSID
 	} else {
 		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}

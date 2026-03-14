@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // PlayerProfile represents a player's comprehensive profile
@@ -616,6 +618,41 @@ func (s *Server) PlayerGet(c *gin.Context) {
 	profile.RiskIndicators = s.calculateRiskIndicators(profile)
 
 	responses.Success(c, "Player profile fetched successfully", &gin.H{"player": profile})
+}
+
+// PlayerBanHistory handles GET /api/players/:playerId/ban-history - historical
+// bans for a player by Steam or EOS identifier.
+func (s *Server) PlayerBanHistory(c *gin.Context) {
+	playerID := c.Param("playerId")
+	if playerID == "" {
+		responses.BadRequest(c, "Player ID is required", nil)
+		return
+	}
+
+	isSteamID := false
+	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
+		isSteamID = true
+	} else {
+		playerID = utils.NormalizeEOSID(playerID)
+	}
+
+	limit := 20
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 100 {
+			limit = parsedLimit
+		}
+	}
+
+	history, err := s.getPlayerBanHistory(c, playerID, isSteamID, limit)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
+	responses.Success(c, "Player ban history fetched successfully", &gin.H{
+		"history": history,
+		"count":   len(history),
+	})
 }
 
 // PlayersStats handles GET /api/players/stats - get player statistics summary
@@ -1577,6 +1614,77 @@ func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID
 	}
 
 	return messages, nil
+}
+
+func (s *Server) getPlayerBanHistory(c *gin.Context, playerID string, isSteamID bool, limit int) ([]ActiveBan, error) {
+	whereClause := "b.steam_id = $1"
+	var queryPlayerID interface{} = playerID
+	if isSteamID {
+		steamIDInt, err := strconv.ParseInt(playerID, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		queryPlayerID = steamIDInt
+	} else {
+		whereClause = "b.eos_id = $1"
+		queryPlayerID = utils.NormalizeEOSID(playerID)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			b.id,
+			b.server_id,
+			s.name,
+			b.reason,
+			b.duration,
+			b.created_at,
+			COALESCE(u.name, u.username, 'System') as admin_name
+		FROM server_bans b
+		JOIN servers s ON b.server_id = s.id
+		LEFT JOIN users u ON b.admin_id = u.id
+		WHERE %s
+		ORDER BY b.created_at DESC
+		LIMIT $2
+	`, whereClause)
+
+	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), query, queryPlayerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	history := []ActiveBan{}
+	for rows.Next() {
+		var entry ActiveBan
+		var banID uuid.UUID
+		var serverID uuid.UUID
+		if err := rows.Scan(
+			&banID,
+			&serverID,
+			&entry.ServerName,
+			&entry.Reason,
+			&entry.Duration,
+			&entry.CreatedAt,
+			&entry.AdminName,
+		); err != nil {
+			return nil, err
+		}
+
+		entry.BanID = banID.String()
+		entry.ServerID = serverID.String()
+		entry.Permanent = entry.Duration == 0
+		if !entry.Permanent {
+			expiresAt := entry.CreatedAt.AddDate(0, 0, entry.Duration)
+			entry.ExpiresAt = &expiresAt
+		}
+
+		history = append(history, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return history, nil
 }
 
 // getPlayerViolations retrieves player rule violations

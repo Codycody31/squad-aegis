@@ -72,10 +72,11 @@ func resolveRCONPlayerID(steamId, eosId string) (rconID string, errMsg string) {
 		}
 		return steamId, ""
 	}
-	if !utils.IsEOSID(eosId) {
+	normalizedEOSID := utils.NormalizeEOSID(eosId)
+	if !utils.IsEOSID(normalizedEOSID) {
 		return "", "EOS ID must be a 32-character hex string"
 	}
-	return eosId, ""
+	return normalizedEOSID, ""
 }
 
 // RconCommandList handles the listing of all commands that can be executed by the server
@@ -613,11 +614,12 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 		steamIDVal = steamID
 	}
 	if request.EosId != "" {
-		if !utils.IsEOSID(request.EosId) {
+		normalizedEOSID := utils.NormalizeEOSID(request.EosId)
+		if !utils.IsEOSID(normalizedEOSID) {
 			responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
 			return
 		}
-		eosIDVal = request.EosId
+		eosIDVal = normalizedEOSID
 	}
 
 	// Duration is in days (0 for permanent)
@@ -852,7 +854,7 @@ func (s *Server) ServerRconPlayerEscalationSuggestion(c *gin.Context) {
 	}
 
 	steamId := c.Query("steam_id")
-	eosId := c.Query("eos_id")
+	eosId := utils.NormalizeEOSID(c.Query("eos_id"))
 	ruleIdStr := c.Query("rule_id")
 
 	if steamId == "" && eosId == "" {

@@ -86,7 +86,7 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
 		steamID := ""
 		eosID := ""
 		if len(idStr) == 32 && utils.IsHex(idStr) {
-			eosID = idStr
+			eosID = utils.NormalizeEOSID(idStr)
 		} else if _, err := strconv.ParseInt(idStr, 10, 64); err == nil {
 			steamID = idStr
 		} else {
@@ -207,7 +207,7 @@ func (s *Server) getExistingBanIDs(ctx context.Context, serverID uuid.UUID) (ste
 			steamIDs[strconv.FormatInt(steamIDInt.Int64, 10)] = true
 		}
 		if eosIDStr.Valid {
-			eosIDs[eosIDStr.String] = true
+			eosIDs[utils.NormalizeEOSID(eosIDStr.String)] = true
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -232,6 +232,17 @@ func categorizeBans(entries []models.CfgBanEntry, existingSteamIDs, existingEOSI
 		}
 	}
 	return
+}
+
+func calculateImportedBanTiming(expiryTimestamp int64, now time.Time) (durationDays int, createdAt time.Time) {
+	if expiryTimestamp == 0 {
+		return 0, now
+	}
+
+	expiryTime := time.Unix(expiryTimestamp, 0)
+	remaining := expiryTime.Sub(now)
+	durationDays = max(int(math.Ceil(remaining.Hours()/24)), 1)
+	return durationDays, expiryTime.AddDate(0, 0, -durationDays)
 }
 
 // ServerBanImportPreview returns a preview of what would be imported from the server's Bans.cfg.
@@ -373,11 +384,12 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 			return
 		}
 
-		// Calculate duration: remaining days until expiry, or 0 for permanent
+		// Calculate duration and created_at so regenerated Bans.cfg preserves the
+		// original expiry timestamp when this import is synced back to the server.
 		duration := 0
+		createdAt := now
 		if !ban.Permanent {
-			remaining := time.Unix(ban.ExpiryTimestamp, 0).Sub(now)
-			duration = max(int(math.Ceil(remaining.Hours()/24)), 1)
+			duration, createdAt = calculateImportedBanTiming(ban.ExpiryTimestamp, now)
 		}
 
 		reason := ban.Reason
@@ -398,7 +410,8 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 			steamIDPtr = &v
 		}
 		if ban.EOSID != "" {
-			eosIDPtr = &ban.EOSID
+			normalizedEOSID := utils.NormalizeEOSID(ban.EOSID)
+			eosIDPtr = &normalizedEOSID
 		}
 
 		playerLabel := ban.SteamID
@@ -409,7 +422,7 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		`, uuid.New(), serverID, user.Id, steamIDPtr, eosIDPtr, reason, duration, now, now)
+		`, uuid.New(), serverID, user.Id, steamIDPtr, eosIDPtr, reason, duration, createdAt, now)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("failed to insert ban for %s: %v", playerLabel, err))
 			continue

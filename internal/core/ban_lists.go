@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/db"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // BanList Management Functions
@@ -193,11 +194,11 @@ func DeleteServerBanListSubscription(ctx context.Context, database db.Executor, 
 func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]models.ServerBan, error) {
 	query := `
 		SELECT DISTINCT ON (COALESCE(sb.steam_id::text, sb.eos_id))
-			sb.id, sb.server_id, sb.admin_id, u.username, u.steam_id, sb.steam_id, sb.eos_id, sb.reason,
+			sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, u.steam_id, sb.steam_id, sb.eos_id, sb.reason,
 			sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name,
 			sb.created_at, sb.updated_at
 		FROM server_bans sb
-		JOIN users u ON sb.admin_id = u.id
+		LEFT JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
 		WHERE (
 			-- Direct bans on this server
@@ -222,13 +223,14 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 	var bans []models.ServerBan
 	for rows.Next() {
 		var ban models.ServerBan
+		var adminIDStr sql.NullString
 		var steamIDInt sql.NullInt64
 		var eosIDStr sql.NullString
 		var adminSteamIDInt sql.NullInt64
 		var ruleIDStr, banListIDStr, banListNameStr *string
 
 		err := rows.Scan(
-			&ban.ID, &ban.ServerID, &ban.AdminID, &ban.AdminName, &adminSteamIDInt,
+			&ban.ID, &ban.ServerID, &adminIDStr, &ban.AdminName, &adminSteamIDInt,
 			&steamIDInt, &eosIDStr, &ban.Reason, &ban.Duration, &ruleIDStr,
 			&banListIDStr, &banListNameStr, &ban.CreatedAt, &ban.UpdatedAt,
 		)
@@ -236,11 +238,18 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 			return nil, err
 		}
 
+		if adminIDStr.Valid {
+			adminID, parseErr := uuid.Parse(adminIDStr.String)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			ban.AdminID = &adminID
+		}
 		if steamIDInt.Valid {
 			ban.SteamID = fmt.Sprintf("%d", steamIDInt.Int64)
 		}
 		if eosIDStr.Valid {
-			ban.EOSID = eosIDStr.String
+			ban.EOSID = utils.NormalizeEOSID(eosIDStr.String)
 		}
 		if ban.SteamID != "" {
 			ban.Name = ban.SteamID
@@ -490,6 +499,8 @@ func IsIgnoredSteamID(ctx context.Context, database db.Executor, steamID string)
 // At least one of steamID or eosID must be non-empty.
 // Returns nil if no active ban is found.
 func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID uuid.UUID, steamID string, eosID string) (*models.ServerBan, error) {
+	eosID = utils.NormalizeEOSID(eosID)
+
 	// Build identifier conditions dynamically to avoid PostgreSQL cast issues.
 	// Passing "" to $1::bigint fails even with a "$1 != ''" guard because
 	// PostgreSQL does not guarantee short-circuit evaluation of AND/OR.
@@ -553,4 +564,3 @@ func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID u
 
 	return &ban, nil
 }
-

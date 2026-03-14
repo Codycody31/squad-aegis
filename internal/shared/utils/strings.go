@@ -27,6 +27,12 @@ func IsEOSID(s string) bool {
 	return len(s) == 32 && IsHex(s)
 }
 
+// NormalizeEOSID trims surrounding whitespace and lowercases the identifier so
+// comparisons are consistent across UI input, imports, DB storage, and logs.
+func NormalizeEOSID(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
 // IsSteamID returns true if the string looks like a Steam ID (numeric, parses to int64).
 func IsSteamID(s string) bool {
 	_, err := strconv.ParseInt(s, 10, 64)
