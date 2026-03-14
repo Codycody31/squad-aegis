@@ -26,6 +26,16 @@ import (
 // are used by Squad servers to represent permanent bans.
 const permanentThresholdYears = 50
 
+// activeServerBanWhereClause keeps server ban lookups aligned anywhere we need
+// the same "currently active" set that gets written back into Bans.cfg.
+const activeServerBanWhereClause = `
+	sb.server_id = $1
+	AND (
+		sb.duration = 0
+		OR sb.created_at + (sb.duration * INTERVAL '1 day') >= NOW()
+	)
+`
+
 // parseBansCfg parses the content of a Squad Bans.cfg file into structured entries.
 // Returns the parsed entries and the count of lines that could not be parsed.
 //
@@ -188,8 +198,9 @@ func (s *Server) readBansCfg(ctx context.Context, server *models.Server) (string
 // getExistingBanIDs returns sets of Steam IDs and EOS IDs that already have bans for this server.
 func (s *Server) getExistingBanIDs(ctx context.Context, serverID uuid.UUID) (steamIDs map[string]bool, eosIDs map[string]bool, err error) {
 	rows, err := s.Dependencies.DB.QueryContext(ctx, `
-		SELECT steam_id, eos_id FROM server_bans WHERE server_id = $1
-	`, serverID)
+		SELECT steam_id, eos_id
+		FROM server_bans sb
+		WHERE `+activeServerBanWhereClause, serverID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query existing bans: %w", err)
 	}

@@ -963,15 +963,13 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
-		WHERE sb.server_id = $1
-	`, serverId)
+		WHERE `+activeServerBanWhereClause, serverId)
 	if err != nil {
 		return "", err
 	}
 	defer rows.Close()
 
 	var banCfg strings.Builder
-	now := time.Now()
 	for rows.Next() {
 		var steamIDInt sql.NullInt64
 		var eosIDStr sql.NullString
@@ -984,13 +982,7 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 		if err := rows.Scan(&steamIDInt, &eosIDStr, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt); err != nil {
 			return "", err
 		}
-
 		unixTimeOfExpiry := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
-
-		// Skip expired bans
-		if duration > 0 && now.After(unixTimeOfExpiry) {
-			continue
-		}
 
 		// Determine the banned player ID (prefer Steam ID, fall back to EOS ID)
 		var bannedID string
