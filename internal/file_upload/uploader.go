@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,16 +15,39 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+var windowsDriveAbsPathPattern = regexp.MustCompile(`^[a-zA-Z]:/`)
+
 // validateFilePath rejects paths that contain traversal sequences or are not absolute.
 func validateFilePath(p string) error {
-	cleaned := filepath.Clean(p)
-	if strings.Contains(cleaned, "..") {
+	normalizedPath := strings.ReplaceAll(p, `\\`, "/")
+	if hasTraversalSegment(normalizedPath) {
 		return fmt.Errorf("file path must not contain '..' traversal: %s", p)
 	}
-	if !filepath.IsAbs(cleaned) {
+
+	cleaned := path.Clean(normalizedPath)
+	if !isAbsoluteRemotePath(cleaned) {
 		return fmt.Errorf("file path must be absolute: %s", p)
 	}
 	return nil
+}
+
+func hasTraversalSegment(p string) bool {
+	for _, segment := range strings.Split(p, "/") {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func isAbsoluteRemotePath(p string) bool {
+	if filepath.IsAbs(p) {
+		return true
+	}
+
+	// Support Windows absolute paths for remote hosts regardless of local OS,
+	// e.g. D:/SquadGame/ServerConfig/Bans.cfg.
+	return windowsDriveAbsPathPattern.MatchString(p)
 }
 
 // UploadConfig holds configuration for file upload
