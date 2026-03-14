@@ -121,6 +121,18 @@ watch(eventTypeFilter, () => {
   page.value = 1;
 });
 
+watch(
+  () => props.playerId,
+  (newPlayerId, oldPlayerId) => {
+    if (!newPlayerId || newPlayerId === oldPlayerId) return;
+
+    page.value = 1;
+    eventTypeFilter.value = "all";
+    events.value = [];
+    fetchCombatHistory();
+  }
+);
+
 function nextPage() {
   page.value++;
   fetchCombatHistory();

@@ -539,6 +539,42 @@ func normalizePlayerIdentifier(playerID string) (string, bool) {
 	return utils.NormalizeEOSID(playerID), false
 }
 
+func (s *Server) isPlayerCurrentlyBanned(ctx context.Context, steamID, eosID string) (bool, error) {
+	idConditions := []string{}
+	args := []interface{}{}
+
+	if steamID != "" {
+		args = append(args, steamID)
+		idConditions = append(idConditions, fmt.Sprintf("steam_id = $%d", len(args)))
+	}
+
+	normalizedEOSID := utils.NormalizeEOSID(eosID)
+	if normalizedEOSID != "" {
+		args = append(args, normalizedEOSID)
+		idConditions = append(idConditions, fmt.Sprintf("eos_id = $%d", len(args)))
+	}
+
+	if len(idConditions) == 0 {
+		return false, nil
+	}
+
+	query := fmt.Sprintf(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM server_bans
+			WHERE (%s)
+			AND (duration = 0 OR created_at + (duration || ' days')::interval > NOW())
+		)
+	`, strings.Join(idConditions, " OR "))
+
+	var isBanned bool
+	if err := s.Dependencies.DB.QueryRowContext(ctx, query, args...).Scan(&isBanned); err != nil {
+		return false, err
+	}
+
+	return isBanned, nil
+}
+
 // PlayerGet handles GET /api/players/:playerId - get player profile by steam or eos id
 func (s *Server) PlayerGet(c *gin.Context) {
 	playerID := c.Param("playerId")
@@ -2819,14 +2855,10 @@ func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
 		}
 		player.RelationType = "same_ip"
 
-		// Check if this player is banned (duration 0 = permanent, otherwise check if created_at + duration > now)
-		if player.SteamID != "" {
-			banQuery := `SELECT EXISTS(SELECT 1 FROM server_bans WHERE steam_id = $1 AND (duration = 0 OR created_at + (duration || ' days')::interval > NOW()))`
-			var isBanned bool
-			if err := s.Dependencies.DB.QueryRow(banQuery, player.SteamID).Scan(&isBanned); err == nil {
+			// Check if this player currently has an active ban by either Steam or EOS ID.
+			if isBanned, err := s.isPlayerCurrentlyBanned(c.Request.Context(), player.SteamID, player.EOSID); err == nil {
 				player.IsBanned = isBanned
 			}
-		}
 
 		related = append(related, player)
 	}
@@ -3220,14 +3252,10 @@ func (s *Server) PlayersAltGroups(c *gin.Context) {
 				LastSeen:       &lastSeen,
 			}
 
-			// Check if this player is banned
-			if player.SteamID != "" {
-				banQuery := `SELECT EXISTS(SELECT 1 FROM server_bans WHERE steam_id = $1 AND (duration = 0 OR created_at + (duration || ' days')::interval > NOW()))`
-				var isBanned bool
-				if err := s.Dependencies.DB.QueryRow(banQuery, player.SteamID).Scan(&isBanned); err == nil {
+				// Check if this player currently has an active ban by either Steam or EOS ID.
+				if isBanned, err := s.isPlayerCurrentlyBanned(c.Request.Context(), player.SteamID, player.EOSID); err == nil {
 					player.IsBanned = isBanned
 				}
-			}
 
 			group.Players = append(group.Players, player)
 		}

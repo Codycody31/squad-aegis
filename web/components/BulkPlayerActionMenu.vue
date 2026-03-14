@@ -468,7 +468,7 @@ async function executeBulkAction() {
                     <div class="col-span-3 max-h-32 overflow-y-auto">
                         <div
                             v-for="player in selectedPlayers"
-                            :key="player.steam_id"
+                            :key="player.steam_id || player.eos_id || player.name"
                             class="text-sm py-1"
                         >
                             {{ player.name }}
@@ -509,4 +509,3 @@ async function executeBulkAction() {
         </DialogContent>
     </Dialog>
 </template>
-

@@ -1807,12 +1807,12 @@ async function executeImport() {
                                                         >
                                                             <div
                                                                 v-for="player in playerSearchResults"
-                                                                :key="player.steam_id"
+                                                                :key="player.steam_id || player.eos_id"
                                                                 class="p-2 hover:bg-muted cursor-pointer border-b last:border-b-0"
                                                                 @click="selectPlayer(player)"
                                                             >
                                                                 <p class="font-medium text-sm">{{ player.player_name }}</p>
-                                                                <p class="text-xs text-muted-foreground">{{ player.steam_id }}</p>
+                                                                <p class="text-xs text-muted-foreground">{{ player.steam_id || player.eos_id || "Unknown ID" }}</p>
                                                                 <p class="text-xs text-muted-foreground">Last seen: {{ new Date(player.last_seen).toLocaleDateString() }}</p>
                                                             </div>
                                                         </div>
