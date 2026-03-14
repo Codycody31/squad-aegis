@@ -1152,6 +1152,15 @@ function cleanPlayerId(playerId: string | number | undefined | null): { steamId?
     throw new Error("Must be a 17-digit Steam ID or 32-character hex EOS ID");
 }
 
+function hasValidEvidencePlayerId(playerId?: string | null): boolean {
+    try {
+        cleanPlayerId(playerId);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 // Function to search evidence inline (no longer opens a dialog)
 async function searchEvidenceInline(steamId: string) {
     try {
@@ -2115,7 +2124,7 @@ async function executeImport() {
                                                         <Button
                                                             type="button"
                                                             @click="searchEvidenceInline(formValues.steam_id || '')"
-                                                            :disabled="!formValues.steam_id || formValues.steam_id.length !== 17 || isSearchingEvidence"
+                                                            :disabled="!hasValidEvidencePlayerId(formValues.steam_id) || isSearchingEvidence"
                                                             class="flex-1 text-xs sm:text-sm"
                                                         >
                                                             <Icon v-if="isSearchingEvidence" name="mdi:loading" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2 animate-spin" />
@@ -2547,8 +2556,8 @@ async function executeImport() {
                                                         </Select>
                                                         <Button
                                                             type="button"
-                                                            @click="searchEvidenceInline(editingBan?.steam_id || '')"
-                                                            :disabled="!editingBan?.steam_id || isSearchingEvidence"
+                                                            @click="searchEvidenceInline(editingBan?.steam_id || editingBan?.eos_id || '')"
+                                                            :disabled="!hasValidEvidencePlayerId(editingBan?.steam_id || editingBan?.eos_id) || isSearchingEvidence"
                                                             class="flex-1 text-xs sm:text-sm"
                                                         >
                                                             <Icon v-if="isSearchingEvidence" name="mdi:loading" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2 animate-spin" />
@@ -3446,4 +3455,3 @@ async function executeImport() {
 <style scoped>
 /* Add any page-specific styles here */
 </style>
-

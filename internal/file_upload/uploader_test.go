@@ -20,7 +20,7 @@ func TestValidateFilePath(t *testing.T) {
 		},
 		{
 			name:    "accepts windows absolute path with backslashes",
-			path:    `D:\\SquadGame\\ServerConfig\\Bans.cfg`,
+			path:    "D:\\SquadGame\\ServerConfig\\Bans.cfg",
 			wantErr: false,
 		},
 		{

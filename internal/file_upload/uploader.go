@@ -19,7 +19,7 @@ var windowsDriveAbsPathPattern = regexp.MustCompile(`^[a-zA-Z]:/`)
 
 // validateFilePath rejects paths that contain traversal sequences or are not absolute.
 func validateFilePath(p string) error {
-	normalizedPath := strings.ReplaceAll(p, `\\`, "/")
+	normalizedPath := strings.ReplaceAll(p, `\`, "/")
 	if hasTraversalSegment(normalizedPath) {
 		return fmt.Errorf("file path must not contain '..' traversal: %s", p)
 	}

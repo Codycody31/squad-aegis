@@ -1,6 +1,6 @@
 export interface User {
   id: string;
-  steam_id: number;
+  steam_id: string;
   name: string;
   username: string;
   super_admin: boolean;
@@ -40,7 +40,7 @@ export interface ServerBan {
   id: string;
   server_id: string;
   admin_id: string;
-  steam_id: number;
+  steam_id: string;
   eos_id?: string;
   reason: string;
   duration: number;
