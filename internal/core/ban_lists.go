@@ -211,6 +211,7 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 				WHERE sbls.server_id = $1
 			)
 		)
+		AND (sb.duration = 0 OR sb.created_at + (sb.duration * INTERVAL '1 day') >= NOW())
 		ORDER BY COALESCE(sb.steam_id::text, sb.eos_id), sb.created_at DESC
 	`
 

@@ -151,7 +151,7 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 		if steamIDInt.Valid {
 			bannedID = strconv.FormatInt(steamIDInt.Int64, 10)
 		} else if eosIDStr.Valid {
-			bannedID = eosIDStr.String
+			bannedID = utils.NormalizeEOSID(eosIDStr.String)
 		} else {
 			continue
 		}
@@ -202,6 +202,11 @@ func (s *Server) appendRemoteBans(c *gin.Context, banCfg *strings.Builder, now t
 }
 
 func (s *Server) fetchAndProcessRemoteBans(c *gin.Context, url string, banCfg *strings.Builder, now time.Time) error {
+	// Validate URL to prevent SSRF
+	if err := utils.ValidateRemoteURL(url); err != nil {
+		return fmt.Errorf("remote ban source URL validation failed: %w", err)
+	}
+
 	// Create HTTP client with timeout
 	client := &http.Client{
 		Timeout: 30 * time.Second,

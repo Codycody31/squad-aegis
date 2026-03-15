@@ -990,7 +990,7 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 		if steamIDInt.Valid {
 			bannedID = strconv.FormatInt(steamIDInt.Int64, 10)
 		} else if eosIDStr.Valid {
-			bannedID = eosIDStr.String
+			bannedID = utils.NormalizeEOSID(eosIDStr.String)
 		} else {
 			continue
 		}

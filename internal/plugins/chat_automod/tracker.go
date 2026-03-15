@@ -17,7 +17,9 @@ type Violation struct {
 	Message     string         `json:"message,omitempty"`
 }
 
-// ViolationRecord stores all violations for a player
+// ViolationRecord stores all violations for a player.
+// PlayerID may be a SteamID or EOS ID depending on what was available.
+// The JSON field is kept as "steam_id" for backward compatibility with existing stored data.
 type ViolationRecord struct {
 	SteamID    string      `json:"steam_id"`
 	Violations []Violation `json:"violations"`

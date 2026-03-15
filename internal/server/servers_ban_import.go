@@ -26,6 +26,12 @@ import (
 // are used by Squad servers to represent permanent bans.
 const permanentThresholdYears = 50
 
+// maxBansCfgLines is the maximum number of lines accepted when parsing a Bans.cfg file.
+const maxBansCfgLines = 50000
+
+// maxBansCfgReadBytes is the maximum size in bytes when reading a Bans.cfg file (10 MB).
+const maxBansCfgReadBytes = 10 * 1024 * 1024
+
 // activeServerBanWhereClause keeps server ban lookups aligned anywhere we need
 // the same "currently active" set that gets written back into Bans.cfg.
 const activeServerBanWhereClause = `
@@ -48,7 +54,13 @@ const activeServerBanWhereClause = `
 //	AdminName [SteamID X] Banned:<id>:<expiryTimestamp> //<reason>
 //	N/A Banned:<id>:<expiryTimestamp> //<reason>
 func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
+	if len(content) > maxBansCfgReadBytes {
+		return nil, 0
+	}
 	lines := strings.Split(content, "\n")
+	if len(lines) > maxBansCfgLines {
+		return nil, 0
+	}
 	var entries []models.CfgBanEntry
 	seen := make(map[string]bool)
 	unparseable := 0
