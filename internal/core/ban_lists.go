@@ -195,7 +195,7 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 	query := `
 		SELECT DISTINCT ON (COALESCE(sb.steam_id::text, sb.eos_id))
 			sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, u.steam_id, sb.steam_id, sb.eos_id, sb.reason,
-			sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name,
+			sb.expires_at, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name,
 			sb.created_at, sb.updated_at
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
@@ -211,7 +211,7 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 				WHERE sbls.server_id = $1
 			)
 		)
-		AND (sb.duration = 0 OR sb.created_at + (sb.duration * INTERVAL '1 day') >= NOW())
+		AND (sb.expires_at IS NULL OR sb.expires_at >= NOW())
 		ORDER BY COALESCE(sb.steam_id::text, sb.eos_id), sb.created_at DESC
 	`
 
@@ -228,11 +228,12 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 		var steamIDInt sql.NullInt64
 		var eosIDStr sql.NullString
 		var adminSteamIDInt sql.NullInt64
+		var expiresAt sql.NullTime
 		var ruleIDStr, banListIDStr, banListNameStr *string
 
 		err := rows.Scan(
 			&ban.ID, &ban.ServerID, &adminIDStr, &ban.AdminName, &adminSteamIDInt,
-			&steamIDInt, &eosIDStr, &ban.Reason, &ban.Duration, &ruleIDStr,
+			&steamIDInt, &eosIDStr, &ban.Reason, &expiresAt, &ruleIDStr,
 			&banListIDStr, &banListNameStr, &ban.CreatedAt, &ban.UpdatedAt,
 		)
 		if err != nil {
@@ -267,11 +268,11 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 		ban.BanListID = banListIDStr
 		ban.BanListName = banListNameStr
 
-		// Calculate if ban is permanent and expiry date
-		ban.Permanent = ban.Duration == 0
-		if !ban.Permanent {
-			ban.ExpiresAt = ban.CreatedAt.AddDate(0, 0, ban.Duration)
+		// Set expires_at and compute permanent flag
+		if expiresAt.Valid {
+			ban.ExpiresAt = &expiresAt.Time
 		}
+		ban.Permanent = ban.ExpiresAt == nil
 
 		bans = append(bans, ban)
 	}
@@ -531,10 +532,10 @@ func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID u
 	args = append(args, serverID)
 
 	query := fmt.Sprintf(`
-		SELECT sb.id, sb.reason, sb.duration, sb.created_at
+		SELECT sb.id, sb.reason, sb.expires_at, sb.created_at
 		FROM server_bans sb
 		WHERE (%s)
-		AND (sb.duration = 0 OR sb.created_at + (sb.duration || ' days')::interval > NOW())
+		AND (sb.expires_at IS NULL OR sb.expires_at > NOW())
 		AND (
 			sb.server_id = %s
 			OR sb.ban_list_id IN (
@@ -548,8 +549,9 @@ func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID u
 	`, strings.Join(idConditions, " OR "), serverPlaceholder, serverPlaceholder)
 
 	var ban models.ServerBan
+	var banExpiresAt sql.NullTime
 	err := database.QueryRowContext(ctx, query, args...).Scan(
-		&ban.ID, &ban.Reason, &ban.Duration, &ban.CreatedAt,
+		&ban.ID, &ban.Reason, &banExpiresAt, &ban.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -558,10 +560,10 @@ func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID u
 	ban.SteamID = steamID
 	ban.EOSID = eosID
 	ban.ServerID = serverID
-	ban.Permanent = ban.Duration == 0
-	if !ban.Permanent {
-		ban.ExpiresAt = ban.CreatedAt.AddDate(0, 0, ban.Duration)
+	if banExpiresAt.Valid {
+		ban.ExpiresAt = &banExpiresAt.Time
 	}
+	ban.Permanent = ban.ExpiresAt == nil
 
 	return &ban, nil
 }

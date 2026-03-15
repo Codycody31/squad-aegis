@@ -47,7 +47,7 @@ const actionType = ref<
     "kick" | "ban" | "warn" | "move" | "remove-from-squad" | null
 >(null);
 const actionReason = ref("");
-const actionDuration = ref(0); // For ban duration in minutes
+const actionDuration = ref("0"); // Ban duration string: "0" for permanent, "7d", "2h", "30m"
 const selectedRuleId = ref<string>("__none__");
 const serverRules = ref<
     Array<{
@@ -214,9 +214,9 @@ async function fetchEscalationSuggestion(ruleId: string) {
             if (
                 actionType.value === "ban" &&
                 suggestion.suggested_duration &&
-                actionDuration.value === 0
+                actionDuration.value === "0"
             ) {
-                actionDuration.value = suggestion.suggested_duration;
+                actionDuration.value = String(suggestion.suggested_duration) + "d";
             }
         } else {
             escalationSuggestion.value = null;
@@ -264,9 +264,9 @@ function switchToSuggestedAction() {
             escalationSuggestion.value.suggested_duration
         ) {
             actionDuration.value =
-                escalationSuggestion.value.suggested_duration;
+                String(escalationSuggestion.value.suggested_duration) + "d";
         } else if (suggestedAction !== "ban") {
-            actionDuration.value = 0;
+            actionDuration.value = "0";
         }
 
         // Set reason/message if not already set
@@ -292,7 +292,7 @@ async function openActionDialog(
 ) {
     actionType.value = action;
     actionReason.value = "";
-    actionDuration.value = action === "ban" ? 0 : 0;
+    actionDuration.value = "0";
     selectedRuleId.value = "__none__";
     escalationSuggestion.value = null;
     showActionDialog.value = true;
@@ -312,7 +312,7 @@ function closeActionDialog() {
     showActionDialog.value = false;
     actionType.value = null;
     actionReason.value = "";
-    actionDuration.value = 0;
+    actionDuration.value = "0";
     selectedRuleId.value = "__none__";
     escalationSuggestion.value = null;
 }
@@ -377,7 +377,7 @@ async function executePlayerAction() {
                     steam_id: props.player.steam_id,
                     eos_id: props.player.eosId,
                     reason: actionReason.value,
-                    duration: actionDuration.value, // Duration in days
+                    duration: actionDuration.value,
                 };
                 if (
                     selectedRuleId.value &&
@@ -437,13 +437,10 @@ async function executePlayerAction() {
             successMessage += "moved";
         } else if (actionType.value === "ban") {
             successMessage += "banned";
-            if (actionDuration.value) {
-                const days = actionDuration.value;
-                if (days >= 1) {
-                    successMessage += ` for ${days} ${days === 1 ? "day" : "days"}`;
-                } else {
-                    successMessage += " permanently";
-                }
+            if (actionDuration.value && actionDuration.value !== "0") {
+                successMessage += ` for ${actionDuration.value}`;
+            } else {
+                successMessage += " permanently";
             }
         } else if (actionType.value === "remove-from-squad") {
             successMessage += "removed from squad";
@@ -663,11 +660,11 @@ function copyToClipboard(text: string) {
                         v-model="actionDuration"
                         placeholder="0"
                         class="col-span-3"
-                        type="number"
+                        type="text"
                     />
                     <div class="col-span-1"></div>
                     <div class="text-xs text-muted-foreground col-span-3">
-                        Ban duration in days. Use 0 for a permanent ban.
+                        Duration: 0 = permanent, 7d = 7 days, 2h = 2 hours, 30m = 30 minutes
                     </div>
                 </div>
 

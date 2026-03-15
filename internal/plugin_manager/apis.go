@@ -694,20 +694,30 @@ func (api *rconAPI) RemovePlayerFromSquadById(playerID string) error {
 }
 
 func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Duration) error {
-	// Convert duration to days for Squad's ban system
-	durationDays := int(duration.Hours() / 24)
-
-	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", utils.SanitizeRCONParam(playerID), durationDays, utils.SanitizeRCONParam(reason))
-	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
-	if err != nil {
-		return fmt.Errorf("failed to ban player: %w", err)
+	// Compute expires_at from duration
+	var expiresAt *time.Time
+	if duration > 0 {
+		t := time.Now().Add(duration)
+		expiresAt = &t
 	}
 
-	// Store ban information in database
-	err = api.storeBanInDatabase(playerID, reason, duration)
+	// Store ban in database first
+	err := api.storeBanInDatabase(playerID, reason, expiresAt)
 	if err != nil {
-		// Log error but don't fail the ban operation since RCON command succeeded
 		log.Error().Err(err).Str("playerID", playerID).Msg("Failed to store ban in database")
+		return fmt.Errorf("failed to store ban: %w", err)
+	}
+
+	// Reload server config so the game server picks up the ban via Bans.cfg
+	if _, err := api.rconManager.ExecuteCommand(api.serverID, "AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("playerID", playerID).Msg("Failed to reload server config after ban")
+	}
+
+	// Kick player for immediate enforcement
+	command := fmt.Sprintf("AdminKick \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(reason))
+	_, err = api.rconManager.ExecuteCommand(api.serverID, command)
+	if err != nil {
+		return fmt.Errorf("failed to kick player: %w", err)
 	}
 
 	return nil
@@ -733,8 +743,12 @@ func mapPluginEventTypeToEvidence(eventType string) (evidenceType string, clickh
 
 // BanWithEvidence bans a player and links evidence from an event
 func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration time.Duration, eventID string, eventType string) (string, error) {
-	// Convert duration to days
-	durationDays := int(duration.Hours() / 24)
+	// Compute expires_at from duration
+	var expiresAt *time.Time
+	if duration > 0 {
+		t := time.Now().Add(duration)
+		expiresAt = &t
+	}
 
 	// Map event type to evidence type and table
 	evidenceType, clickhouseTable := mapPluginEventTypeToEvidence(eventType)
@@ -770,14 +784,14 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 	banID := uuid.New()
 	now := time.Now()
 
-	banQuery := `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
+	banQuery := `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
 	_, err = tx.Exec(banQuery,
 		banID,
 		api.serverID,
 		steamIDVal,
 		eosIDVal,
 		reason,
-		durationDays,
+		expiresAt,
 		now,
 		now,
 	)
@@ -815,14 +829,12 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 		return "", fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// Execute RCON ban
-	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", utils.SanitizeRCONParam(playerID), durationDays, utils.SanitizeRCONParam(reason))
-	_, err = api.rconManager.ExecuteCommand(api.serverID, command)
-	if err != nil {
-		log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
+	// Reload server config so the game server picks up the ban via Bans.cfg
+	if _, err := api.rconManager.ExecuteCommand(api.serverID, "AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("banID", banID.String()).Msg("Failed to reload server config after ban")
 	}
 
-	// Kick player
+	// Kick player for immediate enforcement
 	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(reason))
 	_, _ = api.rconManager.ExecuteCommand(api.serverID, kickCommand)
 
@@ -830,7 +842,7 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 }
 
 // storeBanInDatabase stores the ban information in the database
-func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration time.Duration) error {
+func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt *time.Time) error {
 	// Detect player ID type (Steam ID or EOS ID)
 	var steamIDVal interface{}
 	var eosIDVal interface{}
@@ -842,14 +854,11 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}
 
-	// Convert duration to days for database storage
-	durationDays := int(duration.Hours() / 24)
-
 	// Insert ban into database
 	// We use NULL for admin_id since this is a plugin-initiated ban, not a specific user
 	now := time.Now()
 	query := `
-		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at)
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
 		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
 	`
 
@@ -859,7 +868,7 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration 
 		steamIDVal,   // steam_id (nil if EOS-only)
 		eosIDVal,     // eos_id (nil if Steam-only)
 		reason,       // reason
-		durationDays, // duration in days
+		expiresAt,    // expires_at (nil = permanent)
 		now,          // created_at
 		now,          // updated_at
 	)

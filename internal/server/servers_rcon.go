@@ -51,7 +51,7 @@ type PlayerKickRequest struct {
 type PlayerBanRequest struct {
 	PlayerActionRequest
 	Reason   string `json:"reason" binding:"required"`
-	Duration int    `json:"duration"` // Duration in days, 0 for permanent
+	Duration string `json:"duration"` // "0"/"permanent" for permanent, "7d", "2h", "30m", or bare number (days)
 }
 
 type PlayerWarnRequest struct {
@@ -597,8 +597,10 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 		return
 	}
 
-	if request.Duration < 0 {
-		responses.BadRequest(c, "Duration must be a positive integer", &gin.H{"error": "Duration must be a positive integer"})
+	// Parse duration string into expires_at
+	expiresAt, parseErr := utils.ParseBanDuration(request.Duration)
+	if parseErr != nil {
+		responses.BadRequest(c, "Invalid duration format", &gin.H{"error": parseErr.Error()})
 		return
 	}
 
@@ -622,16 +624,13 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 		eosIDVal = normalizedEOSID
 	}
 
-	// Duration is in days (0 for permanent)
-	durationDays := request.Duration
-
 	// Build INSERT query dynamically
 	var banID string
 	now := time.Now()
 
-	columns := "id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at"
+	columns := "id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at"
 	placeholders := "$1, $2, $3, $4, $5, $6, $7, $8, $9"
-	args := []interface{}{uuid.New(), serverId, user.Id, steamIDVal, eosIDVal, request.Reason, durationDays, now, now}
+	args := []interface{}{uuid.New(), serverId, user.Id, steamIDVal, eosIDVal, request.Reason, expiresAt, now, now}
 	nextParam := 10
 
 	// Add rule_id if provided
@@ -655,13 +654,6 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 		return
 	}
 
-	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
-
-	err = r.BanPlayer(rconID, request.Duration, request.Reason)
-	if err != nil {
-		log.Error().Err(err).Str("playerId", rconID).Str("serverId", serverId.String()).Msg("Failed to apply ban via RCON")
-	}
-
 	// Log rule violation to ClickHouse if rule_id is provided
 	if request.RuleId != nil && *request.RuleId != "" {
 		s.logRuleViolation(c.Request.Context(), serverId, rconID, request.RuleId, &user.Id, "BAN")
@@ -669,33 +661,28 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 
 	// Create detailed audit log
 	auditData := map[string]interface{}{
-		"banId":    banID,
-		"steamId":  request.SteamId,
-		"eosId":    request.EosId,
-		"reason":   request.Reason,
-		"duration": durationDays,
+		"banId":   banID,
+		"steamId": request.SteamId,
+		"eosId":   request.EosId,
+		"reason":  request.Reason,
 	}
-
-	// Add expiry information if not permanent
-	if durationDays > 0 {
-		expiresAt := time.Now().Add(time.Duration(durationDays) * 24 * time.Hour)
+	if expiresAt != nil {
 		auditData["expiresAt"] = expiresAt.Format(time.RFC3339)
 	}
-
 	if request.RuleId != nil && *request.RuleId != "" {
 		auditData["ruleId"] = *request.RuleId
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:player:ban", auditData)
 
+	// Sync Bans.cfg, reload config, and kick the player to enforce immediately
 	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
 		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after RCON ban")
 	}
 
-	// Reload server config so the game server picks up the updated Bans.cfg
-	r2 := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-	if _, err := r2.ExecuteRaw("AdminReloadServerConfig"); err != nil {
-		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after RCON ban")
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+	if err := r.BanPlayer(rconID, request.Reason); err != nil {
+		log.Warn().Err(err).Str("playerId", rconID).Str("serverId", serverId.String()).Msg("Failed to kick player after ban")
 	}
 
 	responses.Success(c, "Player banned successfully", &gin.H{

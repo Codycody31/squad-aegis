@@ -43,7 +43,8 @@ export interface ServerBan {
   steam_id: string;
   eos_id?: string;
   reason: string;
-  duration: number;
+  permanent: boolean;
+  expires_at?: string;
   created_at: string;
   updated_at: string;
 }

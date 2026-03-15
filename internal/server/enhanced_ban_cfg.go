@@ -57,7 +57,7 @@ func (s *Server) ServerBansCfgEnhanced(c *gin.Context) {
 func (s *Server) generateServerSpecificBans(c *gin.Context, serverId uuid.UUID, banCfg *strings.Builder, now time.Time) error {
 	// Query only direct server bans (not from ban lists)
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
+		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.server_id = $1 AND sb.ban_list_id IS NULL
@@ -99,18 +99,17 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 		}
 
 		var expiryTimestamp string
-		if ban.Duration == 0 {
+		if ban.ExpiresAt == nil {
 			expiryTimestamp = "0"
 		} else {
-			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * (time.Hour * 24))
-			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
+			expiryTimestamp = strconv.FormatInt(ban.ExpiresAt.Unix(), 10)
 		}
 
 		// Build the reason comment
 		reasonComment := ""
 		if ban.Reason != "" {
 			reasonComment = " //" + utils.SanitizeBanReason(ban.Reason)
-		} else if ban.Duration == 0 {
+		} else if ban.ExpiresAt == nil {
 			reasonComment = " //Permanent ban"
 		}
 
@@ -135,13 +134,12 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 		var steamIDInt sql.NullInt64
 		var eosIDStr sql.NullString
 		var reason string
-		var duration int
-		var createdAt time.Time
+		var expiresAt sql.NullTime
 		var adminID sql.NullString
 		var adminUsername sql.NullString
 		var adminSteamIDInt sql.NullInt64
 
-		err := rows.Scan(&steamIDInt, &eosIDStr, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt)
+		err := rows.Scan(&steamIDInt, &eosIDStr, &reason, &expiresAt, &adminID, &adminUsername, &adminSteamIDInt)
 		if err != nil {
 			return err
 		}
@@ -157,18 +155,17 @@ func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now tim
 		}
 
 		var expiryTimestamp string
-		if duration == 0 {
+		if !expiresAt.Valid {
 			expiryTimestamp = "0"
 		} else {
-			expiryTime := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
-			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
+			expiryTimestamp = strconv.FormatInt(expiresAt.Time.Unix(), 10)
 		}
 
 		// Build the reason comment
 		reasonComment := ""
 		if reason != "" {
 			reasonComment = " //" + utils.SanitizeBanReason(reason)
-		} else if duration == 0 {
+		} else if !expiresAt.Valid {
 			reasonComment = " //Permanent ban"
 		}
 
@@ -347,7 +344,7 @@ func (s *Server) BanListCfg(c *gin.Context) {
 
 	// Query bans from the specific ban list
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
+		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.ban_list_id = $1

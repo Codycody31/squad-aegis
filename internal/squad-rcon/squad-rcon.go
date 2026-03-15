@@ -317,17 +317,18 @@ func NewSquadRconWithConnection(manager *rcon_manager.RconManager, serverID uuid
 	}, nil
 }
 
-// BanPlayer bans a player from the server.
-// Duration is in days: 0 for permanent, >0 for that many days.
-func (s *SquadRcon) BanPlayer(playerID string, duration int, reason string) error {
-	var durationStr string
-	if duration == 0 {
-		durationStr = "0"
-	} else {
-		durationStr = fmt.Sprintf("%dd", duration)
+// BanPlayer enforces a ban by kicking the player and reloading the server config.
+// The ban must already be written to the DB and Bans.cfg before calling this.
+// This replaces the old AdminBan RCON approach — we control Bans.cfg directly
+// for exact expiry timestamps (including sub-day bans).
+func (s *SquadRcon) BanPlayer(playerID string, reason string) error {
+	// Reload server config so the game server picks up the updated Bans.cfg
+	if _, err := s.ExecuteRaw("AdminReloadServerConfig"); err != nil {
+		// Log but continue — the kick is still important for immediate enforcement
+		_ = err
 	}
-	_, err := s.Manager.ExecuteCommand(s.ServerID, fmt.Sprintf("AdminBan %s %s %s", utils.SanitizeRCONParam(playerID), durationStr, utils.SanitizeRCONParam(reason)))
-	return err
+	// Kick the player to enforce the ban immediately
+	return s.KickPlayer(playerID, reason)
 }
 
 // KickPlayer kicks a player from the server

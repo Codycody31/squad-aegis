@@ -149,9 +149,8 @@ interface BannedPlayer {
     eos_id?: string;
     name: string;
     reason: string;
-    duration: number;
     permanent: boolean;
-    expires_at: string;
+    expires_at?: string;
     created_at: string;
     updated_at: string;
     ban_list_id?: string;
@@ -181,7 +180,7 @@ const formSchema = toTypedSchema(
                 "Must be a 17-digit Steam ID or 32-character hex EOS ID"
             ),
         reason: z.string().optional(), // Now optional - will be auto-generated when rule is selected
-        duration: z.number().min(0, "Duration must be at least 0"),
+        duration: z.string().default("0"),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
         evidence_text: z.string().optional(),
@@ -192,7 +191,7 @@ const formSchema = toTypedSchema(
 const editFormSchema = toTypedSchema(
     z.object({
         reason: z.string().min(1, "Reason is required"),
-        duration: z.number().min(0, "Duration must be at least 0"),
+        duration: z.string().default("0"),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
         evidence_text: z.string().optional(),
@@ -209,20 +208,34 @@ function getSelectedRuleDetails(ruleId: string) {
 }
 
 // Generate ban reason from rule and duration
-function generateBanReason(ruleId: string | undefined, duration: number | undefined): string {
+function generateBanReason(ruleId: string | undefined, duration: string | undefined): string {
     if (!ruleId || ruleId === "__none__") return "";
 
     const rule = getSelectedRuleDetails(ruleId);
     if (!rule) return "";
 
     // Format: "rule_number | rule_title | duration"
-    // Extract the last part of the title (after the last ">")
     const titleParts = rule.title.split(" > ");
     const shortTitle = titleParts[titleParts.length - 1];
 
-    const durationValue = duration ?? 0;
-    const durationText = durationValue === 0 ? "perm" : `${durationValue}d`;
+    const durationStr = duration || "0";
+    const durationText = durationStr === "0" || durationStr === "permanent" ? "perm" : durationStr;
     return `${rule.number} | ${shortTitle} | ${durationText}`;
+}
+
+// Format expires_at for display
+function formatExpiresAt(ban: BannedPlayer): string {
+    if (ban.permanent || !ban.expires_at) return "Permanent";
+    const expiresAt = new Date(ban.expires_at);
+    const now = new Date();
+    const diffMs = expiresAt.getTime() - now.getTime();
+    if (diffMs <= 0) return "Expired";
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    if (diffDays > 0) return `${diffDays}d ${diffHours}h remaining`;
+    if (diffHours > 0) return `${diffHours}h ${diffMins}m remaining`;
+    return `${diffMins}m remaining`;
 }
 
 // Search for players
@@ -405,7 +418,7 @@ async function addBan(values: any) {
         // Generate reason: if rule is selected, generate it dynamically, otherwise use provided reason
         let finalReason = reason || "";
         if (hasValidRule) {
-            finalReason = generateBanReason(rule_id, duration ?? 0);
+            finalReason = generateBanReason(rule_id, duration ?? "0");
         }
 
         // Validate that we have a reason
@@ -579,7 +592,7 @@ async function editBan(values: any) {
             requestBody.reason = reason;
         }
 
-        if (duration !== editingBan.value.duration) {
+        if (duration) {
             requestBody.duration = duration;
         }
 
@@ -1729,7 +1742,7 @@ async function executeImport() {
                     :initial-values="{
                         steam_id: '',
                         reason: '',
-                        duration: 1,
+                        duration: '1d',
                         ban_list_id: '',
                         rule_id: '',
                     }"
@@ -1958,14 +1971,13 @@ async function executeImport() {
                                         v-slot="{ componentField, setValue }"
                                     >
                                         <FormItem>
-                                            <FormLabel>Days</FormLabel>
+                                            <FormLabel>Duration</FormLabel>
                                             <div
                                                 class="flex items-center space-x-2"
                                             >
                                                 <FormControl>
                                                     <Input
-                                                        type="number"
-                                                        min="0"
+                                                        type="text"
                                                         v-bind="componentField"
                                                     />
                                                 </FormControl>
@@ -1975,7 +1987,7 @@ async function executeImport() {
                                                     size="sm"
                                                     @click="
                                                         setValue(
-                                                            suggestedDuration,
+                                                            suggestedDuration === 0 ? '0' : suggestedDuration + 'd',
                                                         )
                                                     "
                                                     v-if="
@@ -1985,10 +1997,9 @@ async function executeImport() {
                                                     Use Suggested
                                                 </Button>
                                             </div>
-                                            <FormDescription
-                                                >Duration in days. 0 is
-                                                permanent</FormDescription
-                                            >
+                                            <FormDescription>
+                                                0 = permanent, 7d = 7 days, 2h = 2 hours, 30m = 30 minutes
+                                            </FormDescription>
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
@@ -2003,7 +2014,7 @@ async function executeImport() {
                                             Generated Ban Reason
                                         </h4>
                                         <p class="text-sm font-mono bg-background p-2 rounded border">
-                                            {{ generateBanReason(formValues.rule_id, formValues.duration) }}
+                                            {{ generateBanReason(formValues.rule_id, formValues.duration as string) }}
                                         </p>
                                     </div>
 
@@ -2336,7 +2347,7 @@ async function executeImport() {
                     :validation-schema="editFormSchema"
                     :initial-values="{
                         reason: editingBan?.reason || '',
-                        duration: editingBan?.duration,
+                        duration: editingBan?.permanent ? '0' : '',
                         ban_list_id: editingBan?.ban_list_id || '',
                         rule_id: editingBan?.rule_id || '',
                         evidence_text: editingBan?.evidence_text || '',
@@ -2447,16 +2458,15 @@ async function executeImport() {
                                         v-slot="{ componentField }"
                                     >
                                         <FormItem>
-                                            <FormLabel>Days</FormLabel>
+                                            <FormLabel>Duration</FormLabel>
                                             <FormControl>
                                                 <Input
-                                                    type="number"
-                                                    min="0"
+                                                    type="text"
                                                     v-bind="componentField"
                                                 />
                                             </FormControl>
                                             <FormDescription>
-                                                Duration in days. 0 is permanent
+                                                0 = permanent, 7d = 7 days, 2h = 2 hours, 30m = 30 minutes
                                             </FormDescription>
                                             <FormMessage />
                                         </FormItem>
@@ -2792,7 +2802,7 @@ async function executeImport() {
                                     <div>
                                         <span class="text-muted-foreground">Duration:</span>
                                         <span class="ml-2">
-                                            {{ viewingBanEvidence.duration === 0 ? "Permanent" : `${viewingBanEvidence.duration} days` }}
+                                            {{ formatExpiresAt(viewingBanEvidence) }}
                                         </span>
                                     </div>
                                 </div>
@@ -3150,17 +3160,13 @@ async function executeImport() {
                                     <TableCell>
                                         <Badge
                                             :variant="
-                                                player.duration == 0
+                                                player.permanent
                                                     ? 'destructive'
                                                     : 'outline'
                                             "
                                             class="text-xs"
                                         >
-                                            {{
-                                                player.duration == 0
-                                                    ? "Permanent"
-                                                    : player.duration + " days"
-                                            }}
+                                            {{ formatExpiresAt(player) }}
                                         </Badge>
                                     </TableCell>
                                     <TableCell>
@@ -3254,17 +3260,13 @@ async function executeImport() {
                                     <div class="flex items-center gap-2">
                                         <Badge
                                             :variant="
-                                                player.duration == 0
+                                                player.permanent
                                                     ? 'destructive'
                                                     : 'outline'
                                             "
                                             class="text-xs"
                                         >
-                                            {{
-                                                player.duration == 0
-                                                    ? "Permanent"
-                                                    : player.duration + " days"
-                                            }}
+                                            {{ formatExpiresAt(player) }}
                                         </Badge>
                                         <Badge variant="secondary" class="text-xs">
                                             {{ player.ban_list_name || "Manual" }}

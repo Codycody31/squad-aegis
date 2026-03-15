@@ -129,7 +129,7 @@ func (s *RemoteBanSyncService) SyncSource(ctx context.Context, source *models.Re
 type RemoteBan struct {
 	SteamID   string
 	Reason    string
-	Duration  int // 0 for permanent, minutes for temporary
+	ExpiresAt *time.Time // nil = permanent
 	CreatedAt time.Time
 }
 
@@ -191,7 +191,7 @@ func (s *RemoteBanSyncService) parseCSVBans(body io.Reader) ([]RemoteBan, error)
 		ban := RemoteBan{
 			SteamID:   steamIDStr,
 			Reason:    "Remote ban",
-			Duration:  0, // Default to permanent
+			ExpiresAt: nil, // Default to permanent
 			CreatedAt: time.Now(),
 		}
 
@@ -206,7 +206,7 @@ func (s *RemoteBanSyncService) parseCSVBans(body io.Reader) ([]RemoteBan, error)
 				if time.Now().After(expiryTime) {
 					continue // Skip expired bans
 				}
-				ban.Duration = int(time.Until(expiryTime).Minutes())
+				ban.ExpiresAt = &expiryTime
 			}
 		}
 
@@ -242,7 +242,7 @@ func (s *RemoteBanSyncService) parseTextBans(body io.Reader) ([]RemoteBan, error
 		ban := RemoteBan{
 			SteamID:   steamIDStr,
 			Reason:    "Remote ban",
-			Duration:  0, // Default to permanent
+			ExpiresAt: nil, // Default to permanent
 			CreatedAt: time.Now(),
 		}
 
@@ -253,7 +253,7 @@ func (s *RemoteBanSyncService) parseTextBans(body io.Reader) ([]RemoteBan, error
 				if time.Now().After(expiryTimestamp) {
 					continue // Skip expired bans
 				}
-				ban.Duration = int(time.Until(expiryTimestamp).Minutes())
+				ban.ExpiresAt = &expiryTimestamp
 			}
 		}
 
@@ -291,9 +291,9 @@ func (s *RemoteBanSyncService) updateBanListBans(ctx context.Context, banListID 
 
 		// For remote bans, use NULL for admin_id and server_id since they don't apply to a specific server/admin
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, ban_list_id, created_at, updated_at)
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, expires_at, ban_list_id, created_at, updated_at)
 			VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, $7)
-		`, uuid.New(), ban.SteamID, ban.Reason, ban.Duration, banListID, ban.CreatedAt, ban.CreatedAt)
+		`, uuid.New(), ban.SteamID, ban.Reason, ban.ExpiresAt, banListID, ban.CreatedAt, ban.CreatedAt)
 		if err != nil {
 			return err
 		}

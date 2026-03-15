@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -129,7 +130,6 @@ type ActiveBan struct {
 	ServerID   string     `json:"server_id"`
 	ServerName string     `json:"server_name"`
 	Reason     string     `json:"reason"`
-	Duration   int        `json:"duration"`
 	Permanent  bool       `json:"permanent"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -563,7 +563,7 @@ func (s *Server) isPlayerCurrentlyBanned(ctx context.Context, steamID, eosID str
 			SELECT 1
 			FROM server_bans
 			WHERE (%s)
-			AND (duration = 0 OR created_at + (duration || ' days')::interval > NOW())
+			AND (expires_at IS NULL OR expires_at > NOW())
 		)
 	`, strings.Join(idConditions, " OR "))
 
@@ -1671,7 +1671,7 @@ func (s *Server) getPlayerBanHistory(c *gin.Context, playerID string, isSteamID 
 			b.server_id,
 			s.name,
 			b.reason,
-			b.duration,
+			b.expires_at,
 			b.created_at,
 			COALESCE(u.name, u.username, 'System') as admin_name
 		FROM server_bans b
@@ -1693,12 +1693,13 @@ func (s *Server) getPlayerBanHistory(c *gin.Context, playerID string, isSteamID 
 		var entry ActiveBan
 		var banID uuid.UUID
 		var serverID uuid.UUID
+		var expiresAt sql.NullTime
 		if err := rows.Scan(
 			&banID,
 			&serverID,
 			&entry.ServerName,
 			&entry.Reason,
-			&entry.Duration,
+			&expiresAt,
 			&entry.CreatedAt,
 			&entry.AdminName,
 		); err != nil {
@@ -1707,11 +1708,10 @@ func (s *Server) getPlayerBanHistory(c *gin.Context, playerID string, isSteamID 
 
 		entry.BanID = banID.String()
 		entry.ServerID = serverID.String()
-		entry.Permanent = entry.Duration == 0
-		if !entry.Permanent {
-			expiresAt := entry.CreatedAt.AddDate(0, 0, entry.Duration)
-			entry.ExpiresAt = &expiresAt
+		if expiresAt.Valid {
+			entry.ExpiresAt = &expiresAt.Time
 		}
+		entry.Permanent = entry.ExpiresAt == nil
 
 		history = append(history, entry)
 	}
@@ -1887,11 +1887,9 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID 
 	}
 
 	// Query PostgreSQL for active bans
-	// Duration is in days, 0 means permanent
-	// Calculate expiration as created_at + duration days
 	query := fmt.Sprintf(`
 			SELECT
-				b.id, b.server_id, b.reason, b.duration,
+				b.id, b.server_id, b.reason, b.expires_at,
 				b.created_at,
 				COALESCE(s.name, 'Unknown Server') as server_name,
 				COALESCE(u.name, u.username, 'System') as admin_name
@@ -1899,7 +1897,7 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID 
 			LEFT JOIN servers s ON b.server_id = s.id
 			LEFT JOIN users u ON b.admin_id = u.id
 			WHERE %s
-			AND (b.duration = 0 OR b.created_at + (b.duration || ' days')::interval > NOW())
+			AND (b.expires_at IS NULL OR b.expires_at > NOW())
 			ORDER BY b.created_at DESC
 	`, whereClause)
 
@@ -1912,11 +1910,12 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID 
 	bans := []ActiveBan{}
 	for rows.Next() {
 		var ban ActiveBan
+		var expiresAt sql.NullTime
 		err := rows.Scan(
 			&ban.BanID,
 			&ban.ServerID,
 			&ban.Reason,
-			&ban.Duration,
+			&expiresAt,
 			&ban.CreatedAt,
 			&ban.ServerName,
 			&ban.AdminName,
@@ -1924,12 +1923,10 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID 
 		if err != nil {
 			continue
 		}
-		// Calculate expiration
-		ban.Permanent = ban.Duration == 0
-		if !ban.Permanent {
-			expiresAt := ban.CreatedAt.AddDate(0, 0, ban.Duration)
-			ban.ExpiresAt = &expiresAt
+		if expiresAt.Valid {
+			ban.ExpiresAt = &expiresAt.Time
 		}
+		ban.Permanent = ban.ExpiresAt == nil
 		bans = append(bans, ban)
 	}
 

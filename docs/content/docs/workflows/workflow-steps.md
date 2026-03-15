@@ -716,7 +716,7 @@ This workflow demonstrates:
 - `AdminBroadcast <message>` - Broadcast message to all players
 - `AdminWarn <player_id> <message>` - Send warning to specific player (accepts Steam ID or EOS ID)
 - `AdminKick <player_id> <reason>` - Kick player from server (accepts Steam ID or EOS ID)
-- `AdminBan <player_id> <duration> <reason>` - Ban player (accepts Steam ID or EOS ID, duration in minutes)
+- `AdminBan <player_id> <duration> <reason>` - Ban player (accepts Steam ID or EOS ID, duration days (ie: 1d = 1 day, 1M = 1 month, 0 = permanent))
 - `AdminForceTeamChange <player_id>` - Force player to switch teams (accepts Steam ID or EOS ID)
 - `AdminChangeMap <layer>` - Change the current map layer
 - `AdminSetMaxNumPlayers <number>` - Set maximum player count

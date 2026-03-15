@@ -40,15 +40,14 @@ type ServerBan struct {
 	EOSID        string        `json:"eos_id,omitempty"`
 	Name         string        `json:"name"`
 	Reason       string        `json:"reason"`
-	Duration     int           `json:"duration"`
+	ExpiresAt    *time.Time    `json:"expires_at,omitempty"` // DB column, NULL = permanent
 	RuleID       *string       `json:"rule_id,omitempty"`
 	RuleName     *string       `json:"rule_name,omitempty"`
 	BanListID    *string       `json:"ban_list_id,omitempty"`
 	BanListName  *string       `json:"ban_list_name,omitempty"`
 	EvidenceText *string       `json:"evidence_text,omitempty"`
 	Evidence     []BanEvidence `json:"evidence,omitempty"`
-	Permanent    bool          `json:"permanent"`
-	ExpiresAt    time.Time     `json:"expires_at,omitempty"`
+	Permanent    bool          `json:"permanent"` // computed: ExpiresAt == nil
 	CreatedAt    time.Time     `json:"created_at"`
 	UpdatedAt    time.Time     `json:"updated_at"`
 }
@@ -142,7 +141,7 @@ type ServerBanCreateRequest struct {
 	SteamID      string                  `json:"steam_id"`
 	EOSID        string                  `json:"eos_id,omitempty"`
 	Reason       string                  `json:"reason"`
-	Duration     int                     `json:"duration"`
+	Duration     string                  `json:"duration"` // "0"/"permanent" for permanent, "7d", "2h", "30m", or bare number (days)
 	RuleID       *string                 `json:"rule_id,omitempty"`
 	BanListID    *string                 `json:"ban_list_id,omitempty"`
 	EvidenceText *string                 `json:"evidence_text,omitempty"`
@@ -166,7 +165,7 @@ type BanEvidenceCreateItem struct {
 
 type ServerBanUpdateRequest struct {
 	Reason       *string                  `json:"reason,omitempty"`
-	Duration     *int                     `json:"duration,omitempty"`
+	Duration     *string                  `json:"duration,omitempty"` // "0"/"permanent" for permanent, "7d", "2h", "30m", or bare number (days)
 	BanListID    *string                  `json:"ban_list_id,omitempty"`
 	RuleID       *uuid.UUID               `json:"rule_id,omitempty"`
 	EvidenceText *string                  `json:"evidence_text,omitempty"`

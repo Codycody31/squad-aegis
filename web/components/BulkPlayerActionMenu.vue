@@ -46,7 +46,7 @@ const emit = defineEmits<{
 const showActionDialog = ref(false);
 const actionType = ref<"kick" | "ban" | "warn" | "move" | null>(null);
 const actionReason = ref("");
-const actionDuration = ref(0);
+const actionDuration = ref("0");
 const selectedRuleId = ref<string>("__none__");
 const serverRules = ref<
     Array<{
@@ -135,7 +135,7 @@ function flattenRulesForDropdown(
 async function openActionDialog(action: "kick" | "ban" | "warn" | "move") {
     actionType.value = action;
     actionReason.value = "";
-    actionDuration.value = action === "ban" ? 0 : 0;
+    actionDuration.value = "0";
     selectedRuleId.value = "__none__";
     showActionDialog.value = true;
 
@@ -153,7 +153,7 @@ function closeActionDialog() {
     showActionDialog.value = false;
     actionType.value = null;
     actionReason.value = "";
-    actionDuration.value = 0;
+    actionDuration.value = "0";
     selectedRuleId.value = "__none__";
 }
 
@@ -437,11 +437,11 @@ async function executeBulkAction() {
                         v-model="actionDuration"
                         placeholder="0"
                         class="col-span-3"
-                        type="number"
+                        type="text"
                     />
                     <div class="col-span-1"></div>
                     <div class="text-xs text-muted-foreground col-span-3">
-                        Ban duration in days. Use 0 for a permanent ban.
+                        Duration: 0 = permanent, 7d = 7 days, 2h = 2 hours, 30m = 30 minutes
                     </div>
                 </div>
 

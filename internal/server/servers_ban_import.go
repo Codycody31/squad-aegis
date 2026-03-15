@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -37,8 +36,8 @@ const maxBansCfgReadBytes = 10 * 1024 * 1024
 const activeServerBanWhereClause = `
 	sb.server_id = $1
 	AND (
-		sb.duration = 0
-		OR sb.created_at + (sb.duration * INTERVAL '1 day') >= NOW()
+		sb.expires_at IS NULL
+		OR sb.expires_at >= NOW()
 	)
 `
 
@@ -257,16 +256,6 @@ func categorizeBans(entries []models.CfgBanEntry, existingSteamIDs, existingEOSI
 	return
 }
 
-func calculateImportedBanTiming(expiryTimestamp int64, now time.Time) (durationDays int, createdAt time.Time) {
-	if expiryTimestamp == 0 {
-		return 0, now
-	}
-
-	expiryTime := time.Unix(expiryTimestamp, 0)
-	remaining := expiryTime.Sub(now)
-	durationDays = max(int(math.Ceil(remaining.Hours()/24)), 1)
-	return durationDays, expiryTime.AddDate(0, 0, -durationDays)
-}
 
 // ServerBanImportPreview returns a preview of what would be imported from the server's Bans.cfg.
 func (s *Server) ServerBanImportPreview(c *gin.Context) {
@@ -407,12 +396,12 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 			return
 		}
 
-		// Calculate duration and created_at so regenerated Bans.cfg preserves the
-		// original expiry timestamp when this import is synced back to the server.
-		duration := 0
-		createdAt := now
+		// Compute expires_at directly from the parsed expiry timestamp.
+		// No rounding needed — the exact original expiry is preserved.
+		var expiresAt *time.Time
 		if !ban.Permanent {
-			duration, createdAt = calculateImportedBanTiming(ban.ExpiryTimestamp, now)
+			t := time.Unix(ban.ExpiryTimestamp, 0)
+			expiresAt = &t
 		}
 
 		reason := ban.Reason
@@ -443,9 +432,9 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 		}
 
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, duration, created_at, updated_at)
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		`, uuid.New(), serverID, user.Id, steamIDPtr, eosIDPtr, reason, duration, createdAt, now)
+		`, uuid.New(), serverID, user.Id, steamIDPtr, eosIDPtr, reason, expiresAt, now, now)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("failed to insert ban for %s: %v", playerLabel, err))
 			continue

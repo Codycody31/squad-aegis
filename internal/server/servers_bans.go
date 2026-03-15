@@ -42,7 +42,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 
 	// Query the database for bans
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -63,6 +63,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		var adminIDStr sql.NullString
 		var steamIDInt sql.NullInt64
 		var eosIDStr sql.NullString
+		var expiresAt sql.NullTime
 		var ruleID sql.NullString
 		var ruleTitle sql.NullString
 		var banListID sql.NullString
@@ -76,7 +77,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			&steamIDInt,
 			&eosIDStr,
 			&ban.Reason,
-			&ban.Duration,
+			&expiresAt,
 			&ruleID,
 			&ruleTitle,
 			&banListID,
@@ -133,11 +134,11 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			ban.EvidenceText = &evidenceText.String
 		}
 
-		// Calculate if ban is permanent and expiry date
-		ban.Permanent = ban.Duration == 0
-		if !ban.Permanent {
-			ban.ExpiresAt = ban.CreatedAt.Add(time.Duration(ban.Duration) * 24 * time.Hour)
+		// Set expires_at and compute permanent flag
+		if expiresAt.Valid {
+			ban.ExpiresAt = &expiresAt.Time
 		}
+		ban.Permanent = ban.ExpiresAt == nil
 
 		// Load evidence records for this ban
 		evidence, evidenceErr := s.loadBanEvidence(c.Request.Context(), ban.ID)
@@ -207,8 +208,10 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		return
 	}
 
-	if request.Duration < 0 {
-		responses.BadRequest(c, "Duration must be a positive integer", &gin.H{"error": "Duration must be a positive integer"})
+	// Parse duration string into expires_at
+	expiresAt, parseErr := utils.ParseBanDuration(request.Duration)
+	if parseErr != nil {
+		responses.BadRequest(c, "Invalid duration format", &gin.H{"error": parseErr.Error()})
 		return
 	}
 
@@ -242,9 +245,9 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	var banID uuid.UUID = uuid.New()
 	now := time.Now()
 
-	columns := "id, server_id, admin_id, steam_id, eos_id, reason, duration, evidence_text, created_at, updated_at"
+	columns := "id, server_id, admin_id, steam_id, eos_id, reason, expires_at, evidence_text, created_at, updated_at"
 	placeholders := "$1, $2, $3, $4, $5, $6, $7, $8, $9, $10"
-	args := []interface{}{banID, serverId, user.Id, steamIDVal, eosIDVal, request.Reason, request.Duration, request.EvidenceText, now, now}
+	args := []interface{}{banID, serverId, user.Id, steamIDVal, eosIDVal, request.Reason, expiresAt, request.EvidenceText, now, now}
 	nextParam := 11
 
 	if request.RuleID != nil && *request.RuleID != "" {
@@ -289,20 +292,10 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
-	// Apply the ban via RCON if the server is online
-	if server != nil {
-		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-		err = r.BanPlayer(rconPlayerID, request.Duration, request.Reason)
-		if err != nil {
-			log.Error().Err(err).Str("playerID", rconPlayerID).Str("serverId", server.Id.String()).Msg("Failed to apply ban via RCON")
-		}
-	}
-
 	// Log rule violation to ClickHouse if rule ID is provided (Steam ID only - ClickHouse schema requires UInt64)
 	if request.RuleID != nil && *request.RuleID != "" && request.SteamID != "" {
 		if err := s.logRuleViolation(c.Request.Context(), serverId, request.SteamID, request.RuleID, &user.Id, "BAN"); err != nil {
 			log.Warn().Err(err).Str("steamId", request.SteamID).Str("ruleId", *request.RuleID).Msg("Failed to log rule violation for manual ban")
-			// Don't fail the ban creation if violation logging fails
 		}
 	}
 
@@ -310,7 +303,6 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	auditData := map[string]interface{}{
 		"banId":         banID.String(),
 		"reason":        request.Reason,
-		"duration":      request.Duration,
 		"evidenceCount": len(request.Evidence),
 	}
 	if request.SteamID != "" {
@@ -319,28 +311,23 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	if request.EOSID != "" {
 		auditData["eosId"] = request.EOSID
 	}
-
-	// Add rule ID to audit log if provided
 	if request.RuleID != nil && *request.RuleID != "" {
 		auditData["ruleId"] = *request.RuleID
 	}
-
-	// Add expiry information if not permanent
-	if request.Duration > 0 {
-		expiresAt := time.Now().Add(time.Duration(request.Duration) * 24 * time.Hour)
+	if expiresAt != nil {
 		auditData["expiresAt"] = expiresAt.Format(time.RFC3339)
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:create", auditData)
 
+	// Sync Bans.cfg, reload config, and kick the player to enforce immediately
 	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
 		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after ban")
 	}
 
-	// Reload server config so the game server picks up the updated Bans.cfg
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-	if _, err := r.ExecuteRaw("AdminReloadServerConfig"); err != nil {
-		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban")
+	if err := r.BanPlayer(rconPlayerID, request.Reason); err != nil {
+		log.Warn().Err(err).Str("playerID", rconPlayerID).Str("serverId", serverId.String()).Msg("Failed to kick player after ban")
 	}
 
 	responses.Success(c, "Ban created successfully", &gin.H{
@@ -377,13 +364,12 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	var steamIDInt sql.NullInt64
 	var eosIDStr sql.NullString
 	var reason string
-	var duration int
 
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.duration
+		SELECT sb.steam_id, sb.eos_id, sb.reason
 		FROM server_bans sb
 		WHERE sb.id = $1 AND sb.server_id = $2
-	`, banId, serverId).Scan(&steamIDInt, &eosIDStr, &reason, &duration)
+	`, banId, serverId).Scan(&steamIDInt, &eosIDStr, &reason)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
@@ -443,11 +429,10 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 
 	// Create detailed audit log
 	auditData := map[string]interface{}{
-		"banId":    banId.String(),
-		"steamId":  steamIDStr,
-		"eosId":    eosID,
-		"reason":   reason,
-		"duration": duration,
+		"banId":   banId.String(),
+		"steamId": steamIDStr,
+		"eosId":   eosID,
+		"reason":  reason,
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:delete", auditData)
@@ -567,8 +552,9 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var banListName sql.NullString
 	var evidenceText sql.NullString
 
+	var updateExpiresAt sql.NullTime
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -582,7 +568,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&steamIDInt,
 		&eosIDStr,
 		&currentBan.Reason,
-		&currentBan.Duration,
+		&updateExpiresAt,
 		&ruleID,
 		&ruleTitle,
 		&banListID,
@@ -643,11 +629,11 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		currentBan.EvidenceText = &evidenceText.String
 	}
 
-	// Calculate if ban is permanent and expiry date
-	currentBan.Permanent = currentBan.Duration == 0
-	if !currentBan.Permanent {
-		currentBan.ExpiresAt = currentBan.CreatedAt.Add(time.Duration(currentBan.Duration) * 24 * time.Hour)
+	// Set expires_at and compute permanent flag
+	if updateExpiresAt.Valid {
+		currentBan.ExpiresAt = &updateExpiresAt.Time
 	}
+	currentBan.Permanent = currentBan.ExpiresAt == nil
 
 	// Build update query dynamically based on provided fields
 	updateFields := []string{}
@@ -661,12 +647,13 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	}
 
 	if request.Duration != nil {
-		if *request.Duration < 0 {
-			responses.BadRequest(c, "Duration must be a positive integer", &gin.H{"error": "Duration must be a positive integer"})
+		newExpiresAt, parseErr := utils.ParseBanDuration(*request.Duration)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid duration format", &gin.H{"error": parseErr.Error()})
 			return
 		}
-		updateFields = append(updateFields, fmt.Sprintf("duration = $%d", argIndex))
-		updateArgs = append(updateArgs, *request.Duration)
+		updateFields = append(updateFields, fmt.Sprintf("expires_at = $%d", argIndex))
+		updateArgs = append(updateArgs, newExpiresAt)
 		argIndex++
 	}
 
@@ -824,8 +811,9 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var updatedBanListName sql.NullString
 	var updatedEvidenceText sql.NullString
 
+	var updatedBanExpiresAt sql.NullTime
 	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
+		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
@@ -839,7 +827,7 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		&updatedSteamIDInt,
 		&updatedEOSIDStr,
 		&updatedBan.Reason,
-		&updatedBan.Duration,
+		&updatedBanExpiresAt,
 		&updatedRuleID,
 		&updatedRuleTitle,
 		&updatedBanListID,
@@ -899,11 +887,11 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	// Load evidence records
 	updatedBan.Evidence, _ = s.loadBanEvidence(c.Request.Context(), updatedBan.ID)
 
-	// Calculate if ban is permanent and expiry date
-	updatedBan.Permanent = updatedBan.Duration == 0
-	if !updatedBan.Permanent {
-		updatedBan.ExpiresAt = updatedBan.CreatedAt.Add(time.Duration(updatedBan.Duration) * 24 * time.Hour)
+	// Set expires_at and compute permanent flag
+	if updatedBanExpiresAt.Valid {
+		updatedBan.ExpiresAt = &updatedBanExpiresAt.Time
 	}
+	updatedBan.Permanent = updatedBan.ExpiresAt == nil
 
 	// Create detailed audit log
 	auditData := map[string]interface{}{
@@ -912,8 +900,8 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		"eosId":        updatedBan.EOSID,
 		"oldReason":    currentBan.Reason,
 		"newReason":    updatedBan.Reason,
-		"oldDuration":  currentBan.Duration,
-		"newDuration":  updatedBan.Duration,
+		"oldExpiresAt": currentBan.ExpiresAt,
+		"newExpiresAt": updatedBan.ExpiresAt,
 		"oldBanListId": currentBan.BanListID,
 		"newBanListId": updatedBan.BanListID,
 		"oldRuleId":    currentBan.RuleID,
@@ -961,7 +949,7 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 
 func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (string, error) {
 	rows, err := s.Dependencies.DB.QueryContext(ctx, `
-		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
+		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE `+activeServerBanWhereClause, serverId)
@@ -975,15 +963,13 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 		var steamIDInt sql.NullInt64
 		var eosIDStr sql.NullString
 		var reason string
-		var duration int
-		var createdAt time.Time
+		var expiresAt sql.NullTime
 		var adminID sql.NullString
 		var adminUsername sql.NullString
 		var adminSteamIDInt sql.NullInt64
-		if err := rows.Scan(&steamIDInt, &eosIDStr, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt); err != nil {
+		if err := rows.Scan(&steamIDInt, &eosIDStr, &reason, &expiresAt, &adminID, &adminUsername, &adminSteamIDInt); err != nil {
 			return "", err
 		}
-		unixTimeOfExpiry := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
 
 		// Determine the banned player ID (prefer Steam ID, fall back to EOS ID)
 		var bannedID string
@@ -1006,16 +992,16 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 		}
 
 		var expiryTimestamp string
-		if duration == 0 {
+		if !expiresAt.Valid {
 			expiryTimestamp = "0"
 		} else {
-			expiryTimestamp = strconv.FormatInt(unixTimeOfExpiry.Unix(), 10)
+			expiryTimestamp = strconv.FormatInt(expiresAt.Time.Unix(), 10)
 		}
 
 		reasonComment := ""
 		if reason != "" {
 			reasonComment = " //" + utils.SanitizeBanReason(reason)
-		} else if duration == 0 {
+		} else if !expiresAt.Valid {
 			reasonComment = " //Permanent ban"
 		}
 
