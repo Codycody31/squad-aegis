@@ -21,8 +21,8 @@ func TestParseBanDuration(t *testing.T) {
 		{name: "days suffix", input: "7d", checkDelta: 7 * 24 * time.Hour},
 		{name: "hours suffix", input: "2h", checkDelta: 2 * time.Hour},
 		{name: "minutes suffix", input: "30m", checkDelta: 30 * time.Minute},
-		{name: "negative number is permanent", input: "-1", wantNil: true},
-		{name: "zero days suffix", input: "0d", wantNil: true},
+		{name: "negative number is rejected", input: "-1", wantErr: true},
+		{name: "zero days suffix is rejected", input: "0d", wantErr: true},
 		{name: "invalid format", input: "abc", wantErr: true},
 		{name: "invalid unit", input: "5x", wantErr: true},
 	}

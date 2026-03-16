@@ -440,6 +440,16 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 	responses.Success(c, "Ban removed successfully", nil)
 }
 
+// SyncBansCfgByID looks up a server by ID and regenerates its Bans.cfg.
+// Intended for use as a callback from plugin/workflow ban paths.
+func (s *Server) SyncBansCfgByID(ctx context.Context, serverID uuid.UUID) error {
+	srv, err := core.GetServerById(ctx, s.Dependencies.DB, serverID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to look up server %s: %w", serverID, err)
+	}
+	return s.syncBansCfg(ctx, srv)
+}
+
 // syncBansCfg writes a Bans.cfg for this server, merging DB-tracked bans with
 // any external entries (auto-bans, in-game manual bans) already present in the file.
 func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {

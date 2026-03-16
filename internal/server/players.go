@@ -624,8 +624,8 @@ func (s *Server) PlayerGet(c *gin.Context) {
 	}
 
 	// Get admin-focused data
-	// Active bans
-	activeBans, err := s.getPlayerActiveBans(c, playerID, isSteamID)
+	// Active bans — pass both IDs so legacy steam-only bans are found for EOS lookups
+	activeBans, err := s.getPlayerActiveBans(c, profile.SteamID, profile.EOSID)
 	if err == nil {
 		profile.ActiveBans = activeBans
 	}
@@ -1869,22 +1869,33 @@ func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteam
 	return servers, nil
 }
 
-// getPlayerActiveBans retrieves active bans for the player
-func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID bool) ([]ActiveBan, error) {
-	whereClause := "b.steam_id = $1"
-	var queryPlayerID interface{} = playerID
-	if isSteamID {
-		steamIDInt, err := strconv.ParseInt(playerID, 10, 64)
-		if err != nil {
-			return nil, err
-		}
+// getPlayerActiveBans retrieves active bans for the player, matching on both
+// steam_id and eos_id so that legacy steam-only bans are found for EOS lookups.
+func (s *Server) getPlayerActiveBans(c *gin.Context, steamID string, eosID string) ([]ActiveBan, error) {
+	var conditions []string
+	var args []interface{}
+	argIdx := 1
 
-		queryPlayerID = steamIDInt
-	} else {
-		playerID = utils.NormalizeEOSID(playerID)
-		whereClause = "b.eos_id = $1"
-		queryPlayerID = playerID
+	if steamID != "" {
+		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+		if err == nil {
+			conditions = append(conditions, fmt.Sprintf("b.steam_id = $%d", argIdx))
+			args = append(args, steamIDInt)
+			argIdx++
+		}
 	}
+	if eosID != "" {
+		normalizedEOS := utils.NormalizeEOSID(eosID)
+		conditions = append(conditions, fmt.Sprintf("b.eos_id = $%d", argIdx))
+		args = append(args, normalizedEOS)
+		argIdx++
+	}
+
+	if len(conditions) == 0 {
+		return []ActiveBan{}, nil
+	}
+
+	whereClause := strings.Join(conditions, " OR ")
 
 	// Query PostgreSQL for active bans
 	query := fmt.Sprintf(`
@@ -1896,12 +1907,12 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID 
 			FROM server_bans b
 			LEFT JOIN servers s ON b.server_id = s.id
 			LEFT JOIN users u ON b.admin_id = u.id
-			WHERE %s
+			WHERE (%s)
 			AND (b.expires_at IS NULL OR b.expires_at > NOW())
 			ORDER BY b.created_at DESC
 	`, whereClause)
 
-	rows, err := s.Dependencies.DB.Query(query, queryPlayerID)
+	rows, err := s.Dependencies.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

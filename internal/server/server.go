@@ -43,7 +43,7 @@ type Dependencies struct {
 	PermissionRepo       *permissions.Repository
 }
 
-func NewRouter(serverDependencies *Dependencies) *gin.Engine {
+func NewRouter(serverDependencies *Dependencies) (*gin.Engine, *Server) {
 	router := gin.New()
 	server := &Server{
 		Dependencies: serverDependencies,
@@ -470,5 +470,5 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 		apiGroup.GET("/ban-lists/:banListId/cfg", server.BanListCfg)
 	}
 
-	return router
+	return router, server
 }

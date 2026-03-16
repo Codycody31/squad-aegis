@@ -38,6 +38,9 @@ type PluginManager struct {
 
 	// Event subscription
 	eventSubscriber *event_manager.EventSubscriber
+
+	// Ban sync callback (set by server after construction)
+	banSyncFunc func(ctx context.Context, serverID uuid.UUID) error
 }
 
 // NewPluginManager creates a new plugin manager
@@ -61,6 +64,11 @@ func NewPluginManager(ctx context.Context, db *sql.DB, eventManager *event_manag
 	pm.eventSubscriber = pm.eventManager.Subscribe(event_manager.EventFilter{}, nil, 1000)
 
 	return pm
+}
+
+// SetBanSyncFunc sets the callback used to regenerate Bans.cfg after a plugin-issued ban.
+func (pm *PluginManager) SetBanSyncFunc(fn func(ctx context.Context, serverID uuid.UUID) error) {
+	pm.banSyncFunc = fn
 }
 
 // Start starts the plugin manager
@@ -788,7 +796,7 @@ func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, plugin
 	return &PluginAPIs{
 		ServerAPI:    NewServerAPI(serverID, pm.db, pm.rconManager),
 		DatabaseAPI:  NewDatabaseAPI(instanceID, pm.db),
-		RconAPI:      NewRconAPI(serverID, pm.db, pm.rconManager, pm.clickhouseClient),
+		RconAPI:      NewRconAPI(serverID, pm.db, pm.rconManager, pm.clickhouseClient, pm.banSyncFunc),
 		AdminAPI:     NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
 		EventAPI:     NewEventAPI(serverID, instanceID, pluginName, pm.eventManager),
 		ConnectorAPI: NewConnectorAPI(pm),

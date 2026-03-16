@@ -27,7 +27,7 @@ func ParseBanDuration(s string) (*time.Time, error) {
 	// Try bare number (backward compat: treat as days)
 	if days, err := strconv.Atoi(s); err == nil {
 		if days <= 0 {
-			return nil, nil
+			return nil, fmt.Errorf("invalid duration: %q must be positive", s)
 		}
 		t := now.AddDate(0, 0, days)
 		return &t, nil
@@ -44,7 +44,7 @@ func ParseBanDuration(s string) (*time.Time, error) {
 		return nil, fmt.Errorf("invalid duration format: %q", s)
 	}
 	if value <= 0 {
-		return nil, nil
+		return nil, fmt.Errorf("invalid duration: %q must be positive", s)
 	}
 
 	var t time.Time

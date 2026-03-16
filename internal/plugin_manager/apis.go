@@ -621,14 +621,16 @@ type rconAPI struct {
 	rconManager      *rcon_manager.RconManager
 	clickhouseClient *clickhouse.Client
 	chWarnOnce       sync.Once
+	banSyncFunc      func(ctx context.Context, serverID uuid.UUID) error
 }
 
-func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager, clickhouseClient *clickhouse.Client) RconAPI {
+func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager, clickhouseClient *clickhouse.Client, banSyncFunc func(ctx context.Context, serverID uuid.UUID) error) RconAPI {
 	return &rconAPI{
 		serverID:         serverID,
 		db:               db,
 		rconManager:      rconManager,
 		clickhouseClient: clickhouseClient,
+		banSyncFunc:      banSyncFunc,
 	}
 }
 
@@ -706,6 +708,13 @@ func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Dura
 	if err != nil {
 		log.Error().Err(err).Str("playerID", playerID).Msg("Failed to store ban in database")
 		return fmt.Errorf("failed to store ban: %w", err)
+	}
+
+	// Regenerate Bans.cfg so the game server file reflects the new ban
+	if api.banSyncFunc != nil {
+		if syncErr := api.banSyncFunc(context.Background(), api.serverID); syncErr != nil {
+			log.Warn().Err(syncErr).Str("playerID", playerID).Msg("Failed to sync Bans.cfg after plugin ban")
+		}
 	}
 
 	// Reload server config so the game server picks up the ban via Bans.cfg
