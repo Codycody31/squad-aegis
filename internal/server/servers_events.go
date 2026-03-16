@@ -111,8 +111,8 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 				ON pc.server_id = js.server_id
 				AND pc.chain_id = js.chain_id
 				AND (
-					(pc.steam IS NOT NULL AND pc.steam = js.steam)
-					OR (pc.eos IS NOT NULL AND pc.eos = js.eos)
+					(pc.steam IS NOT NULL AND pc.steam != '' AND pc.steam = js.steam)
+					OR (pc.eos IS NOT NULL AND pc.eos != '' AND pc.eos = js.eos)
 				)
 				AND abs(toUnixTimestamp(pc.event_time) - toUnixTimestamp(js.event_time)) <= 10
 			WHERE pc.server_id = ? AND %s

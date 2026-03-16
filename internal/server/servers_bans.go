@@ -464,13 +464,14 @@ func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
 			return fmt.Errorf("existing Bans.cfg too large to parse safely — aborting sync to avoid dropping bans: %w", parseErr)
 		}
 		dbSteamIDs, dbEOSIDs, lookupErr := s.getExistingBanIDs(ctx, server.Id)
-		if lookupErr == nil {
-			for _, entry := range entries {
-				inDB := (entry.SteamID != "" && dbSteamIDs[entry.SteamID]) ||
-					(entry.EOSID != "" && dbEOSIDs[entry.EOSID])
-				if !inDB && !entry.Expired {
-					content += entry.RawLine + "\n"
-				}
+		if lookupErr != nil {
+			return fmt.Errorf("failed to look up existing ban IDs during sync: %w", lookupErr)
+		}
+		for _, entry := range entries {
+			inDB := (entry.SteamID != "" && dbSteamIDs[entry.SteamID]) ||
+				(entry.EOSID != "" && dbEOSIDs[entry.EOSID])
+			if !inDB && !entry.Expired {
+				content += entry.RawLine + "\n"
 			}
 		}
 	}

@@ -963,12 +963,12 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	// Query unique players count from connected events within the time range
 	var uniquePlayers int
 	err = clickhouseClient.QueryRow(ctx, `
-		SELECT COUNT(DISTINCT coalesce(nullIf(steam, ''), eos))
+		SELECT COUNT(DISTINCT if(steam != '', steam, eos))
 		FROM squad_aegis.server_player_connected_events
 		WHERE server_id = ?
 		AND event_time >= ?
 		AND event_time <= ?
-		AND (steam IS NOT NULL OR eos IS NOT NULL)
+		AND (steam != '' OR eos != '')
 	`, serverId, startTime, endTime).Scan(&uniquePlayers)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query unique players count from ClickHouse")
