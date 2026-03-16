@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +13,10 @@ func TestParseBansCfg_FullFormat(t *testing.T) {
 	content := `Admin [SteamID 76561198000000001] Banned:76561198000000002:0 //Cheating
 System [SteamID 0] Banned:76561198000000003:1893456000 //Teamkilling`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -47,7 +51,10 @@ System [SteamID 0] Banned:76561198000000003:1893456000 //Teamkilling`
 func TestParseBansCfg_ExpiredBans(t *testing.T) {
 	content := "Admin [SteamID 0] Banned:76561198000000001:1000000000 //Old ban"
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -67,7 +74,10 @@ func TestParseBansCfg_EmptyAndComments(t *testing.T) {
 # Another comment
 `
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -83,7 +93,10 @@ Admin [SteamID 0] Banned:76561198000000001:0 //Valid
 Another invalid line
 Also invalid: no banned prefix`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 3 {
 		t.Fatalf("expected 3 unparseable, got %d", unparseable)
@@ -97,7 +110,10 @@ func TestParseBansCfg_DuplicateSteamIDs(t *testing.T) {
 	content := `Admin [SteamID 0] Banned:76561198000000001:0 //First ban
 Admin [SteamID 0] Banned:76561198000000001:0 //Duplicate ban`
 
-	entries, _ := parseBansCfg(content)
+	entries, _, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry (deduplicated), got %d", len(entries))
@@ -110,7 +126,10 @@ Admin [SteamID 0] Banned:76561198000000001:0 //Duplicate ban`
 func TestParseBansCfg_NoReason(t *testing.T) {
 	content := `Admin [SteamID 0] Banned:76561198000000001:0`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -127,7 +146,10 @@ func TestParseBansCfg_InvalidSteamID(t *testing.T) {
 	// "notanumber" is neither a 32-char hex EOS ID nor a numeric Steam ID
 	content := `Admin [SteamID 0] Banned:notanumber:0 //Bad ID`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 1 {
 		t.Fatalf("expected 1 unparseable, got %d", unparseable)
@@ -140,7 +162,10 @@ func TestParseBansCfg_InvalidSteamID(t *testing.T) {
 func TestParseBansCfg_InvalidExpiry(t *testing.T) {
 	content := `Admin [SteamID 0] Banned:76561198000000001:notanumber //Bad expiry`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 1 {
 		t.Fatalf("expected 1 unparseable, got %d", unparseable)
@@ -153,7 +178,10 @@ func TestParseBansCfg_InvalidExpiry(t *testing.T) {
 func TestParseBansCfg_MixedContent(t *testing.T) {
 	content := "# Ban list\nAdmin [SteamID 76561198000000001] Banned:76561198000000010:0 //Permanent cheater\n\nSystem [SteamID 0] Banned:76561198000000011:9999999999 //Future temp ban\ngarbage line\nAdmin [SteamID 0] Banned:76561198000000012:1000000000 //Old expired ban\n"
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 1 {
 		t.Fatalf("expected 1 unparseable, got %d", unparseable)
@@ -184,7 +212,10 @@ func TestParseBansCfg_MixedContent(t *testing.T) {
 func TestParseBansCfg_ReasonWithColons(t *testing.T) {
 	content := `Admin [SteamID 0] Banned:76561198000000001:0 //Reason: with colons: in it`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -198,7 +229,10 @@ func TestParseBansCfg_ReasonWithColons(t *testing.T) {
 }
 
 func TestParseBansCfg_EmptyFile(t *testing.T) {
-	entries, unparseable := parseBansCfg("")
+	entries, unparseable, err := parseBansCfg("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -212,7 +246,10 @@ func TestParseBansCfg_EOSID(t *testing.T) {
 	content := `N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:10403758725 //Griefing
 N/A Banned:0002c835e7db4415b9f823b95b5b90b6:1765307819 //Spawn camping`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -243,7 +280,10 @@ func TestParseBansCfg_PermanentThreshold(t *testing.T) {
 	content := `Admin [SteamID 0] Banned:76561198000000001:0 //Permanent via zero
 Admin [SteamID 0] Banned:76561198000000002:9999999999 //Permanent via far future`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -268,7 +308,10 @@ func TestParseBansCfg_AutoBanDetection(t *testing.T) {
 Admin [SteamID 0] Banned:76561198000000001:0 //Manual ban
 N/A Banned:76561199857143702:1758370309 //Automatic Server Rule Violation`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -297,7 +340,10 @@ N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:10403758725 //Griefing
 N/A Banned:0002c835e7db4415b9f823b95b5b90b6:1765307819 //Spawn camping
 N/A Banned:0002c6fc68c04dad8ad44cb9c83b2187:1766283597 //Automatic Teamkill Kick`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -334,7 +380,10 @@ func TestParseBansCfg_DuplicateEOSIDs(t *testing.T) {
 	content := `N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:0 //First
 N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:0 //Duplicate`
 
-	entries, _ := parseBansCfg(content)
+	entries, _, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry (deduplicated), got %d", len(entries))
@@ -348,7 +397,10 @@ func TestParseBansCfg_NAPrefixFormat(t *testing.T) {
 	// "N/A" prefix is common for server-generated bans
 	content := `N/A Banned:76561199857143702:1758370309 //Griefing / Trolling | Length: 7 days`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -365,7 +417,10 @@ func TestParseBansCfg_ReasonWithPipe(t *testing.T) {
 	// Reasons often contain pipe-separated metadata
 	content := `admin [SteamID 76561199047801300] Banned:76561199814503607:1763087080 //2.3 | No toxicity/harassment. Help new players | 1 day`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
@@ -430,10 +485,30 @@ func TestCategorizeBans(t *testing.T) {
 	}
 }
 
+func TestParseBansCfg_TooLargeReturnsError(t *testing.T) {
+	// Exceed the line limit
+	var lines []string
+	for i := 0; i < maxBansCfgLines+1; i++ {
+		lines = append(lines, "N/A Banned:76561198000000001:0 //ban")
+	}
+	content := strings.Join(lines, "\n")
+
+	_, _, err := parseBansCfg(content)
+	if err == nil {
+		t.Fatal("expected error for file exceeding line limit, got nil")
+	}
+	if err != errBansCfgTooLarge {
+		t.Fatalf("expected errBansCfgTooLarge, got %v", err)
+	}
+}
+
 func TestParseBansCfg_NormalizesEOSIDCase(t *testing.T) {
 	content := `N/A Banned:ABCDEF0123456789ABCDEF0123456789:0 //Uppercase EOS`
 
-	entries, unparseable := parseBansCfg(content)
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if unparseable != 0 {
 		t.Fatalf("expected 0 unparseable, got %d", unparseable)
 	}

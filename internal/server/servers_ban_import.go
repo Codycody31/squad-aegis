@@ -33,6 +33,9 @@ const maxBansCfgReadBytes = 10 * 1024 * 1024
 
 // activeServerBanWhereClause keeps server ban lookups aligned anywhere we need
 // the same "currently active" set that gets written back into Bans.cfg.
+// Uses >= (not >) so bans expiring at the exact current second are still
+// included in Bans.cfg. Enforcement queries (GetActiveBanForServer,
+// isPlayerCurrentlyBanned) use > instead to avoid kicking for already-expiring bans.
 const activeServerBanWhereClause = `
 	sb.server_id = $1
 	AND (
@@ -41,8 +44,14 @@ const activeServerBanWhereClause = `
 	)
 `
 
+// errBansCfgTooLarge is returned when a Bans.cfg file exceeds the size or line
+// count safety limits. Callers must treat this as a hard error and abort any
+// sync/import operation to avoid silently dropping bans.
+var errBansCfgTooLarge = fmt.Errorf("Bans.cfg exceeds safety limits (max %d bytes / %d lines)", maxBansCfgReadBytes, maxBansCfgLines)
+
 // parseBansCfg parses the content of a Squad Bans.cfg file into structured entries.
-// Returns the parsed entries and the count of lines that could not be parsed.
+// Returns the parsed entries, the count of lines that could not be parsed, and an
+// error if the file exceeds safety limits.
 //
 // Supported ID formats:
 //   - Steam ID (numeric, e.g., 76561198000000001)
@@ -52,13 +61,13 @@ const activeServerBanWhereClause = `
 //
 //	AdminName [SteamID X] Banned:<id>:<expiryTimestamp> //<reason>
 //	N/A Banned:<id>:<expiryTimestamp> //<reason>
-func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
+func parseBansCfg(content string) ([]models.CfgBanEntry, int, error) {
 	if len(content) > maxBansCfgReadBytes {
-		return nil, 0
+		return nil, 0, errBansCfgTooLarge
 	}
 	lines := strings.Split(content, "\n")
 	if len(lines) > maxBansCfgLines {
-		return nil, 0
+		return nil, 0, errBansCfgTooLarge
 	}
 	var entries []models.CfgBanEntry
 	seen := make(map[string]bool)
@@ -148,7 +157,7 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int) {
 		})
 	}
 
-	return entries, unparseable
+	return entries, unparseable, nil
 }
 
 // readBansCfg reads the Bans.cfg file from the game server.
@@ -295,7 +304,11 @@ func (s *Server) ServerBanImportPreview(c *gin.Context) {
 		return
 	}
 
-	entries, unparseableCount := parseBansCfg(content)
+	entries, unparseableCount, parseErr := parseBansCfg(content)
+	if parseErr != nil {
+		responses.BadRequest(c, "Bans.cfg is too large to parse safely", &gin.H{"error": parseErr.Error()})
+		return
+	}
 
 	existingSteamIDs, existingEOSIDs, err := s.getExistingBanIDs(c.Request.Context(), serverID)
 	if err != nil {
@@ -352,7 +365,11 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 		return
 	}
 
-	entries, _ := parseBansCfg(content)
+	entries, _, parseErr := parseBansCfg(content)
+	if parseErr != nil {
+		responses.BadRequest(c, "Bans.cfg is too large to parse safely — import aborted to avoid dropping bans", &gin.H{"error": parseErr.Error()})
+		return
+	}
 
 	existingSteamIDs, existingEOSIDs, err := s.getExistingBanIDs(c.Request.Context(), serverID)
 	if err != nil {

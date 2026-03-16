@@ -1352,24 +1352,52 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 		Str("reason", reason).
 		Msg("Banning player")
 
-	// Reload server config and kick player (ban is enforced via Bans.cfg)
+	// Detect player ID type (Steam ID or EOS ID)
+	var steamIDVal interface{}
+	var eosIDVal interface{}
+	if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
+		steamIDVal = sid
+	} else if normalizedEOSID := utils.NormalizeEOSID(playerId); utils.IsEOSID(normalizedEOSID) {
+		eosIDVal = normalizedEOSID
+	} else {
+		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
+	}
+
+	// Create ban in database
+	banID := uuid.New()
+	now := time.Now()
+
+	var expiresAt *time.Time
+	if duration > 0 {
+		t := now.Add(time.Duration(duration) * 24 * time.Hour)
+		expiresAt = &t
+	}
+
+	_, err := wm.db.ExecContext(wm.ctx, `
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
+	`, banID, context.ServerID, steamIDVal, eosIDVal, reason, expiresAt, now, now)
+	if err != nil {
+		return fmt.Errorf("failed to create ban: %w", err)
+	}
+
+	// Reload server config and kick player for immediate enforcement
 	if _, err := wm.rconManager.ExecuteCommand(context.ServerID, "AdminReloadServerConfig"); err != nil {
 		log.Warn().Err(err).Msg("Failed to reload server config after ban")
 	}
 
 	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
-	response, err := wm.rconManager.ExecuteCommand(context.ServerID, kickCommand)
-	if err != nil {
-		return fmt.Errorf("failed to kick player: %w", err)
-	}
+	response, kickErr := wm.rconManager.ExecuteCommand(context.ServerID, kickCommand)
 
 	// Store response in step results
 	context.StepResults[step.ID] = map[string]interface{}{
+		"ban_id":    banID.String(),
 		"command":   kickCommand,
 		"player_id": playerId,
 		"duration":  duration,
 		"reason":    reason,
 		"response":  response,
+		"kicked":    kickErr == nil,
 	}
 
 	return nil
@@ -3320,7 +3348,38 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 			Str("reason", reason).
 			Msg("LUA script banning player")
 
-		// Reload server config and kick player (ban enforced via Bans.cfg)
+		// Detect player ID type (Steam ID or EOS ID)
+		var luaBanSteamIDVal interface{}
+		var luaBanEosIDVal interface{}
+		if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
+			luaBanSteamIDVal = sid
+		} else if normalizedEOSID := utils.NormalizeEOSID(playerId); utils.IsEOSID(normalizedEOSID) {
+			luaBanEosIDVal = normalizedEOSID
+		} else {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID"))
+			return 2
+		}
+
+		// Create ban in database
+		now := time.Now()
+		var luaBanExpiresAt *time.Time
+		if float64(duration) > 0 {
+			t := now.Add(time.Duration(float64(duration)) * 24 * time.Hour)
+			luaBanExpiresAt = &t
+		}
+
+		_, dbErr := wm.db.ExecContext(wm.ctx, `
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
+			VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
+		`, uuid.New(), workflowContext.ServerID, luaBanSteamIDVal, luaBanEosIDVal, reason, luaBanExpiresAt, now, now)
+		if dbErr != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(fmt.Sprintf("failed to create ban: %v", dbErr)))
+			return 2
+		}
+
+		// Reload server config and kick player for immediate enforcement
 		if _, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, "AdminReloadServerConfig"); err != nil {
 			log.Warn().Err(err).Msg("Failed to reload server config after ban")
 		}
@@ -3328,8 +3387,9 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
 		if err != nil {
-			L.Push(lua.LBool(false))
-			L.Push(lua.LString(err.Error()))
+			// Ban is in DB but kick failed — still return success since ban is persisted
+			L.Push(lua.LBool(true))
+			L.Push(lua.LString("ban created but kick failed: " + err.Error()))
 			return 2
 		}
 
@@ -3954,12 +4014,43 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 	// Deprecated: Use workflow.rcon.ban instead
 	L.SetGlobal("rcon_ban", L.NewFunction(func(L *lua.LState) int {
 		playerId := L.CheckString(1)
-		_ = L.CheckNumber(2) // duration (unused — ban enforced via Bans.cfg)
+		deprecatedDuration := L.CheckNumber(2) // Duration in days
 		reason := L.OptString(3, "Banned by workflow")
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		// Reload server config and kick player (ban enforced via Bans.cfg)
+		// Detect player ID type (Steam ID or EOS ID)
+		var deprecatedSteamIDVal interface{}
+		var deprecatedEosIDVal interface{}
+		if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
+			deprecatedSteamIDVal = sid
+		} else if normalizedEOSID := utils.NormalizeEOSID(playerId); utils.IsEOSID(normalizedEOSID) {
+			deprecatedEosIDVal = normalizedEOSID
+		} else {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString("invalid player ID format"))
+			return 2
+		}
+
+		// Create ban in database
+		now := time.Now()
+		var deprecatedExpiresAt *time.Time
+		if float64(deprecatedDuration) > 0 {
+			t := now.Add(time.Duration(float64(deprecatedDuration)) * 24 * time.Hour)
+			deprecatedExpiresAt = &t
+		}
+
+		_, dbErr := wm.db.ExecContext(wm.ctx, `
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
+			VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
+		`, uuid.New(), workflowContext.ServerID, deprecatedSteamIDVal, deprecatedEosIDVal, reason, deprecatedExpiresAt, now, now)
+		if dbErr != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(fmt.Sprintf("failed to create ban: %v", dbErr)))
+			return 2
+		}
+
+		// Reload server config and kick player for immediate enforcement
 		if _, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, "AdminReloadServerConfig"); err != nil {
 			log.Warn().Err(err).Msg("Failed to reload server config after ban")
 		}
@@ -3967,8 +4058,8 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
 		if err != nil {
-			L.Push(lua.LBool(false))
-			L.Push(lua.LString(err.Error()))
+			L.Push(lua.LBool(true)) // Ban persisted, kick failed
+			L.Push(lua.LString("ban created but kick failed: " + err.Error()))
 			return 2
 		}
 		L.Push(lua.LBool(true))

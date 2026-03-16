@@ -459,7 +459,10 @@ func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
 	// (e.g., automatic teamkill bans, in-game manual bans not yet imported).
 	existingContent, readErr := s.readBansCfg(ctx, server)
 	if readErr == nil && existingContent != "" {
-		entries, _ := parseBansCfg(existingContent)
+		entries, _, parseErr := parseBansCfg(existingContent)
+		if parseErr != nil {
+			return fmt.Errorf("existing Bans.cfg too large to parse safely — aborting sync to avoid dropping bans: %w", parseErr)
+		}
 		dbSteamIDs, dbEOSIDs, lookupErr := s.getExistingBanIDs(ctx, server.Id)
 		if lookupErr == nil {
 			for _, entry := range entries {
