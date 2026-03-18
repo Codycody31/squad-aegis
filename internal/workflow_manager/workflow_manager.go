@@ -39,6 +39,7 @@ type WorkflowManager struct {
 	executionMutex   sync.RWMutex
 	isRunning        bool
 	subscriber       *event_manager.EventSubscriber
+	banSyncFunc      func(ctx context.Context, serverID uuid.UUID) error
 }
 
 // NewWorkflowManager creates a new workflow manager
@@ -62,6 +63,11 @@ func NewWorkflowManager(
 		activeWorkflows:  make(map[uuid.UUID]*models.ServerWorkflow),
 		executionContext: make(map[uuid.UUID]*models.WorkflowExecutionContext),
 	}
+}
+
+// SetBanSyncFunc sets the callback used to regenerate Bans.cfg after a workflow-issued ban.
+func (wm *WorkflowManager) SetBanSyncFunc(fn func(ctx context.Context, serverID uuid.UUID) error) {
+	wm.banSyncFunc = fn
 }
 
 // Start starts the workflow manager
@@ -1381,6 +1387,13 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 		return fmt.Errorf("failed to create ban: %w", err)
 	}
 
+	// Regenerate Bans.cfg so the game server file reflects the new ban
+	if wm.banSyncFunc != nil {
+		if syncErr := wm.banSyncFunc(wm.ctx, context.ServerID); syncErr != nil {
+			log.Warn().Err(syncErr).Str("banID", banID.String()).Msg("Failed to sync Bans.cfg after workflow ban")
+		}
+	}
+
 	// Reload server config and kick player for immediate enforcement
 	if _, err := wm.rconManager.ExecuteCommand(context.ServerID, "AdminReloadServerConfig"); err != nil {
 		log.Warn().Err(err).Msg("Failed to reload server config after ban")
@@ -1577,6 +1590,13 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Regenerate Bans.cfg so the game server file reflects the new ban
+	if wm.banSyncFunc != nil {
+		if syncErr := wm.banSyncFunc(wm.ctx, context.ServerID); syncErr != nil {
+			log.Warn().Err(syncErr).Str("banID", banID.String()).Msg("Failed to sync Bans.cfg after workflow evidence ban")
+		}
 	}
 
 	// Reload server config so the game server picks up the ban via Bans.cfg

@@ -838,6 +838,13 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 		return "", fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	// Regenerate Bans.cfg so the game server file reflects the new ban
+	if api.banSyncFunc != nil {
+		if syncErr := api.banSyncFunc(context.Background(), api.serverID); syncErr != nil {
+			log.Warn().Err(syncErr).Str("banID", banID.String()).Msg("Failed to sync Bans.cfg after evidence ban")
+		}
+	}
+
 	// Reload server config so the game server picks up the ban via Bans.cfg
 	if _, err := api.rconManager.ExecuteCommand(api.serverID, "AdminReloadServerConfig"); err != nil {
 		log.Warn().Err(err).Str("banID", banID.String()).Msg("Failed to reload server config after ban")

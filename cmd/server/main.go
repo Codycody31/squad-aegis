@@ -321,8 +321,9 @@ func run(ctx context.Context) error {
 		go deps.RemoteBanSyncService.StartPeriodicSync(ctx) // Initialize router
 		router, httpServer := server.NewRouter(deps)
 
-		// Wire up ban sync callback so plugins can regenerate Bans.cfg after issuing bans
+		// Wire up ban sync callback so plugins and workflows can regenerate Bans.cfg after issuing bans
 		pluginManager.SetBanSyncFunc(httpServer.SyncBansCfgByID)
+		workflowManager.SetBanSyncFunc(httpServer.SyncBansCfgByID)
 
 		// Create server with timeout
 		srv := &http.Server{
