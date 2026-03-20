@@ -4,11 +4,11 @@ UPDATE servers
 SET squad_game_path = CASE
 	WHEN log_file_path IS NOT NULL AND log_file_path LIKE '%/Saved/Logs/%'
 		THEN regexp_replace(log_file_path, '/Saved/Logs/[^/]+$', '')
-	WHEN log_file_path IS NOT NULL AND log_file_path LIKE '%\\Saved\\Logs\\%'
+	WHEN log_file_path IS NOT NULL AND log_file_path LIKE '%\Saved\Logs\%'
 		THEN regexp_replace(log_file_path, '\\Saved\\Logs\\[^\\]+$', '')
 	WHEN bans_cfg_path IS NOT NULL AND bans_cfg_path LIKE '%/ServerConfig/%'
 		THEN regexp_replace(bans_cfg_path, '/ServerConfig/[^/]+$', '')
-	WHEN bans_cfg_path IS NOT NULL AND bans_cfg_path LIKE '%\\ServerConfig\\%'
+	WHEN bans_cfg_path IS NOT NULL AND bans_cfg_path LIKE '%\ServerConfig\%'
 		THEN regexp_replace(bans_cfg_path, '\\ServerConfig\\[^\\]+$', '')
 	ELSE squad_game_path
 END

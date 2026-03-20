@@ -416,7 +416,16 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		eosID = utils.NormalizeEOSID(eosIDStr.String)
 	}
 
-	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
+	excludedSteamIDs := map[string]bool(nil)
+	if steamIDStr != "" {
+		excludedSteamIDs = map[string]bool{steamIDStr: true}
+	}
+	excludedEOSIDs := map[string]bool(nil)
+	if eosID != "" {
+		excludedEOSIDs = map[string]bool{eosID: true}
+	}
+
+	if err := s.syncBansCfgWithExcludedIDs(c.Request.Context(), server, excludedSteamIDs, excludedEOSIDs); err != nil {
 		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after unban for server %s (steam_id=%s eos_id=%s): %w", serverId.String(), steamIDStr, eosID, err), nil)
 		return
 	}
@@ -453,6 +462,10 @@ func (s *Server) SyncBansCfgByID(ctx context.Context, serverID uuid.UUID) error 
 // syncBansCfg writes a Bans.cfg for this server, merging DB-tracked bans with
 // any external entries (auto-bans, in-game manual bans) already present in the file.
 func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
+	return s.syncBansCfgWithExcludedIDs(ctx, server, nil, nil)
+}
+
+func (s *Server) syncBansCfgWithExcludedIDs(ctx context.Context, server *models.Server, excludedSteamIDs, excludedEOSIDs map[string]bool) error {
 	if server == nil || server.SquadGamePath == nil || *server.SquadGamePath == "" {
 		return nil // No base path configured, nothing to do
 	}
@@ -460,10 +473,12 @@ func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
 		return nil // No log source configured, can't access files
 	}
 
-	content, err := s.buildServerBansCfg(ctx, server.Id)
+	managedBans, err := s.getEffectiveServerBans(ctx, server.Id)
 	if err != nil {
 		return err
 	}
+	content := buildServerBansCfgContent(managedBans)
+	managedSteamIDs, managedEOSIDs := collectServerBanIDs(managedBans)
 
 	// Preserve entries from the existing Bans.cfg that are not tracked in the DB
 	// (e.g., automatic teamkill bans, in-game manual bans not yet imported).
@@ -473,17 +488,15 @@ func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
 		if parseErr != nil {
 			return fmt.Errorf("existing Bans.cfg too large to parse safely — aborting sync to avoid dropping bans: %w", parseErr)
 		}
-		dbSteamIDs, dbEOSIDs, lookupErr := s.getExistingBanIDs(ctx, server.Id)
-		if lookupErr != nil {
-			return fmt.Errorf("failed to look up existing ban IDs during sync: %w", lookupErr)
-		}
+		var merged strings.Builder
+		merged.WriteString(content)
 		for _, entry := range entries {
-			inDB := (entry.SteamID != "" && dbSteamIDs[entry.SteamID]) ||
-				(entry.EOSID != "" && dbEOSIDs[entry.EOSID])
-			if !inDB && !entry.Expired {
-				content += entry.RawLine + "\n"
+			if shouldPreserveExistingBansCfgEntry(entry, managedSteamIDs, managedEOSIDs, excludedSteamIDs, excludedEOSIDs) {
+				merged.WriteString(entry.RawLine)
+				merged.WriteString("\n")
 			}
 		}
+		content = merged.String()
 	}
 
 	bansCfgPath := buildBansCfgPath(*server.SquadGamePath, server.LogSourceType)
@@ -962,60 +975,82 @@ func (s *Server) ServerBansCfg(c *gin.Context) {
 }
 
 func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (string, error) {
-	rows, err := s.Dependencies.DB.QueryContext(ctx, `
-		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.admin_id, u.username, u.steam_id
-		FROM server_bans sb
-		LEFT JOIN users u ON sb.admin_id = u.id
-		WHERE `+activeServerBanWhereClause, serverId)
+	bans, err := s.getEffectiveServerBans(ctx, serverId)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	return buildServerBansCfgContent(bans), nil
+}
 
-	var banCfg strings.Builder
-	for rows.Next() {
-		var steamIDInt sql.NullInt64
-		var eosIDStr sql.NullString
-		var reason string
-		var expiresAt sql.NullTime
-		var adminID sql.NullString
-		var adminUsername sql.NullString
-		var adminSteamIDInt sql.NullInt64
-		if err := rows.Scan(&steamIDInt, &eosIDStr, &reason, &expiresAt, &adminID, &adminUsername, &adminSteamIDInt); err != nil {
-			return "", err
+func (s *Server) getEffectiveServerBans(ctx context.Context, serverID uuid.UUID) ([]models.ServerBan, error) {
+	return core.GetServerBans(ctx, s.Dependencies.DB, serverID)
+}
+
+func collectServerBanIDs(bans []models.ServerBan) (steamIDs map[string]bool, eosIDs map[string]bool) {
+	steamIDs = make(map[string]bool)
+	eosIDs = make(map[string]bool)
+	for _, ban := range bans {
+		if ban.SteamID != "" {
+			steamIDs[ban.SteamID] = true
 		}
+		if ban.EOSID != "" {
+			eosIDs[utils.NormalizeEOSID(ban.EOSID)] = true
+		}
+	}
+	return steamIDs, eosIDs
+}
 
-		// Determine the banned player ID (prefer Steam ID, fall back to EOS ID)
-		var bannedID string
-		if steamIDInt.Valid {
-			bannedID = strconv.FormatInt(steamIDInt.Int64, 10)
-		} else if eosIDStr.Valid {
-			bannedID = utils.NormalizeEOSID(eosIDStr.String)
-		} else {
+func shouldPreserveExistingBansCfgEntry(entry models.CfgBanEntry, managedSteamIDs, managedEOSIDs, excludedSteamIDs, excludedEOSIDs map[string]bool) bool {
+	if entry.Expired {
+		return false
+	}
+
+	if entry.SteamID != "" {
+		if managedSteamIDs[entry.SteamID] || excludedSteamIDs[entry.SteamID] {
+			return false
+		}
+	}
+
+	if entry.EOSID != "" {
+		normalizedEOSID := utils.NormalizeEOSID(entry.EOSID)
+		if managedEOSIDs[normalizedEOSID] || excludedEOSIDs[normalizedEOSID] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func buildServerBansCfgContent(bans []models.ServerBan) string {
+	var banCfg strings.Builder
+	for _, ban := range bans {
+		bannedID := ban.SteamID
+		if bannedID == "" {
+			bannedID = utils.NormalizeEOSID(ban.EOSID)
+		}
+		if bannedID == "" {
 			continue
 		}
 
-		// Build admin info
-		adminInfo := "System"
-		adminSteamID := "0"
-		if adminUsername.Valid && adminUsername.String != "" {
-			adminInfo = adminUsername.String
-		}
-		if adminSteamIDInt.Valid && adminSteamIDInt.Int64 > 0 {
-			adminSteamID = strconv.FormatInt(adminSteamIDInt.Int64, 10)
+		adminInfo := ban.AdminName
+		if adminInfo == "" {
+			adminInfo = "System"
 		}
 
-		var expiryTimestamp string
-		if !expiresAt.Valid {
-			expiryTimestamp = "0"
-		} else {
-			expiryTimestamp = strconv.FormatInt(expiresAt.Time.Unix(), 10)
+		adminSteamID := ban.AdminSteamID
+		if adminSteamID == "" {
+			adminSteamID = "0"
+		}
+
+		expiryTimestamp := "0"
+		if ban.ExpiresAt != nil {
+			expiryTimestamp = strconv.FormatInt(ban.ExpiresAt.Unix(), 10)
 		}
 
 		reasonComment := ""
-		if reason != "" {
-			reasonComment = " //" + utils.SanitizeBanReason(reason)
-		} else if !expiresAt.Valid {
+		if ban.Reason != "" {
+			reasonComment = " //" + utils.SanitizeBanReason(ban.Reason)
+		} else if ban.ExpiresAt == nil {
 			reasonComment = " //Permanent ban"
 		}
 
@@ -1023,7 +1058,7 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 			adminInfo, adminSteamID, bannedID, expiryTimestamp, reasonComment))
 	}
 
-	return banCfg.String(), nil
+	return banCfg.String()
 }
 
 // loadBanEvidence loads all evidence records for a given ban

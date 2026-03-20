@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strconv"
@@ -30,19 +29,6 @@ const maxBansCfgLines = 50000
 
 // maxBansCfgReadBytes is the maximum size in bytes when reading a Bans.cfg file (10 MB).
 const maxBansCfgReadBytes = 10 * 1024 * 1024
-
-// activeServerBanWhereClause keeps server ban lookups aligned anywhere we need
-// the same "currently active" set that gets written back into Bans.cfg.
-// Uses >= (not >) so bans expiring at the exact current second are still
-// included in Bans.cfg. Enforcement queries (GetActiveBanForServer,
-// isPlayerCurrentlyBanned) use > instead to avoid kicking for already-expiring bans.
-const activeServerBanWhereClause = `
-	sb.server_id = $1
-	AND (
-		sb.expires_at IS NULL
-		OR sb.expires_at >= NOW()
-	)
-`
 
 // errBansCfgTooLarge is returned when a Bans.cfg file exceeds the size or line
 // count safety limits. Callers must treat this as a hard error and abort any
@@ -215,35 +201,14 @@ func (s *Server) readBansCfg(ctx context.Context, server *models.Server) (string
 	}
 }
 
-// getExistingBanIDs returns sets of Steam IDs and EOS IDs that already have bans for this server.
+// getExistingBanIDs returns sets of active Steam IDs and EOS IDs already enforced
+// for this server, including subscribed ban-list entries.
 func (s *Server) getExistingBanIDs(ctx context.Context, serverID uuid.UUID) (steamIDs map[string]bool, eosIDs map[string]bool, err error) {
-	rows, err := s.Dependencies.DB.QueryContext(ctx, `
-		SELECT steam_id, eos_id
-		FROM server_bans sb
-		WHERE `+activeServerBanWhereClause, serverID)
+	bans, err := s.getEffectiveServerBans(ctx, serverID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query existing bans: %w", err)
 	}
-	defer rows.Close()
-
-	steamIDs = make(map[string]bool)
-	eosIDs = make(map[string]bool)
-	for rows.Next() {
-		var steamIDInt sql.NullInt64
-		var eosIDStr sql.NullString
-		if err := rows.Scan(&steamIDInt, &eosIDStr); err != nil {
-			return nil, nil, fmt.Errorf("failed to scan ban IDs: %w", err)
-		}
-		if steamIDInt.Valid {
-			steamIDs[strconv.FormatInt(steamIDInt.Int64, 10)] = true
-		}
-		if eosIDStr.Valid {
-			eosIDs[utils.NormalizeEOSID(eosIDStr.String)] = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("row iteration error: %w", err)
-	}
+	steamIDs, eosIDs = collectServerBanIDs(bans)
 	return steamIDs, eosIDs, nil
 }
 
@@ -264,7 +229,6 @@ func categorizeBans(entries []models.CfgBanEntry, existingSteamIDs, existingEOSI
 	}
 	return
 }
-
 
 // ServerBanImportPreview returns a preview of what would be imported from the server's Bans.cfg.
 func (s *Server) ServerBanImportPreview(c *gin.Context) {
