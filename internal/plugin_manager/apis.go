@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -555,7 +556,7 @@ func (api *databaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Ro
 	}
 
 	// Reject multi-statement queries
-	if strings.Contains(query, ";") {
+	if hasMultipleSQLStatements(query) {
 		return nil, fmt.Errorf("multi-statement queries are not allowed")
 	}
 
@@ -570,6 +571,128 @@ func (api *databaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Ro
 	}
 
 	return api.db.Query(query, args...)
+}
+
+// This is shit, we know its shit.... but it's for plugins... which we control...., but at least it puts somekind of ground work for the future
+func hasMultipleSQLStatements(query string) bool {
+	statementTerminated := false
+	lineComment := false
+	blockCommentDepth := 0
+	singleQuoted := false
+	doubleQuoted := false
+	dollarQuoteTag := ""
+
+	for i := 0; i < len(query); i++ {
+		ch := query[i]
+
+		if lineComment {
+			if ch == '\n' {
+				lineComment = false
+			}
+			continue
+		}
+
+		if blockCommentDepth > 0 {
+			if ch == '/' && i+1 < len(query) && query[i+1] == '*' {
+				blockCommentDepth++
+				i++
+				continue
+			}
+			if ch == '*' && i+1 < len(query) && query[i+1] == '/' {
+				blockCommentDepth--
+				i++
+			}
+			continue
+		}
+
+		if dollarQuoteTag != "" {
+			if strings.HasPrefix(query[i:], dollarQuoteTag) {
+				i += len(dollarQuoteTag) - 1
+				dollarQuoteTag = ""
+			}
+			continue
+		}
+
+		if singleQuoted {
+			if ch == '\'' {
+				if i+1 < len(query) && query[i+1] == '\'' {
+					i++
+				} else {
+					singleQuoted = false
+				}
+			}
+			continue
+		}
+
+		if doubleQuoted {
+			if ch == '"' {
+				if i+1 < len(query) && query[i+1] == '"' {
+					i++
+				} else {
+					doubleQuoted = false
+				}
+			}
+			continue
+		}
+
+		switch ch {
+		case '-':
+			if i+1 < len(query) && query[i+1] == '-' {
+				lineComment = true
+				i++
+				continue
+			}
+		case '/':
+			if i+1 < len(query) && query[i+1] == '*' {
+				blockCommentDepth = 1
+				i++
+				continue
+			}
+		case '\'':
+			singleQuoted = true
+			continue
+		case '"':
+			doubleQuoted = true
+			continue
+		case '$':
+			if tag := parseDollarQuoteTag(query, i); tag != "" {
+				dollarQuoteTag = tag
+				i += len(tag) - 1
+				continue
+			}
+		case ';':
+			if statementTerminated {
+				return true
+			}
+			statementTerminated = true
+			continue
+		}
+
+		if statementTerminated && !unicode.IsSpace(rune(ch)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func parseDollarQuoteTag(query string, start int) string {
+	if start >= len(query) || query[start] != '$' {
+		return ""
+	}
+
+	for i := start + 1; i < len(query); i++ {
+		switch ch := rune(query[i]); {
+		case query[i] == '$':
+			return query[start : i+1]
+		case ch == '_' || unicode.IsLetter(ch) || unicode.IsDigit(ch):
+			continue
+		default:
+			return ""
+		}
+	}
+
+	return ""
 }
 
 func (api *databaseAPI) GetPluginData(key string) (string, error) {

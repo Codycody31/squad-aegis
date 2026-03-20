@@ -654,12 +654,32 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 		return
 	}
 
-	// Log rule violation to ClickHouse if rule_id is provided
+	// Sync Bans.cfg, reload config, and kick the player to enforce immediately
+	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
+		if _, rollbackErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
+			DELETE FROM server_bans
+			WHERE id = $1 AND server_id = $2
+		`, banID, serverId); rollbackErr != nil {
+			log.Error().Err(rollbackErr).Str("banId", banID).Str("serverId", serverId.String()).Msg("Failed to roll back RCON ban after Bans.cfg sync failure")
+			responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after RCON ban: %w (rollback also failed: %v)", err, rollbackErr), nil)
+			return
+		}
+
+		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after RCON ban: %w", err), nil)
+		return
+	}
+
+	// Log rule violation to ClickHouse only after the ban has been synced successfully.
 	if request.RuleId != nil && *request.RuleId != "" {
 		s.logRuleViolation(c.Request.Context(), serverId, rconID, request.RuleId, &user.Id, "BAN")
 	}
 
-	// Create detailed audit log
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+	if err := r.KickPlayer(rconID, request.Reason); err != nil {
+		log.Warn().Err(err).Str("playerId", rconID).Str("serverId", serverId.String()).Msg("Failed to kick player after ban")
+	}
+
+	// Create detailed audit log after the ban has been persisted and synced.
 	auditData := map[string]interface{}{
 		"banId":   banID,
 		"steamId": request.SteamId,
@@ -674,16 +694,6 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:player:ban", auditData)
-
-	// Sync Bans.cfg, reload config, and kick the player to enforce immediately
-	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
-		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after RCON ban")
-	}
-
-	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-	if err := r.BanPlayer(rconID, request.Reason); err != nil {
-		log.Warn().Err(err).Str("playerId", rconID).Str("serverId", serverId.String()).Msg("Failed to kick player after ban")
-	}
 
 	responses.Success(c, "Player banned successfully", &gin.H{
 		"banId": banID,

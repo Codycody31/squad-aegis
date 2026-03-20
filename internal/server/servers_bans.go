@@ -484,9 +484,12 @@ func (s *Server) syncBansCfgWithExcludedIDs(ctx context.Context, server *models.
 	// (e.g., automatic teamkill bans, in-game manual bans not yet imported).
 	existingContent, readErr := s.readBansCfg(ctx, server)
 	if readErr == nil && existingContent != "" {
-		entries, _, parseErr := parseBansCfg(existingContent)
+		entries, unparseableCount, parseErr := parseBansCfg(existingContent)
 		if parseErr != nil {
 			return fmt.Errorf("existing Bans.cfg too large to parse safely — aborting sync to avoid dropping bans: %w", parseErr)
+		}
+		if unparseableCount > 0 {
+			return fmt.Errorf("existing Bans.cfg contains %d unparseable active lines — aborting sync to avoid dropping bans", unparseableCount)
 		}
 		var merged strings.Builder
 		merged.WriteString(content)
