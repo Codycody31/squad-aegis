@@ -850,21 +850,42 @@ func (s *Server) ServerRconPlayerEscalationSuggestion(c *gin.Context) {
 	}
 
 	// ClickHouse violation table uses UInt64 for player_steam_id, so we can
-	// only query violation history when a valid Steam ID is provided.
-	var steamIdInt int64
+	// only query violation history for Steam IDs, including those linked from EOS.
 	hasSteamId := false
 	if steamId != "" {
-		parsed, parseErr := strconv.ParseInt(steamId, 10, 64)
+		_, parseErr := strconv.ParseUint(steamId, 10, 64)
 		if parseErr != nil {
 			responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
 			return
 		}
-		steamIdInt = parsed
 		hasSteamId = true
 	}
 	if eosId != "" && !utils.IsEOSID(eosId) {
 		responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
 		return
+	}
+
+	lookupPlayerID := steamId
+	lookupIsSteamID := true
+	if !hasSteamId {
+		lookupPlayerID = eosId
+		lookupIsSteamID = false
+	}
+
+	resolvedSteamIDStrings, _ := s.resolveLinkedPlayerIdentifiers(c, lookupPlayerID, lookupIsSteamID)
+	violationLookupSteamIDs := make([]uint64, 0, len(resolvedSteamIDStrings))
+	seenSteamIDs := make(map[uint64]struct{}, len(resolvedSteamIDStrings))
+	for _, resolvedSteamID := range resolvedSteamIDStrings {
+		parsedSteamID, parseErr := strconv.ParseUint(resolvedSteamID, 10, 64)
+		if parseErr != nil {
+			continue
+		}
+		if _, seen := seenSteamIDs[parsedSteamID]; seen {
+			continue
+		}
+
+		seenSteamIDs[parsedSteamID] = struct{}{}
+		violationLookupSteamIDs = append(violationLookupSteamIDs, parsedSteamID)
 	}
 
 	suggestion := RuleEscalationSuggestion{
@@ -879,17 +900,17 @@ func (s *Server) ServerRconPlayerEscalationSuggestion(c *gin.Context) {
 			return
 		}
 
-		// Get violation count from ClickHouse for this player and rule
-		// (only possible with a numeric Steam ID; EOS-only players get 0 violations)
-		if hasSteamId {
+		// Get violation count from ClickHouse for this player and rule across
+		// every linked Steam ID we can resolve from the supplied identifiers.
+		if len(violationLookupSteamIDs) > 0 {
 			query := `
 				SELECT count(*) as violation_count
 				FROM squad_aegis.player_rule_violations
-				WHERE server_id = ? AND player_steam_id = ? AND rule_id = ?
+				WHERE server_id = ? AND player_steam_id IN (?) AND rule_id = ?
 			`
 
 			var violationCount uint64
-			err = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, serverId, uint64(steamIdInt), ruleId.String()).Scan(&violationCount)
+			err = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, serverId, violationLookupSteamIDs, ruleId.String()).Scan(&violationCount)
 			if err != nil {
 				if err != sql.ErrNoRows {
 					log.Warn().Err(err).Msg("Failed to query violation count, continuing without escalation suggestion")
