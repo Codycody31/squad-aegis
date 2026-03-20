@@ -675,6 +675,9 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	}
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+	if _, err := r.ExecuteRaw("AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after RCON ban")
+	}
 	if err := r.KickPlayer(rconID, request.Reason); err != nil {
 		log.Warn().Err(err).Str("playerId", rconID).Str("serverId", serverId.String()).Msg("Failed to kick player after ban")
 	}

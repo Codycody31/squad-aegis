@@ -379,34 +379,6 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		return
 	}
 
-	// Delete evidence files from storage before deleting the ban
-	// (ban deletion will cascade delete evidence records)
-	if err := s.deleteBanEvidenceFiles(c.Request.Context(), banId.String()); err != nil {
-		log.Warn().Err(err).Str("banId", banId.String()).Msg("Failed to delete some evidence files from storage, continuing with ban deletion")
-		// Continue with ban deletion even if file deletion fails
-	}
-
-	// Delete the ban from the database
-	result, err := s.Dependencies.DB.ExecContext(c.Request.Context(), `
-		DELETE FROM server_bans
-		WHERE id = $1 AND server_id = $2
-	`, banId, serverId)
-	if err != nil {
-		responses.InternalServerError(c, err, nil)
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		responses.InternalServerError(c, err, nil)
-		return
-	}
-
-	if rowsAffected == 0 {
-		responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
-		return
-	}
-
 	var steamIDStr string
 	if steamIDInt.Valid {
 		steamIDStr = strconv.FormatInt(steamIDInt.Int64, 10)
@@ -425,9 +397,49 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		excludedEOSIDs = map[string]bool{eosID: true}
 	}
 
+	evidenceFilePaths, evidenceErr := s.getBanEvidenceFilePaths(c.Request.Context(), banId.String())
+	if evidenceErr != nil {
+		log.Warn().Err(evidenceErr).Str("banId", banId.String()).Msg("Failed to collect evidence file paths before ban deletion")
+	}
+
 	if err := s.syncBansCfgWithExcludedIDs(c.Request.Context(), server, excludedSteamIDs, excludedEOSIDs); err != nil {
 		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after unban for server %s (steam_id=%s eos_id=%s): %w", serverId.String(), steamIDStr, eosID, err), nil)
 		return
+	}
+
+	// Delete the ban from the database only after Bans.cfg has been updated.
+	result, err := s.Dependencies.DB.ExecContext(c.Request.Context(), `
+		DELETE FROM server_bans
+		WHERE id = $1 AND server_id = $2
+	`, banId, serverId)
+	if err != nil {
+		if restoreErr := s.syncBansCfg(c.Request.Context(), server); restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("banId", banId.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after unban delete error")
+		}
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		if restoreErr := s.syncBansCfg(c.Request.Context(), server); restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("banId", banId.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after unban rows-affected error")
+		}
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
+	if rowsAffected == 0 {
+		if restoreErr := s.syncBansCfg(c.Request.Context(), server); restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("banId", banId.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after missing ban delete")
+		}
+		responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
+		return
+	}
+
+	// Delete evidence files from storage after the DB row is gone.
+	if err := s.deleteEvidenceFilesFromStorage(c.Request.Context(), banId.String(), evidenceFilePaths); err != nil {
+		log.Warn().Err(err).Str("banId", banId.String()).Msg("Failed to delete some evidence files from storage, continuing with ban deletion")
 	}
 
 	// Reload server config so the game server picks up the updated Bans.cfg
@@ -477,6 +489,7 @@ func (s *Server) syncBansCfgWithExcludedIDs(ctx context.Context, server *models.
 	if err != nil {
 		return err
 	}
+	managedBans = filterServerBansByExcludedIDs(managedBans, excludedSteamIDs, excludedEOSIDs)
 	content := buildServerBansCfgContent(managedBans)
 	managedSteamIDs, managedEOSIDs := collectServerBanIDs(managedBans)
 
@@ -1003,6 +1016,25 @@ func collectServerBanIDs(bans []models.ServerBan) (steamIDs map[string]bool, eos
 	return steamIDs, eosIDs
 }
 
+func filterServerBansByExcludedIDs(bans []models.ServerBan, excludedSteamIDs, excludedEOSIDs map[string]bool) []models.ServerBan {
+	if len(excludedSteamIDs) == 0 && len(excludedEOSIDs) == 0 {
+		return bans
+	}
+
+	filtered := make([]models.ServerBan, 0, len(bans))
+	for _, ban := range bans {
+		if ban.SteamID != "" && excludedSteamIDs[ban.SteamID] {
+			continue
+		}
+		if ban.EOSID != "" && excludedEOSIDs[utils.NormalizeEOSID(ban.EOSID)] {
+			continue
+		}
+		filtered = append(filtered, ban)
+	}
+
+	return filtered
+}
+
 func shouldPreserveExistingBansCfgEntry(entry models.CfgBanEntry, managedSteamIDs, managedEOSIDs, excludedSteamIDs, excludedEOSIDs map[string]bool) bool {
 	if entry.Expired {
 		return false
@@ -1506,6 +1538,15 @@ func (s *Server) deleteSpecificEvidenceFiles(ctx context.Context, banID string, 
 
 // deleteBanEvidenceFiles deletes all file evidence files from storage for a given ban
 func (s *Server) deleteBanEvidenceFiles(ctx context.Context, banID string) error {
+	filePaths, err := s.getBanEvidenceFilePaths(ctx, banID)
+	if err != nil {
+		return err
+	}
+
+	return s.deleteEvidenceFilesFromStorage(ctx, banID, filePaths)
+}
+
+func (s *Server) getBanEvidenceFilePaths(ctx context.Context, banID string) ([]string, error) {
 	// Query for all file_upload evidence records for this ban
 	rows, err := s.Dependencies.DB.QueryContext(ctx, `
 		SELECT file_path
@@ -1513,11 +1554,11 @@ func (s *Server) deleteBanEvidenceFiles(ctx context.Context, banID string) error
 		WHERE ban_id = $1 AND evidence_type = 'file_upload' AND file_path IS NOT NULL
 	`, banID)
 	if err != nil {
-		return fmt.Errorf("failed to query evidence files: %w", err)
+		return nil, fmt.Errorf("failed to query evidence files: %w", err)
 	}
 	defer rows.Close()
 
-	var deleteErrors []error
+	var filePaths []string
 	for rows.Next() {
 		var filePath sql.NullString
 		if err := rows.Scan(&filePath); err != nil {
@@ -1529,18 +1570,30 @@ func (s *Server) deleteBanEvidenceFiles(ctx context.Context, banID string) error
 			continue
 		}
 
-		// Delete the file from storage
-		if err := s.Dependencies.Storage.Delete(ctx, filePath.String); err != nil {
+		filePaths = append(filePaths, filePath.String)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate evidence files: %w", err)
+	}
+
+	return filePaths, nil
+}
+
+func (s *Server) deleteEvidenceFilesFromStorage(ctx context.Context, banID string, filePaths []string) error {
+	var deleteErrors []error
+	for _, filePath := range filePaths {
+		if err := s.Dependencies.Storage.Delete(ctx, filePath); err != nil {
 			log.Warn().Err(err).
 				Str("banId", banID).
-				Str("filePath", filePath.String).
+				Str("filePath", filePath).
 				Msg("Failed to delete evidence file from storage")
-			deleteErrors = append(deleteErrors, fmt.Errorf("failed to delete file %s: %w", filePath.String, err))
+			deleteErrors = append(deleteErrors, fmt.Errorf("failed to delete file %s: %w", filePath, err))
 			// Continue deleting other files even if one fails
 		} else {
 			log.Info().
 				Str("banId", banID).
-				Str("filePath", filePath.String).
+				Str("filePath", filePath).
 				Msg("Deleted evidence file from storage")
 		}
 	}

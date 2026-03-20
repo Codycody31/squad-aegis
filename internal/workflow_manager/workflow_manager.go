@@ -22,6 +22,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
+	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
 // WorkflowManager manages workflow execution and lifecycle
@@ -119,6 +120,157 @@ func (wm *WorkflowManager) Start() error {
 // dangerous in RCON commands (double quotes, newlines).
 func sanitizeRCONParam(s string) string {
 	return utils.SanitizeRCONParam(s)
+}
+
+func (wm *WorkflowManager) resolveBanTargetIdentifiers(serverID uuid.UUID, playerID string, triggerEvent map[string]interface{}) (steamIDVal interface{}, eosIDVal interface{}, err error) {
+	playerID = strings.TrimSpace(playerID)
+	if playerID == "" {
+		return nil, nil, fmt.Errorf("player ID is empty")
+	}
+
+	if sid, parseErr := strconv.ParseInt(playerID, 10, 64); parseErr == nil {
+		return sid, nil, nil
+	}
+
+	if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
+		return nil, normalizedEOSID, nil
+	}
+
+	if steamIDVal, eosIDVal, ok := resolveBanTargetIdentifiersFromTriggerEvent(playerID, triggerEvent); ok {
+		return steamIDVal, eosIDVal, nil
+	}
+
+	return wm.resolveBanTargetIdentifiersFromLivePlayers(serverID, playerID)
+}
+
+func resolveBanTargetIdentifiersFromTriggerEvent(playerID string, triggerEvent map[string]interface{}) (steamIDVal interface{}, eosIDVal interface{}, ok bool) {
+	if len(triggerEvent) == 0 {
+		return nil, nil, false
+	}
+
+	playerID = strings.TrimSpace(playerID)
+	for key, rawValue := range triggerEvent {
+		name, isString := rawValue.(string)
+		if !isString || !strings.EqualFold(strings.TrimSpace(name), playerID) {
+			continue
+		}
+
+		candidateKeys := identifierCandidateKeysForNameKey(key)
+		for _, steamKey := range candidateKeys.steamKeys {
+			if sid, found := parseWorkflowSteamID(triggerEvent[steamKey]); found {
+				return sid, nil, true
+			}
+		}
+		for _, eosKey := range candidateKeys.eosKeys {
+			if eosID, found := parseWorkflowEOSID(triggerEvent[eosKey]); found {
+				return nil, eosID, true
+			}
+		}
+	}
+
+	return nil, nil, false
+}
+
+type workflowIdentifierCandidateKeys struct {
+	steamKeys []string
+	eosKeys   []string
+}
+
+func identifierCandidateKeysForNameKey(nameKey string) workflowIdentifierCandidateKeys {
+	keys := workflowIdentifierCandidateKeys{}
+
+	prefixes := []string{}
+	switch {
+	case nameKey == "player_name":
+		prefixes = append(prefixes, "player")
+	case strings.HasSuffix(nameKey, "_name"):
+		prefixes = append(prefixes, strings.TrimSuffix(nameKey, "_name"))
+	}
+
+	for _, prefix := range prefixes {
+		keys.steamKeys = append(keys.steamKeys, prefix+"_steam_id", prefix+"_steam")
+		keys.eosKeys = append(keys.eosKeys, prefix+"_eos_id", prefix+"_eos")
+		if prefix == "player" {
+			keys.steamKeys = append(keys.steamKeys, "steam_id")
+			keys.eosKeys = append(keys.eosKeys, "eos_id")
+		}
+	}
+
+	return keys
+}
+
+func parseWorkflowSteamID(value interface{}) (int64, bool) {
+	switch v := value.(type) {
+	case string:
+		sid, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return sid, err == nil
+	case float64:
+		return int64(v), true
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	default:
+		return 0, false
+	}
+}
+
+func parseWorkflowEOSID(value interface{}) (string, bool) {
+	str, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+
+	normalizedEOSID := utils.NormalizeEOSID(strings.TrimSpace(str))
+	if !utils.IsEOSID(normalizedEOSID) {
+		return "", false
+	}
+
+	return normalizedEOSID, true
+}
+
+func (wm *WorkflowManager) resolveBanTargetIdentifiersFromLivePlayers(serverID uuid.UUID, playerID string) (steamIDVal interface{}, eosIDVal interface{}, err error) {
+	playersData, err := squadRcon.NewSquadRcon(wm.rconManager, serverID).GetServerPlayers()
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid player ID format: %q is neither a Steam ID nor an EOS ID, and live player lookup failed: %w", playerID, err)
+	}
+
+	allPlayers := make([]squadRcon.Player, 0, len(playersData.OnlinePlayers)+len(playersData.DisconnectedPlayers))
+	allPlayers = append(allPlayers, playersData.OnlinePlayers...)
+	allPlayers = append(allPlayers, playersData.DisconnectedPlayers...)
+
+	exactMatches := make([]squadRcon.Player, 0, 1)
+	caseInsensitiveMatches := make([]squadRcon.Player, 0, 1)
+	for _, player := range allPlayers {
+		switch {
+		case strings.TrimSpace(player.Name) == playerID:
+			exactMatches = append(exactMatches, player)
+		case strings.EqualFold(strings.TrimSpace(player.Name), playerID):
+			caseInsensitiveMatches = append(caseInsensitiveMatches, player)
+		}
+	}
+
+	matches := exactMatches
+	if len(matches) == 0 {
+		matches = caseInsensitiveMatches
+	}
+
+	if len(matches) == 0 {
+		return nil, nil, fmt.Errorf("invalid player ID format: %q is neither a Steam ID nor an EOS ID, and no live player with that name was found", playerID)
+	}
+	if len(matches) > 1 {
+		return nil, nil, fmt.Errorf("player name %q matched multiple live players; use Steam ID or EOS ID instead", playerID)
+	}
+
+	match := matches[0]
+	if sid, found := parseWorkflowSteamID(match.SteamId); found {
+		return sid, nil, nil
+	}
+	if eosID, found := parseWorkflowEOSID(match.EosId); found {
+		return nil, eosID, nil
+	}
+
+	return nil, nil, fmt.Errorf("live player %q does not have a usable Steam ID or EOS ID", playerID)
 }
 
 // Stop stops the workflow manager
@@ -1370,15 +1522,9 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 		Str("reason", reason).
 		Msg("Banning player")
 
-	// Detect player ID type (Steam ID or EOS ID)
-	var steamIDVal interface{}
-	var eosIDVal interface{}
-	if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
-		steamIDVal = sid
-	} else if normalizedEOSID := utils.NormalizeEOSID(playerId); utils.IsEOSID(normalizedEOSID) {
-		eosIDVal = normalizedEOSID
-	} else {
-		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
+	steamIDVal, eosIDVal, err := wm.resolveBanTargetIdentifiers(context.ServerID, playerId, context.TriggerEvent)
+	if err != nil {
+		return err
 	}
 
 	// Create ban in database
@@ -1391,7 +1537,7 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 		expiresAt = &t
 	}
 
-	_, err := wm.db.ExecContext(wm.ctx, `
+	_, err = wm.db.ExecContext(wm.ctx, `
 		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
 		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
 	`, banID, context.ServerID, steamIDVal, eosIDVal, reason, expiresAt, now, now)
@@ -1516,15 +1662,9 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 	// Create ban in database
 	banID := uuid.New()
 
-	// Detect player ID type (Steam ID or EOS ID)
-	var steamIDVal interface{}
-	var eosIDVal interface{}
-	if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
-		steamIDVal = sid
-	} else if normalizedEOSID := utils.NormalizeEOSID(playerId); utils.IsEOSID(normalizedEOSID) {
-		eosIDVal = normalizedEOSID
-	} else {
-		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
+	steamIDVal, eosIDVal, err := wm.resolveBanTargetIdentifiers(context.ServerID, playerId, context.TriggerEvent)
+	if err != nil {
+		return err
 	}
 
 	// Start transaction
@@ -3362,16 +3502,10 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 			Str("reason", reason).
 			Msg("LUA script banning player")
 
-		// Detect player ID type (Steam ID or EOS ID)
-		var luaBanSteamIDVal interface{}
-		var luaBanEosIDVal interface{}
-		if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
-			luaBanSteamIDVal = sid
-		} else if normalizedEOSID := utils.NormalizeEOSID(playerId); utils.IsEOSID(normalizedEOSID) {
-			luaBanEosIDVal = normalizedEOSID
-		} else {
+		luaBanSteamIDVal, luaBanEosIDVal, resolveErr := wm.resolveBanTargetIdentifiers(workflowContext.ServerID, playerId, workflowContext.TriggerEvent)
+		if resolveErr != nil {
 			L.Push(lua.LBool(false))
-			L.Push(lua.LString("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID"))
+			L.Push(lua.LString(resolveErr.Error()))
 			return 2
 		}
 
@@ -3469,16 +3603,10 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		// Create ban in database
 		banID := uuid.New()
 
-		// Detect player ID type (Steam ID or EOS ID)
-		var steamIDVal interface{}
-		var eosIDVal interface{}
-		if sid, parseErr := strconv.ParseInt(steamID, 10, 64); parseErr == nil {
-			steamIDVal = sid
-		} else if normalizedEOSID := utils.NormalizeEOSID(steamID); utils.IsEOSID(normalizedEOSID) {
-			eosIDVal = normalizedEOSID
-		} else {
+		steamIDVal, eosIDVal, resolveErr := wm.resolveBanTargetIdentifiers(workflowContext.ServerID, steamID, workflowContext.TriggerEvent)
+		if resolveErr != nil {
 			L.Push(lua.LNil)
-			L.Push(lua.LString("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID"))
+			L.Push(lua.LString(resolveErr.Error()))
 			return 2
 		}
 
@@ -4033,16 +4161,10 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		// Detect player ID type (Steam ID or EOS ID)
-		var deprecatedSteamIDVal interface{}
-		var deprecatedEosIDVal interface{}
-		if sid, parseErr := strconv.ParseInt(playerId, 10, 64); parseErr == nil {
-			deprecatedSteamIDVal = sid
-		} else if normalizedEOSID := utils.NormalizeEOSID(playerId); utils.IsEOSID(normalizedEOSID) {
-			deprecatedEosIDVal = normalizedEOSID
-		} else {
+		deprecatedSteamIDVal, deprecatedEosIDVal, resolveErr := wm.resolveBanTargetIdentifiers(workflowContext.ServerID, playerId, workflowContext.TriggerEvent)
+		if resolveErr != nil {
 			L.Push(lua.LBool(false))
-			L.Push(lua.LString("invalid player ID format"))
+			L.Push(lua.LString(resolveErr.Error()))
 			return 2
 		}
 
