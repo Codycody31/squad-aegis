@@ -324,10 +324,7 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 	}
 
 	// Send in-game response using preferred ID for RCON call
-	playerID := event.SteamID
-	if playerID == "" {
-		playerID = event.EosID
-	}
+	playerID := event.PreferredPlayerID()
 	if err := p.sendInGameResponse(playerID, onlineAdmins); err != nil {
 		p.apis.LogAPI.Error("Failed to send in-game response", err, map[string]interface{}{
 			"player": event.PlayerName,

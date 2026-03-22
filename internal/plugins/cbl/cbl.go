@@ -365,10 +365,7 @@ func (p *CBLPlugin) checkPlayerAndAlertAutoKickIfNeeded(ctx context.Context, eve
 	// Check for auto-kick
 	kickThreshold := p.getIntConfig("kick_threshold")
 	if kickThreshold > 0 && user.ReputationPoints >= kickThreshold {
-		playerID := event.SteamID
-		if playerID == "" {
-			playerID = event.EOSID
-		}
+		playerID := event.PreferredPlayerID()
 		if err := p.apis.RconAPI.KickPlayer(playerID, "Kicked via https://communitybanlist.com"); err != nil {
 			p.apis.LogAPI.Error("Failed to kick player", err, map[string]interface{}{
 				"steam_id":          event.SteamID,

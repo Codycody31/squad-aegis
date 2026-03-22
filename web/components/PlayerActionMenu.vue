@@ -330,8 +330,20 @@ function getActionTitle() {
     return `${actionMap[actionType.value]} ${props.player.name}`;
 }
 
+const banDurationPattern = /^(0|permanent|\d+[dDhHmM])$/;
+
 async function executePlayerAction() {
     if (!actionType.value) return;
+
+    // Validate ban duration format before submitting
+    if (actionType.value === "ban" && !banDurationPattern.test(actionDuration.value)) {
+        toast({
+            title: "Invalid Duration",
+            description: "Duration must be '0' for permanent, or a number followed by 'd', 'h', or 'm' (e.g., '7d', '2h', '30m')",
+            variant: "destructive",
+        });
+        return;
+    }
 
     isActionLoading.value = true;
     const runtimeConfig = useRuntimeConfig();

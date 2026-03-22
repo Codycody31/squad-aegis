@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
@@ -325,7 +326,7 @@ func (s *SquadRcon) BanPlayer(playerID string, reason string) error {
 	// Reload server config so the game server picks up the updated Bans.cfg
 	if _, err := s.ExecuteRaw("AdminReloadServerConfig"); err != nil {
 		// Log but continue — the kick is still important for immediate enforcement
-		_ = err
+		log.Warn().Err(err).Str("playerID", playerID).Msg("Failed to reload server config before kick")
 	}
 	// Kick the player to enforce the ban immediately
 	return s.KickPlayer(playerID, reason)

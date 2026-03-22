@@ -423,18 +423,10 @@ func (p *ChatAutoModPlugin) HandleEvent(event *plugin_manager.PluginEvent) error
 	return p.handleViolation(event.ID, chatEvent, result)
 }
 
-// preferredPlayerID returns the SteamID if available, falling back to EosID.
-func preferredPlayerID(steamID, eosID string) string {
-	if steamID != "" {
-		return steamID
-	}
-	return eosID
-}
-
 // handleViolation processes a detected violation
 func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_manager.RconChatMessageData, result *FilterResult) error {
 	// Use a consistent player identifier for tracking (prefer SteamID, fall back to EosID)
-	playerID := preferredPlayerID(chatEvent.SteamID, chatEvent.EosID)
+	playerID := chatEvent.PreferredPlayerID()
 
 	// Get current violation count (before adding this one)
 	currentCount, err := p.tracker.GetActiveViolationCount(playerID)
@@ -541,10 +533,7 @@ func (p *ChatAutoModPlugin) executeBan(chatEvent *event_manager.RconChatMessageD
 	duration := time.Duration(durationDays*24) * time.Hour
 
 	// Use EOS ID as fallback when Steam ID is empty for RCON calls
-	playerID := chatEvent.SteamID
-	if playerID == "" {
-		playerID = chatEvent.EosID
-	}
+	playerID := chatEvent.PreferredPlayerID()
 
 	// Use BanWithEvidenceAndRule to link the chat message as evidence and log rule violation
 	banID, err := p.apis.RconAPI.BanWithEvidenceAndRule(

@@ -338,10 +338,7 @@ func (p *ChatCommandsPlugin) executeCommand(command *CommandConfig, event *event
 		})
 
 	case "warn":
-		playerID := event.SteamID
-		if playerID == "" {
-			playerID = event.EosID
-		}
+		playerID := event.PreferredPlayerID()
 		if err := p.apis.RconAPI.SendWarningToPlayer(playerID, command.Response); err != nil {
 			return fmt.Errorf("failed to warn player: %w", err)
 		}

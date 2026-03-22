@@ -180,7 +180,10 @@ const formSchema = toTypedSchema(
                 "Must be a 17-digit Steam ID or 32-character hex EOS ID"
             ),
         reason: z.string().optional(), // Now optional - will be auto-generated when rule is selected
-        duration: z.string().default("0"),
+        duration: z.string().default("0").refine(
+            (val) => /^(0|permanent|\d+[dDhHmM])$/.test(val),
+            "Duration must be '0' for permanent, or a number followed by 'd', 'h', or 'm' (e.g., '7d', '2h', '30m')"
+        ),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
         evidence_text: z.string().optional(),
@@ -191,7 +194,10 @@ const formSchema = toTypedSchema(
 const editFormSchema = toTypedSchema(
     z.object({
         reason: z.string().min(1, "Reason is required"),
-        duration: z.string().default("0"),
+        duration: z.string().default("0").refine(
+            (val) => /^(0|permanent|\d+[dDhHmM])$/.test(val),
+            "Duration must be '0' for permanent, or a number followed by 'd', 'h', or 'm' (e.g., '7d', '2h', '30m')"
+        ),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
         evidence_text: z.string().optional(),
@@ -1499,10 +1505,9 @@ async function openImportDialog() {
     importLoading.value = true;
 
     try {
-        const response = await fetch(`/api/servers/${serverId}/bans/import-preview`, {
-            headers: { Authorization: `Bearer ${authStore.token}` },
-        });
-        const data = await response.json();
+        const data = await useAuthFetchImperative<any>(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/import-preview`,
+        );
 
         if (data.code === 200) {
             importPreview.value = data.data.preview;
@@ -1521,15 +1526,13 @@ async function executeImport() {
     importError.value = null;
 
     try {
-        const response = await fetch(`/api/servers/${serverId}/bans/import`, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-                'Content-Type': 'application/json',
+        const data = await useAuthFetchImperative<any>(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/import`,
+            {
+                method: 'POST',
+                body: { confirm: true },
             },
-            body: JSON.stringify({ confirm: true }),
-        });
-        const data = await response.json();
+        );
 
         if (data.code === 200) {
             importResult.value = data.data.result;

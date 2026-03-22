@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/db"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 type RemoteBanSyncService struct {
@@ -80,6 +81,11 @@ func (s *RemoteBanSyncService) SyncAllSources(ctx context.Context) error {
 // SyncSource syncs a specific remote ban source
 func (s *RemoteBanSyncService) SyncSource(ctx context.Context, source *models.RemoteBanSource) error {
 	log.Info().Str("source", source.Name).Str("url", source.URL).Msg("Starting sync of remote ban source")
+
+	// Re-validate URL at fetch time to prevent SSRF via DNS rebinding
+	if err := utils.ValidateRemoteURL(source.URL); err != nil {
+		return fmt.Errorf("remote ban source URL blocked: %w", err)
+	}
 
 	// Create HTTP client with timeout
 	client := &http.Client{

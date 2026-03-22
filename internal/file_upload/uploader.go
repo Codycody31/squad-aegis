@@ -17,6 +17,10 @@ import (
 
 var windowsDriveAbsPathPattern = regexp.MustCompile(`^[a-zA-Z]:/`)
 
+// MaxReadBytes is the maximum number of bytes allowed when reading a remote file
+// to prevent unbounded memory allocation from maliciously large files.
+const MaxReadBytes = 10 * 1024 * 1024 // 10 MB
+
 // validateFilePath rejects paths that contain traversal sequences or are not absolute.
 func validateFilePath(p string) error {
 	normalizedPath := strings.ReplaceAll(p, `\`, "/")
@@ -162,8 +166,12 @@ func (u *SFTPUploader) Read(ctx context.Context) (string, error) {
 	defer file.Close()
 
 	var buf strings.Builder
-	if _, err := io.Copy(&buf, file); err != nil {
+	limited := io.LimitReader(file, MaxReadBytes+1)
+	if _, err := io.Copy(&buf, limited); err != nil {
 		return "", fmt.Errorf("failed to read remote file: %v", err)
+	}
+	if buf.Len() > MaxReadBytes {
+		return "", fmt.Errorf("remote file exceeds maximum allowed size (%d bytes)", MaxReadBytes)
 	}
 
 	return buf.String(), nil
@@ -270,8 +278,12 @@ func (u *FTPUploader) Read(ctx context.Context) (string, error) {
 	defer resp.Close()
 
 	var buf strings.Builder
-	if _, err := io.Copy(&buf, resp); err != nil {
+	limited := io.LimitReader(resp, MaxReadBytes+1)
+	if _, err := io.Copy(&buf, limited); err != nil {
 		return "", fmt.Errorf("failed to read remote file: %v", err)
+	}
+	if buf.Len() > MaxReadBytes {
+		return "", fmt.Errorf("remote file exceeds maximum allowed size (%d bytes)", MaxReadBytes)
 	}
 
 	return buf.String(), nil

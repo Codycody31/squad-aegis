@@ -482,10 +482,7 @@ func (p *SquadLeaderWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager.
 		return nil
 	}
 
-	playerID := event.SteamID
-	if playerID == "" {
-		playerID = event.EosID
-	}
+	playerID := event.PreferredPlayerID()
 	return p.sendProgressToPlayer(playerID)
 }
 

@@ -1045,10 +1045,7 @@ func (p *TeamBalancerPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEv
 
 // handleTeamBalancerCommand processes !teambalancer commands
 func (p *TeamBalancerPlugin) handleTeamBalancerCommand(event *event_manager.RconChatMessageData) error {
-	playerID := event.SteamID
-	if playerID == "" {
-		playerID = event.EosID
-	}
+	playerID := event.PreferredPlayerID()
 
 	parts := strings.Fields(strings.ToLower(event.Message))
 	subcommand := ""
@@ -1092,10 +1089,7 @@ func (p *TeamBalancerPlugin) handleTeamBalancerCommand(event *event_manager.Rcon
 
 // handleScrambleCommand processes !scramble commands
 func (p *TeamBalancerPlugin) handleScrambleCommand(event *event_manager.RconChatMessageData) error {
-	playerID := event.SteamID
-	if playerID == "" {
-		playerID = event.EosID
-	}
+	playerID := event.PreferredPlayerID()
 
 	// Check admin status
 	isAdmin, err := p.isPlayerAdmin(event.SteamID)

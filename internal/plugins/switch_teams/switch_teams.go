@@ -11,6 +11,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // SwitchTeamsPlugin manages immediate team switching
@@ -219,10 +220,7 @@ func (p *SwitchTeamsPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEve
 			return err
 		}
 		if !isAdmin {
-			playerID := event.SteamID
-			if playerID == "" {
-				playerID = event.EosID
-			}
+			playerID := event.PreferredPlayerID()
 			return p.apis.RconAPI.SendWarningToPlayer(playerID, "You must be an admin to use the switch command.")
 		}
 	}
@@ -244,10 +242,7 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 		if timeSinceLastSwitch < cooldown {
 			remainingTime := cooldown - timeSinceLastSwitch
-			playerID := event.SteamID
-			if playerID == "" {
-				playerID = event.EosID
-			}
+			playerID := event.PreferredPlayerID()
 			return p.apis.RconAPI.SendWarningToPlayer(playerID,
 				fmt.Sprintf("You must wait %s before using !%s again.",
 					p.formatDuration(remainingTime), p.getStringConfig("command")))
@@ -274,10 +269,7 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 	// Try to switch the player immediately
 	if err := p.tryImmediateSwitch(event.SteamID, event.PlayerName, event.EosID, currentPlayer.TeamID, players); err != nil {
-		playerID := event.SteamID
-		if playerID == "" {
-			playerID = event.EosID
-		}
+		playerID := event.PreferredPlayerID()
 		return p.apis.RconAPI.SendWarningToPlayer(playerID, err.Error())
 	}
 
@@ -354,7 +346,7 @@ func (p *SwitchTeamsPlugin) tryImmediateSwitch(steamID, playerName, eosID string
 // togglePlayerTeam moves a player to the other team using RCON.
 // Squad's AdminForceTeamChange toggles the player's team automatically.
 func (p *SwitchTeamsPlugin) togglePlayerTeam(steamID string) error {
-	command := fmt.Sprintf("AdminForceTeamChange %s", steamID)
+	command := fmt.Sprintf("AdminForceTeamChange %s", utils.SanitizeRCONParam(steamID))
 	_, err := p.apis.RconAPI.SendCommand(command)
 	return err
 }

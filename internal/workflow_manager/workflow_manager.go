@@ -1814,6 +1814,11 @@ func (wm *WorkflowManager) executeHTTPRequestAction(context *models.WorkflowExec
 	// Replace variables in URL
 	url = wm.replaceVariablesWithContext(url, context.Variables, context.TriggerEvent, context.Metadata)
 
+	// Validate the final URL to prevent SSRF (variables may contain attacker-controlled data)
+	if err := utils.ValidateRemoteURL(url); err != nil {
+		return fmt.Errorf("workflow HTTP request URL blocked: %w", err)
+	}
+
 	log.Info().
 		Str("execution_id", context.ExecutionID.String()).
 		Str("url", url).
@@ -1894,6 +1899,11 @@ func (wm *WorkflowManager) executeWebhookAction(context *models.WorkflowExecutio
 
 	// Replace variables in URL
 	url = wm.replaceVariablesWithContext(url, context.Variables, context.TriggerEvent, context.Metadata)
+
+	// Validate the final URL to prevent SSRF (variables may contain attacker-controlled data)
+	if err := utils.ValidateRemoteURL(url); err != nil {
+		return fmt.Errorf("workflow webhook URL blocked: %w", err)
+	}
 
 	log.Info().
 		Str("execution_id", context.ExecutionID.String()).

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -190,9 +191,18 @@ func (s *Server) readBansCfg(ctx context.Context, server *models.Server) (string
 		return content, nil
 
 	case "local":
-		data, err := os.ReadFile(bansCfgPath)
+		f, err := os.Open(bansCfgPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to open local Bans.cfg: %w", err)
+		}
+		defer f.Close()
+		limited := io.LimitReader(f, int64(maxBansCfgReadBytes+1))
+		data, err := io.ReadAll(limited)
 		if err != nil {
 			return "", fmt.Errorf("failed to read local Bans.cfg: %w", err)
+		}
+		if len(data) > maxBansCfgReadBytes {
+			return "", errBansCfgTooLarge
 		}
 		return string(data), nil
 

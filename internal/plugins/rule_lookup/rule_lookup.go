@@ -203,10 +203,7 @@ func (p *RuleLookupPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEven
 	}
 
 	// Determine the preferred player ID for RCON commands
-	playerID := event.SteamID
-	if playerID == "" {
-		playerID = event.EosID
-	}
+	playerID := event.PreferredPlayerID()
 
 	// Parse the rule number from the message
 	// Expected format: !rule 1.1 or !rule 7.7.1
