@@ -757,6 +757,44 @@ func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconMa
 	}
 }
 
+func (api *rconAPI) deleteBanRecord(ctx context.Context, banID uuid.UUID) error {
+	result, err := api.db.ExecContext(ctx, `
+		DELETE FROM server_bans
+		WHERE id = $1 AND server_id = $2
+	`, banID, api.serverID)
+	if err != nil {
+		return fmt.Errorf("failed to roll back ban %s: %w", banID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to verify rollback for ban %s: %w", banID, err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("ban %s was not found during rollback", banID)
+	}
+
+	return nil
+}
+
+func (api *rconAPI) syncBanConfigOrRollback(ctx context.Context, banID uuid.UUID, action string) error {
+	if api.banSyncFunc != nil {
+		if syncErr := api.banSyncFunc(ctx, api.serverID); syncErr != nil {
+			if rollbackErr := api.deleteBanRecord(ctx, banID); rollbackErr != nil {
+				log.Error().Err(rollbackErr).Str("banID", banID.String()).Msg("Failed to roll back ban after Bans.cfg sync failure")
+				return fmt.Errorf("failed to sync Bans.cfg after %s: %w (rollback failed: %v)", action, syncErr, rollbackErr)
+			}
+			return fmt.Errorf("failed to sync Bans.cfg after %s: %w", action, syncErr)
+		}
+	}
+
+	if _, err := api.rconManager.ExecuteCommand(api.serverID, "AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("banID", banID.String()).Msg("Failed to reload server config after " + action)
+	}
+
+	return nil
+}
+
 func (api *rconAPI) SendCommand(command string) (string, error) {
 	// Extract command name (first word)
 	parts := strings.Fields(command)
@@ -827,22 +865,14 @@ func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Dura
 	}
 
 	// Store ban in database first
-	err := api.storeBanInDatabase(playerID, reason, expiresAt)
+	banID, err := api.storeBanInDatabase(playerID, reason, expiresAt)
 	if err != nil {
 		log.Error().Err(err).Str("playerID", playerID).Msg("Failed to store ban in database")
 		return fmt.Errorf("failed to store ban: %w", err)
 	}
 
-	// Regenerate Bans.cfg so the game server file reflects the new ban
-	if api.banSyncFunc != nil {
-		if syncErr := api.banSyncFunc(context.Background(), api.serverID); syncErr != nil {
-			log.Warn().Err(syncErr).Str("playerID", playerID).Msg("Failed to sync Bans.cfg after plugin ban")
-		}
-	}
-
-	// Reload server config so the game server picks up the ban via Bans.cfg
-	if _, err := api.rconManager.ExecuteCommand(api.serverID, "AdminReloadServerConfig"); err != nil {
-		log.Warn().Err(err).Str("playerID", playerID).Msg("Failed to reload server config after ban")
+	if err := api.syncBanConfigOrRollback(context.Background(), banID, "plugin ban"); err != nil {
+		return err
 	}
 
 	// Kick player for immediate enforcement
@@ -961,16 +991,8 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 		return "", fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// Regenerate Bans.cfg so the game server file reflects the new ban
-	if api.banSyncFunc != nil {
-		if syncErr := api.banSyncFunc(context.Background(), api.serverID); syncErr != nil {
-			log.Warn().Err(syncErr).Str("banID", banID.String()).Msg("Failed to sync Bans.cfg after evidence ban")
-		}
-	}
-
-	// Reload server config so the game server picks up the ban via Bans.cfg
-	if _, err := api.rconManager.ExecuteCommand(api.serverID, "AdminReloadServerConfig"); err != nil {
-		log.Warn().Err(err).Str("banID", banID.String()).Msg("Failed to reload server config after ban")
+	if err := api.syncBanConfigOrRollback(context.Background(), banID, "evidence ban"); err != nil {
+		return "", err
 	}
 
 	// Kick player for immediate enforcement
@@ -981,7 +1003,7 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 }
 
 // storeBanInDatabase stores the ban information in the database
-func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt *time.Time) error {
+func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt *time.Time) (uuid.UUID, error) {
 	// Detect player ID type (Steam ID or EOS ID)
 	var steamIDVal interface{}
 	var eosIDVal interface{}
@@ -990,19 +1012,20 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt
 	} else if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
 		eosIDVal = normalizedEOSID
 	} else {
-		return fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
+		return uuid.Nil, fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}
 
 	// Insert ban into database
 	// We use NULL for admin_id since this is a plugin-initiated ban, not a specific user
 	now := time.Now()
+	banID := uuid.New()
 	query := `
 		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
 		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
 	`
 
 	_, err := api.db.Exec(query,
-		uuid.New(),   // id
+		banID,        // id
 		api.serverID, // server_id
 		steamIDVal,   // steam_id (nil if EOS-only)
 		eosIDVal,     // eos_id (nil if Steam-only)
@@ -1012,10 +1035,10 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt
 		now,          // updated_at
 	)
 	if err != nil {
-		return fmt.Errorf("failed to insert ban into database: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to insert ban into database: %w", err)
 	}
 
-	return nil
+	return banID, nil
 }
 
 // logPluginRuleViolation logs a rule violation to ClickHouse for player history tracking

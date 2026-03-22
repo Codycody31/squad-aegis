@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
+	dbpkg "go.codycody31.dev/squad-aegis/internal/db"
 	"go.codycody31.dev/squad-aegis/internal/file_upload"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
@@ -242,6 +243,15 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		rconPlayerID = normalizedEOSID
 	}
 
+	restoreExcludedSteamIDs := map[string]bool(nil)
+	if request.SteamID != "" {
+		restoreExcludedSteamIDs = map[string]bool{request.SteamID: true}
+	}
+	restoreExcludedEOSIDs := map[string]bool(nil)
+	if normalizedEOSID != "" {
+		restoreExcludedEOSIDs = map[string]bool{normalizedEOSID: true}
+	}
+
 	// Build INSERT query dynamically
 	var banID uuid.UUID = uuid.New()
 	now := time.Now()
@@ -277,14 +287,34 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 
 	query := fmt.Sprintf(`INSERT INTO server_bans (%s) VALUES (%s) RETURNING id`, columns, placeholders)
 
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to start transaction"})
+		return
+	}
+	defer tx.Rollback()
+
 	var returnedBanID string
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&returnedBanID)
+	err = tx.QueryRowContext(c.Request.Context(), query, args...).Scan(&returnedBanID)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 
-	// Insert evidence records if provided
+	if err := s.syncBansCfgWithExecutor(c.Request.Context(), tx, server); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after ban: %w", err), nil)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		if restoreErr := s.syncBansCfgWithExcludedIDs(c.Request.Context(), server, restoreExcludedSteamIDs, restoreExcludedEOSIDs); restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("banId", banID.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after ban commit error")
+		}
+		responses.InternalServerError(c, fmt.Errorf("failed to commit ban after syncing Bans.cfg: %w", err), nil)
+		return
+	}
+
+	// Insert evidence records after the ban has been persisted and synced.
 	if len(request.Evidence) > 0 {
 		err = s.createBanEvidence(c.Request.Context(), banID.String(), serverId, request.Evidence)
 		if err != nil {
@@ -300,7 +330,7 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
-	// Create detailed audit log
+	// Create detailed audit log after the ban has been persisted and synced.
 	auditData := map[string]interface{}{
 		"banId":         banID.String(),
 		"reason":        request.Reason,
@@ -320,11 +350,6 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:create", auditData)
-
-	// Sync Bans.cfg, reload config, and kick the player to enforce immediately
-	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
-		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after ban")
-	}
 
 	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
 	if err := r.BanPlayer(rconPlayerID, request.Reason); err != nil {
@@ -475,10 +500,18 @@ func (s *Server) SyncBansCfgByID(ctx context.Context, serverID uuid.UUID) error 
 // syncBansCfg writes a Bans.cfg for this server, merging DB-tracked bans with
 // any external entries (auto-bans, in-game manual bans) already present in the file.
 func (s *Server) syncBansCfg(ctx context.Context, server *models.Server) error {
-	return s.syncBansCfgWithExcludedIDs(ctx, server, nil, nil)
+	return s.syncBansCfgWithExecutor(ctx, s.Dependencies.DB, server)
 }
 
 func (s *Server) syncBansCfgWithExcludedIDs(ctx context.Context, server *models.Server, excludedSteamIDs, excludedEOSIDs map[string]bool) error {
+	return s.syncBansCfgWithExcludedIDsUsingExecutor(ctx, s.Dependencies.DB, server, excludedSteamIDs, excludedEOSIDs)
+}
+
+func (s *Server) syncBansCfgWithExecutor(ctx context.Context, executor dbpkg.Executor, server *models.Server) error {
+	return s.syncBansCfgWithExcludedIDsUsingExecutor(ctx, executor, server, nil, nil)
+}
+
+func (s *Server) syncBansCfgWithExcludedIDsUsingExecutor(ctx context.Context, executor dbpkg.Executor, server *models.Server, excludedSteamIDs, excludedEOSIDs map[string]bool) error {
 	if server == nil || server.SquadGamePath == nil || *server.SquadGamePath == "" {
 		return nil // No base path configured, nothing to do
 	}
@@ -494,34 +527,18 @@ func (s *Server) syncBansCfgWithExcludedIDs(ctx context.Context, server *models.
 	mu.Lock()
 	defer mu.Unlock()
 
-	managedBans, err := s.getEffectiveServerBans(ctx, server.Id)
+	managedBans, err := s.getEffectiveServerBansWithExecutor(ctx, executor, server.Id)
 	if err != nil {
 		return err
 	}
 	managedBans = filterServerBansByExcludedIDs(managedBans, excludedSteamIDs, excludedEOSIDs)
-	content := buildServerBansCfgContent(managedBans)
-	managedSteamIDs, managedEOSIDs := collectServerBanIDs(managedBans)
 
 	// Preserve entries from the existing Bans.cfg that are not tracked in the DB
 	// (e.g., automatic teamkill bans, in-game manual bans not yet imported).
 	existingContent, readErr := s.readBansCfg(ctx, server)
-	if readErr == nil && existingContent != "" {
-		entries, unparseableCount, parseErr := parseBansCfg(existingContent)
-		if parseErr != nil {
-			return fmt.Errorf("existing Bans.cfg too large to parse safely — aborting sync to avoid dropping bans: %w", parseErr)
-		}
-		if unparseableCount > 0 {
-			return fmt.Errorf("existing Bans.cfg contains %d unparseable active lines — aborting sync to avoid dropping bans", unparseableCount)
-		}
-		var merged strings.Builder
-		merged.WriteString(content)
-		for _, entry := range entries {
-			if shouldPreserveExistingBansCfgEntry(entry, managedSteamIDs, managedEOSIDs, excludedSteamIDs, excludedEOSIDs) {
-				merged.WriteString(entry.RawLine)
-				merged.WriteString("\n")
-			}
-		}
-		content = merged.String()
+	content, err := buildMergedServerBansCfgContent(managedBans, existingContent, readErr, excludedSteamIDs, excludedEOSIDs)
+	if err != nil {
+		return err
 	}
 
 	bansCfgPath := buildBansCfgPath(*server.SquadGamePath, server.LogSourceType)
@@ -590,6 +607,12 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 	var request models.ServerBanUpdateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	if err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -761,8 +784,37 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		strings.Join(updateFields, ", "), argIndex, argIndex+1)
 	updateArgs = append(updateArgs, banId, serverId)
 
-	// Execute the update
-	result, err := s.Dependencies.DB.ExecContext(c.Request.Context(), query, updateArgs...)
+	filesToDelete := []string(nil)
+	if request.Evidence != nil {
+		existingFiles, err := s.getExistingEvidenceFiles(c.Request.Context(), banId.String())
+		if err != nil {
+			log.Error().Err(err).Str("banId", banId.String()).Msg("Failed to query existing evidence files")
+			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to query existing evidence"})
+			return
+		}
+
+		newFilePaths := make(map[string]bool)
+		for _, ev := range *request.Evidence {
+			if ev.EvidenceType == "file_upload" && ev.FilePath != nil && *ev.FilePath != "" {
+				newFilePaths[*ev.FilePath] = true
+			}
+		}
+
+		for _, existingFile := range existingFiles {
+			if !newFilePaths[existingFile] {
+				filesToDelete = append(filesToDelete, existingFile)
+			}
+		}
+	}
+
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to start transaction"})
+		return
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(c.Request.Context(), query, updateArgs...)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
@@ -779,76 +831,40 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 		return
 	}
 
-	// Update evidence records if provided (including empty array to clear evidence)
 	if request.Evidence != nil {
-		// First, get the list of existing evidence files to determine which ones to delete
-		existingFiles, err := s.getExistingEvidenceFiles(c.Request.Context(), banId.String())
-		if err != nil {
-			log.Error().Err(err).Str("banId", banId.String()).Msg("Failed to query existing evidence files")
-			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to query existing evidence"})
-			return
-		}
-
-		// Build a set of file paths from the new evidence that should be kept
-		newFilePaths := make(map[string]bool)
-		for _, ev := range *request.Evidence {
-			if ev.EvidenceType == "file_upload" && ev.FilePath != nil && *ev.FilePath != "" {
-				newFilePaths[*ev.FilePath] = true
-			}
-		}
-
-		// Determine which files need to be deleted (files that exist but are NOT in the new evidence)
-		filesToDelete := []string{}
-		for _, existingFile := range existingFiles {
-			if !newFilePaths[existingFile] {
-				filesToDelete = append(filesToDelete, existingFile)
-			}
-		}
-
-		// Delete only the files that are being removed
-		if len(filesToDelete) > 0 {
-			if err := s.deleteSpecificEvidenceFiles(c.Request.Context(), banId.String(), filesToDelete); err != nil {
-				log.Warn().Err(err).Str("banId", banId.String()).Msg("Failed to delete some evidence files from storage, continuing with database update")
-				// Continue with update even if file deletion fails
-			}
-		}
-
-		// Use a transaction to ensure atomicity - if insert fails, rollback the delete
-		tx, txErr := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
-		if txErr != nil {
-			log.Error().Err(txErr).Str("banId", banId.String()).Msg("Failed to begin transaction for evidence update")
-			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to start evidence update transaction"})
-			return
-		}
-		defer tx.Rollback()
-
-		// Delete existing evidence records from database
-		_, delErr := tx.ExecContext(c.Request.Context(), `
+		if _, err := tx.ExecContext(c.Request.Context(), `
 			DELETE FROM ban_evidence WHERE ban_id = $1
-		`, banId)
-		if delErr != nil {
-			log.Error().Err(delErr).Str("banId", banId.String()).Msg("Failed to delete old ban evidence")
-			tx.Rollback()
+		`, banId); err != nil {
+			log.Error().Err(err).Str("banId", banId.String()).Msg("Failed to delete old ban evidence")
 			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to delete existing evidence"})
 			return
 		}
 
-		// Insert new evidence (if any)
 		if len(*request.Evidence) > 0 {
-			createErr := s.createBanEvidenceWithTx(c.Request.Context(), tx, banId.String(), serverId, *request.Evidence)
-			if createErr != nil {
-				log.Error().Err(createErr).Str("banId", banId.String()).Msg("Failed to create updated ban evidence")
-				tx.Rollback()
-				responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": createErr.Error()})
+			if err := s.createBanEvidenceWithTx(c.Request.Context(), tx, banId.String(), serverId, *request.Evidence); err != nil {
+				log.Error().Err(err).Str("banId", banId.String()).Msg("Failed to create updated ban evidence")
+				responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": err.Error()})
 				return
 			}
 		}
+	}
 
-		// Commit the transaction
-		if commitErr := tx.Commit(); commitErr != nil {
-			log.Error().Err(commitErr).Str("banId", banId.String()).Msg("Failed to commit evidence update transaction")
-			responses.BadRequest(c, "Failed to update evidence", &gin.H{"error": "Failed to commit evidence update"})
-			return
+	if err := s.syncBansCfgWithExecutor(c.Request.Context(), tx, server); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after ban update: %w", err), nil)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		if restoreErr := s.syncBansCfg(c.Request.Context(), server); restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("banId", banId.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after ban update commit error")
+		}
+		responses.InternalServerError(c, fmt.Errorf("failed to commit ban update after syncing Bans.cfg: %w", err), nil)
+		return
+	}
+
+	if len(filesToDelete) > 0 {
+		if err := s.deleteSpecificEvidenceFiles(c.Request.Context(), banId.String(), filesToDelete); err != nil {
+			log.Warn().Err(err).Str("banId", banId.String()).Msg("Failed to delete some evidence files from storage after ban update")
 		}
 	}
 
@@ -962,16 +978,10 @@ func (s *Server) ServerBansUpdate(c *gin.Context) {
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:ban:update", auditData)
 
-	if server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user); err == nil {
-		if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
-			log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to sync Bans.cfg after ban update")
-		}
-
-		// Reload server config so the game server picks up the updated Bans.cfg
-		r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
-		if _, err := r.ExecuteRaw("AdminReloadServerConfig"); err != nil {
-			log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban update")
-		}
+	// Reload server config so the game server picks up the updated Bans.cfg.
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, server.Id)
+	if _, err := r.ExecuteRaw("AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("serverId", serverId.String()).Msg("Failed to reload server config after ban update")
 	}
 
 	responses.Success(c, "Ban updated successfully", &gin.H{
@@ -1008,7 +1018,11 @@ func (s *Server) buildServerBansCfg(ctx context.Context, serverId uuid.UUID) (st
 }
 
 func (s *Server) getEffectiveServerBans(ctx context.Context, serverID uuid.UUID) ([]models.ServerBan, error) {
-	return core.GetServerBans(ctx, s.Dependencies.DB, serverID)
+	return s.getEffectiveServerBansWithExecutor(ctx, s.Dependencies.DB, serverID)
+}
+
+func (s *Server) getEffectiveServerBansWithExecutor(ctx context.Context, executor dbpkg.Executor, serverID uuid.UUID) ([]models.ServerBan, error) {
+	return core.GetServerBans(ctx, executor, serverID)
 }
 
 func collectServerBanIDs(bans []models.ServerBan) (steamIDs map[string]bool, eosIDs map[string]bool) {
@@ -1110,6 +1124,36 @@ func buildServerBansCfgContent(bans []models.ServerBan) string {
 	}
 
 	return banCfg.String()
+}
+
+func buildMergedServerBansCfgContent(managedBans []models.ServerBan, existingContent string, existingContentErr error, excludedSteamIDs, excludedEOSIDs map[string]bool) (string, error) {
+	content := buildServerBansCfgContent(managedBans)
+	if existingContentErr != nil {
+		return "", fmt.Errorf("failed to read existing Bans.cfg before sync: %w", existingContentErr)
+	}
+	if existingContent == "" {
+		return content, nil
+	}
+
+	managedSteamIDs, managedEOSIDs := collectServerBanIDs(managedBans)
+	entries, unparseableCount, parseErr := parseBansCfg(existingContent)
+	if parseErr != nil {
+		return "", fmt.Errorf("existing Bans.cfg too large to parse safely — aborting sync to avoid dropping bans: %w", parseErr)
+	}
+	if unparseableCount > 0 {
+		return "", fmt.Errorf("existing Bans.cfg contains %d unparseable active lines — aborting sync to avoid dropping bans", unparseableCount)
+	}
+
+	var merged strings.Builder
+	merged.WriteString(content)
+	for _, entry := range entries {
+		if shouldPreserveExistingBansCfgEntry(entry, managedSteamIDs, managedEOSIDs, excludedSteamIDs, excludedEOSIDs) {
+			merged.WriteString(entry.RawLine)
+			merged.WriteString("\n")
+		}
+	}
+
+	return merged.String(), nil
 }
 
 // loadBanEvidence loads all evidence records for a given ban

@@ -357,6 +357,8 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 		SkippedCount: len(existingBans),
 		ExpiredCount: len(expiredBans) + len(autoBans),
 	}
+	importedSteamIDs := map[string]bool(nil)
+	importedEOSIDs := map[string]bool(nil)
 
 	if len(newBans) == 0 {
 		responses.Success(c, "No new bans to import", &gin.H{"result": result})
@@ -431,6 +433,19 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 			continue
 		}
 
+		if ban.SteamID != "" {
+			if importedSteamIDs == nil {
+				importedSteamIDs = make(map[string]bool)
+			}
+			importedSteamIDs[ban.SteamID] = true
+		}
+		if ban.EOSID != "" {
+			if importedEOSIDs == nil {
+				importedEOSIDs = make(map[string]bool)
+			}
+			importedEOSIDs[utils.NormalizeEOSID(ban.EOSID)] = true
+		}
+
 		result.ImportedCount++
 	}
 
@@ -447,14 +462,17 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
-		responses.InternalServerError(c, err, &gin.H{"error": "Failed to commit import"})
+	if err := s.syncBansCfgWithExecutor(c.Request.Context(), tx, server); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after import: %w", err), nil)
 		return
 	}
 
-	// Sync Bans.cfg to reflect the merged state (DB is source of truth)
-	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
-		log.Warn().Err(err).Str("serverId", serverID.String()).Msg("Failed to sync Bans.cfg after import")
+	if err := tx.Commit(); err != nil {
+		if restoreErr := s.syncBansCfgWithExcludedIDs(c.Request.Context(), server, importedSteamIDs, importedEOSIDs); restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("serverId", serverID.String()).Msg("Failed to restore Bans.cfg after import commit error")
+		}
+		responses.InternalServerError(c, fmt.Errorf("failed to commit import after syncing Bans.cfg: %w", err), &gin.H{"error": "Failed to commit import"})
+		return
 	}
 
 	// Reload server config so the game server picks up the updated Bans.cfg

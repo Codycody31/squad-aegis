@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -124,5 +125,49 @@ func TestCollectServerBanIDs(t *testing.T) {
 
 	if !eosIDs["abcdef0123456789abcdef0123456789"] {
 		t.Fatal("expected EOS ID to be normalized and collected")
+	}
+}
+
+func TestBuildMergedServerBansCfgContentFailsOnReadError(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildMergedServerBansCfgContent(
+		[]models.ServerBan{{SteamID: "76561198000000001", Reason: "Cheating"}},
+		"",
+		errors.New("permission denied"),
+		nil,
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected read failure to abort merge")
+	}
+	if !strings.Contains(err.Error(), "failed to read existing Bans.cfg before sync") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildMergedServerBansCfgContentPreservesUnmanagedEntries(t *testing.T) {
+	t.Parallel()
+
+	managed := []models.ServerBan{
+		{
+			AdminName:    "Admin",
+			AdminSteamID: "76561198000000010",
+			SteamID:      "76561198000000001",
+			Reason:       "Cheating",
+		},
+	}
+	existing := "N/A Banned:abcdef0123456789abcdef0123456789:0 //Manual server-side ban\n"
+
+	content, err := buildMergedServerBansCfgContent(managed, existing, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("expected merge to succeed, got %v", err)
+	}
+
+	if !strings.Contains(content, "Admin [SteamID 76561198000000010] Banned:76561198000000001:0 //Cheating") {
+		t.Fatalf("expected managed ban in merged content, got %q", content)
+	}
+	if !strings.Contains(content, "N/A Banned:abcdef0123456789abcdef0123456789:0 //Manual server-side ban") {
+		t.Fatalf("expected unmanaged ban to be preserved, got %q", content)
 	}
 }

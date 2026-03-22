@@ -64,7 +64,14 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		return
 	}
 
-	err := validation.ValidateStruct(&request,
+	var err error
+	request.LogSourceType, err = normalizeLogSourceType(request.LogSourceType)
+	if err != nil {
+		responses.BadRequest(c, "Invalid log source type", &gin.H{"error": err.Error()})
+		return
+	}
+
+	err = validation.ValidateStruct(&request,
 		validation.Field(&request.Name, validation.Required),
 		validation.Field(&request.IpAddress, validation.Required),
 		validation.Field(&request.GamePort, validation.Required),
@@ -432,8 +439,8 @@ func probeSFTPLogTransport(server *models.Server, filePath string, status logTra
 	}
 
 	clientConfig := &ssh.ClientConfig{
-		User:            username,
-		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		User: username,
+		Auth: []ssh.AuthMethod{ssh.Password(password)},
 		// Intentionally skipping host key verification: this is a status probe
 		// against trusted, operator-configured infrastructure. The connection is
 		// short-lived and used only to check reachability, not to transfer
@@ -752,18 +759,10 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		return
 	}
 
-	// Normalize and validate optional log source type from UI payload.
-	if request.LogSourceType != nil {
-		logSourceType := strings.TrimSpace(*request.LogSourceType)
-		switch logSourceType {
-		case "":
-			request.LogSourceType = nil
-		case "local", "sftp", "ftp":
-			request.LogSourceType = &logSourceType
-		default:
-			responses.BadRequest(c, "Invalid log source type", &gin.H{"error": "log_source_type must be one of: local, sftp, ftp"})
-			return
-		}
+	request.LogSourceType, err = normalizeLogSourceType(request.LogSourceType)
+	if err != nil {
+		responses.BadRequest(c, "Invalid log source type", &gin.H{"error": err.Error()})
+		return
 	}
 
 	// Validate request
@@ -946,4 +945,20 @@ func validateSquadGamePath(value interface{}) error {
 	}
 
 	return nil
+}
+
+func normalizeLogSourceType(value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	normalized := strings.TrimSpace(*value)
+	switch normalized {
+	case "":
+		return nil, nil
+	case "local", "sftp", "ftp":
+		return &normalized, nil
+	default:
+		return nil, fmt.Errorf("log_source_type must be one of: local, sftp, ftp")
+	}
 }

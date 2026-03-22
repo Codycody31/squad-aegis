@@ -71,16 +71,42 @@ func (wm *WorkflowManager) SetBanSyncFunc(fn func(ctx context.Context, serverID 
 	wm.banSyncFunc = fn
 }
 
-func (wm *WorkflowManager) syncWorkflowBanConfig(serverID uuid.UUID, banID uuid.UUID, action string) {
+func (wm *WorkflowManager) deleteBanRecord(serverID uuid.UUID, banID uuid.UUID) error {
+	result, err := wm.db.ExecContext(wm.ctx, `
+		DELETE FROM server_bans
+		WHERE id = $1 AND server_id = $2
+	`, banID, serverID)
+	if err != nil {
+		return fmt.Errorf("failed to roll back ban %s: %w", banID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to verify rollback for ban %s: %w", banID, err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("ban %s was not found during rollback", banID)
+	}
+
+	return nil
+}
+
+func (wm *WorkflowManager) syncWorkflowBanConfig(serverID uuid.UUID, banID uuid.UUID, action string) error {
 	if wm.banSyncFunc != nil {
 		if syncErr := wm.banSyncFunc(wm.ctx, serverID); syncErr != nil {
-			log.Warn().Err(syncErr).Str("banID", banID.String()).Msg("Failed to sync Bans.cfg after " + action)
+			if rollbackErr := wm.deleteBanRecord(serverID, banID); rollbackErr != nil {
+				log.Error().Err(rollbackErr).Str("banID", banID.String()).Msg("Failed to roll back workflow ban after Bans.cfg sync failure")
+				return fmt.Errorf("failed to sync Bans.cfg after %s: %w (rollback failed: %v)", action, syncErr, rollbackErr)
+			}
+			return fmt.Errorf("failed to sync Bans.cfg after %s: %w", action, syncErr)
 		}
 	}
 
 	if _, err := wm.rconManager.ExecuteCommand(serverID, "AdminReloadServerConfig"); err != nil {
 		log.Warn().Err(err).Str("banID", banID.String()).Msg("Failed to reload server config after " + action)
 	}
+
+	return nil
 }
 
 // Start starts the workflow manager
@@ -1546,7 +1572,9 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 	}
 
 	// Regenerate Bans.cfg, then reload server config for immediate enforcement.
-	wm.syncWorkflowBanConfig(context.ServerID, banID, "workflow ban")
+	if err := wm.syncWorkflowBanConfig(context.ServerID, banID, "workflow ban"); err != nil {
+		return err
+	}
 
 	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 	response, kickErr := wm.rconManager.ExecuteCommand(context.ServerID, kickCommand)
@@ -1736,7 +1764,9 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 	}
 
 	// Regenerate Bans.cfg, then reload server config so the game server picks up the ban.
-	wm.syncWorkflowBanConfig(context.ServerID, banID, "workflow evidence ban")
+	if err := wm.syncWorkflowBanConfig(context.ServerID, banID, "workflow evidence ban"); err != nil {
+		return err
+	}
 
 	// Kick player for immediate enforcement
 	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
@@ -3539,7 +3569,11 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		}
 
 		// Regenerate Bans.cfg, then reload server config before kicking for enforcement.
-		wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow Lua ban")
+		if err := wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow Lua ban"); err != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
 
 		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
@@ -3708,7 +3742,11 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 			Msg("LUA script banning player with evidence")
 
 		// Regenerate Bans.cfg, then reload server config before kicking for enforcement.
-		wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow Lua evidence ban")
+		if err := wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow Lua evidence ban"); err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
 
 		// Kick player for immediate enforcement
 		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(steamID), sanitizeRCONParam(reason))
@@ -4198,7 +4236,11 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 		}
 
 		// Regenerate Bans.cfg, then reload server config before kicking for enforcement.
-		wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow deprecated Lua ban")
+		if err := wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow deprecated Lua ban"); err != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
 
 		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
