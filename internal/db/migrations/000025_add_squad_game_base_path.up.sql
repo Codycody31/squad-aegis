@@ -1,5 +1,12 @@
 ALTER TABLE servers ADD COLUMN squad_game_path TEXT;
 
+-- Backup columns being dropped so data can be recovered if regex extraction fails.
+CREATE TABLE IF NOT EXISTS _backup_000025_server_paths AS
+SELECT id, log_file_path, bans_cfg_path FROM servers;
+
+CREATE TABLE IF NOT EXISTS _backup_000025_motd_paths AS
+SELECT server_id, motd_file_path FROM server_motd_config WHERE motd_file_path IS NOT NULL;
+
 UPDATE servers
 SET squad_game_path = CASE
 	WHEN log_file_path IS NOT NULL AND log_file_path LIKE '%/Saved/Logs/%'

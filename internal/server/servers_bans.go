@@ -1040,15 +1040,22 @@ func shouldPreserveExistingBansCfgEntry(entry models.CfgBanEntry, managedSteamID
 		return false
 	}
 
+	// Check if this entry is managed by Aegis (exists in DB). Managed entries are
+	// already written from the DB query, so we skip them here to avoid duplicates.
+	// NOTE: We intentionally do NOT check excludedSteamIDs/excludedEOSIDs here.
+	// Excluded IDs are only used to filter the DB-sourced managed bans (done in
+	// filterServerBansByExcludedIDs). External entries (auto-bans, in-game bans)
+	// for the same player must be preserved — removing an Aegis ban should not
+	// silently drop an unrelated game-server auto-ban for the same player.
 	if entry.SteamID != "" {
-		if managedSteamIDs[entry.SteamID] || excludedSteamIDs[entry.SteamID] {
+		if managedSteamIDs[entry.SteamID] {
 			return false
 		}
 	}
 
 	if entry.EOSID != "" {
 		normalizedEOSID := utils.NormalizeEOSID(entry.EOSID)
-		if managedEOSIDs[normalizedEOSID] || excludedEOSIDs[normalizedEOSID] {
+		if managedEOSIDs[normalizedEOSID] {
 			return false
 		}
 	}
