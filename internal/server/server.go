@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 
 	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/core"
@@ -26,6 +27,10 @@ import (
 
 type Server struct {
 	Dependencies *Dependencies
+
+	// bansCfgMu provides per-server locking for Bans.cfg read-modify-write
+	// cycles. Keyed by server UUID string, values are *sync.Mutex.
+	bansCfgMu sync.Map
 }
 
 type Dependencies struct {

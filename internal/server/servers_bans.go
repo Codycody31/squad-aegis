@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -484,6 +485,14 @@ func (s *Server) syncBansCfgWithExcludedIDs(ctx context.Context, server *models.
 	if server.LogSourceType == nil || *server.LogSourceType == "" {
 		return nil // No log source configured, can't access files
 	}
+
+	// Acquire a per-server mutex to serialize read-modify-write cycles on
+	// Bans.cfg. Without this, concurrent ban/unban requests for the same
+	// server could race and silently drop entries.
+	muVal, _ := s.bansCfgMu.LoadOrStore(server.Id.String(), &sync.Mutex{})
+	mu := muVal.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
 
 	managedBans, err := s.getEffectiveServerBans(ctx, server.Id)
 	if err != nil {
