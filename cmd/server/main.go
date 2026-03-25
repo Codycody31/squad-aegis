@@ -234,9 +234,9 @@ func run(ctx context.Context) error {
 		PermissionService:    permissionService,
 		PermissionRepo:       permissionRepo,
 	}
-	banSyncServer := &server.Server{Dependencies: deps}
-	pluginManager.SetBanSyncFunc(banSyncServer.SyncBansCfgByID)
-	workflowManager.SetBanSyncFunc(banSyncServer.SyncBansCfgByID)
+	appServer := server.New(deps)
+	pluginManager.SetBanSyncFunc(appServer.SyncBansCfgByID)
+	workflowManager.SetBanSyncFunc(appServer.SyncBansCfgByID)
 
 	// Register all available plugins and connectors
 	if err := plugin_registry.RegisterAllConnectors(pluginManager); err != nil {
@@ -322,7 +322,7 @@ func run(ctx context.Context) error {
 
 		// Start remote ban sync service
 		go deps.RemoteBanSyncService.StartPeriodicSync(ctx) // Initialize router
-		router, _ := server.NewRouter(deps)
+		router := server.NewRouter(appServer)
 
 		// Create server with timeout
 		srv := &http.Server{

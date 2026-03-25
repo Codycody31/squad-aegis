@@ -48,11 +48,14 @@ type Dependencies struct {
 	PermissionRepo       *permissions.Repository
 }
 
-func NewRouter(serverDependencies *Dependencies) (*gin.Engine, *Server) {
-	router := gin.New()
-	server := &Server{
+func New(serverDependencies *Dependencies) *Server {
+	return &Server{
 		Dependencies: serverDependencies,
 	}
+}
+
+func NewRouter(server *Server) *gin.Engine {
+	router := gin.New()
 
 	if config.Config.Log.ShowGin {
 		// General Middleware
@@ -99,7 +102,7 @@ func NewRouter(serverDependencies *Dependencies) (*gin.Engine, *Server) {
 			proxy := &httputil.ReverseProxy{Director: director}
 			proxy.ServeHTTP(w, r)
 		} else {
-			webEngine, err := web.New(serverDependencies.DB)
+			webEngine, err := web.New(server.Dependencies.DB)
 			if err != nil {
 				log.Println("failed to create web engine", err)
 			}
@@ -415,12 +418,12 @@ func NewRouter(serverDependencies *Dependencies) (*gin.Engine, *Server) {
 		{
 			playersGroup.Use(server.AuthSession)
 
-				playersGroup.GET("", server.PlayersList)
-				playersGroup.GET("/stats", server.PlayersStats)
-				playersGroup.GET("/alt-groups", server.PlayersAltGroups)
-				playersGroup.GET("/:playerId", server.PlayerGet)
-				playersGroup.GET("/:playerId/ban-history", server.PlayerBanHistory)
-				playersGroup.GET("/:playerId/chat", server.PlayerChatHistoryPaginated)
+			playersGroup.GET("", server.PlayersList)
+			playersGroup.GET("/stats", server.PlayersStats)
+			playersGroup.GET("/alt-groups", server.PlayersAltGroups)
+			playersGroup.GET("/:playerId", server.PlayerGet)
+			playersGroup.GET("/:playerId/ban-history", server.PlayerBanHistory)
+			playersGroup.GET("/:playerId/chat", server.PlayerChatHistoryPaginated)
 			playersGroup.GET("/:playerId/teamkills", server.PlayerTeamkillsAnalysis)
 			playersGroup.GET("/:playerId/sessions", server.PlayerSessionHistory)
 			playersGroup.GET("/:playerId/related", server.PlayerRelatedPlayers)
@@ -475,5 +478,5 @@ func NewRouter(serverDependencies *Dependencies) (*gin.Engine, *Server) {
 		apiGroup.GET("/ban-lists/:banListId/cfg", server.BanListCfg)
 	}
 
-	return router, server
+	return router
 }
