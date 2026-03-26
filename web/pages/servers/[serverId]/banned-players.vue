@@ -1325,6 +1325,18 @@ function formatEventDescription(event: any, type: string): string {
     return "Event";
 }
 
+function getEvidenceDisplayPayload(evidence: any): any {
+    if (evidence?.metadata && Object.keys(evidence.metadata).length > 0) {
+        return evidence.metadata;
+    }
+    return evidence || {};
+}
+
+function getEvidenceDisplayTime(evidence: any): string | null {
+    const payload = getEvidenceDisplayPayload(evidence);
+    return payload.event_time || payload.sent_at || evidence?.event_time || evidence?.sent_at || null;
+}
+
 // Function to handle file upload
 async function handleFileUpload(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -2224,9 +2236,9 @@ async function executeImport() {
                                                                 class="flex items-center justify-between text-sm p-2 bg-background rounded border"
                                                             >
                                                                 <div class="flex-1">
-                                                                    <div class="font-medium">{{ formatEventDescription(evidence.metadata, evidence.evidence_type) }}</div>
-                                                                    <div class="text-xs text-muted-foreground">
-                                                                        {{ new Date(evidence.event_time).toLocaleString() }}
+                                                                    <div class="font-medium">{{ formatEventDescription(getEvidenceDisplayPayload(evidence), evidence.evidence_type) }}</div>
+                                                                    <div v-if="getEvidenceDisplayTime(evidence)" class="text-xs text-muted-foreground">
+                                                                        {{ new Date(getEvidenceDisplayTime(evidence) || "").toLocaleString() }}
                                                                     </div>
                                                                 </div>
                                                                 <Button
@@ -2656,9 +2668,9 @@ async function executeImport() {
                                                                 class="flex items-center justify-between text-sm p-2 bg-background rounded border"
                                                             >
                                                                 <div class="flex-1">
-                                                                    <div class="font-medium">{{ formatEventDescription(evidence.metadata, evidence.evidence_type) }}</div>
-                                                                    <div class="text-xs text-muted-foreground">
-                                                                        {{ new Date(evidence.event_time).toLocaleString() }}
+                                                                    <div class="font-medium">{{ formatEventDescription(getEvidenceDisplayPayload(evidence), evidence.evidence_type) }}</div>
+                                                                    <div v-if="getEvidenceDisplayTime(evidence)" class="text-xs text-muted-foreground">
+                                                                        {{ new Date(getEvidenceDisplayTime(evidence) || "").toLocaleString() }}
                                                                     </div>
                                                                 </div>
                                                                 <Button
@@ -2882,14 +2894,14 @@ async function executeImport() {
                                             <div class="flex items-start justify-between">
                                                 <div class="flex-1">
                                                     <div class="font-medium text-sm mb-1">
-                                                        {{ formatEventDescription(evidence.metadata || {}, evidence.evidence_type) }}
+                                                        {{ formatEventDescription(getEvidenceDisplayPayload(evidence), evidence.evidence_type) }}
                                                     </div>
                                                     <div class="text-xs text-muted-foreground space-y-1">
                                                         <div>Type: {{ evidence.evidence_type }}</div>
-                                                        <div v-if="evidence.event_time">
-                                                            Time: {{ new Date(evidence.event_time).toLocaleString() }}
+                                                        <div v-if="getEvidenceDisplayTime(evidence)">
+                                                            Time: {{ new Date(getEvidenceDisplayTime(evidence) || "").toLocaleString() }}
                                                         </div>
-                                                        <div v-if="evidence.metadata && evidence.metadata.teamkill">
+                                                        <div v-if="getEvidenceDisplayPayload(evidence).teamkill">
                                                             <Badge variant="destructive" class="text-xs">TEAMKILL</Badge>
                                                         </div>
                                                     </div>
