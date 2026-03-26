@@ -535,14 +535,24 @@ func (p *ChatAutoModPlugin) executeBan(chatEvent *event_manager.RconChatMessageD
 	// Use EOS ID as fallback when Steam ID is empty for RCON calls
 	playerID := chatEvent.PreferredPlayerID()
 
+	evidenceMetadata := map[string]interface{}{
+		"message_id":  eventID.String(),
+		"player_name": chatEvent.PlayerName,
+		"chat_type":   chatEvent.ChatType,
+		"message":     chatEvent.Message,
+		"steam_id":    chatEvent.SteamID,
+		"eos_id":      chatEvent.EosID,
+	}
+
 	// Use BanWithEvidenceAndRule to link the chat message as evidence and log rule violation
-	banID, err := p.apis.RconAPI.BanWithEvidenceAndRule(
+	banID, err := p.apis.RconAPI.BanWithEvidenceAndRuleAndMetadata(
 		playerID,
 		reason,
 		duration,
 		eventID.String(),
 		"RCON_CHAT_MESSAGE",
 		ruleID,
+		evidenceMetadata,
 	)
 
 	if err != nil {

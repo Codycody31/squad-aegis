@@ -914,8 +914,9 @@ func mapPluginEventTypeToEvidence(eventType string) (evidenceType string, clickh
 	}
 }
 
-// BanWithEvidence bans a player and links evidence from an event
-func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration time.Duration, eventID string, eventType string) (string, error) {
+// banWithEvidence bans a player and links evidence from an event, optionally
+// persisting an associated server rule on the created ban and extra evidence metadata.
+func (api *rconAPI) banWithEvidence(playerID string, reason string, duration time.Duration, eventID string, eventType string, ruleID *string, extraMetadata map[string]interface{}) (string, error) {
 	// Compute expires_at from duration
 	var expiresAt *time.Time
 	if duration > 0 {
@@ -957,8 +958,9 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 	banID := uuid.New()
 	now := time.Now()
 
-	banQuery := `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
-	_, err = tx.Exec(banQuery,
+	columns := "id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at"
+	placeholders := "$1, $2, NULL, $3, $4, $5, $6, $7, $8"
+	args := []interface{}{
 		banID,
 		api.serverID,
 		steamIDVal,
@@ -967,7 +969,21 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 		expiresAt,
 		now,
 		now,
-	)
+	}
+
+	if ruleID != nil && *ruleID != "" {
+		ruleUUID, parseErr := uuid.Parse(*ruleID)
+		if parseErr != nil {
+			log.Warn().Err(parseErr).Str("rule_id", *ruleID).Msg("Invalid rule ID format, creating plugin evidence ban without linked rule")
+		} else {
+			columns += ", rule_id"
+			placeholders += ", $9"
+			args = append(args, ruleUUID)
+		}
+	}
+
+	banQuery := fmt.Sprintf(`INSERT INTO server_bans (%s) VALUES (%s)`, columns, placeholders)
+	_, err = tx.Exec(banQuery, args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to create ban: %w", err)
 	}
@@ -977,6 +993,9 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 		"event_type": eventType,
 		"event_id":   eventID,
 		"plugin":     true,
+	}
+	for key, value := range extraMetadata {
+		metadata[key] = value
 	}
 	metadataJSON, _ := json.Marshal(metadata)
 
@@ -1011,6 +1030,11 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 	_, _ = api.rconManager.ExecuteCommand(api.serverID, kickCommand)
 
 	return banID.String(), nil
+}
+
+// BanWithEvidence bans a player and links evidence from an event
+func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration time.Duration, eventID string, eventType string) (string, error) {
+	return api.banWithEvidence(playerID, reason, duration, eventID, eventType, nil, nil)
 }
 
 // storeBanInDatabase stores the ban information in the database
@@ -1164,13 +1188,28 @@ func (api *rconAPI) BanPlayerWithRule(playerID string, reason string, duration t
 
 // BanWithEvidenceAndRule bans a player with evidence linking and logs the violation to player history if ruleID is provided
 func (api *rconAPI) BanWithEvidenceAndRule(playerID string, reason string, duration time.Duration, eventID string, eventType string, ruleID *string) (string, error) {
-	// Execute ban with evidence (existing logic)
-	banID, err := api.BanWithEvidence(playerID, reason, duration, eventID, eventType)
+	// Execute ban with evidence and persist the linked rule on the ban row when available.
+	banID, err := api.banWithEvidence(playerID, reason, duration, eventID, eventType, ruleID, nil)
 	if err != nil {
 		return "", err
 	}
 
 	// Log violation if rule_id provided (non-blocking, don't fail the action)
+	if err := api.logPluginRuleViolation(playerID, ruleID, "BAN"); err != nil {
+		log.Warn().Err(err).Msg("Failed to log ban violation, but ban was executed successfully")
+	}
+
+	return banID, nil
+}
+
+// BanWithEvidenceAndRuleAndMetadata bans a player with evidence linking, logs
+// the rule violation, and stores additional evidence metadata when provided.
+func (api *rconAPI) BanWithEvidenceAndRuleAndMetadata(playerID string, reason string, duration time.Duration, eventID string, eventType string, ruleID *string, metadata map[string]interface{}) (string, error) {
+	banID, err := api.banWithEvidence(playerID, reason, duration, eventID, eventType, ruleID, metadata)
+	if err != nil {
+		return "", err
+	}
+
 	if err := api.logPluginRuleViolation(playerID, ruleID, "BAN"); err != nil {
 		log.Warn().Err(err).Msg("Failed to log ban violation, but ban was executed successfully")
 	}
