@@ -55,6 +55,8 @@ type legacyPlayerProgressRecord struct {
 // SquadLeaderSession tracks an active squad leadership session
 type SquadLeaderSession struct {
 	PlayerID  string    `json:"player_id"`
+	SteamID   string    `json:"steam_id,omitempty"`
+	EOSID     string    `json:"eos_id,omitempty"`
 	StartTime time.Time `json:"start_time"`
 	LastCheck time.Time `json:"last_check"`
 	SquadSize int       `json:"squad_size"`
@@ -526,7 +528,7 @@ func (p *SquadLeaderWhitelistPlugin) handlePlayerConnected(event *plugin_manager
 
 	// Update last seen time for the player
 	p.mu.Lock()
-	if record, exists := p.playerProgress[playerID]; exists {
+	if record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID); exists {
 		record.LastSeenAt = time.Now()
 	}
 	p.mu.Unlock()
@@ -577,13 +579,23 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 	defer p.mu.Unlock()
 
 	if session, exists := p.squadLeaderSession[playerID]; exists {
+		if steamID, ok := eventData["steam_id"].(string); ok && steamID != "" {
+			session.SteamID = utils.NormalizePlayerID(steamID)
+		}
+		if eosID, ok := eventData["eos_id"].(string); ok && eosID != "" {
+			session.EOSID = utils.NormalizePlayerID(eosID)
+		}
 		session.LastCheck = time.Now()
 		session.SquadSize = int(memberCount)
 		session.SquadName = squadName
 		session.Unlocked = unlocked
 	} else {
+		steamID, _ := eventData["steam_id"].(string)
+		eosID, _ := eventData["eos_id"].(string)
 		p.squadLeaderSession[playerID] = &SquadLeaderSession{
 			PlayerID:  playerID,
+			SteamID:   utils.NormalizePlayerID(steamID),
+			EOSID:     utils.NormalizePlayerID(eosID),
 			StartTime: time.Now(),
 			LastCheck: time.Now(),
 			SquadSize: int(memberCount),
@@ -621,6 +633,8 @@ func (p *SquadLeaderWhitelistPlugin) updateSquadLeaderSessions(players []*plugin
 		// Update or create squad leader session
 		if session, exists := p.squadLeaderSession[playerID]; exists {
 			// Update existing session
+			session.SteamID = utils.NormalizePlayerID(player.SteamID)
+			session.EOSID = utils.NormalizePlayerID(player.EOSID)
 			session.LastCheck = now
 			session.SquadSize = p.getSquadSize(players, player.TeamID, player.SquadID)
 			session.SquadName = fmt.Sprintf("Squad %d", player.SquadID)
@@ -629,6 +643,8 @@ func (p *SquadLeaderWhitelistPlugin) updateSquadLeaderSessions(players []*plugin
 			// Create new session for this squad leader
 			p.squadLeaderSession[playerID] = &SquadLeaderSession{
 				PlayerID:  playerID,
+				SteamID:   utils.NormalizePlayerID(player.SteamID),
+				EOSID:     utils.NormalizePlayerID(player.EOSID),
 				StartTime: now,
 				LastCheck: now,
 				SquadSize: p.getSquadSize(players, player.TeamID, player.SquadID),
@@ -776,7 +792,10 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 		session.LastCheck = now
 
 		// Get or create player progress record
-		record := whitelistprogress.EnsureRecord(p.playerProgress, playerID, now)
+		record := whitelistprogress.EnsureRecord(p.playerProgress, session.SteamID, session.EOSID, now)
+		if record == nil {
+			continue
+		}
 
 		oldQualifiedSeconds := record.QualifiedSeconds
 		record.QualifiedSeconds += intervalSeconds
@@ -785,7 +804,7 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 		record.LastSeenAt = now
 		newQualifiedSeconds := record.QualifiedSeconds
 
-		updatedPlayers = append(updatedPlayers, playerID)
+		updatedPlayers = append(updatedPlayers, record.PlayerID)
 
 		// Check for notification thresholds and whitelist status changes
 		oldPercentage := whitelistprogress.Percent(oldQualifiedSeconds, requiredSeconds)
@@ -797,7 +816,7 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 			newQualifiedSeconds >= requiredSeconds {
 			// Player just became whitelisted - add them as admin (skip if shutting down)
 			if !p.shuttingDown {
-				go p.addPlayerAsTemporaryAdmin(playerID, playerName)
+				go p.addPlayerAsTemporaryAdmin(record.PlayerID, playerName)
 			}
 		}
 
@@ -912,7 +931,7 @@ func (p *SquadLeaderWhitelistPlugin) decayProgress() error {
 // sendProgressToPlayer sends progress information to a specific player
 func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(playerID string) error {
 	p.mu.Lock()
-	record, exists := p.playerProgress[playerID]
+	record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID)
 	session, hasActiveSession := p.squadLeaderSession[playerID]
 	p.mu.Unlock()
 
@@ -931,7 +950,7 @@ func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(playerID string) error
 		var status string
 		if whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
 			// Get rank among whitelisted players
-			rank := p.getPlayerRank(playerID)
+			rank := p.getPlayerRank(record.PlayerID)
 			status = fmt.Sprintf("WHITELISTED (Rank #%d)", rank)
 		} else {
 			status = fmt.Sprintf("Progress: %.1f%%", percentage)
@@ -993,6 +1012,10 @@ func (p *SquadLeaderWhitelistPlugin) getPlayerRank(playerID string) int {
 
 	var whitelistedPlayers []playerRank
 	p.mu.Lock()
+	record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID)
+	if exists {
+		playerID = record.PlayerID
+	}
 	for _, record := range p.playerProgress {
 		if whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
 			whitelistedPlayers = append(whitelistedPlayers, playerRank{
@@ -1057,7 +1080,19 @@ func (p *SquadLeaderWhitelistPlugin) loadPlayerProgress() error {
 		}
 
 		migratedProgress[recordPlayerID] = &PlayerProgressRecord{
-			PlayerID:         recordPlayerID,
+			PlayerID: recordPlayerID,
+			SteamID: func() string {
+				if utils.IsSteamID(recordPlayerID) {
+					return recordPlayerID
+				}
+				return ""
+			}(),
+			EOSID: func() string {
+				if utils.IsEOSID(recordPlayerID) {
+					return recordPlayerID
+				}
+				return ""
+			}(),
 			QualifiedSeconds: whitelistprogress.LegacyPercentToSeconds(record.Progress, requiredHours),
 			LifetimeSeconds:  whitelistprogress.LegacyPercentToSeconds(record.TotalLeadership, requiredHours),
 			LastEarnedAt:     record.LastProgressed,

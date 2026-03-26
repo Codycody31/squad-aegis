@@ -505,7 +505,7 @@ func (p *ServerSeederWhitelistPlugin) handlePlayerConnected(event *plugin_manage
 
 	// Update last seen time for the player
 	p.mu.Lock()
-	if record, exists := p.playerProgress[playerID]; exists {
+	if record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID); exists {
 		record.LastSeenAt = time.Now()
 	}
 	p.mu.Unlock()
@@ -614,7 +614,10 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 			continue
 		}
 
-		record := whitelistprogress.EnsureRecord(p.playerProgress, playerID, now)
+		record := whitelistprogress.EnsureRecord(p.playerProgress, player.SteamID, player.EOSID, now)
+		if record == nil {
+			continue
+		}
 
 		oldQualifiedSeconds := record.QualifiedSeconds
 		record.QualifiedSeconds += intervalSeconds
@@ -623,7 +626,7 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 		record.LastSeenAt = now
 		newQualifiedSeconds := record.QualifiedSeconds
 
-		updatedPlayers = append(updatedPlayers, playerID)
+		updatedPlayers = append(updatedPlayers, record.PlayerID)
 
 		// Check for notification thresholds and whitelist status changes
 		oldPercentage := whitelistprogress.Percent(oldQualifiedSeconds, requiredSeconds)
@@ -635,7 +638,7 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 			newQualifiedSeconds >= requiredSeconds {
 			// Player just became whitelisted - add them as admin (skip if shutting down)
 			if !p.shuttingDown {
-				go p.addPlayerAsTemporaryAdmin(playerID, player.Name)
+				go p.addPlayerAsTemporaryAdmin(record.PlayerID, player.Name)
 			}
 		}
 
@@ -750,7 +753,7 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 // sendProgressToPlayer sends progress information to a specific player
 func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(playerID string) error {
 	p.mu.Lock()
-	record, exists := p.playerProgress[playerID]
+	record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID)
 	p.mu.Unlock()
 
 	requiredSeconds := p.requiredWhitelistSeconds()
@@ -768,7 +771,7 @@ func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(playerID string) erro
 		var status string
 		if whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
 			// Get rank among whitelisted players
-			rank := p.getPlayerRank(playerID)
+			rank := p.getPlayerRank(record.PlayerID)
 			status = fmt.Sprintf("✓ WHITELISTED (Rank #%d)", rank)
 		} else {
 			status = fmt.Sprintf("Progress: %.1f%%", percentage)
@@ -823,6 +826,10 @@ func (p *ServerSeederWhitelistPlugin) getPlayerRank(playerID string) int {
 
 	var whitelistedPlayers []playerRank
 	p.mu.Lock()
+	record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID)
+	if exists {
+		playerID = record.PlayerID
+	}
 	for _, record := range p.playerProgress {
 		if whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
 			whitelistedPlayers = append(whitelistedPlayers, playerRank{
@@ -887,7 +894,19 @@ func (p *ServerSeederWhitelistPlugin) loadPlayerProgress() error {
 		}
 
 		migratedProgress[recordPlayerID] = &PlayerProgressRecord{
-			PlayerID:         recordPlayerID,
+			PlayerID: recordPlayerID,
+			SteamID: func() string {
+				if utils.IsSteamID(recordPlayerID) {
+					return recordPlayerID
+				}
+				return ""
+			}(),
+			EOSID: func() string {
+				if utils.IsEOSID(recordPlayerID) {
+					return recordPlayerID
+				}
+				return ""
+			}(),
 			QualifiedSeconds: whitelistprogress.LegacyPercentToSeconds(record.Progress, requiredHours),
 			LifetimeSeconds:  whitelistprogress.LegacyPercentToSeconds(record.TotalSeeded, requiredHours),
 			LastEarnedAt:     record.LastProgressed,

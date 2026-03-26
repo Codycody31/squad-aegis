@@ -21,6 +21,8 @@ type State struct {
 
 type PlayerRecord struct {
 	PlayerID         string    `json:"player_id"`
+	SteamID          string    `json:"steam_id,omitempty"`
+	EOSID            string    `json:"eos_id,omitempty"`
 	QualifiedSeconds int64     `json:"qualified_seconds"`
 	LifetimeSeconds  int64     `json:"lifetime_seconds"`
 	LastEarnedAt     time.Time `json:"last_earned_at"`
@@ -30,6 +32,7 @@ type PlayerRecord struct {
 type playerRecordJSON struct {
 	PlayerID         string    `json:"player_id"`
 	SteamID          string    `json:"steam_id"`
+	EOSID            string    `json:"eos_id"`
 	QualifiedSeconds int64     `json:"qualified_seconds"`
 	LifetimeSeconds  int64     `json:"lifetime_seconds"`
 	LastEarnedAt     time.Time `json:"last_earned_at"`
@@ -48,6 +51,9 @@ func (r *PlayerRecord) UnmarshalJSON(data []byte) error {
 	}
 
 	r.PlayerID = utils.NormalizePlayerID(playerID)
+	r.SteamID = normalizeSteamID(payload.SteamID)
+	r.EOSID = normalizeEOSID(payload.EOSID)
+	applyIdentifierFallbacks(r)
 	r.QualifiedSeconds = payload.QualifiedSeconds
 	r.LifetimeSeconds = payload.LifetimeSeconds
 	r.LastEarnedAt = payload.LastEarnedAt
@@ -100,6 +106,9 @@ func ParseState(raw string) (*State, error) {
 		} else {
 			record.PlayerID = utils.NormalizePlayerID(record.PlayerID)
 		}
+		record.SteamID = normalizeSteamID(record.SteamID)
+		record.EOSID = normalizeEOSID(record.EOSID)
+		applyIdentifierFallbacks(record)
 		if record.QualifiedSeconds < 0 {
 			record.QualifiedSeconds = 0
 		}
@@ -123,23 +132,198 @@ func MarshalPlayers(players map[string]*PlayerRecord) ([]byte, error) {
 	return json.Marshal(state)
 }
 
-func EnsureRecord(players map[string]*PlayerRecord, playerID string, now time.Time) *PlayerRecord {
+func FindRecord(players map[string]*PlayerRecord, playerID string) (*PlayerRecord, bool) {
 	playerID = utils.NormalizePlayerID(playerID)
-	record, exists := players[playerID]
-	if exists && record != nil {
-		if record.PlayerID == "" {
-			record.PlayerID = playerID
+	if playerID == "" {
+		return nil, false
+	}
+
+	if record, exists := players[playerID]; exists && record != nil {
+		return record, true
+	}
+
+	steamID, eosID := splitPlayerID(playerID)
+	for _, record := range players {
+		if record == nil {
+			continue
 		}
+		if recordMatches(record, steamID, eosID) {
+			return record, true
+		}
+	}
+
+	return nil, false
+}
+
+func EnsureRecord(players map[string]*PlayerRecord, steamID string, eosID string, now time.Time) *PlayerRecord {
+	steamID = normalizeSteamID(steamID)
+	eosID = normalizeEOSID(eosID)
+
+	canonicalPlayerID := chooseCanonicalPlayerID(steamID, eosID)
+	if canonicalPlayerID == "" {
+		return nil
+	}
+
+	recordKey, record := findRecordByIdentifiers(players, steamID, eosID)
+	if record == nil {
+		record = &PlayerRecord{
+			PlayerID:     canonicalPlayerID,
+			SteamID:      steamID,
+			EOSID:        eosID,
+			LastEarnedAt: now,
+			LastSeenAt:   now,
+		}
+		applyIdentifierFallbacks(record)
+		players[record.PlayerID] = record
 		return record
 	}
 
-	record = &PlayerRecord{
-		PlayerID:     playerID,
-		LastEarnedAt: now,
-		LastSeenAt:   now,
+	if record.PlayerID == "" {
+		if recordKey != "" {
+			record.PlayerID = recordKey
+		} else {
+			record.PlayerID = canonicalPlayerID
+		}
 	}
-	players[playerID] = record
+
+	if steamID != "" {
+		record.SteamID = steamID
+	}
+	if eosID != "" {
+		record.EOSID = eosID
+	}
+	applyIdentifierFallbacks(record)
+
+	if recordKey != "" && recordKey != record.PlayerID {
+		delete(players, recordKey)
+	}
+
+	mergeDuplicateRecord(players, record, steamID)
+	mergeDuplicateRecord(players, record, eosID)
+	players[record.PlayerID] = record
+
 	return record
+}
+
+func normalizeSteamID(steamID string) string {
+	steamID = utils.NormalizePlayerID(steamID)
+	if !utils.IsSteamID(steamID) {
+		return ""
+	}
+	return steamID
+}
+
+func normalizeEOSID(eosID string) string {
+	eosID = utils.NormalizePlayerID(eosID)
+	if !utils.IsEOSID(eosID) {
+		return ""
+	}
+	return eosID
+}
+
+func splitPlayerID(playerID string) (steamID string, eosID string) {
+	playerID = utils.NormalizePlayerID(playerID)
+	switch {
+	case utils.IsSteamID(playerID):
+		return playerID, ""
+	case utils.IsEOSID(playerID):
+		return "", playerID
+	default:
+		return "", ""
+	}
+}
+
+func chooseCanonicalPlayerID(steamID string, eosID string) string {
+	if steamID != "" {
+		return steamID
+	}
+	return eosID
+}
+
+func applyIdentifierFallbacks(record *PlayerRecord) {
+	if record == nil {
+		return
+	}
+
+	if record.PlayerID == "" {
+		record.PlayerID = chooseCanonicalPlayerID(record.SteamID, record.EOSID)
+	}
+
+	if record.SteamID == "" && utils.IsSteamID(record.PlayerID) {
+		record.SteamID = record.PlayerID
+	}
+	if record.EOSID == "" && utils.IsEOSID(record.PlayerID) {
+		record.EOSID = record.PlayerID
+	}
+}
+
+func recordMatches(record *PlayerRecord, steamID string, eosID string) bool {
+	if record == nil {
+		return false
+	}
+
+	if steamID != "" && (record.SteamID == steamID || record.PlayerID == steamID) {
+		return true
+	}
+	if eosID != "" && (record.EOSID == eosID || record.PlayerID == eosID) {
+		return true
+	}
+
+	return false
+}
+
+func findRecordByIdentifiers(players map[string]*PlayerRecord, steamID string, eosID string) (string, *PlayerRecord) {
+	if steamID != "" {
+		if record, exists := players[steamID]; exists && record != nil {
+			return steamID, record
+		}
+	}
+	if eosID != "" {
+		if record, exists := players[eosID]; exists && record != nil {
+			return eosID, record
+		}
+	}
+
+	for key, record := range players {
+		if record == nil {
+			continue
+		}
+		if recordMatches(record, steamID, eosID) {
+			return key, record
+		}
+	}
+
+	return "", nil
+}
+
+func mergeDuplicateRecord(players map[string]*PlayerRecord, target *PlayerRecord, alias string) {
+	if target == nil || alias == "" {
+		return
+	}
+
+	duplicate, exists := players[alias]
+	if !exists || duplicate == nil || duplicate == target {
+		return
+	}
+
+	target.QualifiedSeconds += duplicate.QualifiedSeconds
+	target.LifetimeSeconds += duplicate.LifetimeSeconds
+	if duplicate.LastEarnedAt.After(target.LastEarnedAt) {
+		target.LastEarnedAt = duplicate.LastEarnedAt
+	}
+	if duplicate.LastSeenAt.After(target.LastSeenAt) {
+		target.LastSeenAt = duplicate.LastSeenAt
+	}
+	if target.SteamID == "" {
+		target.SteamID = duplicate.SteamID
+	}
+	if target.EOSID == "" {
+		target.EOSID = duplicate.EOSID
+	}
+	applyIdentifierFallbacks(target)
+	delete(players, alias)
+	delete(players, duplicate.PlayerID)
+	players[target.PlayerID] = target
 }
 
 func RequiredSeconds(hours int) int64 {

@@ -64,6 +64,44 @@ func TestParseStateSupportsLegacyPlayerRecordIdentifier(t *testing.T) {
 	}
 }
 
+func TestEnsureRecordMergesEOSAndSteamObservations(t *testing.T) {
+	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
+	players := map[string]*PlayerRecord{
+		"abcdef0123456789abcdef0123456789": {
+			PlayerID:         "abcdef0123456789abcdef0123456789",
+			EOSID:            "abcdef0123456789abcdef0123456789",
+			QualifiedSeconds: 3600,
+			LifetimeSeconds:  7200,
+			LastEarnedAt:     now.Add(-time.Hour),
+			LastSeenAt:       now.Add(-time.Hour),
+		},
+	}
+
+	record := EnsureRecord(players, "76561198000000021", "abcdef0123456789ABCDEF0123456789", now)
+	if record == nil {
+		t.Fatalf("expected merged record")
+	}
+
+	if got, want := record.PlayerID, "abcdef0123456789abcdef0123456789"; got != want {
+		t.Fatalf("canonical player ID = %q, want %q", got, want)
+	}
+	if got, want := record.SteamID, "76561198000000021"; got != want {
+		t.Fatalf("steam ID = %q, want %q", got, want)
+	}
+	if got, want := record.EOSID, "abcdef0123456789abcdef0123456789"; got != want {
+		t.Fatalf("eos ID = %q, want %q", got, want)
+	}
+
+	lookup, ok := FindRecord(players, "76561198000000021")
+	if !ok || lookup != record {
+		t.Fatalf("expected Steam lookup to resolve merged record")
+	}
+
+	if len(players) != 1 {
+		t.Fatalf("expected one canonical record after merge, got %d", len(players))
+	}
+}
+
 func TestLegacyPercentToSeconds(t *testing.T) {
 	if got, want := LegacyPercentToSeconds(50, 6), int64(3*time.Hour/time.Second); got != want {
 		t.Fatalf("legacy conversion = %d, want %d", got, want)

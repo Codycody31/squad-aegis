@@ -191,7 +191,22 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	defer rows.Close()
 
 	adminMap := make(map[string]*AdminInfo)
-	adminPlayerIDs := make(map[string]*AdminInfo)
+	adminPlayerIDs := make(map[string][]*AdminInfo)
+
+	registerAdminPlayerID := func(playerID string, admin *AdminInfo) {
+		playerID = utils.NormalizePlayerID(playerID)
+		if playerID == "" || admin == nil {
+			return
+		}
+
+		for _, existingAdmin := range adminPlayerIDs[playerID] {
+			if existingAdmin == admin {
+				return
+			}
+		}
+
+		adminPlayerIDs[playerID] = append(adminPlayerIDs[playerID], admin)
+	}
 
 	for rows.Next() {
 		var adminID, roleID string
@@ -229,12 +244,8 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 			}
 
 			adminMap[adminID] = admin
-			if steamIDStr != "" {
-				adminPlayerIDs[utils.NormalizePlayerID(steamIDStr)] = admin
-			}
-			if admin.EOSID != "" {
-				adminPlayerIDs[admin.EOSID] = admin
-			}
+			registerAdminPlayerID(steamIDStr, admin)
+			registerAdminPlayerID(admin.EOSID, admin)
 		}
 
 		// Add role to admin
@@ -271,11 +282,27 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	players, err := api.GetPlayers()
 	if err == nil {
 		for _, player := range players {
-			if admin, exists := adminPlayerIDs[utils.NormalizePlayerID(player.SteamID)]; exists {
-				admin.IsOnline = true
+			playerSteamID := utils.NormalizePlayerID(player.SteamID)
+			playerEOSID := utils.NormalizePlayerID(player.EOSID)
+
+			if playerSteamID != "" {
+				for _, admin := range adminPlayerIDs[playerSteamID] {
+					admin.IsOnline = true
+					if admin.EOSID == "" && playerEOSID != "" {
+						admin.EOSID = playerEOSID
+						registerAdminPlayerID(playerEOSID, admin)
+					}
+				}
 			}
-			if admin, exists := adminPlayerIDs[utils.NormalizePlayerID(player.EOSID)]; exists {
-				admin.IsOnline = true
+
+			if playerEOSID != "" {
+				for _, admin := range adminPlayerIDs[playerEOSID] {
+					admin.IsOnline = true
+					if admin.SteamID == "" && playerSteamID != "" {
+						admin.SteamID = playerSteamID
+						registerAdminPlayerID(playerSteamID, admin)
+					}
+				}
 			}
 		}
 	}
