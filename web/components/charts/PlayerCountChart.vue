@@ -143,7 +143,13 @@ const createChart = () => {
 
 // Update chart when data changes
 const updateChart = () => {
-  if (!props.data?.length) return;
+  if (!props.data?.length) {
+    if (chart) {
+      chart.destroy();
+      chart = null;
+    }
+    return;
+  }
 
   const chartData = buildChartData();
 
