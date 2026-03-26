@@ -9,6 +9,7 @@ export const PERMISSION_WILDCARD = "*";
 // UI Permissions - Control access to pages/components
 export const UI_PERMISSIONS = {
   DASHBOARD_VIEW: "ui:dashboard:view",
+  MAPS_CHANGE: "ui:maps:change",
   AUDIT_LOGS_VIEW: "ui:audit_logs:view",
   METRICS_VIEW: "ui:metrics:view",
   FEEDS_VIEW: "ui:feeds:view",

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, computed } from "vue";
+import PermissionButton from "@/components/PermissionButton.vue";
+import { UI_PERMISSIONS } from "@/constants/permissions";
 import { Button } from "~/components/ui/button";
 import {
     Card,
@@ -28,7 +30,6 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
 } from "~/components/ui/dialog";
 import {
     Select,
@@ -449,11 +450,11 @@ async function changeServerLayer() {
 
         const { data: responseData, error: fetchError } =
             await useAuthFetch<LayerChangeResponse>(
-                `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
+                `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/change-layer`,
                 {
                     method: "POST",
                     body: {
-                        command: `AdminChangeLayer ${selectedLayer.value}`,
+                        layer: selectedLayer.value,
                     },
                 },
             );
@@ -515,11 +516,11 @@ async function setNextLayer() {
 
         const { data: responseData, error: fetchError } =
             await useAuthFetch<LayerChangeResponse>(
-                `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
+                `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/set-next-layer`,
                 {
                     method: "POST",
                     body: {
-                        command: `AdminSetNextLayer ${selectedNextLayer.value}`,
+                        layer: selectedNextLayer.value,
                     },
                 },
             );
@@ -805,20 +806,24 @@ refresh();
                     </CardContent>
                     <CardFooter>
                         <div class="w-full grid grid-cols-3 gap-2">
-                            <Button
+                            <PermissionButton
+                                :permission="UI_PERMISSIONS.MAPS_CHANGE"
+                                :server-id="serverId as string"
                                 variant="outline"
                                 size="sm"
                                 @click="openMapChangeDialog"
                             >
                                 Change
-                            </Button>
-                            <Button
+                            </PermissionButton>
+                            <PermissionButton
+                                :permission="UI_PERMISSIONS.MAPS_CHANGE"
+                                :server-id="serverId as string"
                                 variant="outline"
                                 size="sm"
                                 @click="openNextLayerDialog"
                             >
                                 Set Next
-                            </Button>
+                            </PermissionButton>
                             <Button
                                 variant="destructive"
                                 size="sm"

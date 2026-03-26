@@ -21,6 +21,7 @@ const Wildcard Permission = "*"
 // UI Permissions - Control access to pages/components.
 const (
 	UIDashboardView   Permission = "ui:dashboard:view"
+	UIMapsChange      Permission = "ui:maps:change"
 	UIAuditLogsView   Permission = "ui:audit_logs:view"
 	UIMetricsView     Permission = "ui:metrics:view"
 	UIFeedsView       Permission = "ui:feeds:view"
@@ -183,7 +184,7 @@ func AllPermissions() []Permission {
 	return []Permission{
 		Wildcard,
 		// UI
-		UIDashboardView, UIAuditLogsView, UIMetricsView, UIFeedsView,
+		UIDashboardView, UIMapsChange, UIAuditLogsView, UIMetricsView, UIFeedsView,
 		UIConsoleView, UIConsoleExecute, UIPluginsView, UIPluginsManage,
 		UIWorkflowsView, UIWorkflowsManage, UISettingsView, UISettingsManage,
 		UIUsersManage, UIRolesManage, UIBansView, UIBansCreate, UIBansEdit, UIBansDelete,
@@ -202,7 +203,7 @@ func AllPermissions() []Permission {
 // UIPermissions returns all UI permissions.
 func UIPermissions() []Permission {
 	return []Permission{
-		UIDashboardView, UIAuditLogsView, UIMetricsView, UIFeedsView,
+		UIDashboardView, UIMapsChange, UIAuditLogsView, UIMetricsView, UIFeedsView,
 		UIConsoleView, UIConsoleExecute, UIPluginsView, UIPluginsManage,
 		UIWorkflowsView, UIWorkflowsManage, UISettingsView, UISettingsManage,
 		UIUsersManage, UIRolesManage, UIBansView, UIBansCreate, UIBansEdit, UIBansDelete,

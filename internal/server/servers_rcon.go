@@ -36,6 +36,10 @@ type MovePlayerRequest struct {
 	EosId   string `json:"eos_id"`
 }
 
+type LayerChangeRequest struct {
+	Layer string `json:"layer" binding:"required"`
+}
+
 // Request structs for player actions with rule support
 type PlayerActionRequest struct {
 	SteamId string  `json:"steam_id"`
@@ -242,6 +246,50 @@ func (s *Server) ServerRconAvailableLayers(c *gin.Context) {
 	}
 
 	responses.Success(c, "Available layers fetched successfully", &gin.H{"layers": layers})
+}
+
+func (s *Server) executeLayerCommand(c *gin.Context, commandName, auditAction, successMessage, failureMessage string) {
+	user := s.getUserFromSession(c)
+
+	var request LayerChangeRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+		return
+	}
+
+	layer := strings.TrimSpace(request.Layer)
+	if layer == "" {
+		responses.BadRequest(c, "Layer is required", &gin.H{"error": "Layer is required"})
+		return
+	}
+
+	serverIdString := c.Param("serverId")
+	serverId, err := uuid.Parse(serverIdString)
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	r := squadRcon.NewSquadRcon(s.Dependencies.RconManager, serverId)
+	response, err := r.ExecuteRaw(commandName + " " + utils.SanitizeAndQuoteRCONParam(layer))
+	if err != nil {
+		responses.BadRequest(c, failureMessage, &gin.H{"error": err.Error()})
+		return
+	}
+
+	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, auditAction, map[string]interface{}{
+		"layer": layer,
+	})
+
+	responses.Success(c, successMessage, &gin.H{"response": response})
+}
+
+func (s *Server) ServerRconChangeLayer(c *gin.Context) {
+	s.executeLayerCommand(c, "AdminChangeLayer", "server:rcon:command:change_layer", "Layer change initiated successfully", "Failed to change layer")
+}
+
+func (s *Server) ServerRconSetNextLayer(c *gin.Context) {
+	s.executeLayerCommand(c, "AdminSetNextLayer", "server:rcon:command:set_next_layer", "Next layer set successfully", "Failed to set next layer")
 }
 
 // ServerRconKickPlayer handles kicking a player from the server
