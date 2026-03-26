@@ -625,12 +625,12 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	}
 
 	// Build INSERT query dynamically
-	var banID string
+	banID := uuid.New()
 	now := time.Now()
 
 	columns := "id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at"
 	placeholders := "$1, $2, $3, $4, $5, $6, $7, $8, $9"
-	args := []interface{}{uuid.New(), serverId, user.Id, steamIDVal, eosIDVal, request.Reason, expiresAt, now, now}
+	args := []interface{}{banID, serverId, user.Id, steamIDVal, eosIDVal, request.Reason, expiresAt, now, now}
 	nextParam := 10
 
 	// Add rule_id if provided
@@ -648,24 +648,39 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 
 	query := fmt.Sprintf(`INSERT INTO server_bans (%s) VALUES (%s) RETURNING id`, columns, placeholders)
 
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&banID)
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to start transaction"})
+		return
+	}
+	defer tx.Rollback()
+
+	var persistedBanID string
+	err = tx.QueryRowContext(c.Request.Context(), query, args...).Scan(&persistedBanID)
 	if err != nil {
 		responses.BadRequest(c, "Failed to create ban", &gin.H{"error": err.Error()})
 		return
 	}
 
-	// Sync Bans.cfg, reload config, and kick the player to enforce immediately
-	if err := s.syncBansCfg(c.Request.Context(), server); err != nil {
-		if _, rollbackErr := s.Dependencies.DB.ExecContext(c.Request.Context(), `
-			DELETE FROM server_bans
-			WHERE id = $1 AND server_id = $2
-		`, banID, serverId); rollbackErr != nil {
-			log.Error().Err(rollbackErr).Str("banId", banID).Str("serverId", serverId.String()).Msg("Failed to roll back RCON ban after Bans.cfg sync failure")
-			responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after RCON ban: %w (rollback also failed: %v)", err, rollbackErr), nil)
-			return
-		}
-
+	// Sync Bans.cfg before commit so DB state and file contents succeed or fail together.
+	if err := s.syncBansCfgWithExecutor(c.Request.Context(), tx, server); err != nil {
 		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after RCON ban: %w", err), nil)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		restoreExcludedSteamIDs := map[string]bool(nil)
+		if request.SteamId != "" {
+			restoreExcludedSteamIDs = map[string]bool{request.SteamId: true}
+		}
+		restoreExcludedEOSIDs := map[string]bool(nil)
+		if request.EosId != "" {
+			restoreExcludedEOSIDs = map[string]bool{utils.NormalizeEOSID(request.EosId): true}
+		}
+		if restoreErr := s.syncBansCfgWithExcludedIDs(c.Request.Context(), server, restoreExcludedSteamIDs, restoreExcludedEOSIDs); restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("banId", banID.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after RCON ban commit error")
+		}
+		responses.InternalServerError(c, fmt.Errorf("failed to commit RCON ban after syncing Bans.cfg: %w", err), nil)
 		return
 	}
 
@@ -684,7 +699,7 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 
 	// Create detailed audit log after the ban has been persisted and synced.
 	auditData := map[string]interface{}{
-		"banId":   banID,
+		"banId":   banID.String(),
 		"steamId": request.SteamId,
 		"eosId":   request.EosId,
 		"reason":  request.Reason,
@@ -699,7 +714,7 @@ func (s *Server) ServerRconPlayerBan(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:rcon:player:ban", auditData)
 
 	responses.Success(c, "Player banned successfully", &gin.H{
-		"banId": banID,
+		"banId": persistedBanID,
 	})
 }
 

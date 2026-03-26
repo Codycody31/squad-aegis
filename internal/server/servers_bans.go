@@ -386,7 +386,8 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		return
 	}
 
-	// Get the ban details first
+	// Get the ban details first so we can build audit data and clean up evidence
+	// after the transaction commits.
 	var steamIDInt sql.NullInt64
 	var eosIDStr sql.NullString
 	var reason string
@@ -414,52 +415,48 @@ func (s *Server) ServerBansRemove(c *gin.Context) {
 		eosID = utils.NormalizeEOSID(eosIDStr.String)
 	}
 
-	excludedSteamIDs := map[string]bool(nil)
-	if steamIDStr != "" {
-		excludedSteamIDs = map[string]bool{steamIDStr: true}
-	}
-	excludedEOSIDs := map[string]bool(nil)
-	if eosID != "" {
-		excludedEOSIDs = map[string]bool{eosID: true}
-	}
-
 	evidenceFilePaths, evidenceErr := s.getBanEvidenceFilePaths(c.Request.Context(), banId.String())
 	if evidenceErr != nil {
 		log.Warn().Err(evidenceErr).Str("banId", banId.String()).Msg("Failed to collect evidence file paths before ban deletion")
 	}
 
-	if err := s.syncBansCfgWithExcludedIDs(c.Request.Context(), server, excludedSteamIDs, excludedEOSIDs); err != nil {
-		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after unban for server %s (steam_id=%s eos_id=%s): %w", serverId.String(), steamIDStr, eosID, err), nil)
+	tx, err := s.Dependencies.DB.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		responses.InternalServerError(c, err, &gin.H{"error": "Failed to start transaction"})
 		return
 	}
+	defer tx.Rollback()
 
-	// Delete the ban from the database only after Bans.cfg has been updated.
-	result, err := s.Dependencies.DB.ExecContext(c.Request.Context(), `
+	result, err := tx.ExecContext(c.Request.Context(), `
 		DELETE FROM server_bans
 		WHERE id = $1 AND server_id = $2
 	`, banId, serverId)
 	if err != nil {
-		if restoreErr := s.syncBansCfg(c.Request.Context(), server); restoreErr != nil {
-			log.Warn().Err(restoreErr).Str("banId", banId.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after unban delete error")
-		}
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		if restoreErr := s.syncBansCfg(c.Request.Context(), server); restoreErr != nil {
-			log.Warn().Err(restoreErr).Str("banId", banId.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after unban rows-affected error")
-		}
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 
 	if rowsAffected == 0 {
-		if restoreErr := s.syncBansCfg(c.Request.Context(), server); restoreErr != nil {
-			log.Warn().Err(restoreErr).Str("banId", banId.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after missing ban delete")
-		}
 		responses.BadRequest(c, "Ban not found", &gin.H{"error": "Ban not found"})
+		return
+	}
+
+	if err := s.syncBansCfgWithExecutor(c.Request.Context(), tx, server); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to sync Bans.cfg after unban for server %s (steam_id=%s eos_id=%s): %w", serverId.String(), steamIDStr, eosID, err), nil)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		if restoreErr := s.syncBansCfg(c.Request.Context(), server); restoreErr != nil {
+			log.Warn().Err(restoreErr).Str("banId", banId.String()).Str("serverId", serverId.String()).Msg("Failed to restore Bans.cfg after unban commit error")
+		}
+		responses.InternalServerError(c, fmt.Errorf("failed to commit unban after syncing Bans.cfg: %w", err), nil)
 		return
 	}
 
@@ -531,12 +528,12 @@ func (s *Server) syncBansCfgWithExcludedIDsUsingExecutor(ctx context.Context, ex
 	if err != nil {
 		return err
 	}
-	managedBans = filterServerBansByExcludedIDs(managedBans, excludedSteamIDs, excludedEOSIDs)
+	filteredManagedBans := filterServerBansByExcludedIDs(managedBans, excludedSteamIDs, excludedEOSIDs)
 
 	// Preserve entries from the existing Bans.cfg that are not tracked in the DB
 	// (e.g., automatic teamkill bans, in-game manual bans not yet imported).
 	existingContent, readErr := s.readBansCfg(ctx, server)
-	content, err := buildMergedServerBansCfgContent(managedBans, existingContent, readErr, excludedSteamIDs, excludedEOSIDs)
+	content, err := buildMergedServerBansCfgContent(filteredManagedBans, existingContent, readErr, excludedSteamIDs, excludedEOSIDs)
 	if err != nil {
 		return err
 	}
@@ -1063,13 +1060,15 @@ func shouldPreserveExistingBansCfgEntry(entry models.CfgBanEntry, managedSteamID
 		return false
 	}
 
+	if entry.SteamID != "" && excludedSteamIDs[entry.SteamID] {
+		return false
+	}
+	if entry.EOSID != "" && excludedEOSIDs[utils.NormalizeEOSID(entry.EOSID)] {
+		return false
+	}
+
 	// Check if this entry is managed by Aegis (exists in DB). Managed entries are
 	// already written from the DB query, so we skip them here to avoid duplicates.
-	// NOTE: We intentionally do NOT check excludedSteamIDs/excludedEOSIDs here.
-	// Excluded IDs are only used to filter the DB-sourced managed bans (done in
-	// filterServerBansByExcludedIDs). External entries (auto-bans, in-game bans)
-	// for the same player must be preserved — removing an Aegis ban should not
-	// silently drop an unrelated game-server auto-ban for the same player.
 	if entry.SteamID != "" {
 		if managedSteamIDs[entry.SteamID] {
 			return false

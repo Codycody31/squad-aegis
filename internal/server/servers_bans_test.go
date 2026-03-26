@@ -171,3 +171,26 @@ func TestBuildMergedServerBansCfgContentPreservesUnmanagedEntries(t *testing.T) 
 		t.Fatalf("expected unmanaged ban to be preserved, got %q", content)
 	}
 }
+
+func TestBuildMergedServerBansCfgContentDropsExcludedExistingEntries(t *testing.T) {
+	t.Parallel()
+
+	existing := strings.Join([]string{
+		"Admin [SteamID 76561198000000010] Banned:76561198000000001:0 //Cheating",
+		"N/A Banned:abcdef0123456789abcdef0123456789:0 //Manual server-side ban",
+	}, "\n") + "\n"
+
+	content, err := buildMergedServerBansCfgContent(nil, existing, nil, map[string]bool{
+		"76561198000000001": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("expected merge to succeed, got %v", err)
+	}
+
+	if strings.Contains(content, "Banned:76561198000000001:0 //Cheating") {
+		t.Fatalf("expected excluded Steam ID line to be dropped, got %q", content)
+	}
+	if !strings.Contains(content, "N/A Banned:abcdef0123456789abcdef0123456789:0 //Manual server-side ban") {
+		t.Fatalf("expected non-excluded entry to remain, got %q", content)
+	}
+}

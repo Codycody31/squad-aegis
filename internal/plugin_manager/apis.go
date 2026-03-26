@@ -777,6 +777,17 @@ func (api *rconAPI) deleteBanRecord(ctx context.Context, banID uuid.UUID) error 
 	return nil
 }
 
+func (api *rconAPI) restoreBanConfigAfterRollback(ctx context.Context, action string, rollbackErr error) error {
+	if api.banSyncFunc == nil {
+		return rollbackErr
+	}
+	if restoreErr := api.banSyncFunc(ctx, api.serverID); restoreErr != nil {
+		return fmt.Errorf("%w (Bans.cfg restore failed: %v)", rollbackErr, restoreErr)
+	}
+	log.Info().Str("serverID", api.serverID.String()).Msg("Restored Bans.cfg after rolling back " + action)
+	return rollbackErr
+}
+
 func (api *rconAPI) syncBanConfigOrRollback(ctx context.Context, banID uuid.UUID, action string) error {
 	if api.banSyncFunc != nil {
 		if syncErr := api.banSyncFunc(ctx, api.serverID); syncErr != nil {
@@ -784,7 +795,7 @@ func (api *rconAPI) syncBanConfigOrRollback(ctx context.Context, banID uuid.UUID
 				log.Error().Err(rollbackErr).Str("banID", banID.String()).Msg("Failed to roll back ban after Bans.cfg sync failure")
 				return fmt.Errorf("failed to sync Bans.cfg after %s: %w (rollback failed: %v)", action, syncErr, rollbackErr)
 			}
-			return fmt.Errorf("failed to sync Bans.cfg after %s: %w", action, syncErr)
+			return api.restoreBanConfigAfterRollback(ctx, action, fmt.Errorf("failed to sync Bans.cfg after %s: %w", action, syncErr))
 		}
 	}
 

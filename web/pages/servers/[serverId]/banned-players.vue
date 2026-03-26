@@ -97,6 +97,7 @@ const selectedBanListId = ref("");
 const subscribing = ref(false);
 const unsubscribing = ref<string>("");
 const editingBan = ref<BannedPlayer | null>(null);
+const editingBanInitialDuration = ref("0");
 const evidenceSearchQuery = ref("");
 const evidenceSearchResults = ref<any[]>([]);
 const selectedEvidence = ref<any[]>([]);
@@ -227,6 +228,31 @@ function generateBanReason(ruleId: string | undefined, duration: string | undefi
     const durationStr = duration || "0";
     const durationText = durationStr === "0" || durationStr === "permanent" ? "perm" : durationStr;
     return `${rule.number} | ${shortTitle} | ${durationText}`;
+}
+
+function getInitialEditBanDuration(ban: BannedPlayer | null): string {
+    if (!ban || ban.permanent || !ban.expires_at) {
+        return "0";
+    }
+
+    const expiresAt = new Date(ban.expires_at);
+    const remainingMs = expiresAt.getTime() - Date.now();
+
+    if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+        return "1m";
+    }
+
+    const remainingMinutes = Math.max(1, Math.ceil(remainingMs / (60 * 1000)));
+
+    if (remainingMinutes % (24 * 60) === 0) {
+        return `${remainingMinutes / (24 * 60)}d`;
+    }
+
+    if (remainingMinutes % 60 === 0) {
+        return `${remainingMinutes / 60}h`;
+    }
+
+    return `${remainingMinutes}m`;
 }
 
 // Format expires_at for display
@@ -598,7 +624,7 @@ async function editBan(values: any) {
             requestBody.reason = reason;
         }
 
-        if (duration) {
+        if (duration && duration !== editingBanInitialDuration.value) {
             requestBody.duration = duration;
         }
 
@@ -713,6 +739,7 @@ function getRuleDetails(ruleId: string) {
 // Function to open edit ban dialog
 async function openEditBanDialog(ban: BannedPlayer) {
     editingBan.value = ban;
+    editingBanInitialDuration.value = getInitialEditBanDuration(ban);
 
     // Load existing evidence if present
     selectedEvidence.value = [];
@@ -772,6 +799,7 @@ async function openEditBanDialog(ban: BannedPlayer) {
 function closeEditBanDialog() {
     showEditBanDialog.value = false;
     editingBan.value = null;
+    editingBanInitialDuration.value = "0";
     selectedEvidence.value = [];
     uploadedFiles.value = [];
     textEvidenceItems.value = [];
@@ -2350,7 +2378,7 @@ async function executeImport() {
                     :validation-schema="editFormSchema"
                     :initial-values="{
                         reason: editingBan?.reason || '',
-                        duration: editingBan?.permanent ? '0' : '',
+                        duration: editingBanInitialDuration,
                         ban_list_id: editingBan?.ban_list_id || '',
                         rule_id: editingBan?.rule_id || '',
                         evidence_text: editingBan?.evidence_text || '',

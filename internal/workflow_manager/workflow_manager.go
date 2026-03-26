@@ -91,6 +91,17 @@ func (wm *WorkflowManager) deleteBanRecord(serverID uuid.UUID, banID uuid.UUID) 
 	return nil
 }
 
+func (wm *WorkflowManager) restoreBanConfigAfterRollback(serverID uuid.UUID, action string, rollbackErr error) error {
+	if wm.banSyncFunc == nil {
+		return rollbackErr
+	}
+	if restoreErr := wm.banSyncFunc(wm.ctx, serverID); restoreErr != nil {
+		return fmt.Errorf("%w (Bans.cfg restore failed: %v)", rollbackErr, restoreErr)
+	}
+	log.Info().Str("serverID", serverID.String()).Msg("Restored Bans.cfg after rolling back " + action)
+	return rollbackErr
+}
+
 func (wm *WorkflowManager) syncWorkflowBanConfig(serverID uuid.UUID, banID uuid.UUID, action string) error {
 	if wm.banSyncFunc != nil {
 		if syncErr := wm.banSyncFunc(wm.ctx, serverID); syncErr != nil {
@@ -98,7 +109,7 @@ func (wm *WorkflowManager) syncWorkflowBanConfig(serverID uuid.UUID, banID uuid.
 				log.Error().Err(rollbackErr).Str("banID", banID.String()).Msg("Failed to roll back workflow ban after Bans.cfg sync failure")
 				return fmt.Errorf("failed to sync Bans.cfg after %s: %w (rollback failed: %v)", action, syncErr, rollbackErr)
 			}
-			return fmt.Errorf("failed to sync Bans.cfg after %s: %w", action, syncErr)
+			return wm.restoreBanConfigAfterRollback(serverID, action, fmt.Errorf("failed to sync Bans.cfg after %s: %w", action, syncErr))
 		}
 	}
 
