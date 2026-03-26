@@ -96,11 +96,6 @@ func (s *Server) updateMOTDConfig(c *gin.Context) {
 		args = append(args, *req.AutoUploadOnChange)
 		argIndex++
 	}
-	if req.MOTDFilePath != nil {
-		query += fmt.Sprintf(", motd_file_path = $%d", argIndex)
-		args = append(args, *req.MOTDFilePath)
-		argIndex++
-	}
 	if req.UseLogCredentials != nil {
 		query += fmt.Sprintf(", use_log_credentials = $%d", argIndex)
 		args = append(args, *req.UseLogCredentials)
@@ -300,7 +295,7 @@ func (s *Server) fetchOrCreateMOTDConfig(ctx context.Context, serverID uuid.UUID
 
 	query := `
 		SELECT id, server_id, prefix_text, suffix_text, auto_generate_from_rules, include_rule_descriptions,
-		       upload_enabled, auto_upload_on_change, motd_file_path, use_log_credentials, upload_host, upload_port,
+		       upload_enabled, auto_upload_on_change, use_log_credentials, upload_host, upload_port,
 		       upload_username, upload_password, upload_protocol, last_uploaded_at, last_upload_error,
 		       last_generated_content, created_at, updated_at
 		FROM server_motd_config
@@ -310,8 +305,8 @@ func (s *Server) fetchOrCreateMOTDConfig(ctx context.Context, serverID uuid.UUID
 	err := s.Dependencies.DB.QueryRowContext(ctx, query, serverID).Scan(
 		&config.ID, &config.ServerID, &config.PrefixText, &config.SuffixText,
 		&config.AutoGenerateFromRules, &config.IncludeRuleDescriptions,
-		&config.UploadEnabled, &config.AutoUploadOnChange, &config.MOTDFilePath,
-		&config.UseLogCredentials, &config.UploadHost, &config.UploadPort,
+		&config.UploadEnabled, &config.AutoUploadOnChange, &config.UseLogCredentials,
+		&config.UploadHost, &config.UploadPort,
 		&config.UploadUsername, &config.UploadPassword, &config.UploadProtocol,
 		&config.LastUploadedAt, &config.LastUploadError, &config.LastGeneratedContent,
 		&config.CreatedAt, &config.UpdatedAt,
@@ -328,7 +323,6 @@ func (s *Server) fetchOrCreateMOTDConfig(ctx context.Context, serverID uuid.UUID
 			IncludeRuleDescriptions: true,
 			UploadEnabled:           false,
 			AutoUploadOnChange:      false,
-			MOTDFilePath:            "/SquadGame/ServerConfig/MOTD.cfg",
 			UseLogCredentials:       true,
 			CreatedAt:               time.Now(),
 			UpdatedAt:               time.Now(),
@@ -338,12 +332,12 @@ func (s *Server) fetchOrCreateMOTDConfig(ctx context.Context, serverID uuid.UUID
 		// just return the existing one
 		upsertQuery := `
 			INSERT INTO server_motd_config (id, server_id, prefix_text, suffix_text, auto_generate_from_rules,
-			    include_rule_descriptions, upload_enabled, auto_upload_on_change, motd_file_path, use_log_credentials,
+			    include_rule_descriptions, upload_enabled, auto_upload_on_change, use_log_credentials,
 			    created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (server_id) DO UPDATE SET updated_at = server_motd_config.updated_at
 			RETURNING id, server_id, prefix_text, suffix_text, auto_generate_from_rules, include_rule_descriptions,
-			    upload_enabled, auto_upload_on_change, motd_file_path, use_log_credentials, upload_host, upload_port,
+			    upload_enabled, auto_upload_on_change, use_log_credentials, upload_host, upload_port,
 			    upload_username, upload_password, upload_protocol, last_uploaded_at, last_upload_error,
 			    last_generated_content, created_at, updated_at
 		`
@@ -351,13 +345,13 @@ func (s *Server) fetchOrCreateMOTDConfig(ctx context.Context, serverID uuid.UUID
 		err = s.Dependencies.DB.QueryRowContext(ctx, upsertQuery,
 			config.ID, config.ServerID, config.PrefixText, config.SuffixText,
 			config.AutoGenerateFromRules, config.IncludeRuleDescriptions,
-			config.UploadEnabled, config.AutoUploadOnChange, config.MOTDFilePath,
+			config.UploadEnabled, config.AutoUploadOnChange,
 			config.UseLogCredentials, config.CreatedAt, config.UpdatedAt,
 		).Scan(
 			&config.ID, &config.ServerID, &config.PrefixText, &config.SuffixText,
 			&config.AutoGenerateFromRules, &config.IncludeRuleDescriptions,
-			&config.UploadEnabled, &config.AutoUploadOnChange, &config.MOTDFilePath,
-			&config.UseLogCredentials, &config.UploadHost, &config.UploadPort,
+			&config.UploadEnabled, &config.AutoUploadOnChange, &config.UseLogCredentials,
+			&config.UploadHost, &config.UploadPort,
 			&config.UploadUsername, &config.UploadPassword, &config.UploadProtocol,
 			&config.LastUploadedAt, &config.LastUploadError, &config.LastGeneratedContent,
 			&config.CreatedAt, &config.UpdatedAt,
@@ -474,18 +468,22 @@ func (s *Server) getUploadConfig(ctx context.Context, serverID uuid.UUID, config
 		if server.LogSourceType == nil || (*server.LogSourceType != "sftp" && *server.LogSourceType != "ftp") {
 			return uploadConfig, fmt.Errorf("server does not have FTP/SFTP log configuration")
 		}
+		if server.SquadGamePath == nil || *server.SquadGamePath == "" {
+			return uploadConfig, fmt.Errorf("server does not have a SquadGame base path configured")
+		}
 
 		if server.LogHost == nil || server.LogPort == nil || server.LogUsername == nil || server.LogPassword == nil {
 			return uploadConfig, fmt.Errorf("server log credentials are incomplete")
 		}
 
+		motdPath := buildMotdPath(*server.SquadGamePath, *server.LogSourceType)
 		uploadConfig = file_upload.UploadConfig{
 			Protocol: *server.LogSourceType,
 			Host:     *server.LogHost,
 			Port:     *server.LogPort,
 			Username: *server.LogUsername,
 			Password: *server.LogPassword,
-			FilePath: config.MOTDFilePath,
+			FilePath: motdPath,
 		}
 	} else {
 		// Use custom credentials
@@ -496,13 +494,22 @@ func (s *Server) getUploadConfig(ctx context.Context, serverID uuid.UUID, config
 			return uploadConfig, fmt.Errorf("custom upload credentials are incomplete")
 		}
 
+		server, err := core.GetServerById(ctx, s.Dependencies.DB, serverID, nil)
+		if err != nil {
+			return uploadConfig, fmt.Errorf("failed to get server: %w", err)
+		}
+		if server.SquadGamePath == nil || *server.SquadGamePath == "" {
+			return uploadConfig, fmt.Errorf("server does not have a SquadGame base path configured")
+		}
+		motdPath := buildMotdPath(*server.SquadGamePath, *config.UploadProtocol)
+
 		uploadConfig = file_upload.UploadConfig{
 			Protocol: *config.UploadProtocol,
 			Host:     *config.UploadHost,
 			Port:     *config.UploadPort,
 			Username: *config.UploadUsername,
 			Password: *config.UploadPassword,
-			FilePath: config.MOTDFilePath,
+			FilePath: motdPath,
 		}
 	}
 

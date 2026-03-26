@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
   Table,
@@ -115,6 +115,18 @@ function prevPage() {
 onMounted(() => {
   fetchSessions();
 });
+
+watch(
+  () => props.playerId,
+  (newPlayerId, oldPlayerId) => {
+    if (!newPlayerId || newPlayerId === oldPlayerId) return;
+
+    page.value = 1;
+    sessions.value = [];
+    canViewIP.value = false;
+    fetchSessions();
+  }
+);
 </script>
 
 <template>

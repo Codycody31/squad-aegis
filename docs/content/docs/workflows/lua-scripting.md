@@ -306,13 +306,13 @@ else
 end
 ```
 
-#### `workflow.rcon.ban_with_evidence(steam_id, duration, reason, rule_id)`
+#### `workflow.rcon.ban_with_evidence(player_id, duration, reason, rule_id)`
 
 Bans a player and automatically links the triggering event as evidence in the database. This creates a complete audit trail with the event that caused the ban stored as evidence.
 
 **Parameters:**
 
-- `steam_id` (string): Player's Steam ID (required)
+- `player_id` (string): Player's Steam ID (17-digit numeric) or EOS ID (32-char hex) (required)
 - `duration` (number): Ban duration in days (0 = permanent)
 - `reason` (string): Ban reason (required)
 - `rule_id` (string): Optional rule UUID to associate with the ban
@@ -337,9 +337,10 @@ Bans a player and automatically links the triggering event as evidence in the da
 - Returns ban UUID for tracking and reference
 
 ```lua
--- Basic usage
+-- Basic usage (works with either Steam ID or EOS ID)
+local player_id = trigger_event.steam_id or trigger_event.eos_id
 local ban_id, err = workflow.rcon.ban_with_evidence(
-    trigger_event.steam_id,
+    player_id,
     7,
     "Offensive language: " .. trigger_event.message
 )
@@ -354,7 +355,8 @@ end
 **Complete Example with Rule Lookup:**
 
 ```lua
-local steam_id = trigger_event.steam_id
+-- Use Steam ID if available, otherwise fall back to EOS ID
+local player_id = trigger_event.steam_id or trigger_event.eos_id
 local message = trigger_event.message
 local player_name = trigger_event.player_name
 
@@ -362,9 +364,9 @@ local player_name = trigger_event.player_name
 local rule_rows = workflow.db.query('SELECT id FROM server_rules WHERE title = $1', 'Offensive Language')
 local rule_id = (rule_rows and #rule_rows > 0) and rule_rows[1].id or ''
 
--- Ban with evidence
+-- Ban with evidence (accepts Steam ID or EOS ID)
 local ban_id, err = workflow.rcon.ban_with_evidence(
-    steam_id,
+    player_id,
     7,
     'Offensive language: ' .. message,
     rule_id
@@ -383,16 +385,17 @@ end
 **Error Handling:**
 
 ```lua
+local player_id = trigger_event.steam_id or trigger_event.eos_id
 local ban_id, err = workflow.rcon.ban_with_evidence(
-    trigger_event.steam_id,
+    player_id,
     7,
     "Rule violation"
 )
 
 if err then
     -- Handle specific errors
-    if err:match("invalid steam ID") then
-        workflow.log.error("Invalid Steam ID format")
+    if err:match("invalid player ID") then
+        workflow.log.error("Invalid player ID format (expected Steam ID or EOS ID)")
     elseif err:match("transaction") then
         workflow.log.error("Database error, ban not created")
     else

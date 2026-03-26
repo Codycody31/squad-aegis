@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
@@ -47,6 +47,7 @@ interface CBLGraphQLResponse {
 async function fetchPlayerProfile() {
   loading.value = true;
   error.value = null;
+  cblData.value = null;
 
   const playerId = route.params.playerId as string;
 
@@ -57,6 +58,7 @@ async function fetchPlayerProfile() {
 
   if (!token) {
     error.value = "Authentication required";
+    loading.value = false;
     return;
   }
 
@@ -141,17 +143,33 @@ async function fetchCBLData(steamId: string) {
   }
 }
 
+async function loadPlayerProfile() {
+  player.value = null;
+  await fetchPlayerProfile();
+
+  if (player.value && player.value.steam_id) {
+    await fetchCBLData(player.value.steam_id);
+  }
+}
+
 onMounted(async () => {
   if (!authStore.isLoggedIn) {
     navigateTo("/login");
     return;
   }
-  await fetchPlayerProfile();
-
-  if (player.value && player.value.steam_id) {
-    fetchCBLData(player.value.steam_id);
-  }
+  await loadPlayerProfile();
 });
+
+watch(
+  () => route.params.playerId,
+  async (newPlayerId, oldPlayerId) => {
+    if (!authStore.isLoggedIn || !newPlayerId || newPlayerId === oldPlayerId) {
+      return;
+    }
+
+    await loadPlayerProfile();
+  }
+);
 </script>
 
 <template>

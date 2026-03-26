@@ -3,6 +3,7 @@ package workflow_manager
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/models"
 )
 
@@ -346,5 +347,61 @@ func TestToFloat64(t *testing.T) {
 					tt.input, result, ok, tt.expected, tt.ok)
 			}
 		})
+	}
+}
+
+func TestResolveBanTargetIdentifiers_UsesTriggerEventSteamIDForPlayerName(t *testing.T) {
+	t.Parallel()
+
+	wm := &WorkflowManager{}
+	steamIDVal, eosIDVal, err := wm.resolveBanTargetIdentifiers(
+		uuid.Nil,
+		"Player One",
+		map[string]interface{}{
+			"player_name": "Player One",
+			"steam_id":    "76561198000000001",
+		},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if eosIDVal != nil {
+		t.Fatalf("expected no EOS ID, got %#v", eosIDVal)
+	}
+
+	steamID, ok := steamIDVal.(int64)
+	if !ok {
+		t.Fatalf("expected int64 Steam ID, got %#v", steamIDVal)
+	}
+	if steamID != 76561198000000001 {
+		t.Fatalf("unexpected Steam ID %d", steamID)
+	}
+}
+
+func TestResolveBanTargetIdentifiers_UsesTriggerEventEOSIDForNamedTarget(t *testing.T) {
+	t.Parallel()
+
+	wm := &WorkflowManager{}
+	steamIDVal, eosIDVal, err := wm.resolveBanTargetIdentifiers(
+		uuid.Nil,
+		"Attacker",
+		map[string]interface{}{
+			"attacker_name": "Attacker",
+			"attacker_eos":  "ABCDEF0123456789ABCDEF0123456789",
+		},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if steamIDVal != nil {
+		t.Fatalf("expected no Steam ID, got %#v", steamIDVal)
+	}
+
+	eosID, ok := eosIDVal.(string)
+	if !ok {
+		t.Fatalf("expected string EOS ID, got %#v", eosIDVal)
+	}
+	if eosID != "abcdef0123456789abcdef0123456789" {
+		t.Fatalf("unexpected EOS ID %q", eosID)
 	}
 }

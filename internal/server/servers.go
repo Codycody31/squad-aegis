@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jlaffaye/ftp"
-	"github.com/pkg/sftp"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/google/uuid"
+	"github.com/jlaffaye/ftp"
+	"github.com/pkg/sftp"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
@@ -64,12 +64,21 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		return
 	}
 
-	err := validation.ValidateStruct(&request,
+	var err error
+	request.LogSourceType, err = normalizeLogSourceType(request.LogSourceType)
+	if err != nil {
+		responses.BadRequest(c, "Invalid log source type", &gin.H{"error": err.Error()})
+		return
+	}
+
+	err = validation.ValidateStruct(&request,
 		validation.Field(&request.Name, validation.Required),
 		validation.Field(&request.IpAddress, validation.Required),
 		validation.Field(&request.GamePort, validation.Required),
 		validation.Field(&request.RconPort, validation.Required),
 		validation.Field(&request.RconPassword, validation.Required),
+		validation.Field(&request.LogSourceType, validation.Required),
+		validation.Field(&request.SquadGamePath, validation.Required, validation.By(validateSquadGamePath)),
 	)
 
 	if err != nil {
@@ -77,9 +86,22 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		return
 	}
 
-	banMode := "server"
-	if request.BanEnforcementMode != nil && *request.BanEnforcementMode == "aegis" {
-		banMode = "aegis"
+	// Validate SFTP/FTP-specific fields
+	if request.LogSourceType != nil && (*request.LogSourceType == "sftp" || *request.LogSourceType == "ftp") {
+		err = validation.ValidateStruct(&request,
+			validation.Field(&request.LogHost, validation.Required),
+			validation.Field(&request.LogUsername, validation.Required),
+			validation.Field(&request.LogPassword, validation.Required),
+		)
+		if err != nil {
+			responses.BadRequest(c, "Invalid request payload", &gin.H{"errors": err})
+			return
+		}
+	}
+
+	if request.LogPollFrequency == nil {
+		defaultPoll := 2
+		request.LogPollFrequency = &defaultPoll
 	}
 
 	serverToCreate := models.Server{
@@ -93,15 +115,13 @@ func (s *Server) ServersCreate(c *gin.Context) {
 
 		// Log configuration fields
 		LogSourceType:    request.LogSourceType,
-		LogFilePath:      request.LogFilePath,
 		LogHost:          request.LogHost,
 		LogPort:          request.LogPort,
 		LogUsername:      request.LogUsername,
 		LogPassword:      request.LogPassword,
 		LogPollFrequency: request.LogPollFrequency,
 		LogReadFromStart: request.LogReadFromStart,
-
-		BanEnforcementMode: banMode,
+		SquadGamePath:    request.SquadGamePath,
 
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -122,33 +142,8 @@ func (s *Server) ServersCreate(c *gin.Context) {
 	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
 
 	// Connect to logwatcher if log configuration is provided
-	if server.LogSourceType != nil && server.LogFilePath != nil {
-		config := logwatcher_manager.LogSourceConfig{
-			Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
-			FilePath:      *server.LogFilePath,
-			ReadFromStart: false, // Default value
-		}
-
-		if server.LogHost != nil {
-			config.Host = *server.LogHost
-		}
-		if server.LogPort != nil {
-			config.Port = *server.LogPort
-		}
-		if server.LogUsername != nil {
-			config.Username = *server.LogUsername
-		}
-		if server.LogPassword != nil {
-			config.Password = *server.LogPassword
-		}
-		if server.LogPollFrequency != nil {
-			config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
-		}
-		if server.LogReadFromStart != nil {
-			config.ReadFromStart = *server.LogReadFromStart
-		}
-
-		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, config)
+	if server.LogSourceType != nil && server.SquadGamePath != nil {
+		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, buildLogSourceConfig(server))
 	}
 
 	responses.Success(c, "Server created successfully", &gin.H{"server": server})
@@ -361,7 +356,7 @@ func (s *Server) testLogTransportFunctionality(server *models.Server, includeLog
 		return status
 	}
 
-	filePath := trimmedStringPtr(server.LogFilePath)
+	filePath := buildLogFilePath(*server.SquadGamePath, server.LogSourceType)
 	switch logwatcher_manager.LogSourceType(status.SourceType) {
 	case logwatcher_manager.LogSourceTypeLocal:
 		return probeLocalLogTransport(filePath, status)
@@ -378,8 +373,8 @@ func (s *Server) testLogTransportFunctionality(server *models.Server, includeLog
 
 func buildBaseLogTransportStatus(server *models.Server) logTransportStatus {
 	sourceType := trimmedStringPtr(server.LogSourceType)
-	filePath := trimmedStringPtr(server.LogFilePath)
-	if sourceType == "" || filePath == "" {
+	squadGamePath := trimmedStringPtr(server.SquadGamePath)
+	if sourceType == "" || squadGamePath == "" {
 		return logTransportStatus{
 			Enabled: false,
 			Healthy: false,
@@ -444,8 +439,12 @@ func probeSFTPLogTransport(server *models.Server, filePath string, status logTra
 	}
 
 	clientConfig := &ssh.ClientConfig{
-		User:            username,
-		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		User: username,
+		Auth: []ssh.AuthMethod{ssh.Password(password)},
+		// Intentionally skipping host key verification: this is a status probe
+		// against trusted, operator-configured infrastructure. The connection is
+		// short-lived and used only to check reachability, not to transfer
+		// sensitive data beyond the already-known credentials.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         statusLogProbeTimeout,
 	}
@@ -760,18 +759,10 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		return
 	}
 
-	// Normalize and validate optional log source type from UI payload.
-	if request.LogSourceType != nil {
-		logSourceType := strings.TrimSpace(*request.LogSourceType)
-		switch logSourceType {
-		case "":
-			request.LogSourceType = nil
-		case "local", "sftp", "ftp":
-			request.LogSourceType = &logSourceType
-		default:
-			responses.BadRequest(c, "Invalid log source type", &gin.H{"error": "log_source_type must be one of: local, sftp, ftp"})
-			return
-		}
+	request.LogSourceType, err = normalizeLogSourceType(request.LogSourceType)
+	if err != nil {
+		responses.BadRequest(c, "Invalid log source type", &gin.H{"error": err.Error()})
+		return
 	}
 
 	// Validate request
@@ -780,11 +771,38 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		validation.Field(&request.IpAddress, validation.Required),
 		validation.Field(&request.GamePort, validation.Required),
 		validation.Field(&request.RconPort, validation.Required),
+		validation.Field(&request.LogSourceType, validation.Required),
+		validation.Field(&request.SquadGamePath, validation.Required, validation.By(validateSquadGamePath)),
 	)
 
 	if err != nil {
 		responses.BadRequest(c, "Invalid request payload", &gin.H{"errors": err})
 		return
+	}
+
+	// Validate SFTP/FTP-specific fields
+	if request.LogSourceType != nil && (*request.LogSourceType == "sftp" || *request.LogSourceType == "ftp") {
+		err = validation.ValidateStruct(&request,
+			validation.Field(&request.LogHost, validation.Required),
+			validation.Field(&request.LogUsername, validation.Required),
+		)
+		if err != nil {
+			responses.BadRequest(c, "Invalid request payload", &gin.H{"errors": err})
+			return
+		}
+
+		// Require password if the server doesn't already have one stored
+		newPassword := request.LogPassword != nil && *request.LogPassword != ""
+		existingPassword := server.LogPassword != nil && *server.LogPassword != ""
+		if !newPassword && !existingPassword {
+			responses.BadRequest(c, "Invalid request payload", &gin.H{"errors": "log_password is required for SFTP/FTP"})
+			return
+		}
+	}
+
+	if request.LogPollFrequency == nil {
+		defaultPoll := 2
+		request.LogPollFrequency = &defaultPoll
 	}
 
 	// Update server fields
@@ -800,7 +818,6 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 
 	// Update log configuration fields
 	server.LogSourceType = request.LogSourceType
-	server.LogFilePath = request.LogFilePath
 	server.LogHost = request.LogHost
 	server.LogPort = request.LogPort
 	server.LogUsername = request.LogUsername
@@ -809,13 +826,7 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 	}
 	server.LogPollFrequency = request.LogPollFrequency
 	server.LogReadFromStart = request.LogReadFromStart
-
-	// Update ban enforcement mode if provided
-	if request.BanEnforcementMode != nil {
-		if *request.BanEnforcementMode == "aegis" || *request.BanEnforcementMode == "server" {
-			server.BanEnforcementMode = *request.BanEnforcementMode
-		}
-	}
+	server.SquadGamePath = request.SquadGamePath
 
 	// Update server in database
 	if err := core.UpdateServer(c.Request.Context(), s.Dependencies.DB, server); err != nil {
@@ -832,33 +843,8 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
 
 	// Reconnect logwatcher if log configuration is provided
-	if server.LogSourceType != nil && server.LogFilePath != nil {
-		config := logwatcher_manager.LogSourceConfig{
-			Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
-			FilePath:      *server.LogFilePath,
-			ReadFromStart: false, // Default value
-		}
-
-		if server.LogHost != nil {
-			config.Host = *server.LogHost
-		}
-		if server.LogPort != nil {
-			config.Port = *server.LogPort
-		}
-		if server.LogUsername != nil {
-			config.Username = *server.LogUsername
-		}
-		if server.LogPassword != nil {
-			config.Password = *server.LogPassword
-		}
-		if server.LogPollFrequency != nil {
-			config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
-		}
-		if server.LogReadFromStart != nil {
-			config.ReadFromStart = *server.LogReadFromStart
-		}
-
-		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, config)
+	if server.LogSourceType != nil && server.SquadGamePath != nil {
+		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, buildLogSourceConfig(server))
 	} else {
 		// Disconnect from logwatcher if log configuration is removed
 		_ = s.Dependencies.LogwatcherManager.DisconnectFromServer(server.Id)
@@ -897,7 +883,7 @@ func (s *Server) ServerLogwatcherRestart(c *gin.Context) {
 	}
 
 	// Check if server has log watcher configuration
-	if server.LogSourceType == nil || server.LogFilePath == nil {
+	if server.LogSourceType == nil || server.SquadGamePath == nil {
 		responses.BadRequest(c, "Server does not have log watcher configuration", &gin.H{"error": "No log configuration found"})
 		return
 	}
@@ -912,33 +898,8 @@ func (s *Server) ServerLogwatcherRestart(c *gin.Context) {
 
 	// Then reconnect to the log watcher with current configuration
 	log.Info().Str("server_id", serverId.String()).Msg("Reconnecting to log watcher")
-	
-	config := logwatcher_manager.LogSourceConfig{
-		Type:          logwatcher_manager.LogSourceType(*server.LogSourceType),
-		FilePath:      *server.LogFilePath,
-		ReadFromStart: false, // Default value
-	}
 
-	if server.LogHost != nil {
-		config.Host = *server.LogHost
-	}
-	if server.LogPort != nil {
-		config.Port = *server.LogPort
-	}
-	if server.LogUsername != nil {
-		config.Username = *server.LogUsername
-	}
-	if server.LogPassword != nil {
-		config.Password = *server.LogPassword
-	}
-	if server.LogPollFrequency != nil {
-		config.PollFrequency = time.Duration(*server.LogPollFrequency) * time.Second
-	}
-	if server.LogReadFromStart != nil {
-		config.ReadFromStart = *server.LogReadFromStart
-	}
-
-	err = s.Dependencies.LogwatcherManager.ConnectToServer(serverId, config)
+	err = s.Dependencies.LogwatcherManager.ConnectToServer(serverId, buildLogSourceConfig(server))
 	if err != nil {
 		responses.BadRequest(c, "Failed to reconnect to log watcher", &gin.H{"error": err.Error()})
 		return
@@ -950,9 +911,54 @@ func (s *Server) ServerLogwatcherRestart(c *gin.Context) {
 	auditData := map[string]interface{}{
 		"serverId": serverId.String(),
 		"logType":  *server.LogSourceType,
-		"logPath":  *server.LogFilePath,
+		"logPath":  buildLogFilePath(*server.SquadGamePath, server.LogSourceType),
 	}
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:logwatcher:restart", auditData)
 
 	responses.Success(c, "Log watcher restarted successfully", nil)
+}
+
+func validateSquadGamePath(value interface{}) error {
+	pathValue, ok := value.(*string)
+	if !ok || pathValue == nil {
+		return fmt.Errorf("SquadGame base path is required")
+	}
+	trimmed := strings.TrimSpace(*pathValue)
+	if trimmed == "" {
+		return fmt.Errorf("SquadGame base path is required")
+	}
+
+	if strings.Contains(trimmed, "..") {
+		return fmt.Errorf("SquadGame base path must not contain path traversal sequences (..)")
+	}
+
+	// Store trimmed value back
+	*pathValue = trimmed
+
+	normalized := strings.ToLower(strings.TrimRight(trimmed, `/\`))
+	if strings.HasSuffix(normalized, ".log") || strings.HasSuffix(normalized, ".cfg") {
+		return fmt.Errorf("SquadGame base path must be a folder, not a file")
+	}
+	if strings.Contains(normalized, "/saved/logs") || strings.Contains(normalized, `\saved\logs`) ||
+		strings.Contains(normalized, "/serverconfig") || strings.Contains(normalized, `\serverconfig`) {
+		return fmt.Errorf("SquadGame base path should point to the SquadGame folder")
+	}
+
+	return nil
+}
+
+func normalizeLogSourceType(value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	normalized := strings.TrimSpace(*value)
+	switch normalized {
+	case "":
+		return nil, nil
+	case "local", "sftp", "ftp":
+		return &normalized, nil
+	default:
+		return nil, fmt.Errorf("log_source_type must be one of: local, sftp, ftp")
+	}
 }

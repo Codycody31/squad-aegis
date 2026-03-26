@@ -11,6 +11,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // TeamRandomizerPlugin randomizes teams to break up clan stacks
@@ -237,7 +238,8 @@ func (p *TeamRandomizerPlugin) handleChatMessage(rawEvent *plugin_manager.Plugin
 			return err
 		}
 		if !isAdmin {
-			return p.apis.RconAPI.SendWarningToPlayer(event.SteamID, "You must be an admin to use the randomize command.")
+			playerID := event.PreferredPlayerID()
+			return p.apis.RconAPI.SendWarningToPlayer(playerID, "You must be an admin to use the randomize command.")
 		}
 	}
 
@@ -322,8 +324,8 @@ func (p *TeamRandomizerPlugin) randomizeTeams(initiatorName, steamID string) err
 	for _, player := range shuffledPlayers {
 		// Only move player if they're not already on the target team
 		if player.TeamID != targetTeam {
-			// Use SteamID for AdminForceTeamChange command
-			command := fmt.Sprintf("AdminForceTeamChange %s", player.SteamID)
+			// Use PreferredID (SteamID with EOS fallback) for AdminForceTeamChange command
+			command := fmt.Sprintf("AdminForceTeamChange %s", utils.SanitizeRCONParam(player.PreferredID()))
 
 			if _, err := p.apis.RconAPI.SendCommand(command); err != nil {
 				p.apis.LogAPI.Error("Failed to move player to team", err, map[string]interface{}{

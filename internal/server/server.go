@@ -7,6 +7,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 
 	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/core"
@@ -26,6 +27,10 @@ import (
 
 type Server struct {
 	Dependencies *Dependencies
+
+	// bansCfgMu provides per-server locking for Bans.cfg read-modify-write
+	// cycles. Keyed by server UUID string, values are *sync.Mutex.
+	bansCfgMu sync.Map
 }
 
 type Dependencies struct {
@@ -43,11 +48,14 @@ type Dependencies struct {
 	PermissionRepo       *permissions.Repository
 }
 
-func NewRouter(serverDependencies *Dependencies) *gin.Engine {
-	router := gin.New()
-	server := &Server{
+func New(serverDependencies *Dependencies) *Server {
+	return &Server{
 		Dependencies: serverDependencies,
 	}
+}
+
+func NewRouter(server *Server) *gin.Engine {
+	router := gin.New()
 
 	if config.Config.Log.ShowGin {
 		// General Middleware
@@ -94,7 +102,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			proxy := &httputil.ReverseProxy{Director: director}
 			proxy.ServeHTTP(w, r)
 		} else {
-			webEngine, err := web.New(serverDependencies.DB)
+			webEngine, err := web.New(server.Dependencies.DB)
 			if err != nil {
 				log.Println("failed to create web engine", err)
 			}
@@ -263,6 +271,8 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 				serverGroup.POST("/bans", server.RequirePermission(permissions.UIBansCreate), server.ServerBansAdd)
 				serverGroup.PUT("/bans/:banId", server.RequirePermission(permissions.UIBansEdit), server.ServerBansUpdate)
 				serverGroup.DELETE("/bans/:banId", server.RequirePermission(permissions.UIBansDelete), server.ServerBansRemove)
+				serverGroup.GET("/bans/import-preview", server.RequirePermission(permissions.UIBansCreate), server.ServerBanImportPreview)
+				serverGroup.POST("/bans/import", server.RequirePermission(permissions.UIBansCreate), server.ServerBanImportExecute)
 
 				// Ban list subscription management
 				serverGroup.GET("/ban-list-subscriptions", server.RequirePermission(permissions.UIBanListsView), server.ServerBanListSubscriptions)
@@ -412,6 +422,7 @@ func NewRouter(serverDependencies *Dependencies) *gin.Engine {
 			playersGroup.GET("/stats", server.PlayersStats)
 			playersGroup.GET("/alt-groups", server.PlayersAltGroups)
 			playersGroup.GET("/:playerId", server.PlayerGet)
+			playersGroup.GET("/:playerId/ban-history", server.PlayerBanHistory)
 			playersGroup.GET("/:playerId/chat", server.PlayerChatHistoryPaginated)
 			playersGroup.GET("/:playerId/teamkills", server.PlayerTeamkillsAnalysis)
 			playersGroup.GET("/:playerId/sessions", server.PlayerSessionHistory)

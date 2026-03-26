@@ -18,6 +18,14 @@ type RconChatMessageData struct {
 
 func (d RconChatMessageData) GetEventType() EventType { return EventTypeRconChatMessage }
 
+// PreferredPlayerID returns the SteamID if available, falling back to EosID.
+func (d RconChatMessageData) PreferredPlayerID() string {
+	if d.SteamID != "" {
+		return d.SteamID
+	}
+	return d.EosID
+}
+
 // RconPlayerWarnedData represents RCON player warned event data
 type RconPlayerWarnedData struct {
 	PlayerName string `json:"player_name"`
@@ -39,6 +47,7 @@ func (d RconPlayerKickedData) GetEventType() EventType { return EventTypeRconPla
 // RconPlayerBannedData represents RCON player banned event data
 type RconPlayerBannedData struct {
 	PlayerID   string `json:"player_id,omitempty"`
+	EosID      string `json:"eos_id,omitempty"`
 	SteamID    string `json:"steam_id,omitempty"`
 	PlayerName string `json:"player_name"`
 	Interval   int    `json:"interval"`
@@ -121,6 +130,14 @@ type LogPlayerConnectedData struct {
 }
 
 func (d LogPlayerConnectedData) GetEventType() EventType { return EventTypeLogPlayerConnected }
+
+// PreferredPlayerID returns the SteamID if available, falling back to EOSID.
+func (d LogPlayerConnectedData) PreferredPlayerID() string {
+	if d.SteamID != "" {
+		return d.SteamID
+	}
+	return d.EOSID
+}
 
 // LogPlayerDamagedData represents log player damaged event data
 type LogPlayerDamagedData struct {

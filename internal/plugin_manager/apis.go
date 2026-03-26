@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -15,6 +17,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
@@ -552,6 +555,11 @@ func (api *databaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Ro
 		return nil, fmt.Errorf("only SELECT queries are allowed")
 	}
 
+	// Reject multi-statement queries
+	if hasMultipleSQLStatements(query) {
+		return nil, fmt.Errorf("multi-statement queries are not allowed")
+	}
+
 	// Prevent certain dangerous operations
 	if strings.Contains(trimmedQuery, "DROP") ||
 		strings.Contains(trimmedQuery, "DELETE") ||
@@ -563,6 +571,128 @@ func (api *databaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Ro
 	}
 
 	return api.db.Query(query, args...)
+}
+
+// This is shit, we know its shit.... but it's for plugins... which we control...., but at least it puts somekind of ground work for the future
+func hasMultipleSQLStatements(query string) bool {
+	statementTerminated := false
+	lineComment := false
+	blockCommentDepth := 0
+	singleQuoted := false
+	doubleQuoted := false
+	dollarQuoteTag := ""
+
+	for i := 0; i < len(query); i++ {
+		ch := query[i]
+
+		if lineComment {
+			if ch == '\n' {
+				lineComment = false
+			}
+			continue
+		}
+
+		if blockCommentDepth > 0 {
+			if ch == '/' && i+1 < len(query) && query[i+1] == '*' {
+				blockCommentDepth++
+				i++
+				continue
+			}
+			if ch == '*' && i+1 < len(query) && query[i+1] == '/' {
+				blockCommentDepth--
+				i++
+			}
+			continue
+		}
+
+		if dollarQuoteTag != "" {
+			if strings.HasPrefix(query[i:], dollarQuoteTag) {
+				i += len(dollarQuoteTag) - 1
+				dollarQuoteTag = ""
+			}
+			continue
+		}
+
+		if singleQuoted {
+			if ch == '\'' {
+				if i+1 < len(query) && query[i+1] == '\'' {
+					i++
+				} else {
+					singleQuoted = false
+				}
+			}
+			continue
+		}
+
+		if doubleQuoted {
+			if ch == '"' {
+				if i+1 < len(query) && query[i+1] == '"' {
+					i++
+				} else {
+					doubleQuoted = false
+				}
+			}
+			continue
+		}
+
+		switch ch {
+		case '-':
+			if i+1 < len(query) && query[i+1] == '-' {
+				lineComment = true
+				i++
+				continue
+			}
+		case '/':
+			if i+1 < len(query) && query[i+1] == '*' {
+				blockCommentDepth = 1
+				i++
+				continue
+			}
+		case '\'':
+			singleQuoted = true
+			continue
+		case '"':
+			doubleQuoted = true
+			continue
+		case '$':
+			if tag := parseDollarQuoteTag(query, i); tag != "" {
+				dollarQuoteTag = tag
+				i += len(tag) - 1
+				continue
+			}
+		case ';':
+			if statementTerminated {
+				return true
+			}
+			statementTerminated = true
+			continue
+		}
+
+		if statementTerminated && !unicode.IsSpace(rune(ch)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func parseDollarQuoteTag(query string, start int) string {
+	if start >= len(query) || query[start] != '$' {
+		return ""
+	}
+
+	for i := start + 1; i < len(query); i++ {
+		switch ch := rune(query[i]); {
+		case query[i] == '$':
+			return query[start : i+1]
+		case ch == '_' || unicode.IsLetter(ch) || unicode.IsDigit(ch):
+			continue
+		default:
+			return ""
+		}
+	}
+
+	return ""
 }
 
 func (api *databaseAPI) GetPluginData(key string) (string, error) {
@@ -613,15 +743,67 @@ type rconAPI struct {
 	db               *sql.DB
 	rconManager      *rcon_manager.RconManager
 	clickhouseClient *clickhouse.Client
+	chWarnOnce       sync.Once
+	banSyncFunc      func(ctx context.Context, serverID uuid.UUID) error
 }
 
-func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager, clickhouseClient *clickhouse.Client) RconAPI {
+func NewRconAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager, clickhouseClient *clickhouse.Client, banSyncFunc func(ctx context.Context, serverID uuid.UUID) error) RconAPI {
 	return &rconAPI{
 		serverID:         serverID,
 		db:               db,
 		rconManager:      rconManager,
 		clickhouseClient: clickhouseClient,
+		banSyncFunc:      banSyncFunc,
 	}
+}
+
+func (api *rconAPI) deleteBanRecord(ctx context.Context, banID uuid.UUID) error {
+	result, err := api.db.ExecContext(ctx, `
+		DELETE FROM server_bans
+		WHERE id = $1 AND server_id = $2
+	`, banID, api.serverID)
+	if err != nil {
+		return fmt.Errorf("failed to roll back ban %s: %w", banID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to verify rollback for ban %s: %w", banID, err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("ban %s was not found during rollback", banID)
+	}
+
+	return nil
+}
+
+func (api *rconAPI) restoreBanConfigAfterRollback(ctx context.Context, action string, rollbackErr error) error {
+	if api.banSyncFunc == nil {
+		return rollbackErr
+	}
+	if restoreErr := api.banSyncFunc(ctx, api.serverID); restoreErr != nil {
+		return fmt.Errorf("%w (Bans.cfg restore failed: %v)", rollbackErr, restoreErr)
+	}
+	log.Info().Str("serverID", api.serverID.String()).Msg("Restored Bans.cfg after rolling back " + action)
+	return rollbackErr
+}
+
+func (api *rconAPI) syncBanConfigOrRollback(ctx context.Context, banID uuid.UUID, action string) error {
+	if api.banSyncFunc != nil {
+		if syncErr := api.banSyncFunc(ctx, api.serverID); syncErr != nil {
+			if rollbackErr := api.deleteBanRecord(ctx, banID); rollbackErr != nil {
+				log.Error().Err(rollbackErr).Str("banID", banID.String()).Msg("Failed to roll back ban after Bans.cfg sync failure")
+				return fmt.Errorf("failed to sync Bans.cfg after %s: %w (rollback failed: %v)", action, syncErr, rollbackErr)
+			}
+			return api.restoreBanConfigAfterRollback(ctx, action, fmt.Errorf("failed to sync Bans.cfg after %s: %w", action, syncErr))
+		}
+	}
+
+	if _, err := api.rconManager.ExecuteCommand(api.serverID, "AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("banID", banID.String()).Msg("Failed to reload server config after " + action)
+	}
+
+	return nil
 }
 
 func (api *rconAPI) SendCommand(command string) (string, error) {
@@ -641,7 +823,7 @@ func (api *rconAPI) SendCommand(command string) (string, error) {
 }
 
 func (api *rconAPI) Broadcast(message string) error {
-	command := fmt.Sprintf("AdminBroadcast %s", message)
+	command := fmt.Sprintf("AdminBroadcast %s", utils.SanitizeRCONParam(message))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to send broadcast message: %w", err)
@@ -650,7 +832,7 @@ func (api *rconAPI) Broadcast(message string) error {
 }
 
 func (api *rconAPI) SendWarningToPlayer(playerID string, message string) error {
-	command := fmt.Sprintf("AdminWarn \"%s\" %s", playerID, message)
+	command := fmt.Sprintf("AdminWarn \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(message))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to send warning to player: %w", err)
@@ -659,7 +841,7 @@ func (api *rconAPI) SendWarningToPlayer(playerID string, message string) error {
 }
 
 func (api *rconAPI) KickPlayer(playerID string, reason string) error {
-	command := fmt.Sprintf("AdminKick \"%s\" %s", playerID, reason)
+	command := fmt.Sprintf("AdminKick \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(reason))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to kick player: %w", err)
@@ -668,7 +850,7 @@ func (api *rconAPI) KickPlayer(playerID string, reason string) error {
 }
 
 func (api *rconAPI) RemovePlayerFromSquad(playerID string) error {
-	command := fmt.Sprintf("AdminRemovePlayerFromSquad \"%s\"", playerID)
+	command := fmt.Sprintf("AdminRemovePlayerFromSquad \"%s\"", utils.SanitizeRCONParam(playerID))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to remove player from squad: %w", err)
@@ -677,7 +859,7 @@ func (api *rconAPI) RemovePlayerFromSquad(playerID string) error {
 }
 
 func (api *rconAPI) RemovePlayerFromSquadById(playerID string) error {
-	command := fmt.Sprintf("AdminRemovePlayerFromSquadById \"%s\"", playerID)
+	command := fmt.Sprintf("AdminRemovePlayerFromSquadById \"%s\"", utils.SanitizeRCONParam(playerID))
 	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
 	if err != nil {
 		return fmt.Errorf("failed to remove player from squad: %w", err)
@@ -686,20 +868,29 @@ func (api *rconAPI) RemovePlayerFromSquadById(playerID string) error {
 }
 
 func (api *rconAPI) BanPlayer(playerID string, reason string, duration time.Duration) error {
-	// Convert duration to days for Squad's ban system
-	durationDays := int(duration.Hours() / 24)
-
-	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", playerID, durationDays, reason)
-	_, err := api.rconManager.ExecuteCommand(api.serverID, command)
-	if err != nil {
-		return fmt.Errorf("failed to ban player: %w", err)
+	// Compute expires_at from duration
+	var expiresAt *time.Time
+	if duration > 0 {
+		t := time.Now().Add(duration)
+		expiresAt = &t
 	}
 
-	// Store ban information in database
-	err = api.storeBanInDatabase(playerID, reason, duration)
+	// Store ban in database first
+	banID, err := api.storeBanInDatabase(playerID, reason, expiresAt)
 	if err != nil {
-		// Log error but don't fail the ban operation since RCON command succeeded
 		log.Error().Err(err).Str("playerID", playerID).Msg("Failed to store ban in database")
+		return fmt.Errorf("failed to store ban: %w", err)
+	}
+
+	if err := api.syncBanConfigOrRollback(context.Background(), banID, "plugin ban"); err != nil {
+		return err
+	}
+
+	// Kick player for immediate enforcement
+	command := fmt.Sprintf("AdminKick \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(reason))
+	_, err = api.rconManager.ExecuteCommand(api.serverID, command)
+	if err != nil {
+		return fmt.Errorf("failed to kick player: %w", err)
 	}
 
 	return nil
@@ -725,8 +916,12 @@ func mapPluginEventTypeToEvidence(eventType string) (evidenceType string, clickh
 
 // BanWithEvidence bans a player and links evidence from an event
 func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration time.Duration, eventID string, eventType string) (string, error) {
-	// Convert duration to days
-	durationDays := int(duration.Hours() / 24)
+	// Compute expires_at from duration
+	var expiresAt *time.Time
+	if duration > 0 {
+		t := time.Now().Add(duration)
+		expiresAt = &t
+	}
 
 	// Map event type to evidence type and table
 	evidenceType, clickhouseTable := mapPluginEventTypeToEvidence(eventType)
@@ -740,10 +935,15 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 		return "", fmt.Errorf("invalid event ID format: %w", err)
 	}
 
-	// Convert playerID to int64
-	steamID, err := strconv.ParseInt(playerID, 10, 64)
-	if err != nil {
-		return "", fmt.Errorf("invalid Steam ID format: %w", err)
+	// Detect player ID type (Steam ID or EOS ID)
+	var steamIDVal interface{}
+	var eosIDVal interface{}
+	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
+		steamIDVal = sid
+	} else if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
+		eosIDVal = normalizedEOSID
+	} else {
+		return "", fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}
 
 	// Start transaction
@@ -757,13 +957,14 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 	banID := uuid.New()
 	now := time.Now()
 
-	banQuery := `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
+	banQuery := `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
 	_, err = tx.Exec(banQuery,
 		banID,
 		api.serverID,
-		steamID,
+		steamIDVal,
+		eosIDVal,
 		reason,
-		durationDays,
+		expiresAt,
 		now,
 		now,
 	)
@@ -801,53 +1002,54 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 		return "", fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// Execute RCON ban
-	command := fmt.Sprintf("AdminBan \"%s\" %dd %s", playerID, durationDays, reason)
-	_, err = api.rconManager.ExecuteCommand(api.serverID, command)
-	if err != nil {
-		log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
+	if err := api.syncBanConfigOrRollback(context.Background(), banID, "evidence ban"); err != nil {
+		return "", err
 	}
 
-	// Kick player
-	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", playerID, reason)
+	// Kick player for immediate enforcement
+	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", utils.SanitizeRCONParam(playerID), utils.SanitizeRCONParam(reason))
 	_, _ = api.rconManager.ExecuteCommand(api.serverID, kickCommand)
 
 	return banID.String(), nil
 }
 
 // storeBanInDatabase stores the ban information in the database
-func (api *rconAPI) storeBanInDatabase(playerID string, reason string, duration time.Duration) error {
-	// Convert playerID (which should be a Steam ID) to int64
-	steamID, err := strconv.ParseInt(playerID, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid Steam ID format: %w", err)
+func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt *time.Time) (uuid.UUID, error) {
+	// Detect player ID type (Steam ID or EOS ID)
+	var steamIDVal interface{}
+	var eosIDVal interface{}
+	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
+		steamIDVal = sid
+	} else if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
+		eosIDVal = normalizedEOSID
+	} else {
+		return uuid.Nil, fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
 	}
-
-	// Convert duration to days for database storage
-	durationDays := int(duration.Hours() / 24)
 
 	// Insert ban into database
 	// We use NULL for admin_id since this is a plugin-initiated ban, not a specific user
 	now := time.Now()
+	banID := uuid.New()
 	query := `
-		INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at)
-		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
 	`
 
-	_, err = api.db.Exec(query,
-		uuid.New(),   // id
+	_, err := api.db.Exec(query,
+		banID,        // id
 		api.serverID, // server_id
-		steamID,      // steam_id
+		steamIDVal,   // steam_id (nil if EOS-only)
+		eosIDVal,     // eos_id (nil if Steam-only)
 		reason,       // reason
-		durationDays, // duration in days
+		expiresAt,    // expires_at (nil = permanent)
 		now,          // created_at
 		now,          // updated_at
 	)
 	if err != nil {
-		return fmt.Errorf("failed to insert ban into database: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to insert ban into database: %w", err)
 	}
 
-	return nil
+	return banID, nil
 }
 
 // logPluginRuleViolation logs a rule violation to ClickHouse for player history tracking
@@ -857,7 +1059,9 @@ func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, acti
 	}
 
 	if api.clickhouseClient == nil {
-		log.Warn().Msg("ClickHouse client not available, skipping violation logging")
+		api.chWarnOnce.Do(func() {
+			log.Warn().Msg("ClickHouse client not available - violation logging is disabled")
+		})
 		return nil
 	}
 
@@ -869,8 +1073,8 @@ func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, acti
 
 	steamID, err := strconv.ParseInt(playerID, 10, 64)
 	if err != nil {
-		log.Warn().Err(err).Str("player_id", playerID).Msg("Invalid Steam ID format, skipping violation log")
-		return nil
+		log.Warn().Err(err).Str("player_id", playerID).Msg("Non-numeric player ID (likely EOS ID), skipping ClickHouse violation log")
+		return nil // ClickHouse schema requires UInt64 for player_steam_id; EOS IDs not supported yet
 	}
 
 	query := `

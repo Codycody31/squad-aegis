@@ -2,13 +2,17 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/db"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // BanList Management Functions
@@ -188,13 +192,13 @@ func DeleteServerBanListSubscription(ctx context.Context, database db.Executor, 
 // Enhanced Ban Functions
 
 func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID) ([]models.ServerBan, error) {
-	sql := `
-		SELECT DISTINCT ON (sb.steam_id)
-			sb.id, sb.server_id, sb.admin_id, u.username, u.steam_id, sb.steam_id, sb.reason,
-			sb.duration, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name,
+	query := `
+		SELECT DISTINCT ON (COALESCE(sb.steam_id::text, sb.eos_id))
+			sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, u.steam_id, sb.steam_id, sb.eos_id, sb.reason,
+			sb.expires_at, sb.rule_id, sb.ban_list_id, bl.name as ban_list_name,
 			sb.created_at, sb.updated_at
 		FROM server_bans sb
-		JOIN users u ON sb.admin_id = u.id
+		LEFT JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
 		WHERE (
 			-- Direct bans on this server
@@ -207,10 +211,11 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 				WHERE sbls.server_id = $1
 			)
 		)
-		ORDER BY sb.steam_id, sb.created_at DESC
+		AND (sb.expires_at IS NULL OR sb.expires_at >= NOW())
+		ORDER BY COALESCE(sb.steam_id::text, sb.eos_id), sb.created_at DESC
 	`
 
-	rows, err := database.QueryContext(ctx, sql, serverId)
+	rows, err := database.QueryContext(ctx, query, serverId)
 	if err != nil {
 		return nil, err
 	}
@@ -219,38 +224,60 @@ func GetServerBans(ctx context.Context, database db.Executor, serverId uuid.UUID
 	var bans []models.ServerBan
 	for rows.Next() {
 		var ban models.ServerBan
-		var steamIDInt int64
-		var adminSteamIDInt int64
+		var adminIDStr sql.NullString
+		var steamIDInt sql.NullInt64
+		var eosIDStr sql.NullString
+		var adminSteamIDInt sql.NullInt64
+		var expiresAt sql.NullTime
 		var ruleIDStr, banListIDStr, banListNameStr *string
 
 		err := rows.Scan(
-			&ban.ID, &ban.ServerID, &ban.AdminID, &ban.AdminName, &adminSteamIDInt,
-			&steamIDInt, &ban.Reason, &ban.Duration, &ruleIDStr,
+			&ban.ID, &ban.ServerID, &adminIDStr, &ban.AdminName, &adminSteamIDInt,
+			&steamIDInt, &eosIDStr, &ban.Reason, &expiresAt, &ruleIDStr,
 			&banListIDStr, &banListNameStr, &ban.CreatedAt, &ban.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		// Convert steamID from int64 to string
-		ban.SteamID = fmt.Sprintf("%d", steamIDInt)
-		ban.Name = ban.SteamID
+		if adminIDStr.Valid {
+			adminID, parseErr := uuid.Parse(adminIDStr.String)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			ban.AdminID = &adminID
+		}
+		if steamIDInt.Valid {
+			ban.SteamID = fmt.Sprintf("%d", steamIDInt.Int64)
+		}
+		if eosIDStr.Valid {
+			ban.EOSID = utils.NormalizeEOSID(eosIDStr.String)
+		}
+		if ban.SteamID != "" {
+			ban.Name = ban.SteamID
+		} else {
+			ban.Name = ban.EOSID
+		}
 
-		// Convert admin steam ID if present
-		ban.AdminSteamID = fmt.Sprintf("%d", adminSteamIDInt)
+		if adminSteamIDInt.Valid {
+			ban.AdminSteamID = fmt.Sprintf("%d", adminSteamIDInt.Int64)
+		}
 
 		// Set optional fields
 		ban.RuleID = ruleIDStr
 		ban.BanListID = banListIDStr
 		ban.BanListName = banListNameStr
 
-		// Calculate if ban is permanent and expiry date
-		ban.Permanent = ban.Duration == 0
-		if !ban.Permanent {
-			ban.ExpiresAt = ban.CreatedAt.Add(time.Duration(ban.Duration) * time.Minute)
+		// Set expires_at and compute permanent flag
+		if expiresAt.Valid {
+			ban.ExpiresAt = &expiresAt.Time
 		}
+		ban.Permanent = ban.ExpiresAt == nil
 
 		bans = append(bans, ban)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
 
 	return bans, nil
@@ -439,8 +466,18 @@ func DeleteIgnoredSteamID(ctx context.Context, database db.Executor, id uuid.UUI
 		return err
 	}
 
-	_, err = database.ExecContext(ctx, sql, args...)
-	return err
+	result, err := database.ExecContext(ctx, sql, args...)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("ignored steam ID not found")
+	}
+	return nil
 }
 
 func IsIgnoredSteamID(ctx context.Context, database db.Executor, steamID string) (bool, error) {
@@ -459,54 +496,74 @@ func IsIgnoredSteamID(ctx context.Context, database db.Executor, steamID string)
 	return count > 0, nil
 }
 
-// GetActiveBanForServer checks if a steam ID has an active (non-expired) ban
+// GetActiveBanForServer checks if a steam ID or EOS ID has an active (non-expired) ban
 // on the given server, including bans from subscribed ban lists.
+// At least one of steamID or eosID must be non-empty.
 // Returns nil if no active ban is found.
-func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID uuid.UUID, steamID string) (*models.ServerBan, error) {
-	query := `
-		SELECT sb.id, sb.reason, sb.duration, sb.created_at
+func GetActiveBanForServer(ctx context.Context, database db.Executor, serverID uuid.UUID, steamID string, eosID string) (*models.ServerBan, error) {
+	eosID = utils.NormalizeEOSID(eosID)
+
+	// Build identifier conditions dynamically to avoid PostgreSQL cast issues.
+	// Passing "" to $1::bigint fails even with a "$1 != ''" guard because
+	// PostgreSQL does not guarantee short-circuit evaluation of AND/OR.
+	var idConditions []string
+	args := []any{}
+	argIdx := 1
+
+	if steamID != "" {
+		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid steam ID %q: %w", steamID, err)
+		}
+		idConditions = append(idConditions, fmt.Sprintf("sb.steam_id = $%d", argIdx))
+		args = append(args, steamIDInt)
+		argIdx++
+	}
+	if eosID != "" {
+		idConditions = append(idConditions, fmt.Sprintf("sb.eos_id = $%d", argIdx))
+		args = append(args, eosID)
+		argIdx++
+	}
+	if len(idConditions) == 0 {
+		return nil, fmt.Errorf("at least one of steamID or eosID must be non-empty")
+	}
+
+	serverPlaceholder := fmt.Sprintf("$%d", argIdx)
+	args = append(args, serverID)
+
+	query := fmt.Sprintf(`
+		SELECT sb.id, sb.reason, sb.expires_at, sb.created_at
 		FROM server_bans sb
-		WHERE sb.steam_id = $1
-		AND (sb.duration = 0 OR sb.created_at + (sb.duration || ' days')::interval > NOW())
+		WHERE (%s)
+		AND (sb.expires_at IS NULL OR sb.expires_at > NOW())
 		AND (
-			sb.server_id = $2
+			sb.server_id = %s
 			OR sb.ban_list_id IN (
 				SELECT sbls.ban_list_id
 				FROM server_ban_list_subscriptions sbls
-				WHERE sbls.server_id = $2
+				WHERE sbls.server_id = %s
 			)
 		)
 		ORDER BY sb.created_at DESC
 		LIMIT 1
-	`
+	`, strings.Join(idConditions, " OR "), serverPlaceholder, serverPlaceholder)
 
 	var ban models.ServerBan
-	err := database.QueryRowContext(ctx, query, steamID, serverID).Scan(
-		&ban.ID, &ban.Reason, &ban.Duration, &ban.CreatedAt,
+	var banExpiresAt sql.NullTime
+	err := database.QueryRowContext(ctx, query, args...).Scan(
+		&ban.ID, &ban.Reason, &banExpiresAt, &ban.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	ban.SteamID = steamID
+	ban.EOSID = eosID
 	ban.ServerID = serverID
-	ban.Permanent = ban.Duration == 0
-	if !ban.Permanent {
-		ban.ExpiresAt = ban.CreatedAt.AddDate(0, 0, ban.Duration)
+	if banExpiresAt.Valid {
+		ban.ExpiresAt = &banExpiresAt.Time
 	}
+	ban.Permanent = ban.ExpiresAt == nil
 
 	return &ban, nil
-}
-
-// GetServerBanEnforcementMode returns the ban enforcement mode for a server.
-// Returns "server" as the default if not found.
-func GetServerBanEnforcementMode(ctx context.Context, database db.Executor, serverID uuid.UUID) (string, error) {
-	var mode string
-	err := database.QueryRowContext(ctx,
-		"SELECT ban_enforcement_mode FROM servers WHERE id = $1", serverID,
-	).Scan(&mode)
-	if err != nil {
-		return "server", err
-	}
-	return mode, nil
 }

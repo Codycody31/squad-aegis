@@ -21,6 +21,8 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
+	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
 // WorkflowManager manages workflow execution and lifecycle
@@ -38,6 +40,7 @@ type WorkflowManager struct {
 	executionMutex   sync.RWMutex
 	isRunning        bool
 	subscriber       *event_manager.EventSubscriber
+	banSyncFunc      func(ctx context.Context, serverID uuid.UUID) error
 }
 
 // NewWorkflowManager creates a new workflow manager
@@ -61,6 +64,60 @@ func NewWorkflowManager(
 		activeWorkflows:  make(map[uuid.UUID]*models.ServerWorkflow),
 		executionContext: make(map[uuid.UUID]*models.WorkflowExecutionContext),
 	}
+}
+
+// SetBanSyncFunc sets the callback used to regenerate Bans.cfg after a workflow-issued ban.
+func (wm *WorkflowManager) SetBanSyncFunc(fn func(ctx context.Context, serverID uuid.UUID) error) {
+	wm.banSyncFunc = fn
+}
+
+func (wm *WorkflowManager) deleteBanRecord(serverID uuid.UUID, banID uuid.UUID) error {
+	result, err := wm.db.ExecContext(wm.ctx, `
+		DELETE FROM server_bans
+		WHERE id = $1 AND server_id = $2
+	`, banID, serverID)
+	if err != nil {
+		return fmt.Errorf("failed to roll back ban %s: %w", banID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to verify rollback for ban %s: %w", banID, err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("ban %s was not found during rollback", banID)
+	}
+
+	return nil
+}
+
+func (wm *WorkflowManager) restoreBanConfigAfterRollback(serverID uuid.UUID, action string, rollbackErr error) error {
+	if wm.banSyncFunc == nil {
+		return rollbackErr
+	}
+	if restoreErr := wm.banSyncFunc(wm.ctx, serverID); restoreErr != nil {
+		return fmt.Errorf("%w (Bans.cfg restore failed: %v)", rollbackErr, restoreErr)
+	}
+	log.Info().Str("serverID", serverID.String()).Msg("Restored Bans.cfg after rolling back " + action)
+	return rollbackErr
+}
+
+func (wm *WorkflowManager) syncWorkflowBanConfig(serverID uuid.UUID, banID uuid.UUID, action string) error {
+	if wm.banSyncFunc != nil {
+		if syncErr := wm.banSyncFunc(wm.ctx, serverID); syncErr != nil {
+			if rollbackErr := wm.deleteBanRecord(serverID, banID); rollbackErr != nil {
+				log.Error().Err(rollbackErr).Str("banID", banID.String()).Msg("Failed to roll back workflow ban after Bans.cfg sync failure")
+				return fmt.Errorf("failed to sync Bans.cfg after %s: %w (rollback failed: %v)", action, syncErr, rollbackErr)
+			}
+			return wm.restoreBanConfigAfterRollback(serverID, action, fmt.Errorf("failed to sync Bans.cfg after %s: %w", action, syncErr))
+		}
+	}
+
+	if _, err := wm.rconManager.ExecuteCommand(serverID, "AdminReloadServerConfig"); err != nil {
+		log.Warn().Err(err).Str("banID", banID.String()).Msg("Failed to reload server config after " + action)
+	}
+
+	return nil
 }
 
 // Start starts the workflow manager
@@ -94,6 +151,163 @@ func (wm *WorkflowManager) Start() error {
 	log.Info().Msgf("Workflow manager started with %d active workflows", len(wm.activeWorkflows))
 
 	return nil
+}
+
+// sanitizeRCONParam delegates to the shared utility that strips characters
+// dangerous in RCON commands (double quotes, newlines).
+func sanitizeRCONParam(s string) string {
+	return utils.SanitizeRCONParam(s)
+}
+
+func (wm *WorkflowManager) resolveBanTargetIdentifiers(serverID uuid.UUID, playerID string, triggerEvent map[string]interface{}) (steamIDVal interface{}, eosIDVal interface{}, err error) {
+	playerID = strings.TrimSpace(playerID)
+	if playerID == "" {
+		return nil, nil, fmt.Errorf("player ID is empty")
+	}
+
+	if sid, parseErr := strconv.ParseInt(playerID, 10, 64); parseErr == nil {
+		return sid, nil, nil
+	}
+
+	if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
+		return nil, normalizedEOSID, nil
+	}
+
+	if steamIDVal, eosIDVal, ok := resolveBanTargetIdentifiersFromTriggerEvent(playerID, triggerEvent); ok {
+		return steamIDVal, eosIDVal, nil
+	}
+
+	return wm.resolveBanTargetIdentifiersFromLivePlayers(serverID, playerID)
+}
+
+func resolveBanTargetIdentifiersFromTriggerEvent(playerID string, triggerEvent map[string]interface{}) (steamIDVal interface{}, eosIDVal interface{}, ok bool) {
+	if len(triggerEvent) == 0 {
+		return nil, nil, false
+	}
+
+	playerID = strings.TrimSpace(playerID)
+	for key, rawValue := range triggerEvent {
+		name, isString := rawValue.(string)
+		if !isString || !strings.EqualFold(strings.TrimSpace(name), playerID) {
+			continue
+		}
+
+		candidateKeys := identifierCandidateKeysForNameKey(key)
+		for _, steamKey := range candidateKeys.steamKeys {
+			if sid, found := parseWorkflowSteamID(triggerEvent[steamKey]); found {
+				return sid, nil, true
+			}
+		}
+		for _, eosKey := range candidateKeys.eosKeys {
+			if eosID, found := parseWorkflowEOSID(triggerEvent[eosKey]); found {
+				return nil, eosID, true
+			}
+		}
+	}
+
+	return nil, nil, false
+}
+
+type workflowIdentifierCandidateKeys struct {
+	steamKeys []string
+	eosKeys   []string
+}
+
+func identifierCandidateKeysForNameKey(nameKey string) workflowIdentifierCandidateKeys {
+	keys := workflowIdentifierCandidateKeys{}
+
+	prefixes := []string{}
+	switch {
+	case nameKey == "player_name":
+		prefixes = append(prefixes, "player")
+	case strings.HasSuffix(nameKey, "_name"):
+		prefixes = append(prefixes, strings.TrimSuffix(nameKey, "_name"))
+	}
+
+	for _, prefix := range prefixes {
+		keys.steamKeys = append(keys.steamKeys, prefix+"_steam_id", prefix+"_steam")
+		keys.eosKeys = append(keys.eosKeys, prefix+"_eos_id", prefix+"_eos")
+		if prefix == "player" {
+			keys.steamKeys = append(keys.steamKeys, "steam_id")
+			keys.eosKeys = append(keys.eosKeys, "eos_id")
+		}
+	}
+
+	return keys
+}
+
+func parseWorkflowSteamID(value interface{}) (int64, bool) {
+	switch v := value.(type) {
+	case string:
+		sid, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return sid, err == nil
+	case float64:
+		return int64(v), true
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	default:
+		return 0, false
+	}
+}
+
+func parseWorkflowEOSID(value interface{}) (string, bool) {
+	str, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+
+	normalizedEOSID := utils.NormalizeEOSID(strings.TrimSpace(str))
+	if !utils.IsEOSID(normalizedEOSID) {
+		return "", false
+	}
+
+	return normalizedEOSID, true
+}
+
+func (wm *WorkflowManager) resolveBanTargetIdentifiersFromLivePlayers(serverID uuid.UUID, playerID string) (steamIDVal interface{}, eosIDVal interface{}, err error) {
+	playersData, err := squadRcon.NewSquadRcon(wm.rconManager, serverID).GetServerPlayers()
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid player ID format: %q is neither a Steam ID nor an EOS ID, and live player lookup failed: %w", playerID, err)
+	}
+
+	allPlayers := make([]squadRcon.Player, 0, len(playersData.OnlinePlayers)+len(playersData.DisconnectedPlayers))
+	allPlayers = append(allPlayers, playersData.OnlinePlayers...)
+	allPlayers = append(allPlayers, playersData.DisconnectedPlayers...)
+
+	exactMatches := make([]squadRcon.Player, 0, 1)
+	caseInsensitiveMatches := make([]squadRcon.Player, 0, 1)
+	for _, player := range allPlayers {
+		switch {
+		case strings.TrimSpace(player.Name) == playerID:
+			exactMatches = append(exactMatches, player)
+		case strings.EqualFold(strings.TrimSpace(player.Name), playerID):
+			caseInsensitiveMatches = append(caseInsensitiveMatches, player)
+		}
+	}
+
+	matches := exactMatches
+	if len(matches) == 0 {
+		matches = caseInsensitiveMatches
+	}
+
+	if len(matches) == 0 {
+		return nil, nil, fmt.Errorf("invalid player ID format: %q is neither a Steam ID nor an EOS ID, and no live player with that name was found", playerID)
+	}
+	if len(matches) > 1 {
+		return nil, nil, fmt.Errorf("player name %q matched multiple live players; use Steam ID or EOS ID instead", playerID)
+	}
+
+	match := matches[0]
+	if sid, found := parseWorkflowSteamID(match.SteamId); found {
+		return sid, nil, nil
+	}
+	if eosID, found := parseWorkflowEOSID(match.EosId); found {
+		return nil, eosID, nil
+	}
+
+	return nil, nil, fmt.Errorf("live player %q does not have a usable Steam ID or EOS ID", playerID)
 }
 
 // Stop stops the workflow manager
@@ -1218,7 +1432,7 @@ func (wm *WorkflowManager) executeAdminBroadcastAction(context *models.WorkflowE
 		Msg("Executing admin broadcast")
 
 	// Execute admin broadcast command
-	command := fmt.Sprintf("AdminBroadcast %s", message)
+	command := fmt.Sprintf("AdminBroadcast %s", sanitizeRCONParam(message))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to execute admin broadcast: %w", err)
@@ -1258,7 +1472,7 @@ func (wm *WorkflowManager) executeChatMessageAction(context *models.WorkflowExec
 		Msg("Sending chat message to player")
 
 	// Execute chat message command
-	command := fmt.Sprintf("AdminChatMessage \"%s\" %s", targetPlayer, message)
+	command := fmt.Sprintf("AdminChatMessage \"%s\" %s", sanitizeRCONParam(targetPlayer), sanitizeRCONParam(message))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to send chat message: %w", err)
@@ -1299,7 +1513,7 @@ func (wm *WorkflowManager) executeKickPlayerAction(context *models.WorkflowExecu
 		Msg("Kicking player")
 
 	// Execute kick command
-	command := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+	command := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to kick player: %w", err)
@@ -1345,20 +1559,47 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 		Str("reason", reason).
 		Msg("Banning player")
 
-	// Execute ban command (duration in days)
-	command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, duration, reason)
-	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
+	steamIDVal, eosIDVal, err := wm.resolveBanTargetIdentifiers(context.ServerID, playerId, context.TriggerEvent)
 	if err != nil {
-		return fmt.Errorf("failed to ban player: %w", err)
+		return err
 	}
+
+	// Create ban in database
+	banID := uuid.New()
+	now := time.Now()
+
+	if duration <= 0 {
+		return fmt.Errorf("invalid ban duration %.2f: must be positive (use a dedicated permanent-ban action for permanent bans)", duration)
+	}
+
+	t := now.Add(time.Duration(duration) * 24 * time.Hour)
+	expiresAt := &t
+
+	_, err = wm.db.ExecContext(wm.ctx, `
+		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
+	`, banID, context.ServerID, steamIDVal, eosIDVal, reason, expiresAt, now, now)
+	if err != nil {
+		return fmt.Errorf("failed to create ban: %w", err)
+	}
+
+	// Regenerate Bans.cfg, then reload server config for immediate enforcement.
+	if err := wm.syncWorkflowBanConfig(context.ServerID, banID, "workflow ban"); err != nil {
+		return err
+	}
+
+	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
+	response, kickErr := wm.rconManager.ExecuteCommand(context.ServerID, kickCommand)
 
 	// Store response in step results
 	context.StepResults[step.ID] = map[string]interface{}{
-		"command":   command,
+		"ban_id":    banID.String(),
+		"command":   kickCommand,
 		"player_id": playerId,
 		"duration":  duration,
 		"reason":    reason,
 		"response":  response,
+		"kicked":    kickErr == nil,
 	}
 
 	return nil
@@ -1460,9 +1701,10 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 
 	// Create ban in database
 	banID := uuid.New()
-	steamID, err := strconv.ParseInt(playerId, 10, 64)
+
+	steamIDVal, eosIDVal, err := wm.resolveBanTargetIdentifiers(context.ServerID, playerId, context.TriggerEvent)
 	if err != nil {
-		return fmt.Errorf("invalid steam ID format: %w", err)
+		return err
 	}
 
 	// Start transaction
@@ -1478,16 +1720,24 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 	var banQuery string
 	var banArgs []interface{}
 
+	// Compute expires_at from duration (in days)
+	if duration <= 0 {
+		return fmt.Errorf("invalid ban duration %.2f: must be positive (use a dedicated permanent-ban action for permanent bans)", duration)
+	}
+
+	t := now.Add(time.Duration(duration) * 24 * time.Hour)
+	expiresAt := &t
+
 	if ruleID != "" {
 		ruleUUID, err := uuid.Parse(ruleID)
 		if err != nil {
 			return fmt.Errorf("invalid rule ID format: %w", err)
 		}
-		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
-		banArgs = []interface{}{banID, context.ServerID, steamID, reason, int(duration), ruleUUID, now, now}
+		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9)`
+		banArgs = []interface{}{banID, context.ServerID, steamIDVal, eosIDVal, reason, expiresAt, ruleUUID, now, now}
 	} else {
-		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
-		banArgs = []interface{}{banID, context.ServerID, steamID, reason, int(duration), now, now}
+		banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
+		banArgs = []interface{}{banID, context.ServerID, steamIDVal, eosIDVal, reason, expiresAt, now, now}
 	}
 
 	_, err = tx.ExecContext(wm.ctx, banQuery, banArgs...)
@@ -1526,21 +1776,19 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// Execute RCON ban
-	command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, duration, reason)
-	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
-	if err != nil {
-		log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
+	// Regenerate Bans.cfg, then reload server config so the game server picks up the ban.
+	if err := wm.syncWorkflowBanConfig(context.ServerID, banID, "workflow evidence ban"); err != nil {
+		return err
 	}
 
-	// Kick player
-	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
-	_, kickErr := wm.rconManager.ExecuteCommand(context.ServerID, kickCommand)
+	// Kick player for immediate enforcement
+	kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
+	response, kickErr := wm.rconManager.ExecuteCommand(context.ServerID, kickCommand)
 
 	// Store results
 	context.StepResults[step.ID] = map[string]interface{}{
 		"ban_id":         banID.String(),
-		"command":        command,
+		"command":        kickCommand,
 		"player_id":      playerId,
 		"duration":       duration,
 		"reason":         reason,
@@ -1577,7 +1825,7 @@ func (wm *WorkflowManager) executeWarnPlayerAction(context *models.WorkflowExecu
 		Msg("Warning player")
 
 	// Execute warn command
-	command := fmt.Sprintf("AdminWarn \"%s\" %s", playerId, message)
+	command := fmt.Sprintf("AdminWarn \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(message))
 	response, err := wm.rconManager.ExecuteCommand(context.ServerID, command)
 	if err != nil {
 		return fmt.Errorf("failed to warn player: %w", err)
@@ -1608,6 +1856,11 @@ func (wm *WorkflowManager) executeHTTPRequestAction(context *models.WorkflowExec
 
 	// Replace variables in URL
 	url = wm.replaceVariablesWithContext(url, context.Variables, context.TriggerEvent, context.Metadata)
+
+	// Validate the final URL to prevent SSRF (variables may contain attacker-controlled data)
+	if err := utils.ValidateRemoteURL(url); err != nil {
+		return fmt.Errorf("workflow HTTP request URL blocked: %w", err)
+	}
 
 	log.Info().
 		Str("execution_id", context.ExecutionID.String()).
@@ -1689,6 +1942,11 @@ func (wm *WorkflowManager) executeWebhookAction(context *models.WorkflowExecutio
 
 	// Replace variables in URL
 	url = wm.replaceVariablesWithContext(url, context.Variables, context.TriggerEvent, context.Metadata)
+
+	// Validate the final URL to prevent SSRF (variables may contain attacker-controlled data)
+	if err := utils.ValidateRemoteURL(url); err != nil {
+		return fmt.Errorf("workflow webhook URL blocked: %w", err)
+	}
 
 	log.Info().
 		Str("execution_id", context.ExecutionID.String()).
@@ -3262,7 +3520,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		command := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+		command := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 
 		log.Info().
 			Str("execution_id", workflowContext.ExecutionID.String()).
@@ -3290,8 +3548,6 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, float64(duration), reason)
-
 		log.Info().
 			Str("execution_id", workflowContext.ExecutionID.String()).
 			Str("player_id", playerId).
@@ -3299,10 +3555,45 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 			Str("reason", reason).
 			Msg("LUA script banning player")
 
-		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
-		if err != nil {
+		luaBanSteamIDVal, luaBanEosIDVal, resolveErr := wm.resolveBanTargetIdentifiers(workflowContext.ServerID, playerId, workflowContext.TriggerEvent)
+		if resolveErr != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(resolveErr.Error()))
+			return 2
+		}
+
+		// Create ban in database
+		now := time.Now()
+		var luaBanExpiresAt *time.Time
+		if float64(duration) > 0 {
+			t := now.Add(time.Duration(float64(duration)) * 24 * time.Hour)
+			luaBanExpiresAt = &t
+		}
+
+		banID := uuid.New()
+		_, dbErr := wm.db.ExecContext(wm.ctx, `
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
+			VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
+		`, banID, workflowContext.ServerID, luaBanSteamIDVal, luaBanEosIDVal, reason, luaBanExpiresAt, now, now)
+		if dbErr != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(fmt.Sprintf("failed to create ban: %v", dbErr)))
+			return 2
+		}
+
+		// Regenerate Bans.cfg, then reload server config before kicking for enforcement.
+		if err := wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow Lua ban"); err != nil {
 			L.Push(lua.LBool(false))
 			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
+		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
+		if err != nil {
+			// Ban is in DB but kick failed — still return success since ban is persisted
+			L.Push(lua.LBool(true))
+			L.Push(lua.LString("ban created but kick failed: " + err.Error()))
 			return 2
 		}
 
@@ -3368,10 +3659,11 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 
 		// Create ban in database
 		banID := uuid.New()
-		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
-		if err != nil {
+
+		steamIDVal, eosIDVal, resolveErr := wm.resolveBanTargetIdentifiers(workflowContext.ServerID, steamID, workflowContext.TriggerEvent)
+		if resolveErr != nil {
 			L.Push(lua.LNil)
-			L.Push(lua.LString(fmt.Sprintf("invalid steam ID format: %v", err)))
+			L.Push(lua.LString(resolveErr.Error()))
 			return 2
 		}
 
@@ -3390,6 +3682,16 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		var banQuery string
 		var banArgs []interface{}
 
+		// Compute expires_at from duration (in days)
+		if duration <= 0 {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(fmt.Sprintf("invalid ban duration %.2f: must be positive", duration)))
+			return 2
+		}
+
+		luaExpiry := now.Add(time.Duration(duration) * 24 * time.Hour)
+		luaExpiresAt := &luaExpiry
+
 		if ruleID != "" {
 			ruleUUID, err := uuid.Parse(ruleID)
 			if err != nil {
@@ -3397,11 +3699,11 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 				L.Push(lua.LString(fmt.Sprintf("invalid rule ID format: %v", err)))
 				return 2
 			}
-			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
-			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDInt, reason, int(duration), ruleUUID, now, now}
+			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, rule_id, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, $9)`
+			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDVal, eosIDVal, reason, luaExpiresAt, ruleUUID, now, now}
 		} else {
-			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, reason, duration, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7)`
-			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDInt, reason, int(duration), now, now}
+			banQuery = `INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at) VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`
+			banArgs = []interface{}{banID, workflowContext.ServerID, steamIDVal, eosIDVal, reason, luaExpiresAt, now, now}
 		}
 
 		_, err = tx.ExecContext(wm.ctx, banQuery, banArgs...)
@@ -3455,16 +3757,19 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 			Int("evidence_count", len(evidenceItems)).
 			Msg("LUA script banning player with evidence")
 
-		// Execute RCON ban
-		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", steamID, float64(duration), reason)
-		_, err = wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
-		if err != nil {
-			log.Error().Err(err).Str("banID", banID.String()).Msg("RCON ban failed but database ban created")
+		// Regenerate Bans.cfg, then reload server config before kicking for enforcement.
+		if err := wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow Lua evidence ban"); err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
 		}
 
-		// Kick player
-		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", steamID, reason)
-		_, _ = wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
+		// Kick player for immediate enforcement
+		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(steamID), sanitizeRCONParam(reason))
+		_, kickErr := wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
+		if kickErr != nil {
+			log.Warn().Err(kickErr).Str("banID", banID.String()).Msg("Kick failed after ban")
+		}
 
 		// Return ban ID and nil error
 		L.Push(lua.LString(banID.String()))
@@ -3480,7 +3785,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		command := fmt.Sprintf("AdminWarn \"%s\" %s", playerId, message)
+		command := fmt.Sprintf("AdminWarn \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(message))
 
 		log.Info().
 			Str("execution_id", workflowContext.ExecutionID.String()).
@@ -3505,7 +3810,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		// Replace variables
 		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 
-		command := fmt.Sprintf("AdminBroadcast %s", message)
+		command := fmt.Sprintf("AdminBroadcast %s", sanitizeRCONParam(message))
 
 		log.Info().
 			Str("execution_id", workflowContext.ExecutionID.String()).
@@ -3900,7 +4205,7 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 		reason := L.OptString(2, "Kicked by workflow")
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		command := fmt.Sprintf("AdminKick \"%s\" %s", playerId, reason)
+		command := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
 			L.Push(lua.LBool(false))
@@ -3915,15 +4220,49 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 	// Deprecated: Use workflow.rcon.ban instead
 	L.SetGlobal("rcon_ban", L.NewFunction(func(L *lua.LState) int {
 		playerId := L.CheckString(1)
-		duration := L.CheckNumber(2)
+		deprecatedDuration := L.CheckNumber(2) // Duration in days
 		reason := L.OptString(3, "Banned by workflow")
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		reason = wm.replaceVariablesWithContext(reason, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		command := fmt.Sprintf("AdminBan \"%s\" %.0f %s", playerId, float64(duration), reason)
-		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
-		if err != nil {
+
+		deprecatedSteamIDVal, deprecatedEosIDVal, resolveErr := wm.resolveBanTargetIdentifiers(workflowContext.ServerID, playerId, workflowContext.TriggerEvent)
+		if resolveErr != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(resolveErr.Error()))
+			return 2
+		}
+
+		// Create ban in database
+		now := time.Now()
+		var deprecatedExpiresAt *time.Time
+		if float64(deprecatedDuration) > 0 {
+			t := now.Add(time.Duration(float64(deprecatedDuration)) * 24 * time.Hour)
+			deprecatedExpiresAt = &t
+		}
+
+		banID := uuid.New()
+		_, dbErr := wm.db.ExecContext(wm.ctx, `
+			INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
+			VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
+		`, banID, workflowContext.ServerID, deprecatedSteamIDVal, deprecatedEosIDVal, reason, deprecatedExpiresAt, now, now)
+		if dbErr != nil {
+			L.Push(lua.LBool(false))
+			L.Push(lua.LString(fmt.Sprintf("failed to create ban: %v", dbErr)))
+			return 2
+		}
+
+		// Regenerate Bans.cfg, then reload server config before kicking for enforcement.
+		if err := wm.syncWorkflowBanConfig(workflowContext.ServerID, banID, "workflow deprecated Lua ban"); err != nil {
 			L.Push(lua.LBool(false))
 			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+
+		kickCommand := fmt.Sprintf("AdminKick \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(reason))
+		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, kickCommand)
+		if err != nil {
+			L.Push(lua.LBool(true)) // Ban persisted, kick failed
+			L.Push(lua.LString("ban created but kick failed: " + err.Error()))
 			return 2
 		}
 		L.Push(lua.LBool(true))
@@ -3937,7 +4276,7 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 		message := L.CheckString(2)
 		playerId = wm.replaceVariablesWithContext(playerId, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
 		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		command := fmt.Sprintf("AdminWarn \"%s\" %s", playerId, message)
+		command := fmt.Sprintf("AdminWarn \"%s\" %s", sanitizeRCONParam(playerId), sanitizeRCONParam(message))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
 			L.Push(lua.LBool(false))
@@ -3953,7 +4292,7 @@ func (wm *WorkflowManager) addLuaBackwardCompatibilityFunctions(L *lua.LState, w
 	L.SetGlobal("rcon_broadcast", L.NewFunction(func(L *lua.LState) int {
 		message := L.CheckString(1)
 		message = wm.replaceVariablesWithContext(message, workflowContext.Variables, workflowContext.TriggerEvent, workflowContext.Metadata)
-		command := fmt.Sprintf("AdminBroadcast %s", message)
+		command := fmt.Sprintf("AdminBroadcast %s", sanitizeRCONParam(message))
 		response, err := wm.rconManager.ExecuteCommand(workflowContext.ServerID, command)
 		if err != nil {
 			L.Push(lua.LBool(false))

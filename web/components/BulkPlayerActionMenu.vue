@@ -46,7 +46,7 @@ const emit = defineEmits<{
 const showActionDialog = ref(false);
 const actionType = ref<"kick" | "ban" | "warn" | "move" | null>(null);
 const actionReason = ref("");
-const actionDuration = ref(0);
+const actionDuration = ref("0");
 const selectedRuleId = ref<string>("__none__");
 const serverRules = ref<
     Array<{
@@ -135,7 +135,7 @@ function flattenRulesForDropdown(
 async function openActionDialog(action: "kick" | "ban" | "warn" | "move") {
     actionType.value = action;
     actionReason.value = "";
-    actionDuration.value = action === "ban" ? 0 : 0;
+    actionDuration.value = "0";
     selectedRuleId.value = "__none__";
     showActionDialog.value = true;
 
@@ -153,7 +153,7 @@ function closeActionDialog() {
     showActionDialog.value = false;
     actionType.value = null;
     actionReason.value = "";
-    actionDuration.value = 0;
+    actionDuration.value = "0";
     selectedRuleId.value = "__none__";
 }
 
@@ -169,8 +169,20 @@ function getActionTitle() {
     return `${actionMap[actionType.value]} ${props.selectedPlayers.length} Player${props.selectedPlayers.length > 1 ? "s" : ""}`;
 }
 
+const banDurationPattern = /^(0|permanent|\d+[dDhHmM])$/;
+
 async function executeBulkAction() {
     if (!actionType.value) return;
+
+    // Validate ban duration format before submitting
+    if (actionType.value === "ban" && !banDurationPattern.test(actionDuration.value)) {
+        toast({
+            title: "Invalid Duration",
+            description: "Duration must be '0' for permanent, or a number followed by 'd', 'h', or 'm' (e.g., '7d', '2h', '30m')",
+            variant: "destructive",
+        });
+        return;
+    }
 
     isActionLoading.value = true;
     const runtimeConfig = useRuntimeConfig();
@@ -204,6 +216,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/kick`;
                         payload = {
                             steam_id: player.steam_id,
+                            eos_id: player.eosId,
                             reason: actionReason.value,
                         };
                         if (
@@ -218,6 +231,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/ban`;
                         payload = {
                             steam_id: player.steam_id,
+                            eos_id: player.eosId,
                             reason: actionReason.value,
                             duration: actionDuration.value,
                         };
@@ -233,6 +247,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/warn`;
                         payload = {
                             steam_id: player.steam_id,
+                            eos_id: player.eosId,
                             message: actionReason.value,
                         };
                         if (
@@ -247,6 +262,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/move-player`;
                         payload = {
                             steam_id: player.steam_id,
+                            eos_id: player.eosId,
                         };
                         break;
                 }
@@ -433,11 +449,11 @@ async function executeBulkAction() {
                         v-model="actionDuration"
                         placeholder="0"
                         class="col-span-3"
-                        type="number"
+                        type="text"
                     />
                     <div class="col-span-1"></div>
                     <div class="text-xs text-muted-foreground col-span-3">
-                        Ban duration in days. Use 0 for a permanent ban.
+                        Duration: 0 = permanent, 7d = 7 days, 2h = 2 hours, 30m = 30 minutes
                     </div>
                 </div>
 
@@ -464,7 +480,7 @@ async function executeBulkAction() {
                     <div class="col-span-3 max-h-32 overflow-y-auto">
                         <div
                             v-for="player in selectedPlayers"
-                            :key="player.steam_id"
+                            :key="player.steam_id || player.eos_id || player.name"
                             class="text-sm py-1"
                         >
                             {{ player.name }}
@@ -505,4 +521,3 @@ async function executeBulkAction() {
         </DialogContent>
     </Dialog>
 </template>
-

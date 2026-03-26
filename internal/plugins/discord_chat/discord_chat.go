@@ -294,6 +294,14 @@ func (p *DiscordChatPlugin) sendChatEmbed(event *event_manager.RconChatMessageDa
 		}
 	}
 
+	// Build Steam ID field: show as profile link if SteamID is available, otherwise show EOS ID as plain text
+	var steamIDFieldValue string
+	if event.SteamID != "" {
+		steamIDFieldValue = fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", event.SteamID, event.SteamID)
+	} else {
+		steamIDFieldValue = event.EosID
+	}
+
 	embed := &discord.DiscordEmbed{
 		Title: event.ChatType,
 		Color: color,
@@ -305,7 +313,7 @@ func (p *DiscordChatPlugin) sendChatEmbed(event *event_manager.RconChatMessageDa
 			},
 			{
 				Name:   "SteamID",
-				Value:  fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", event.SteamID, event.SteamID),
+				Value:  steamIDFieldValue,
 				Inline: true,
 			},
 			{

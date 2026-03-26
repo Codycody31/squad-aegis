@@ -8,6 +8,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // Ban List Management Handlers
@@ -283,6 +284,10 @@ func (s *Server) RemoteBanSourcesCreate(c *gin.Context) {
 		responses.BadRequest(c, "Source URL is required", &gin.H{"error": "Source URL is required"})
 		return
 	}
+	if err := utils.ValidateRemoteURL(request.URL); err != nil {
+		responses.BadRequest(c, "Invalid source URL", &gin.H{"error": err.Error()})
+		return
+	}
 
 	source := &models.RemoteBanSource{
 		ID:                  uuid.New(),
@@ -327,6 +332,10 @@ func (s *Server) RemoteBanSourcesUpdate(c *gin.Context) {
 	}
 	if request.URL == "" {
 		responses.BadRequest(c, "Source URL is required", &gin.H{"error": "Source URL is required"})
+		return
+	}
+	if err := utils.ValidateRemoteURL(request.URL); err != nil {
+		responses.BadRequest(c, "Invalid source URL", &gin.H{"error": err.Error()})
 		return
 	}
 

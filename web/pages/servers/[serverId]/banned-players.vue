@@ -97,6 +97,7 @@ const selectedBanListId = ref("");
 const subscribing = ref(false);
 const unsubscribing = ref<string>("");
 const editingBan = ref<BannedPlayer | null>(null);
+const editingBanInitialDuration = ref("0");
 const evidenceSearchQuery = ref("");
 const evidenceSearchResults = ref<any[]>([]);
 const selectedEvidence = ref<any[]>([]);
@@ -143,14 +144,14 @@ interface BanEvidence {
 interface BannedPlayer {
     id: string;
     server_id: string;
-    admin_id: string;
+    admin_id?: string;
     admin_name: string;
     steam_id: string;
+    eos_id?: string;
     name: string;
     reason: string;
-    duration: number;
     permanent: boolean;
-    expires_at: string;
+    expires_at?: string;
     created_at: string;
     updated_at: string;
     ban_list_id?: string;
@@ -174,11 +175,16 @@ const formSchema = toTypedSchema(
     z.object({
         steam_id: z
             .string()
-            .min(17, "Steam ID must be at least 17 characters")
-            .max(17, "Steam ID must be exactly 17 characters")
-            .regex(/^\d+$/, "Steam ID must contain only numbers"),
+            .min(1, "Player ID is required")
+            .refine(
+                (val) => /^\d{17}$/.test(val) || /^[0-9a-fA-F]{32}$/.test(val),
+                "Must be a 17-digit Steam ID or 32-character hex EOS ID"
+            ),
         reason: z.string().optional(), // Now optional - will be auto-generated when rule is selected
-        duration: z.number().min(0, "Duration must be at least 0"),
+        duration: z.string().default("0").refine(
+            (val) => /^(0|permanent|\d+[dDhHmM])$/.test(val),
+            "Duration must be '0' for permanent, or a number followed by 'd', 'h', or 'm' (e.g., '7d', '2h', '30m')"
+        ),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
         evidence_text: z.string().optional(),
@@ -189,7 +195,10 @@ const formSchema = toTypedSchema(
 const editFormSchema = toTypedSchema(
     z.object({
         reason: z.string().min(1, "Reason is required"),
-        duration: z.number().min(0, "Duration must be at least 0"),
+        duration: z.string().default("0").refine(
+            (val) => /^(0|permanent|\d+[dDhHmM])$/.test(val),
+            "Duration must be '0' for permanent, or a number followed by 'd', 'h', or 'm' (e.g., '7d', '2h', '30m')"
+        ),
         ban_list_id: z.string().optional(),
         rule_id: z.string().optional(),
         evidence_text: z.string().optional(),
@@ -206,20 +215,59 @@ function getSelectedRuleDetails(ruleId: string) {
 }
 
 // Generate ban reason from rule and duration
-function generateBanReason(ruleId: string | undefined, duration: number | undefined): string {
+function generateBanReason(ruleId: string | undefined, duration: string | undefined): string {
     if (!ruleId || ruleId === "__none__") return "";
 
     const rule = getSelectedRuleDetails(ruleId);
     if (!rule) return "";
 
     // Format: "rule_number | rule_title | duration"
-    // Extract the last part of the title (after the last ">")
     const titleParts = rule.title.split(" > ");
     const shortTitle = titleParts[titleParts.length - 1];
 
-    const durationValue = duration ?? 0;
-    const durationText = durationValue === 0 ? "perm" : `${durationValue}d`;
+    const durationStr = duration || "0";
+    const durationText = durationStr === "0" || durationStr === "permanent" ? "perm" : durationStr;
     return `${rule.number} | ${shortTitle} | ${durationText}`;
+}
+
+function getInitialEditBanDuration(ban: BannedPlayer | null): string {
+    if (!ban || ban.permanent || !ban.expires_at) {
+        return "0";
+    }
+
+    const expiresAt = new Date(ban.expires_at);
+    const remainingMs = expiresAt.getTime() - Date.now();
+
+    if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+        return "1m";
+    }
+
+    const remainingMinutes = Math.max(1, Math.ceil(remainingMs / (60 * 1000)));
+
+    if (remainingMinutes % (24 * 60) === 0) {
+        return `${remainingMinutes / (24 * 60)}d`;
+    }
+
+    if (remainingMinutes % 60 === 0) {
+        return `${remainingMinutes / 60}h`;
+    }
+
+    return `${remainingMinutes}m`;
+}
+
+// Format expires_at for display
+function formatExpiresAt(ban: BannedPlayer): string {
+    if (ban.permanent || !ban.expires_at) return "Permanent";
+    const expiresAt = new Date(ban.expires_at);
+    const now = new Date();
+    const diffMs = expiresAt.getTime() - now.getTime();
+    if (diffMs <= 0) return "Expired";
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    if (diffDays > 0) return `${diffDays}d ${diffHours}h remaining`;
+    if (diffHours > 0) return `${diffHours}h ${diffMins}m remaining`;
+    return `${diffMins}m remaining`;
 }
 
 // Search for players
@@ -249,7 +297,7 @@ async function searchPlayers(query: string) {
             showPlayerDropdown.value = playerSearchResults.value.length > 0;
         }
     } catch (err: any) {
-        console.error("Failed to search players:", err);
+        toast({ title: "Player search failed", description: err.message || "An error occurred", variant: "destructive" });
         playerSearchResults.value = [];
     } finally {
         isSearchingPlayers.value = false;
@@ -261,16 +309,16 @@ function selectPlayer(player: any) {
     selectedPlayer.value = player;
     playerSearchQuery.value = player.player_name || "";
 
-    // Ensure steam_id is a clean string (API might return it with quotes or as number)
-    const steamId = String(player.steam_id).replace(/"/g, "");
+    // Use the best available player identifier from search results.
+    const playerId = String(player.steam_id || player.eos_id || "").replace(/"/g, "");
     if (addBanFormRef.value) {
-        addBanFormRef.value.setFieldValue("steam_id", steamId);
+        addBanFormRef.value.setFieldValue("steam_id", playerId);
     }
     showPlayerDropdown.value = false;
 
     // Fetch ban history for the selected player
-    if (steamId) {
-        fetchPlayerBanHistory(steamId);
+    if (playerId) {
+        fetchPlayerBanHistory(playerId);
     }
 }
 
@@ -329,7 +377,8 @@ const filteredBannedPlayers = computed(() => {
         filtered = filtered.filter(
             (player) =>
                 player.name.toLowerCase().includes(query) ||
-                player.steam_id.includes(query) ||
+                player.steam_id?.includes(query) ||
+                player.eos_id?.toLowerCase().includes(query) ||
                 player.reason.toLowerCase().includes(query),
         );
     }
@@ -392,8 +441,8 @@ async function addBan(values: any) {
     const runtimeConfig = useRuntimeConfig();
 
     try {
-        // Clean and validate steam_id
-        const cleanId = cleanSteamId(steam_id);
+        // Clean and validate player ID (Steam ID or EOS ID)
+        const playerIds = cleanPlayerId(steam_id);
 
         // Check if a valid rule is selected (not __none__ sentinel value)
         const hasValidRule = rule_id && rule_id.trim() && rule_id !== "__none__";
@@ -401,7 +450,7 @@ async function addBan(values: any) {
         // Generate reason: if rule is selected, generate it dynamically, otherwise use provided reason
         let finalReason = reason || "";
         if (hasValidRule) {
-            finalReason = generateBanReason(rule_id, duration ?? 0);
+            finalReason = generateBanReason(rule_id, duration ?? "0");
         }
 
         // Validate that we have a reason
@@ -410,10 +459,15 @@ async function addBan(values: any) {
         }
 
         const requestBody: any = {
-            steam_id: cleanId,
             reason: finalReason,
             duration,
         };
+        if (playerIds.steamId) {
+            requestBody.steam_id = playerIds.steamId;
+        }
+        if (playerIds.eosId) {
+            requestBody.eos_id = playerIds.eosId;
+        }
 
         // Add ban_list_id if selected
         if (ban_list_id && ban_list_id.trim()) {
@@ -534,11 +588,15 @@ async function removeBan(banId: string) {
             throw new Error(fetchError.value.message || "Failed to remove ban");
         }
 
+        toast({
+            title: "Success",
+            description: "Ban removed successfully",
+        });
+
         // Refresh the banned players list
         fetchBannedPlayers();
     } catch (err: any) {
         error.value = err.message || "An error occurred while removing the ban";
-        console.error(err);
     } finally {
         loading.value = false;
     }
@@ -566,7 +624,7 @@ async function editBan(values: any) {
             requestBody.reason = reason;
         }
 
-        if (duration !== editingBan.value.duration) {
+        if (duration && duration !== editingBanInitialDuration.value) {
             requestBody.duration = duration;
         }
 
@@ -681,6 +739,7 @@ function getRuleDetails(ruleId: string) {
 // Function to open edit ban dialog
 async function openEditBanDialog(ban: BannedPlayer) {
     editingBan.value = ban;
+    editingBanInitialDuration.value = getInitialEditBanDuration(ban);
 
     // Load existing evidence if present
     selectedEvidence.value = [];
@@ -740,6 +799,7 @@ async function openEditBanDialog(ban: BannedPlayer) {
 function closeEditBanDialog() {
     showEditBanDialog.value = false;
     editingBan.value = null;
+    editingBanInitialDuration.value = "0";
     selectedEvidence.value = [];
     uploadedFiles.value = [];
     textEvidenceItems.value = [];
@@ -1048,8 +1108,8 @@ function flattenRulesForDropdown(
 }
 
 // Function to fetch player ban history
-async function fetchPlayerBanHistory(steamId: string) {
-    if (!steamId || steamId.length !== 17) {
+async function fetchPlayerBanHistory(playerId: string) {
+    if (!playerId) {
         playerHistory.value = [];
         return;
     }
@@ -1059,8 +1119,15 @@ async function fetchPlayerBanHistory(steamId: string) {
     const runtimeConfig = useRuntimeConfig();
 
     try {
+        const playerIds = cleanPlayerId(playerId);
+        const historyId = playerIds.steamId || playerIds.eosId || "";
+        if (!historyId) {
+            playerHistory.value = [];
+            return;
+        }
+
         const { data, error: fetchError } = await useAuthFetch<any>(
-            `${runtimeConfig.public.backendApi}/players/${steamId}/ban-history`,
+            `${runtimeConfig.public.backendApi}/players/${historyId}/ban-history`,
             {
                 method: "GET",
             },
@@ -1118,26 +1185,42 @@ function calculateSuggestedDuration() {
 }
 
 // Function to open evidence dialog
-// Helper function to clean and validate steam_id
-function cleanSteamId(steamId: string | number | undefined | null): string {
-    if (!steamId) {
-        throw new Error("Steam ID is required");
+// Helper function to clean and validate a player ID (Steam ID or EOS ID)
+function cleanPlayerId(playerId: string | number | undefined | null): { steamId?: string; eosId?: string; rconId: string } {
+    if (!playerId) {
+        throw new Error("Player ID is required");
     }
-    // Remove any quotes, whitespace, and ensure it's a number string
-    const cleaned = String(steamId).trim().replace(/['"]/g, '');
-    
-    // Validate it's a valid number
-    if (!/^\d+$/.test(cleaned)) {
-        throw new Error("Steam ID must be a valid number");
+    // Remove any quotes and whitespace
+    const cleaned = String(playerId).trim().replace(/['"]/g, '');
+
+    // Check if it's a Steam ID (17-digit number)
+    if (/^\d{17}$/.test(cleaned)) {
+        return { steamId: cleaned, rconId: cleaned };
     }
-    
-    return cleaned;
+
+    // Check if it's an EOS ID (32-char hex)
+    if (/^[0-9a-fA-F]{32}$/.test(cleaned)) {
+        const normalizedEOSID = cleaned.toLowerCase();
+        return { eosId: normalizedEOSID, rconId: normalizedEOSID };
+    }
+
+    throw new Error("Must be a 17-digit Steam ID or 32-character hex EOS ID");
+}
+
+function hasValidEvidencePlayerId(playerId?: string | null): boolean {
+    try {
+        cleanPlayerId(playerId);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 // Function to search evidence inline (no longer opens a dialog)
 async function searchEvidenceInline(steamId: string) {
     try {
-        const cleanId = cleanSteamId(steamId);
+        const playerIds = cleanPlayerId(steamId);
+        const cleanId = playerIds.rconId;
         evidenceSearchSteamId.value = cleanId;
         isSearchingEvidence.value = true;
         evidenceSearchResults.value = [];
@@ -1145,9 +1228,14 @@ async function searchEvidenceInline(steamId: string) {
         const runtimeConfig = useRuntimeConfig();
 
         const params = new URLSearchParams({
-            steam_id: cleanId,
             event_type: evidenceSearchType.value,
         });
+        if (playerIds.steamId) {
+            params.set("steam_id", playerIds.steamId);
+        }
+        if (playerIds.eosId) {
+            params.set("eos_id", playerIds.eosId);
+        }
 
         const { data, error: fetchError } = await useAuthFetch(
             `${runtimeConfig.public.backendApi}/servers/${serverId}/events/search?${params.toString()}`,
@@ -1348,10 +1436,12 @@ function formatFileSize(bytes: number): string {
 
 // Setup auto-refresh
 onMounted(async () => {
-    await fetchBanLists();
-    await fetchServerBanListSubscriptions();
-    await fetchBannedPlayers();
-    await fetchServerRules();
+    await Promise.all([
+        fetchBanLists(),
+        fetchServerBanListSubscriptions(),
+        fetchBannedPlayers(),
+        fetchServerRules(),
+    ]);
 });
 
 // Manual refresh function
@@ -1397,6 +1487,95 @@ function selectBanCfgUrl(event: Event) {
     const input = event.target as HTMLInputElement;
     input.select();
 }
+
+// ---- Ban Import from Bans.cfg ----
+interface CfgBanEntry {
+    steam_id: string;
+    eos_id: string;
+    expiry_timestamp: number;
+    reason: string;
+    permanent: boolean;
+    expired: boolean;
+    is_auto_ban: boolean;
+    raw_line: string;
+}
+
+interface BanImportPreviewData {
+    cfg_available: boolean;
+    cfg_path: string;
+    new_bans: CfgBanEntry[];
+    existing_bans: CfgBanEntry[];
+    expired_bans: CfgBanEntry[];
+    auto_bans: CfgBanEntry[];
+    unparseable_count: number;
+}
+
+interface BanImportResultData {
+    imported_count: number;
+    skipped_count: number;
+    expired_count: number;
+    errors: string[];
+}
+
+const showImportDialog = ref(false);
+const importStep = ref<'preview' | 'result'>('preview');
+const importLoading = ref(false);
+const importPreview = ref<BanImportPreviewData | null>(null);
+const importResult = ref<BanImportResultData | null>(null);
+const importError = ref<string | null>(null);
+
+async function openImportDialog() {
+    showImportDialog.value = true;
+    importStep.value = 'preview';
+    importPreview.value = null;
+    importResult.value = null;
+    importError.value = null;
+    importLoading.value = true;
+
+    try {
+        const data = await useAuthFetchImperative<any>(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/import-preview`,
+        );
+
+        if (data.code === 200) {
+            importPreview.value = data.data.preview;
+        } else {
+            importError.value = data.message || 'Failed to fetch preview';
+        }
+    } catch (e: any) {
+        importError.value = e.message || 'Failed to connect';
+    } finally {
+        importLoading.value = false;
+    }
+}
+
+async function executeImport() {
+    importLoading.value = true;
+    importError.value = null;
+
+    try {
+        const data = await useAuthFetchImperative<any>(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/import`,
+            {
+                method: 'POST',
+                body: { confirm: true },
+            },
+        );
+
+        if (data.code === 200) {
+            importResult.value = data.data.result;
+            importStep.value = 'result';
+            // Refresh bans list
+            fetchBannedPlayers();
+        } else {
+            importError.value = data.message || 'Import failed';
+        }
+    } catch (e: any) {
+        importError.value = e.message || 'Failed to connect';
+    } finally {
+        importLoading.value = false;
+    }
+}
 </script>
 
 <template>
@@ -1429,6 +1608,162 @@ function selectBanCfgUrl(event: Event) {
                         </div>
                     </PopoverContent>
                 </Popover>
+                <Button
+                    v-if="authStore.hasPermission(serverId as string, UI_PERMISSIONS.BANS_CREATE)"
+                    variant="outline"
+                    class="w-full sm:w-auto text-sm sm:text-base"
+                    @click="openImportDialog"
+                >
+                    Import from Bans.cfg
+                </Button>
+
+                <!-- Import from Bans.cfg Dialog -->
+                <Dialog v-model:open="showImportDialog">
+                    <DialogContent class="w-[95vw] sm:max-w-[600px] max-h-[80vh] overflow-y-auto p-4 sm:p-6">
+                        <DialogHeader>
+                            <DialogTitle>Import Bans from Bans.cfg</DialogTitle>
+                            <DialogDescription>
+                                Import existing bans from the game server's Bans.cfg file into the Aegis database.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <!-- Loading -->
+                        <div v-if="importLoading" class="py-8 text-center text-muted-foreground">
+                            Loading...
+                        </div>
+
+                        <!-- Error -->
+                        <div v-else-if="importError" class="py-4">
+                            <p class="text-destructive text-sm">{{ importError }}</p>
+                        </div>
+
+                        <!-- Preview Step -->
+                        <div v-else-if="importStep === 'preview' && importPreview" class="space-y-4 py-4">
+                            <div v-if="!importPreview.cfg_available" class="text-sm text-muted-foreground">
+                                <p>File access is not configured for this server.</p>
+                                <p class="mt-1">Configure the SquadGame base path and log source type in server settings to enable Bans.cfg import.</p>
+                            </div>
+
+                            <template v-else>
+                                <p class="text-sm text-muted-foreground">File: <code class="bg-muted px-1 py-0.5 rounded text-xs">{{ importPreview.cfg_path }}</code></p>
+
+                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    <Card>
+                                        <CardContent class="p-3 text-center">
+                                            <div class="text-2xl font-bold">{{ importPreview.new_bans?.length || 0 }}</div>
+                                            <div class="text-xs text-muted-foreground">New bans</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent class="p-3 text-center">
+                                            <div class="text-2xl font-bold">{{ importPreview.existing_bans?.length || 0 }}</div>
+                                            <div class="text-xs text-muted-foreground">Already in DB</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent class="p-3 text-center">
+                                            <div class="text-2xl font-bold">{{ importPreview.expired_bans?.length || 0 }}</div>
+                                            <div class="text-xs text-muted-foreground">Expired (skip)</div>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardContent class="p-3 text-center">
+                                            <div class="text-2xl font-bold">{{ importPreview.auto_bans?.length || 0 }}</div>
+                                            <div class="text-xs text-muted-foreground">Auto-bans (skip)</div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+
+                                <div v-if="importPreview.unparseable_count > 0" class="text-xs text-destructive">
+                                    {{ importPreview.unparseable_count }} line(s) could not be parsed. Fix or remove those active lines in Bans.cfg before importing.
+                                </div>
+
+                                <!-- New bans preview table -->
+                                <div v-if="importPreview.new_bans?.length" class="space-y-2">
+                                    <h4 class="text-sm font-medium">Bans to import:</h4>
+                                    <div class="max-h-48 overflow-y-auto border rounded">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead class="text-xs">Player ID</TableHead>
+                                                    <TableHead class="text-xs">Reason</TableHead>
+                                                    <TableHead class="text-xs">Type</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                <TableRow v-for="ban in importPreview.new_bans" :key="ban.steam_id || ban.eos_id">
+                                                    <TableCell class="text-xs font-mono">
+                                                        {{ ban.steam_id || ban.eos_id }}
+                                                        <Badge v-if="ban.eos_id" variant="outline" class="ml-1 text-[10px] px-1 py-0">EOS</Badge>
+                                                    </TableCell>
+                                                    <TableCell class="text-xs">{{ ban.reason || '(no reason)' }}</TableCell>
+                                                    <TableCell class="text-xs">
+                                                        <Badge :variant="ban.permanent ? 'destructive' : 'secondary'">
+                                                            {{ ban.permanent ? 'Permanent' : 'Timed' }}
+                                                        </Badge>
+                                                    </TableCell>
+                                                </TableRow>
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                </div>
+
+                                <!-- Auto-bans info -->
+                                <div v-if="importPreview.auto_bans?.length" class="text-xs text-muted-foreground">
+                                    {{ importPreview.auto_bans.length }} automatic server ban(s) (e.g., teamkill kicks) will be skipped.
+                                </div>
+
+                                <div v-if="!importPreview.new_bans?.length" class="text-sm text-muted-foreground py-2">
+                                    No new bans to import. All entries in Bans.cfg are already in the database, expired, or are automatic server bans.
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- Result Step -->
+                        <div v-else-if="importStep === 'result' && importResult" class="space-y-4 py-4">
+                            <div class="grid grid-cols-3 gap-3">
+                                <Card>
+                                    <CardContent class="p-3 text-center">
+                                        <div class="text-2xl font-bold text-green-600">{{ importResult.imported_count }}</div>
+                                        <div class="text-xs text-muted-foreground">Imported</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardContent class="p-3 text-center">
+                                        <div class="text-2xl font-bold">{{ importResult.skipped_count }}</div>
+                                        <div class="text-xs text-muted-foreground">Skipped</div>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardContent class="p-3 text-center">
+                                        <div class="text-2xl font-bold">{{ importResult.expired_count }}</div>
+                                        <div class="text-xs text-muted-foreground">Expired</div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+
+                            <div v-if="importResult.errors?.length" class="space-y-1">
+                                <p class="text-sm font-medium text-destructive">Errors:</p>
+                                <ul class="text-xs text-destructive list-disc pl-4">
+                                    <li v-for="(err, i) in importResult.errors" :key="i">{{ err }}</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <DialogFooter>
+                            <template v-if="importStep === 'preview' && importPreview?.cfg_available && (importPreview?.new_bans?.length || 0) > 0">
+                                <Button variant="outline" @click="showImportDialog = false">Cancel</Button>
+                                <Button @click="executeImport" :disabled="importLoading || importPreview.unparseable_count > 0">
+                                    Import {{ importPreview?.new_bans?.length }} Ban(s)
+                                </Button>
+                            </template>
+                            <template v-else>
+                                <Button @click="showImportDialog = false">Close</Button>
+                            </template>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
                 <Form
                     ref="addBanFormRef"
                     v-slot="{ handleSubmit, values: formValues }"
@@ -1438,7 +1773,7 @@ function selectBanCfgUrl(event: Event) {
                     :initial-values="{
                         steam_id: '',
                         reason: '',
-                        duration: 1,
+                        duration: '1d',
                         ban_list_id: '',
                         rule_id: '',
                     }"
@@ -1516,25 +1851,25 @@ function selectBanCfgUrl(event: Event) {
                                                         >
                                                             <div
                                                                 v-for="player in playerSearchResults"
-                                                                :key="player.steam_id"
+                                                                :key="player.steam_id || player.eos_id"
                                                                 class="p-2 hover:bg-muted cursor-pointer border-b last:border-b-0"
                                                                 @click="selectPlayer(player)"
                                                             >
                                                                 <p class="font-medium text-sm">{{ player.player_name }}</p>
-                                                                <p class="text-xs text-muted-foreground">{{ player.steam_id }}</p>
+                                                                <p class="text-xs text-muted-foreground">{{ player.steam_id || player.eos_id || "Unknown ID" }}</p>
                                                                 <p class="text-xs text-muted-foreground">Last seen: {{ new Date(player.last_seen).toLocaleDateString() }}</p>
                                                             </div>
                                                         </div>
                                                     </div>
 
-                                                    <!-- Steam ID Input - always present for form binding, hidden when player selected -->
+                                                    <!-- Player ID Input - always present for form binding, hidden when player selected -->
                                                     <Input
                                                         v-bind="componentField"
                                                         :class="{ 'hidden': selectedPlayer }"
-                                                        placeholder="Or enter Steam ID: 76561198012345678"
+                                                        placeholder="Steam ID (76561198012345678) or EOS ID (32-char hex)"
                                                         @input="(e: Event) => {
                                                             const target = e.target as HTMLInputElement;
-                                                            if (target.value.length === 17) {
+                                                            if (/^\d{17}$/.test(target.value) || /^[0-9a-fA-F]{32}$/.test(target.value)) {
                                                                 fetchPlayerBanHistory(target.value);
                                                             }
                                                         }"
@@ -1542,7 +1877,7 @@ function selectBanCfgUrl(event: Event) {
                                                 </div>
                                             </FormControl>
                                             <FormDescription v-if="!selectedPlayer">
-                                                Search for a player by name, or enter their Steam ID directly
+                                                Search for a player by name, or enter their Steam ID or EOS ID directly
                                             </FormDescription>
                                             <FormMessage />
                                         </FormItem>
@@ -1667,14 +2002,13 @@ function selectBanCfgUrl(event: Event) {
                                         v-slot="{ componentField, setValue }"
                                     >
                                         <FormItem>
-                                            <FormLabel>Days</FormLabel>
+                                            <FormLabel>Duration</FormLabel>
                                             <div
                                                 class="flex items-center space-x-2"
                                             >
                                                 <FormControl>
                                                     <Input
-                                                        type="number"
-                                                        min="0"
+                                                        type="text"
                                                         v-bind="componentField"
                                                     />
                                                 </FormControl>
@@ -1684,7 +2018,7 @@ function selectBanCfgUrl(event: Event) {
                                                     size="sm"
                                                     @click="
                                                         setValue(
-                                                            suggestedDuration,
+                                                            suggestedDuration === 0 ? '0' : suggestedDuration + 'd',
                                                         )
                                                     "
                                                     v-if="
@@ -1694,10 +2028,9 @@ function selectBanCfgUrl(event: Event) {
                                                     Use Suggested
                                                 </Button>
                                             </div>
-                                            <FormDescription
-                                                >Duration in days. 0 is
-                                                permanent</FormDescription
-                                            >
+                                            <FormDescription>
+                                                0 = permanent, 7d = 7 days, 2h = 2 hours, 30m = 30 minutes
+                                            </FormDescription>
                                             <FormMessage />
                                         </FormItem>
                                     </FormField>
@@ -1712,7 +2045,7 @@ function selectBanCfgUrl(event: Event) {
                                             Generated Ban Reason
                                         </h4>
                                         <p class="text-sm font-mono bg-background p-2 rounded border">
-                                            {{ generateBanReason(formValues.rule_id, formValues.duration) }}
+                                            {{ generateBanReason(formValues.rule_id, formValues.duration as string) }}
                                         </p>
                                     </div>
 
@@ -1841,7 +2174,7 @@ function selectBanCfgUrl(event: Event) {
                                                         <Button
                                                             type="button"
                                                             @click="searchEvidenceInline(formValues.steam_id || '')"
-                                                            :disabled="!formValues.steam_id || formValues.steam_id.length !== 17 || isSearchingEvidence"
+                                                            :disabled="!hasValidEvidencePlayerId(formValues.steam_id) || isSearchingEvidence"
                                                             class="flex-1 text-xs sm:text-sm"
                                                         >
                                                             <Icon v-if="isSearchingEvidence" name="mdi:loading" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2 animate-spin" />
@@ -2045,7 +2378,7 @@ function selectBanCfgUrl(event: Event) {
                     :validation-schema="editFormSchema"
                     :initial-values="{
                         reason: editingBan?.reason || '',
-                        duration: editingBan?.duration,
+                        duration: editingBanInitialDuration,
                         ban_list_id: editingBan?.ban_list_id || '',
                         rule_id: editingBan?.rule_id || '',
                         evidence_text: editingBan?.evidence_text || '',
@@ -2083,12 +2416,19 @@ function selectBanCfgUrl(event: Event) {
                                                 >
                                                 {{ editingBan.player_name }}
                                             </p>
-                                            <p>
+                                            <p v-if="editingBan.steam_id">
                                                 <span
                                                     class="text-muted-foreground"
                                                     >Steam ID:</span
                                                 >
                                                 {{ editingBan.steam_id }}
+                                            </p>
+                                            <p v-if="editingBan.eos_id">
+                                                <span
+                                                    class="text-muted-foreground"
+                                                    >EOS ID:</span
+                                                >
+                                                {{ editingBan.eos_id }}
                                             </p>
                                         </div>
                                     </div>
@@ -2149,16 +2489,15 @@ function selectBanCfgUrl(event: Event) {
                                         v-slot="{ componentField }"
                                     >
                                         <FormItem>
-                                            <FormLabel>Days</FormLabel>
+                                            <FormLabel>Duration</FormLabel>
                                             <FormControl>
                                                 <Input
-                                                    type="number"
-                                                    min="0"
+                                                    type="text"
                                                     v-bind="componentField"
                                                 />
                                             </FormControl>
                                             <FormDescription>
-                                                Duration in days. 0 is permanent
+                                                0 = permanent, 7d = 7 days, 2h = 2 hours, 30m = 30 minutes
                                             </FormDescription>
                                             <FormMessage />
                                         </FormItem>
@@ -2266,8 +2605,8 @@ function selectBanCfgUrl(event: Event) {
                                                         </Select>
                                                         <Button
                                                             type="button"
-                                                            @click="searchEvidenceInline(editingBan?.steam_id || '')"
-                                                            :disabled="!editingBan?.steam_id || isSearchingEvidence"
+                                                            @click="searchEvidenceInline(editingBan?.steam_id || editingBan?.eos_id || '')"
+                                                            :disabled="!hasValidEvidencePlayerId(editingBan?.steam_id || editingBan?.eos_id) || isSearchingEvidence"
                                                             class="flex-1 text-xs sm:text-sm"
                                                         >
                                                             <Icon v-if="isSearchingEvidence" name="mdi:loading" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2 animate-spin" />
@@ -2475,9 +2814,13 @@ function selectBanCfgUrl(event: Event) {
                             <!-- Ban Info -->
                             <div class="border rounded-md p-3 bg-muted/50">
                                 <div class="grid grid-cols-2 gap-2 text-sm">
-                                    <div>
+                                    <div v-if="viewingBanEvidence.steam_id">
                                         <span class="text-muted-foreground">Steam ID:</span>
                                         <span class="ml-2 font-medium">{{ viewingBanEvidence.steam_id }}</span>
+                                    </div>
+                                    <div v-if="viewingBanEvidence.eos_id">
+                                        <span class="text-muted-foreground">EOS ID:</span>
+                                        <span class="ml-2 font-medium">{{ viewingBanEvidence.eos_id }}</span>
                                     </div>
                                     <div>
                                         <span class="text-muted-foreground">Reason:</span>
@@ -2490,7 +2833,7 @@ function selectBanCfgUrl(event: Event) {
                                     <div>
                                         <span class="text-muted-foreground">Duration:</span>
                                         <span class="ml-2">
-                                            {{ viewingBanEvidence.duration === 0 ? "Permanent" : `${viewingBanEvidence.duration} days` }}
+                                            {{ formatExpiresAt(viewingBanEvidence) }}
                                         </span>
                                     </div>
                                 </div>
@@ -2705,7 +3048,7 @@ function selectBanCfgUrl(event: Event) {
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-3 sm:mb-4">
                     <Input
                         v-model="searchQuery"
-                        placeholder="Search by Steam ID, or reason..."
+                        placeholder="Search by Steam ID, EOS ID, or reason..."
                         class="flex-grow text-sm sm:text-base"
                     />
                     <div class="flex items-center space-x-2">
@@ -2757,7 +3100,7 @@ function selectBanCfgUrl(event: Event) {
                         <Table class="min-w-full">
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead class="text-xs sm:text-sm">Steam ID</TableHead>
+                                    <TableHead class="text-xs sm:text-sm">Player ID</TableHead>
                                     <TableHead class="text-xs sm:text-sm">Reason</TableHead>
                                     <TableHead class="text-xs sm:text-sm">Rule</TableHead>
                                     <TableHead class="text-xs sm:text-sm">Evidence</TableHead>
@@ -2777,19 +3120,37 @@ function selectBanCfgUrl(event: Event) {
                                 >
                                     <TableCell>
                                         <RouterLink
-                                            :to="`/players/${player.steam_id}`"
+                                            v-if="player.steam_id || player.eos_id"
+                                            :to="`/players/${player.steam_id || player.eos_id}`"
                                             class="hover:underline"
                                         >
                                             <div class="font-medium text-sm sm:text-base text-primary">
-                                                {{ player.name && player.name !== player.steam_id ? player.name : player.steam_id }}
+                                                {{ player.name && player.name !== player.steam_id && player.name !== player.eos_id ? player.name : (player.steam_id || player.eos_id) }}
                                             </div>
                                             <div
-                                                v-if="player.name && player.name !== player.steam_id"
+                                                v-if="player.name && player.name !== player.steam_id && player.name !== player.eos_id"
                                                 class="text-xs text-muted-foreground"
                                             >
                                                 {{ player.steam_id }}
                                             </div>
+                                            <div
+                                                v-if="player.eos_id"
+                                                class="text-xs text-muted-foreground"
+                                            >
+                                                EOS: {{ player.eos_id }}
+                                            </div>
                                         </RouterLink>
+                                        <div v-else>
+                                            <div class="font-medium text-sm sm:text-base">
+                                                {{ player.name && player.name !== player.eos_id ? player.name : player.eos_id }}
+                                            </div>
+                                            <div
+                                                v-if="player.eos_id && player.name && player.name !== player.eos_id"
+                                                class="text-xs text-muted-foreground"
+                                            >
+                                                EOS: {{ player.eos_id }}
+                                            </div>
+                                        </div>
                                     </TableCell>
                                     <TableCell class="text-xs sm:text-sm">{{ player.reason }}</TableCell>
                                     <TableCell>
@@ -2830,17 +3191,13 @@ function selectBanCfgUrl(event: Event) {
                                     <TableCell>
                                         <Badge
                                             :variant="
-                                                player.duration == 0
+                                                player.permanent
                                                     ? 'destructive'
                                                     : 'outline'
                                             "
                                             class="text-xs"
                                         >
-                                            {{
-                                                player.duration == 0
-                                                    ? "Permanent"
-                                                    : player.duration + " days"
-                                            }}
+                                            {{ formatExpiresAt(player) }}
                                         </Badge>
                                     </TableCell>
                                     <TableCell>
@@ -2897,19 +3254,31 @@ function selectBanCfgUrl(event: Event) {
                         <div class="flex items-start justify-between gap-2 mb-2">
                             <div class="flex-1 min-w-0">
                                 <RouterLink
-                                    :to="`/players/${player.steam_id}`"
+                                    v-if="player.steam_id || player.eos_id"
+                                    :to="`/players/${player.steam_id || player.eos_id}`"
                                     class="hover:underline"
                                 >
                                     <div class="font-semibold text-sm sm:text-base mb-1 text-primary">
-                                        {{ player.name && player.name !== player.steam_id ? player.name : player.steam_id }}
+                                        {{ player.name && player.name !== player.steam_id && player.name !== player.eos_id ? player.name : (player.steam_id || player.eos_id) }}
                                     </div>
                                     <div
-                                        v-if="player.name && player.name !== player.steam_id"
+                                        v-if="player.name && player.name !== player.steam_id && player.name !== player.eos_id"
                                         class="text-xs text-muted-foreground mb-2"
                                     >
                                         {{ player.steam_id }}
                                     </div>
                                 </RouterLink>
+                                <div v-else class="mb-1">
+                                    <div class="font-semibold text-sm sm:text-base">
+                                        {{ player.name && player.name !== player.eos_id ? player.name : player.eos_id }}
+                                    </div>
+                                    <div
+                                        v-if="player.eos_id && player.name && player.name !== player.eos_id"
+                                        class="text-xs text-muted-foreground mb-2"
+                                    >
+                                        EOS: {{ player.eos_id }}
+                                    </div>
+                                </div>
                                 <div class="space-y-1.5">
                                     <div>
                                         <span class="text-xs text-muted-foreground">Reason: </span>
@@ -2922,17 +3291,13 @@ function selectBanCfgUrl(event: Event) {
                                     <div class="flex items-center gap-2">
                                         <Badge
                                             :variant="
-                                                player.duration == 0
+                                                player.permanent
                                                     ? 'destructive'
                                                     : 'outline'
                                             "
                                             class="text-xs"
                                         >
-                                            {{
-                                                player.duration == 0
-                                                    ? "Permanent"
-                                                    : player.duration + " days"
-                                            }}
+                                            {{ formatExpiresAt(player) }}
                                         </Badge>
                                         <Badge variant="secondary" class="text-xs">
                                             {{ player.ban_list_name || "Manual" }}
@@ -3131,4 +3496,3 @@ function selectBanCfgUrl(event: Event) {
 <style scoped>
 /* Add any page-specific styles here */
 </style>
-

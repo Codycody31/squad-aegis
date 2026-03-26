@@ -365,7 +365,8 @@ func (p *CBLPlugin) checkPlayerAndAlertAutoKickIfNeeded(ctx context.Context, eve
 	// Check for auto-kick
 	kickThreshold := p.getIntConfig("kick_threshold")
 	if kickThreshold > 0 && user.ReputationPoints >= kickThreshold {
-		if err := p.apis.RconAPI.KickPlayer(event.SteamID, "Kicked via https://communitybanlist.com"); err != nil {
+		playerID := event.PreferredPlayerID()
+		if err := p.apis.RconAPI.KickPlayer(playerID, "Kicked via https://communitybanlist.com"); err != nil {
 			p.apis.LogAPI.Error("Failed to kick player", err, map[string]interface{}{
 				"steam_id":          event.SteamID,
 				"reputation_points": user.ReputationPoints,
@@ -498,7 +499,7 @@ func (p *CBLPlugin) sendDiscordAlert(user *CBLUser, event *event_manager.LogPlay
 			},
 			{
 				Name:   "Risk Rating",
-				Value:  fmt.Sprintf("%d / 10", user.RiskRating),
+				Value:  fmt.Sprintf("%.2f / 10", user.RiskRating),
 				Inline: true,
 			},
 			{

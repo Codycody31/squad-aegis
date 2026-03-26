@@ -83,7 +83,6 @@ export interface ActiveBan {
   server_id: string;
   server_name: string;
   reason: string;
-  duration: number;
   permanent: boolean;
   expires_at?: string;
   created_at: string;

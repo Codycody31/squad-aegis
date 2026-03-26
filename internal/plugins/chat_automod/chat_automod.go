@@ -393,9 +393,9 @@ func (p *ChatAutoModPlugin) HandleEvent(event *plugin_manager.PluginEvent) error
 		}
 	}
 
-	// Check admin exemption
+	// Check admin exemption (check both SteamID and EosID for EOS-only players)
 	if p.getBoolConfig("exempt_admins") {
-		if p.isPlayerAdmin(chatEvent.SteamID) {
+		if p.isPlayerAdmin(chatEvent.SteamID, chatEvent.EosID) {
 			return nil
 		}
 	}
@@ -425,11 +425,14 @@ func (p *ChatAutoModPlugin) HandleEvent(event *plugin_manager.PluginEvent) error
 
 // handleViolation processes a detected violation
 func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_manager.RconChatMessageData, result *FilterResult) error {
+	// Use a consistent player identifier for tracking (prefer SteamID, fall back to EosID)
+	playerID := chatEvent.PreferredPlayerID()
+
 	// Get current violation count (before adding this one)
-	currentCount, err := p.tracker.GetActiveViolationCount(chatEvent.SteamID)
+	currentCount, err := p.tracker.GetActiveViolationCount(playerID)
 	if err != nil {
 		p.apis.LogAPI.Error("Failed to get violation count", err, map[string]interface{}{
-			"steam_id": chatEvent.SteamID,
+			"player_id": playerID,
 		})
 		currentCount = 0
 	}
@@ -458,7 +461,7 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 	if action == nil {
 		p.apis.LogAPI.Warn("No escalation action found for violation count", map[string]interface{}{
 			"violation_count": newCount,
-			"steam_id":        chatEvent.SteamID,
+			"player_id":       playerID,
 		})
 		return nil
 	}
@@ -470,12 +473,14 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 	// Get rule ID for violation logging
 	ruleID := p.getRuleIDPtr()
 
+	// playerID already set above (SteamID with EosID fallback)
+
 	var actionErr error
 	switch action.Action {
 	case "WARN":
-		actionErr = p.apis.RconAPI.WarnPlayerWithRule(chatEvent.SteamID, message, ruleID)
+		actionErr = p.apis.RconAPI.WarnPlayerWithRule(playerID, message, ruleID)
 	case "KICK":
-		actionErr = p.apis.RconAPI.KickPlayerWithRule(chatEvent.SteamID, message, ruleID)
+		actionErr = p.apis.RconAPI.KickPlayerWithRule(playerID, message, ruleID)
 	case "BAN":
 		actionErr = p.executeBan(chatEvent, eventID, message, action.BanDurationDays, ruleID)
 	}
@@ -483,7 +488,7 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 	if actionErr != nil {
 		p.apis.LogAPI.Error("Failed to execute moderation action", actionErr, map[string]interface{}{
 			"action":    action.Action,
-			"steam_id":  chatEvent.SteamID,
+			"player_id": playerID,
 			"player":    chatEvent.PlayerName,
 		})
 		return actionErr
@@ -491,21 +496,21 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 
 	// Record violation
 	if err := p.tracker.RecordViolation(
-		chatEvent.SteamID,
+		playerID,
 		eventID.String(),
 		result.Category,
 		action.Action,
 		chatEvent.Message,
 	); err != nil {
 		p.apis.LogAPI.Error("Failed to record violation", err, map[string]interface{}{
-			"steam_id": chatEvent.SteamID,
+			"player_id": playerID,
 		})
 	}
 
 	p.apis.LogAPI.Info("Moderation action executed", map[string]interface{}{
 		"action":          action.Action,
 		"player_name":     chatEvent.PlayerName,
-		"steam_id":        chatEvent.SteamID,
+		"player_id":       playerID,
 		"violation_count": newCount,
 		"category":        string(result.Category),
 		"message":         message,
@@ -527,9 +532,12 @@ func (p *ChatAutoModPlugin) getRuleIDPtr() *string {
 func (p *ChatAutoModPlugin) executeBan(chatEvent *event_manager.RconChatMessageData, eventID uuid.UUID, reason string, durationDays int, ruleID *string) error {
 	duration := time.Duration(durationDays*24) * time.Hour
 
+	// Use EOS ID as fallback when Steam ID is empty for RCON calls
+	playerID := chatEvent.PreferredPlayerID()
+
 	// Use BanWithEvidenceAndRule to link the chat message as evidence and log rule violation
 	banID, err := p.apis.RconAPI.BanWithEvidenceAndRule(
-		chatEvent.SteamID,
+		playerID,
 		reason,
 		duration,
 		eventID.String(),
@@ -614,8 +622,9 @@ func (p *ChatAutoModPlugin) getServerRuleActions() ([]EscalationAction, error) {
 	return actions, nil
 }
 
-// isPlayerAdmin checks if a player is a server admin (cached)
-func (p *ChatAutoModPlugin) isPlayerAdmin(steamID string) bool {
+// isPlayerAdmin checks if a player is a server admin (cached).
+// Checks both SteamID and EosID so EOS-only players are not bypassed.
+func (p *ChatAutoModPlugin) isPlayerAdmin(steamID, eosID string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -624,7 +633,13 @@ func (p *ChatAutoModPlugin) isPlayerAdmin(steamID string) bool {
 		p.refreshAdminCache()
 	}
 
-	return p.adminCache[steamID]
+	if steamID != "" && p.adminCache[steamID] {
+		return true
+	}
+	if eosID != "" && p.adminCache[eosID] {
+		return true
+	}
+	return false
 }
 
 // refreshAdminCache updates the admin cache

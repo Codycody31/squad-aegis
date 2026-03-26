@@ -11,6 +11,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // SwitchTeamsPlugin manages immediate team switching
@@ -219,7 +220,8 @@ func (p *SwitchTeamsPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEve
 			return err
 		}
 		if !isAdmin {
-			return p.apis.RconAPI.SendWarningToPlayer(event.SteamID, "You must be an admin to use the switch command.")
+			playerID := event.PreferredPlayerID()
+			return p.apis.RconAPI.SendWarningToPlayer(playerID, "You must be an admin to use the switch command.")
 		}
 	}
 
@@ -240,7 +242,8 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 		if timeSinceLastSwitch < cooldown {
 			remainingTime := cooldown - timeSinceLastSwitch
-			return p.apis.RconAPI.SendWarningToPlayer(event.SteamID,
+			playerID := event.PreferredPlayerID()
+			return p.apis.RconAPI.SendWarningToPlayer(playerID,
 				fmt.Sprintf("You must wait %s before using !%s again.",
 					p.formatDuration(remainingTime), p.getStringConfig("command")))
 		}
@@ -266,7 +269,8 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 	// Try to switch the player immediately
 	if err := p.tryImmediateSwitch(event.SteamID, event.PlayerName, event.EosID, currentPlayer.TeamID, players); err != nil {
-		return p.apis.RconAPI.SendWarningToPlayer(event.SteamID, err.Error())
+		playerID := event.PreferredPlayerID()
+		return p.apis.RconAPI.SendWarningToPlayer(playerID, err.Error())
 	}
 
 	// Record successful switch time for cooldown
@@ -318,7 +322,7 @@ func (p *SwitchTeamsPlugin) tryImmediateSwitch(steamID, playerName, eosID string
 	}
 
 	// Switch the player
-	if err := p.switchPlayerToTeam(steamID, toTeam); err != nil {
+	if err := p.togglePlayerTeam(steamID); err != nil {
 		return fmt.Errorf("failed to switch player: %w", err)
 	}
 
@@ -339,9 +343,10 @@ func (p *SwitchTeamsPlugin) tryImmediateSwitch(steamID, playerName, eosID string
 	return nil
 }
 
-// switchPlayerToTeam moves a player to the specified team using RCON
-func (p *SwitchTeamsPlugin) switchPlayerToTeam(steamID string, teamID int) error {
-	command := fmt.Sprintf("AdminForceTeamChange %s", steamID)
+// togglePlayerTeam moves a player to the other team using RCON.
+// Squad's AdminForceTeamChange toggles the player's team automatically.
+func (p *SwitchTeamsPlugin) togglePlayerTeam(steamID string) error {
+	command := fmt.Sprintf("AdminForceTeamChange %s", utils.SanitizeRCONParam(steamID))
 	_, err := p.apis.RconAPI.SendCommand(command)
 	return err
 }
