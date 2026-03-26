@@ -5,6 +5,7 @@ package server_seeder_whitelist
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -14,6 +15,8 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
+	"go.codycody31.dev/squad-aegis/internal/shared/whitelistprogress"
 )
 
 // ServerSeederWhitelistPlugin manages a progressive whitelist for players who help seed the server
@@ -38,7 +41,9 @@ type ServerSeederWhitelistPlugin struct {
 }
 
 // PlayerProgressRecord tracks a player's seeding progress
-type PlayerProgressRecord struct {
+type PlayerProgressRecord = whitelistprogress.PlayerRecord
+
+type legacyPlayerProgressRecord struct {
 	SteamID        string    `json:"steam_id"`
 	Progress       float64   `json:"progress"`
 	LastProgressed time.Time `json:"last_progressed"`
@@ -209,7 +214,6 @@ func (p *ServerSeederWhitelistPlugin) GetCommandExecutionStatus(executionID stri
 // Initialize initializes the plugin with its configuration and dependencies
 func (p *ServerSeederWhitelistPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	p.config = config
 	p.apis = apis
@@ -225,6 +229,8 @@ func (p *ServerSeederWhitelistPlugin) Initialize(config map[string]interface{}, 
 
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
+
+	p.mu.Unlock()
 
 	// Load existing player progress from database
 	if err := p.loadPlayerProgress(); err != nil {
@@ -350,11 +356,11 @@ func (p *ServerSeederWhitelistPlugin) GetConfig() map[string]interface{} {
 // UpdateConfig updates the plugin configuration
 func (p *ServerSeederWhitelistPlugin) UpdateConfig(config map[string]interface{}) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	// Validate new config
 	definition := p.GetDefinition()
 	if err := definition.ConfigSchema.Validate(config); err != nil {
+		p.mu.Unlock()
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
@@ -362,6 +368,7 @@ func (p *ServerSeederWhitelistPlugin) UpdateConfig(config map[string]interface{}
 	definition.ConfigSchema.FillDefaults(config)
 
 	p.config = config
+	shouldSyncAdmins := false
 
 	// If running, restart tickers with new intervals
 	if p.status == plugin_manager.PluginStatusRunning {
@@ -381,12 +388,14 @@ func (p *ServerSeederWhitelistPlugin) UpdateConfig(config map[string]interface{}
 
 		// Restart admin sync ticker if enabled
 		if p.getBoolConfig("auto_add_temporary_admins") {
+			shouldSyncAdmins = true
+			startAdminSyncLoop := p.adminSyncTicker == nil
 			if p.adminSyncTicker != nil {
 				p.adminSyncTicker.Stop()
 			}
 			adminSyncInterval := time.Duration(p.getIntConfig("admin_sync_interval_minutes")) * time.Minute
 			p.adminSyncTicker = time.NewTicker(adminSyncInterval)
-			if p.adminSyncTicker == nil {
+			if startAdminSyncLoop {
 				go p.adminSyncLoop()
 			}
 		} else {
@@ -398,11 +407,19 @@ func (p *ServerSeederWhitelistPlugin) UpdateConfig(config map[string]interface{}
 		}
 	}
 
+	p.mu.Unlock()
+
 	p.apis.LogAPI.Info("Server Seeder Whitelist plugin configuration updated", map[string]interface{}{
 		"seeding_threshold":       config["seeding_threshold"],
 		"hours_to_whitelist":      config["hours_to_whitelist"],
 		"whitelist_duration_days": config["whitelist_duration_days"],
 	})
+
+	if shouldSyncAdmins {
+		if err := p.syncTemporaryAdmins(); err != nil {
+			p.apis.LogAPI.Error("Failed to reconcile seeder whitelist admins after config update", err, nil)
+		}
+	}
 
 	return nil
 }
@@ -467,21 +484,29 @@ func (p *ServerSeederWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager
 
 // handlePlayerConnected tracks when players connect for statistics
 func (p *ServerSeederWhitelistPlugin) handlePlayerConnected(event *plugin_manager.PluginEvent) error {
-	// Extract player info from event data
-	eventData, ok := event.Data.(map[string]interface{})
-	if !ok {
-		return nil
+	var playerID string
+	switch data := event.Data.(type) {
+	case *event_manager.LogPlayerConnectedData:
+		playerID = data.PreferredPlayerID()
+	case event_manager.LogPlayerConnectedData:
+		playerID = data.PreferredPlayerID()
+	case map[string]interface{}:
+		if steamID, ok := data["steam_id"].(string); ok && steamID != "" {
+			playerID = steamID
+		} else if eosID, ok := data["eos_id"].(string); ok {
+			playerID = eosID
+		}
 	}
 
-	steamID, ok := eventData["steam_id"].(string)
-	if !ok || steamID == "" {
+	playerID = utils.NormalizePlayerID(playerID)
+	if playerID == "" {
 		return nil
 	}
 
 	// Update last seen time for the player
 	p.mu.Lock()
-	if record, exists := p.playerProgress[steamID]; exists {
-		record.LastSeen = time.Now()
+	if record, exists := p.playerProgress[playerID]; exists {
+		record.LastSeenAt = time.Now()
 	}
 	p.mu.Unlock()
 
@@ -566,66 +591,58 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 		return nil // Not enough players to start awarding seeding progress
 	}
 
-	// Calculate progress increment based on interval
-	// Progress is calculated as: (hours spent seeding / hours needed for whitelist) * 100
-	hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
-	intervalSeconds := float64(p.getIntConfig("progress_interval_seconds"))
-	progressIncrement := (intervalSeconds / 3600.0) / hoursToWhitelist * 100.0
+	requiredSeconds := p.requiredWhitelistSeconds()
+	if requiredSeconds <= 0 {
+		return nil
+	}
 
-	whitelistThreshold := 100.0 // Fixed at 100%
+	intervalSeconds := int64(p.getIntConfig("progress_interval_seconds"))
+	if intervalSeconds <= 0 {
+		return nil
+	}
+
 	notificationThresholds := p.getIntArrayConfig("progress_notification_thresholds")
+	manageTemporaryAdmins := p.getBoolConfig("auto_add_temporary_admins")
 
 	now := time.Now()
 	var updatedPlayers []string
 
 	p.mu.Lock()
 	for _, player := range onlinePlayers {
-		steamID := player.SteamID
-		if steamID == "" {
+		playerID := player.PreferredID()
+		if playerID == "" {
 			continue
 		}
 
-		// Resolve preferred ID for RCON calls (SteamID with EOS ID fallback)
-		playerPreferredID := player.PreferredID()
+		record := whitelistprogress.EnsureRecord(p.playerProgress, playerID, now)
 
-		record, exists := p.playerProgress[steamID]
-		if !exists {
-			record = &PlayerProgressRecord{
-				SteamID:        steamID,
-				Progress:       0,
-				LastProgressed: now,
-				TotalSeeded:    0,
-				LastSeen:       now,
-			}
-			p.playerProgress[steamID] = record
-		}
+		oldQualifiedSeconds := record.QualifiedSeconds
+		record.QualifiedSeconds += intervalSeconds
+		record.LastEarnedAt = now
+		record.LifetimeSeconds += intervalSeconds
+		record.LastSeenAt = now
+		newQualifiedSeconds := record.QualifiedSeconds
 
-		oldProgress := record.Progress
-		newProgress := record.Progress + progressIncrement
-		record.Progress = newProgress
-		record.LastProgressed = now
-		record.TotalSeeded += progressIncrement
-		record.LastSeen = now
-
-		updatedPlayers = append(updatedPlayers, steamID)
+		updatedPlayers = append(updatedPlayers, playerID)
 
 		// Check for notification thresholds and whitelist status changes
-		oldPercentage := (oldProgress / whitelistThreshold) * 100
-		newPercentage := (newProgress / whitelistThreshold) * 100
+		oldPercentage := whitelistprogress.Percent(oldQualifiedSeconds, requiredSeconds)
+		newPercentage := whitelistprogress.Percent(newQualifiedSeconds, requiredSeconds)
 
 		// Check if player just reached whitelist threshold
-		if oldProgress < whitelistThreshold && newProgress >= whitelistThreshold {
+		if manageTemporaryAdmins &&
+			oldQualifiedSeconds < requiredSeconds &&
+			newQualifiedSeconds >= requiredSeconds {
 			// Player just became whitelisted - add them as admin (skip if shutting down)
 			if !p.shuttingDown {
-				go p.addPlayerAsTemporaryAdmin(steamID, player.Name)
+				go p.addPlayerAsTemporaryAdmin(playerID, player.Name)
 			}
 		}
 
 		for _, threshold := range notificationThresholds {
 			thresholdFloat := float64(threshold)
 			if oldPercentage < thresholdFloat && newPercentage >= thresholdFloat {
-				// Player crossed a notification threshold - use preferred ID for RCON call
-				go p.sendProgressNotification(playerPreferredID, player.Name, newPercentage, newProgress >= whitelistThreshold)
+				go p.sendProgressNotification(playerID, player.Name, newPercentage, newQualifiedSeconds >= requiredSeconds)
 				break
 			}
 		}
@@ -641,10 +658,10 @@ func (p *ServerSeederWhitelistPlugin) trackProgress() error {
 		// Only log occasionally to reduce log spam
 		if len(updatedPlayers) >= 5 || onlinePlayerCount <= 10 {
 			p.apis.LogAPI.Debug("Awarded seeder progress", map[string]interface{}{
-				"player_count":       onlinePlayerCount,
-				"seeding_threshold":  seedingThreshold,
-				"progress_increment": progressIncrement,
-				"updated_players":    len(updatedPlayers),
+				"player_count":      onlinePlayerCount,
+				"seeding_threshold": seedingThreshold,
+				"seconds_awarded":   intervalSeconds,
+				"updated_players":   len(updatedPlayers),
 			})
 		}
 	}
@@ -672,14 +689,17 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 		return nil // Server population too low for decay
 	}
 
-	// Calculate decay increment based on interval
-	// Decay is calculated to lose whitelist after the same amount of time it took to earn it
-	hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
-	decayAfterHours := float64(p.getIntConfig("decay_after_hours"))
-	intervalSeconds := float64(p.getIntConfig("decay_interval_seconds"))
+	requiredSeconds := p.requiredWhitelistSeconds()
+	if requiredSeconds <= 0 {
+		return nil
+	}
 
-	// Decay rate: lose 100% progress over the same time it took to earn it
-	decayIncrement := (intervalSeconds / 3600.0) / hoursToWhitelist * 100.0
+	decayAfterHours := float64(p.getIntConfig("decay_after_hours"))
+	decaySeconds := int64(p.getIntConfig("decay_interval_seconds"))
+	if decaySeconds <= 0 {
+		return nil
+	}
+	manageTemporaryAdmins := p.getBoolConfig("auto_add_temporary_admins")
 
 	now := time.Now()
 	decayThreshold := time.Duration(decayAfterHours * float64(time.Hour))
@@ -687,19 +707,20 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 
 	p.mu.Lock()
 	for _, record := range p.playerProgress {
-		timeSinceProgress := now.Sub(record.LastProgressed)
+		timeSinceProgress := now.Sub(record.LastEarnedAt)
 		if timeSinceProgress > decayThreshold {
-			if record.Progress > 0 {
-				oldProgress := record.Progress
-				record.Progress = max(0, record.Progress-decayIncrement)
+			if record.QualifiedSeconds > 0 {
+				oldQualifiedSeconds := record.QualifiedSeconds
+				record.QualifiedSeconds = whitelistprogress.DecayQualifiedSeconds(record.QualifiedSeconds, decaySeconds)
 				decayedPlayers++
 
 				// Check if player lost whitelist status due to decay
-				whitelistThreshold := 100.0 // Fixed at 100%
-				if oldProgress >= whitelistThreshold && record.Progress < whitelistThreshold {
+				if manageTemporaryAdmins &&
+					oldQualifiedSeconds >= requiredSeconds &&
+					record.QualifiedSeconds < requiredSeconds {
 					// Player lost whitelist status - remove admin privileges (skip if shutting down)
 					if !p.shuttingDown {
-						go p.removePlayerAsTemporaryAdmin(record.SteamID, "")
+						go p.removePlayerAsTemporaryAdmin(record.PlayerID, "")
 					}
 				}
 			}
@@ -717,7 +738,7 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 		if decayedPlayers >= 3 {
 			p.apis.LogAPI.Debug("Applied seeder progress decay", map[string]interface{}{
 				"decayed_players":   decayedPlayers,
-				"decay_increment":   decayIncrement,
+				"decay_seconds":     decaySeconds,
 				"server_population": onlinePlayerCount,
 			})
 		}
@@ -727,39 +748,38 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 }
 
 // sendProgressToPlayer sends progress information to a specific player
-func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(steamID string) error {
+func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(playerID string) error {
 	p.mu.Lock()
-	record, exists := p.playerProgress[steamID]
+	record, exists := p.playerProgress[playerID]
 	p.mu.Unlock()
 
-	whitelistThreshold := 100.0 // Fixed at 100%
+	requiredSeconds := p.requiredWhitelistSeconds()
 
 	var message string
-	if !exists || record.Progress == 0 {
+	if !exists || record.QualifiedSeconds == 0 || requiredSeconds <= 0 {
 		message = "No seeding progress found.\n" +
 			"Join during low population to earn progress!"
 	} else {
-		percentage := record.Progress
+		percentage := whitelistprogress.Percent(record.QualifiedSeconds, requiredSeconds)
 		if percentage > 100 {
 			percentage = 100
 		}
 
 		var status string
-		if record.Progress >= whitelistThreshold {
+		if whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
 			// Get rank among whitelisted players
-			rank := p.getPlayerRank(steamID)
+			rank := p.getPlayerRank(playerID)
 			status = fmt.Sprintf("✓ WHITELISTED (Rank #%d)", rank)
 		} else {
 			status = fmt.Sprintf("Progress: %.1f%%", percentage)
 		}
 
-		hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
-		totalHours := record.TotalSeeded / 100.0 * hoursToWhitelist
+		totalHours := whitelistprogress.SecondsToHours(record.LifetimeSeconds)
 		message = status + "\n" +
 			fmt.Sprintf("Total Seeded: %.1f hours", totalHours)
 	}
 
-	if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
+	if err := p.apis.RconAPI.SendWarningToPlayer(playerID, message); err != nil {
 		return fmt.Errorf("failed to send progress message: %w", err)
 	}
 
@@ -769,7 +789,7 @@ func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(steamID string) error
 }
 
 // sendProgressNotification sends a notification when a player crosses a threshold
-func (p *ServerSeederWhitelistPlugin) sendProgressNotification(steamID, playerName string, percentage float64, isWhitelisted bool) {
+func (p *ServerSeederWhitelistPlugin) sendProgressNotification(playerID, playerName string, percentage float64, isWhitelisted bool) {
 	var message string
 	if isWhitelisted {
 		message = "🎉 CONGRATULATIONS! 🎉\n" +
@@ -781,30 +801,33 @@ func (p *ServerSeederWhitelistPlugin) sendProgressNotification(steamID, playerNa
 			"Keep seeding to earn whitelist!"
 	}
 
-	if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
+	if err := p.apis.RconAPI.SendWarningToPlayer(playerID, message); err != nil {
 		p.apis.LogAPI.Error("Failed to send progress notification", err, map[string]interface{}{
-			"steam_id":    steamID,
+			"player_id":   playerID,
 			"player_name": playerName,
 		})
 	}
 }
 
 // getPlayerRank returns the rank of a player among whitelisted players
-func (p *ServerSeederWhitelistPlugin) getPlayerRank(steamID string) int {
-	whitelistThreshold := 100.0 // Fixed at 100%
+func (p *ServerSeederWhitelistPlugin) getPlayerRank(playerID string) int {
+	requiredSeconds := p.requiredWhitelistSeconds()
+	if requiredSeconds <= 0 {
+		return 1
+	}
 
 	type playerRank struct {
-		steamID  string
-		progress float64
+		playerID string
+		progress int64
 	}
 
 	var whitelistedPlayers []playerRank
 	p.mu.Lock()
 	for _, record := range p.playerProgress {
-		if record.Progress >= whitelistThreshold {
+		if whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
 			whitelistedPlayers = append(whitelistedPlayers, playerRank{
-				steamID:  record.SteamID,
-				progress: record.Progress,
+				playerID: record.PlayerID,
+				progress: record.QualifiedSeconds,
 			})
 		}
 	}
@@ -817,7 +840,7 @@ func (p *ServerSeederWhitelistPlugin) getPlayerRank(steamID string) int {
 
 	// Find rank
 	for i, player := range whitelistedPlayers {
-		if player.steamID == steamID {
+		if player.playerID == playerID {
 			return i + 1
 		}
 	}
@@ -833,19 +856,60 @@ func (p *ServerSeederWhitelistPlugin) loadPlayerProgress() error {
 		return nil
 	}
 
-	var progress map[string]*PlayerProgressRecord
-	if err := json.Unmarshal([]byte(data), &progress); err != nil {
-		return fmt.Errorf("failed to unmarshal player progress: %w", err)
+	state, err := whitelistprogress.ParseState(data)
+	if err == nil {
+		p.playerProgress = state.Players
+		return nil
 	}
 
-	p.playerProgress = progress
+	if !errors.Is(err, whitelistprogress.ErrUnknownFormat) {
+		return fmt.Errorf("failed to parse player progress: %w", err)
+	}
+
+	var legacyProgress map[string]*legacyPlayerProgressRecord
+	if err := json.Unmarshal([]byte(data), &legacyProgress); err != nil {
+		return fmt.Errorf("failed to unmarshal legacy player progress: %w", err)
+	}
+
+	requiredHours := p.getIntConfig("hours_to_whitelist")
+	migratedProgress := make(map[string]*PlayerProgressRecord, len(legacyProgress))
+	for legacyPlayerID, record := range legacyProgress {
+		if record == nil {
+			continue
+		}
+
+		recordPlayerID := utils.NormalizePlayerID(record.SteamID)
+		if recordPlayerID == "" {
+			recordPlayerID = utils.NormalizePlayerID(legacyPlayerID)
+		}
+		if recordPlayerID == "" {
+			continue
+		}
+
+		migratedProgress[recordPlayerID] = &PlayerProgressRecord{
+			PlayerID:         recordPlayerID,
+			QualifiedSeconds: whitelistprogress.LegacyPercentToSeconds(record.Progress, requiredHours),
+			LifetimeSeconds:  whitelistprogress.LegacyPercentToSeconds(record.TotalSeeded, requiredHours),
+			LastEarnedAt:     record.LastProgressed,
+			LastSeenAt:       record.LastSeen,
+		}
+	}
+
+	p.playerProgress = migratedProgress
+
+	if err := p.savePlayerProgress(); err != nil {
+		p.apis.LogAPI.Warn("Failed to persist migrated seeder player progress", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
 	return nil
 }
 
 // savePlayerProgress saves player progress to database
 func (p *ServerSeederWhitelistPlugin) savePlayerProgress() error {
 	p.mu.Lock()
-	data, err := json.Marshal(p.playerProgress)
+	data, err := whitelistprogress.MarshalPlayers(p.playerProgress)
 	p.mu.Unlock()
 
 	if err != nil {
@@ -900,12 +964,21 @@ func (p *ServerSeederWhitelistPlugin) getIntArrayConfig(key string) []int {
 	return []int{}
 }
 
-// addPlayerAsTemporaryAdmin adds a player as a temporary admin via direct database operations
-func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerName string) {
+func (p *ServerSeederWhitelistPlugin) requiredWhitelistSeconds() int64 {
+	return whitelistprogress.RequiredSeconds(p.getIntConfig("hours_to_whitelist"))
+}
+
+func (p *ServerSeederWhitelistPlugin) whitelistGroupName() string {
 	groupName := p.getStringConfig("whitelist_group_name")
 	if groupName == "" {
-		groupName = "seeder_whitelist"
+		return "seeder_whitelist"
 	}
+	return groupName
+}
+
+// addPlayerAsTemporaryAdmin adds a player as a temporary admin via direct database operations
+func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(playerID, playerName string) {
+	groupName := p.whitelistGroupName()
 
 	// Create admin notes indicating this is from the Seeder Whitelist plugin
 	notes := fmt.Sprintf("Plugin: Seeder Whitelist - Automatically added for server seeding contributions. Player: %s", playerName)
@@ -919,9 +992,9 @@ func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerN
 	}
 
 	// Add player as temporary admin with configured expiration
-	if err := p.apis.AdminAPI.AddTemporaryAdmin(steamID, groupName, notes, expiresAt); err != nil {
+	if err := p.apis.AdminAPI.AddTemporaryAdmin(playerID, groupName, notes, expiresAt); err != nil {
 		p.apis.LogAPI.Error("Failed to add player as temporary admin via AdminAPI", err, map[string]interface{}{
-			"steam_id":    steamID,
+			"player_id":   playerID,
 			"player_name": playerName,
 			"group_name":  groupName,
 			"notes":       notes,
@@ -938,13 +1011,13 @@ func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerN
 	if !isShuttingDown {
 		if _, err := p.apis.RconAPI.SendCommand("AdminReloadServerConfig"); err != nil {
 			p.apis.LogAPI.Error("Failed to reload server admin config after adding admin", err, map[string]interface{}{
-				"steam_id": steamID,
+				"player_id": playerID,
 			})
 		}
 	}
 
 	p.apis.LogAPI.Info("Added player as temporary admin", map[string]interface{}{
-		"steam_id":    steamID,
+		"player_id":   playerID,
 		"player_name": playerName,
 		"group_name":  groupName,
 		"notes":       notes,
@@ -952,15 +1025,18 @@ func (p *ServerSeederWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerN
 }
 
 // removePlayerAsTemporaryAdmin removes a player as a temporary admin via direct database operations
-func (p *ServerSeederWhitelistPlugin) removePlayerAsTemporaryAdmin(steamID, playerName string) {
+func (p *ServerSeederWhitelistPlugin) removePlayerAsTemporaryAdmin(playerID, playerName string) {
+	groupName := p.whitelistGroupName()
+
 	// Create admin notes indicating this is from the Seeder Whitelist plugin
 	notes := fmt.Sprintf("Plugin: Seeder Whitelist - Automatically removed (no longer qualifies). Player: %s", playerName)
 
 	// Remove player as temporary admin
-	if err := p.apis.AdminAPI.RemoveTemporaryAdmin(steamID, notes); err != nil {
+	if err := p.apis.AdminAPI.RemoveTemporaryAdminRole(playerID, groupName, notes); err != nil {
 		p.apis.LogAPI.Error("Failed to remove player as temporary admin via AdminAPI", err, map[string]interface{}{
-			"steam_id":    steamID,
+			"player_id":   playerID,
 			"player_name": playerName,
+			"group_name":  groupName,
 			"notes":       notes,
 		})
 		return
@@ -975,36 +1051,25 @@ func (p *ServerSeederWhitelistPlugin) removePlayerAsTemporaryAdmin(steamID, play
 	if !isShuttingDown {
 		if _, err := p.apis.RconAPI.SendCommand("AdminReloadServerConfig"); err != nil {
 			p.apis.LogAPI.Error("Failed to reload server admin config after removing admin", err, map[string]interface{}{
-				"steam_id": steamID,
+				"player_id": playerID,
 			})
 		}
 	}
 
 	p.apis.LogAPI.Info("Removed player as temporary admin", map[string]interface{}{
-		"steam_id":    steamID,
+		"player_id":   playerID,
 		"player_name": playerName,
+		"group_name":  groupName,
 		"notes":       notes,
 	})
 }
 
-// renewPlayerAdminRole removes and re-adds a player's admin role to extend expiration
-func (p *ServerSeederWhitelistPlugin) renewPlayerAdminRole(steamID, playerName string) {
-	groupName := p.getStringConfig("whitelist_group_name")
-	if groupName == "" {
-		groupName = "seeder_whitelist"
-	}
+// renewPlayerAdminRole refreshes a player's managed admin role to extend expiration
+func (p *ServerSeederWhitelistPlugin) renewPlayerAdminRole(playerID, playerName string) {
+	groupName := p.whitelistGroupName()
 
 	// Create admin notes indicating this is a renewal from the Seeder Whitelist plugin
 	notes := fmt.Sprintf("Plugin: Seeder Whitelist - Role renewed to extend expiration. Player: %s", playerName)
-
-	// First remove the existing admin role
-	if err := p.apis.AdminAPI.RemoveTemporaryAdmin(steamID, "Role renewal - removing old assignment"); err != nil {
-		p.apis.LogAPI.Error("Failed to remove admin role for renewal", err, map[string]interface{}{
-			"steam_id":    steamID,
-			"player_name": playerName,
-		})
-		return
-	}
 
 	// Calculate new expiration time
 	var expiresAt *time.Time
@@ -1015,9 +1080,9 @@ func (p *ServerSeederWhitelistPlugin) renewPlayerAdminRole(steamID, playerName s
 	}
 
 	// Add new admin role with fresh expiration
-	if err := p.apis.AdminAPI.AddTemporaryAdmin(steamID, groupName, notes, expiresAt); err != nil {
+	if err := p.apis.AdminAPI.AddTemporaryAdmin(playerID, groupName, notes, expiresAt); err != nil {
 		p.apis.LogAPI.Error("Failed to re-add admin role after renewal", err, map[string]interface{}{
-			"steam_id":    steamID,
+			"player_id":   playerID,
 			"player_name": playerName,
 			"group_name":  groupName,
 			"notes":       notes,
@@ -1034,13 +1099,13 @@ func (p *ServerSeederWhitelistPlugin) renewPlayerAdminRole(steamID, playerName s
 	if !isShuttingDown {
 		if _, err := p.apis.RconAPI.SendCommand("AdminReloadServerConfig"); err != nil {
 			p.apis.LogAPI.Error("Failed to reload server admin config after renewing admin role", err, map[string]interface{}{
-				"steam_id": steamID,
+				"player_id": playerID,
 			})
 		}
 	}
 
 	p.apis.LogAPI.Info("Renewed player admin role with extended expiration", map[string]interface{}{
-		"steam_id":    steamID,
+		"player_id":   playerID,
 		"player_name": playerName,
 		"group_name":  groupName,
 		"notes":       notes,
@@ -1049,79 +1114,79 @@ func (p *ServerSeederWhitelistPlugin) renewPlayerAdminRole(steamID, playerName s
 
 // syncTemporaryAdmins synchronizes temporary admin status with current whitelist
 func (p *ServerSeederWhitelistPlugin) syncTemporaryAdmins() error {
-	// This function ensures database consistency for all whitelisted players
-	// and refreshes admin roles that are about to expire
-	whitelistThreshold := 100.0 // Fixed at 100%
-	whitelistDurationDays := p.getIntConfig("whitelist_duration_days")
-
-	if whitelistDurationDays <= 0 {
-		return nil // No expiration handling needed
+	requiredSeconds := p.requiredWhitelistSeconds()
+	if requiredSeconds <= 0 {
+		return nil
 	}
 
+	groupName := p.whitelistGroupName()
+	whitelistDurationDays := p.getIntConfig("whitelist_duration_days")
+	renewalHours := p.getIntConfig("admin_renewal_hours_before_expiry")
+	if renewalHours <= 0 {
+		renewalHours = 24
+	}
+	renewalWindow := time.Duration(renewalHours) * time.Hour
+
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	shuttingDown := p.shuttingDown
+	qualifiedPlayers := make(map[string]bool, len(p.playerProgress))
+	for playerID, record := range p.playerProgress {
+		if record != nil && whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
+			qualifiedPlayers[playerID] = true
+		}
+	}
+	p.mu.Unlock()
 
-	// Check all players and manage their admin status
-	for steamID, record := range p.playerProgress {
-		if record.Progress >= whitelistThreshold {
-			// Player should be whitelisted
+	admins, err := p.apis.AdminAPI.ListTemporaryAdmins()
+	if err != nil {
+		return fmt.Errorf("failed to list temporary admins: %w", err)
+	}
 
-			// Check if they have an existing admin role that's about to expire (within 1 day)
-			adminStatus, err := p.apis.AdminAPI.GetPlayerAdminStatus(steamID)
-			if err != nil {
-				// No existing admin status or error checking - add new admin (skip if shutting down)
-				if !p.shuttingDown {
-					go p.addPlayerAsTemporaryAdmin(steamID, "")
-				}
-				continue
-			}
-
-			// Check if any of their admin roles are about to expire
-			needsRenewal := false
-			groupName := p.getStringConfig("whitelist_group_name")
-			if groupName == "" {
-				groupName = "seeder_whitelist"
-			}
-
-			for _, role := range adminStatus.Roles {
-				if role.RoleName == groupName && role.ExpiresAt != nil {
-					renewalHours := p.getIntConfig("admin_renewal_hours_before_expiry")
-					if renewalHours <= 0 {
-						renewalHours = 24 // Default to 24 hours
-					}
-
-					timeUntilExpiry := time.Until(*role.ExpiresAt)
-					renewalWindow := time.Duration(renewalHours) * time.Hour
-
-					// If expires within the renewal window, renew it
-					if timeUntilExpiry <= renewalWindow && timeUntilExpiry > 0 {
-						needsRenewal = true
-						break
-					}
-				}
-			}
-
-			if needsRenewal {
-				// Remove old admin role and add new one to extend expiration (skip if shutting down)
-				if !p.shuttingDown {
-					go p.renewPlayerAdminRole(steamID, "")
-				}
-			} else if len(adminStatus.Roles) == 0 {
-				// No admin roles found, add new one (skip if shutting down)
-				if !p.shuttingDown {
-					go p.addPlayerAsTemporaryAdmin(steamID, "")
-				}
-			}
+	managedAdmins := make(map[string]*plugin_manager.TemporaryAdminInfo)
+	for _, admin := range admins {
+		if admin == nil || admin.RoleName != groupName {
+			continue
+		}
+		if adminID := admin.PreferredID(); adminID != "" {
+			managedAdmins[adminID] = admin
 		}
 	}
 
-	return nil
-}
-
-// max returns the maximum of two float64 values
-func max(a, b float64) float64 {
-	if a > b {
-		return a
+	if shuttingDown {
+		return nil
 	}
-	return b
+
+	for playerID := range qualifiedPlayers {
+		admin, exists := managedAdmins[playerID]
+		if !exists {
+			p.addPlayerAsTemporaryAdmin(playerID, "")
+			continue
+		}
+
+		if whitelistDurationDays <= 0 {
+			delete(managedAdmins, playerID)
+			continue
+		}
+
+		if admin.ExpiresAt == nil {
+			p.renewPlayerAdminRole(playerID, "")
+			delete(managedAdmins, playerID)
+			continue
+		}
+
+		timeUntilExpiry := time.Until(*admin.ExpiresAt)
+		if timeUntilExpiry <= renewalWindow && timeUntilExpiry > 0 {
+			p.renewPlayerAdminRole(playerID, "")
+		}
+		delete(managedAdmins, playerID)
+	}
+
+	for playerID := range managedAdmins {
+		if qualifiedPlayers[playerID] {
+			continue
+		}
+		p.removePlayerAsTemporaryAdmin(playerID, "")
+	}
+
+	return nil
 }

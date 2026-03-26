@@ -2,6 +2,8 @@ package event_manager
 
 import (
 	"time"
+
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // PlayerListUpdatedData is published when the player list is refreshed
@@ -27,6 +29,13 @@ type PlayerTeamChangedData struct {
 
 func (d PlayerTeamChangedData) GetEventType() EventType { return EventTypePlayerTeamChanged }
 
+func (d PlayerTeamChangedData) PreferredPlayerID() string {
+	if d.SteamID != "" {
+		return utils.NormalizePlayerID(d.SteamID)
+	}
+	return utils.NormalizePlayerID(d.EOSID)
+}
+
 // PlayerSquadChangedData is published when a player changes squad
 type PlayerSquadChangedData struct {
 	EOSID        string `json:"eos_id"`
@@ -39,6 +48,13 @@ type PlayerSquadChangedData struct {
 }
 
 func (d PlayerSquadChangedData) GetEventType() EventType { return EventTypePlayerSquadChanged }
+
+func (d PlayerSquadChangedData) PreferredPlayerID() string {
+	if d.SteamID != "" {
+		return utils.NormalizePlayerID(d.SteamID)
+	}
+	return utils.NormalizePlayerID(d.EOSID)
+}
 
 // SquadCreatedData is published when a new squad is created
 type SquadCreatedData struct {
@@ -75,6 +91,13 @@ type PlayerConnectedData struct {
 
 func (d PlayerConnectedData) GetEventType() EventType { return EventTypePlayerConnected }
 
+func (d PlayerConnectedData) PreferredPlayerID() string {
+	if d.SteamID != "" {
+		return utils.NormalizePlayerID(d.SteamID)
+	}
+	return utils.NormalizePlayerID(d.EOSID)
+}
+
 // PlayerDisconnectedData is published when a player disconnects
 type PlayerDisconnectedData struct {
 	EOSID            string        `json:"eos_id"`
@@ -90,6 +113,13 @@ type PlayerDisconnectedData struct {
 }
 
 func (d PlayerDisconnectedData) GetEventType() EventType { return EventTypePlayerDisconnected }
+
+func (d PlayerDisconnectedData) PreferredPlayerID() string {
+	if d.SteamID != "" {
+		return utils.NormalizePlayerID(d.SteamID)
+	}
+	return utils.NormalizePlayerID(d.EOSID)
+}
 
 // PlayerStatsUpdatedData is published when player statistics are updated
 type PlayerStatsUpdatedData struct {
@@ -107,3 +137,10 @@ type PlayerStatsUpdatedData struct {
 }
 
 func (d PlayerStatsUpdatedData) GetEventType() EventType { return EventTypePlayerStatsUpdated }
+
+func (d PlayerStatsUpdatedData) PreferredPlayerID() string {
+	if d.SteamID != "" {
+		return utils.NormalizePlayerID(d.SteamID)
+	}
+	return utils.NormalizePlayerID(d.EOSID)
+}

@@ -307,6 +307,13 @@ func (p *DiscordAdminCamLogsPlugin) sendAdminCameraEntryEmbed(event *event_manag
 		return fmt.Errorf("channel_id not configured")
 	}
 
+	steamIDValue := event.SteamID
+	if steamIDValue != "" {
+		steamIDValue = fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", event.SteamID, event.SteamID)
+	} else {
+		steamIDValue = "N/A"
+	}
+
 	embed := &discord.DiscordEmbed{
 		Title: "Admin Entered Admin Camera",
 		Color: p.getIntConfig("color"),
@@ -318,7 +325,7 @@ func (p *DiscordAdminCamLogsPlugin) sendAdminCameraEntryEmbed(event *event_manag
 			},
 			{
 				Name:   "Admin's SteamID",
-				Value:  fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", event.SteamID, event.SteamID),
+				Value:  steamIDValue,
 				Inline: true,
 			},
 			{
@@ -359,7 +366,7 @@ func (p *DiscordAdminCamLogsPlugin) sendAdminCameraExitEmbed(event *event_manage
 		},
 		{
 			Name:   "Admin's SteamID",
-			Value:  fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", event.SteamID, event.SteamID),
+			Value:  "N/A",
 			Inline: true,
 		},
 		{
@@ -367,6 +374,9 @@ func (p *DiscordAdminCamLogsPlugin) sendAdminCameraExitEmbed(event *event_manage
 			Value:  event.EosID,
 			Inline: true,
 		},
+	}
+	if event.SteamID != "" {
+		fields[1].Value = fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", event.SteamID, event.SteamID)
 	}
 
 	// Add duration field if we tracked the session

@@ -1057,7 +1057,7 @@ func (p *TeamBalancerPlugin) handleTeamBalancerCommand(event *event_manager.Rcon
 	isAdmin := false
 	if subcommand != "" && subcommand != "status" {
 		var err error
-		isAdmin, err = p.isPlayerAdmin(event.SteamID)
+		isAdmin, err = p.isPlayerAdmin(playerID)
 		if err != nil {
 			p.apis.LogAPI.Error("Failed to check admin status", err, map[string]interface{}{
 				"player": event.PlayerName,
@@ -1092,7 +1092,7 @@ func (p *TeamBalancerPlugin) handleScrambleCommand(event *event_manager.RconChat
 	playerID := event.PreferredPlayerID()
 
 	// Check admin status
-	isAdmin, err := p.isPlayerAdmin(event.SteamID)
+	isAdmin, err := p.isPlayerAdmin(playerID)
 	if err != nil {
 		p.apis.LogAPI.Error("Failed to check admin status", err, map[string]interface{}{
 			"player": event.PlayerName,
@@ -1565,14 +1565,14 @@ func (p *TeamBalancerPlugin) getNonDominantWinMessage(winnerID, margin int, isIn
 
 // Helper methods
 
-func (p *TeamBalancerPlugin) isPlayerAdmin(steamID string) (bool, error) {
+func (p *TeamBalancerPlugin) isPlayerAdmin(playerID string) (bool, error) {
 	admins, err := p.apis.ServerAPI.GetAdmins()
 	if err != nil {
 		return false, fmt.Errorf("failed to get admin list: %w", err)
 	}
 
 	for _, admin := range admins {
-		if admin.SteamID == steamID {
+		if admin.MatchesPlayerID(playerID) {
 			return true, nil
 		}
 	}

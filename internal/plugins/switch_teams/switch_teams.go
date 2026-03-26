@@ -211,11 +211,12 @@ func (p *SwitchTeamsPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEve
 
 	// Check if admin only and validate admin status
 	if p.getBoolConfig("admin_only") {
-		isAdmin, err := p.isPlayerAdmin(event.SteamID)
+		playerID := event.PreferredPlayerID()
+		isAdmin, err := p.isPlayerAdmin(playerID)
 		if err != nil {
 			p.apis.LogAPI.Error("Failed to check admin status", err, map[string]interface{}{
-				"player":  event.PlayerName,
-				"steamID": event.SteamID,
+				"player":    event.PlayerName,
+				"player_id": playerID,
 			})
 			return err
 		}
@@ -234,8 +235,10 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	playerID := event.PreferredPlayerID()
+
 	// Check cooldown
-	if lastSwitch, exists := p.lastSwitches[event.SteamID]; exists {
+	if lastSwitch, exists := p.lastSwitches[playerID]; exists {
 		cooldownMinutes := p.getIntConfig("cooldown_minutes")
 		cooldown := time.Duration(cooldownMinutes) * time.Minute
 		timeSinceLastSwitch := time.Since(lastSwitch)
@@ -257,7 +260,7 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 	var currentPlayer *plugin_manager.PlayerInfo
 	for _, player := range players {
-		if player.SteamID == event.SteamID {
+		if player.MatchesPlayerID(playerID) {
 			currentPlayer = player
 			break
 		}
@@ -268,19 +271,18 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 	}
 
 	// Try to switch the player immediately
-	if err := p.tryImmediateSwitch(event.SteamID, event.PlayerName, event.EosID, currentPlayer.TeamID, players); err != nil {
-		playerID := event.PreferredPlayerID()
+	if err := p.tryImmediateSwitch(playerID, event.PlayerName, currentPlayer.TeamID, players); err != nil {
 		return p.apis.RconAPI.SendWarningToPlayer(playerID, err.Error())
 	}
 
 	// Record successful switch time for cooldown
-	p.lastSwitches[event.SteamID] = time.Now()
+	p.lastSwitches[playerID] = time.Now()
 
 	return nil
 }
 
 // tryImmediateSwitch attempts to immediately switch a player if conditions are met
-func (p *SwitchTeamsPlugin) tryImmediateSwitch(steamID, playerName, eosID string, fromTeam int, players []*plugin_manager.PlayerInfo) error {
+func (p *SwitchTeamsPlugin) tryImmediateSwitch(playerID, playerName string, fromTeam int, players []*plugin_manager.PlayerInfo) error {
 	team1Count, team2Count := p.getTeamCounts(players)
 
 	// Find which team the player wants to switch to
@@ -322,12 +324,12 @@ func (p *SwitchTeamsPlugin) tryImmediateSwitch(steamID, playerName, eosID string
 	}
 
 	// Switch the player
-	if err := p.togglePlayerTeam(steamID); err != nil {
+	if err := p.togglePlayerTeam(playerID); err != nil {
 		return fmt.Errorf("failed to switch player: %w", err)
 	}
 
 	// Notify player
-	p.apis.RconAPI.SendWarningToPlayer(eosID, "You have switched teams.")
+	p.apis.RconAPI.SendWarningToPlayer(playerID, "You have switched teams.")
 
 	p.apis.LogAPI.Info("Player switched immediately", map[string]interface{}{
 		"player":            playerName,
@@ -345,8 +347,8 @@ func (p *SwitchTeamsPlugin) tryImmediateSwitch(steamID, playerName, eosID string
 
 // togglePlayerTeam moves a player to the other team using RCON.
 // Squad's AdminForceTeamChange toggles the player's team automatically.
-func (p *SwitchTeamsPlugin) togglePlayerTeam(steamID string) error {
-	command := fmt.Sprintf("AdminForceTeamChange %s", utils.SanitizeRCONParam(steamID))
+func (p *SwitchTeamsPlugin) togglePlayerTeam(playerID string) error {
+	command := fmt.Sprintf("AdminForceTeamChange %s", utils.SanitizeRCONParam(playerID))
 	_, err := p.apis.RconAPI.SendCommand(command)
 	return err
 }
@@ -369,14 +371,14 @@ func (p *SwitchTeamsPlugin) getTeamCounts(players []*plugin_manager.PlayerInfo) 
 }
 
 // isPlayerAdmin checks if a player is an admin
-func (p *SwitchTeamsPlugin) isPlayerAdmin(steamID string) (bool, error) {
+func (p *SwitchTeamsPlugin) isPlayerAdmin(playerID string) (bool, error) {
 	admins, err := p.apis.ServerAPI.GetAdmins()
 	if err != nil {
 		return false, fmt.Errorf("failed to get admin list: %w", err)
 	}
 
 	for _, admin := range admins {
-		if admin.SteamID == steamID {
+		if admin.MatchesPlayerID(playerID) {
 			return true, nil
 		}
 	}

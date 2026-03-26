@@ -664,7 +664,9 @@ func (p *ChatAutoModPlugin) refreshAdminCache() {
 
 	p.adminCache = make(map[string]bool)
 	for _, admin := range admins {
-		p.adminCache[admin.SteamID] = true
+		if adminID := admin.PreferredID(); adminID != "" {
+			p.adminCache[adminID] = true
+		}
 	}
 	p.adminCacheTime = time.Now()
 }
