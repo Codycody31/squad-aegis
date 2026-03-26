@@ -34,9 +34,9 @@ CREATE INDEX idx_servers_log_configured ON servers (id) WHERE log_source_type IS
 UPDATE servers s
 SET squad_game_path = CASE
 	WHEN mc.motd_file_path LIKE '%/ServerConfig/%'
-		THEN regexp_replace(mc.motd_file_path, '/ServerConfig/[^/]+$', '')
+		THEN COALESCE(NULLIF(regexp_replace(mc.motd_file_path, '/ServerConfig/[^/]+$', ''), ''), '/')
 	WHEN mc.motd_file_path LIKE '%\ServerConfig\%'
-		THEN regexp_replace(mc.motd_file_path, '\\ServerConfig\\[^\\]+$', '')
+		THEN COALESCE(NULLIF(regexp_replace(mc.motd_file_path, '\\ServerConfig\\[^\\]+$', ''), ''), '\')
 	ELSE s.squad_game_path
 END
 FROM server_motd_config mc

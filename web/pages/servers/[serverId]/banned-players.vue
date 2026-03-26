@@ -1674,8 +1674,8 @@ async function executeImport() {
                                     </Card>
                                 </div>
 
-                                <div v-if="importPreview.unparseable_count > 0" class="text-xs text-muted-foreground">
-                                    {{ importPreview.unparseable_count }} line(s) could not be parsed and will be skipped.
+                                <div v-if="importPreview.unparseable_count > 0" class="text-xs text-destructive">
+                                    {{ importPreview.unparseable_count }} line(s) could not be parsed. Fix or remove those active lines in Bans.cfg before importing.
                                 </div>
 
                                 <!-- New bans preview table -->
@@ -1753,7 +1753,7 @@ async function executeImport() {
                         <DialogFooter>
                             <template v-if="importStep === 'preview' && importPreview?.cfg_available && (importPreview?.new_bans?.length || 0) > 0">
                                 <Button variant="outline" @click="showImportDialog = false">Cancel</Button>
-                                <Button @click="executeImport" :disabled="importLoading">
+                                <Button @click="executeImport" :disabled="importLoading || importPreview.unparseable_count > 0">
                                     Import {{ importPreview?.new_bans?.length }} Ban(s)
                                 </Button>
                             </template>

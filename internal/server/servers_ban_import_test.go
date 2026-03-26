@@ -107,8 +107,8 @@ Also invalid: no banned prefix`
 }
 
 func TestParseBansCfg_DuplicateSteamIDs(t *testing.T) {
-	content := `Admin [SteamID 0] Banned:76561198000000001:0 //First ban
-Admin [SteamID 0] Banned:76561198000000001:0 //Duplicate ban`
+	content := `Admin [SteamID 0] Banned:76561198000000001:0 //Older ban
+Admin [SteamID 0] Banned:76561198000000001:1893456000 //Newest ban`
 
 	entries, _, err := parseBansCfg(content)
 	if err != nil {
@@ -118,8 +118,11 @@ Admin [SteamID 0] Banned:76561198000000001:0 //Duplicate ban`
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry (deduplicated), got %d", len(entries))
 	}
-	if entries[0].Reason != "First ban" {
-		t.Errorf("expected first occurrence to win, got reason %q", entries[0].Reason)
+	if entries[0].Reason != "Newest ban" {
+		t.Errorf("expected newest occurrence to win, got reason %q", entries[0].Reason)
+	}
+	if entries[0].ExpiryTimestamp != 1893456000 {
+		t.Errorf("expected newest expiry timestamp to be preserved, got %d", entries[0].ExpiryTimestamp)
 	}
 }
 
@@ -408,7 +411,7 @@ N/A Banned:0002c6fc68c04dad8ad44cb9c83b2187:1766283597 //Automatic Teamkill Kick
 
 func TestParseBansCfg_DuplicateEOSIDs(t *testing.T) {
 	content := `N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:0 //First
-N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:0 //Duplicate`
+N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:1893456000 //Newest`
 
 	entries, _, err := parseBansCfg(content)
 	if err != nil {
@@ -418,8 +421,33 @@ N/A Banned:0002adb8a89b4d1d970a3cd1e4569092:0 //Duplicate`
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry (deduplicated), got %d", len(entries))
 	}
-	if entries[0].Reason != "First" {
-		t.Errorf("expected first occurrence to win, got reason %q", entries[0].Reason)
+	if entries[0].Reason != "Newest" {
+		t.Errorf("expected newest occurrence to win, got reason %q", entries[0].Reason)
+	}
+	if entries[0].ExpiryTimestamp != 1893456000 {
+		t.Errorf("expected newest expiry timestamp to be preserved, got %d", entries[0].ExpiryTimestamp)
+	}
+}
+
+func TestParseBansCfg_DuplicateExpiredThenActiveKeepsLatest(t *testing.T) {
+	content := `Admin [SteamID 0] Banned:76561198000000001:1000000000 //Old expired ban
+Admin [SteamID 0] Banned:76561198000000001:1893456000 //Current active ban`
+
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry (deduplicated), got %d", len(entries))
+	}
+	if entries[0].Expired {
+		t.Fatal("expected latest duplicate entry to determine expiry state")
+	}
+	if entries[0].Reason != "Current active ban" {
+		t.Fatalf("expected latest duplicate reason to be preserved, got %q", entries[0].Reason)
 	}
 }
 
@@ -512,6 +540,22 @@ func TestCategorizeBans(t *testing.T) {
 	}
 	if len(autoBans) != 1 {
 		t.Errorf("expected 1 auto-ban, got %d", len(autoBans))
+	}
+}
+
+func TestValidateBansCfgImport(t *testing.T) {
+	t.Parallel()
+
+	if err := validateBansCfgImport(0); err != nil {
+		t.Fatalf("expected import validation to allow fully parseable Bans.cfg, got %v", err)
+	}
+
+	err := validateBansCfgImport(2)
+	if err == nil {
+		t.Fatal("expected import validation to reject unparseable active lines")
+	}
+	if !strings.Contains(err.Error(), "2 unparseable active lines") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

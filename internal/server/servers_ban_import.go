@@ -58,7 +58,7 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int, error) {
 		return nil, 0, errBansCfgTooLarge
 	}
 	var entries []models.CfgBanEntry
-	seen := make(map[string]bool)
+	entryIndexes := make(map[string]int)
 	unparseable := 0
 	now := time.Now()
 	permanentThreshold := now.AddDate(permanentThresholdYears, 0, 0).Unix()
@@ -119,21 +119,19 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int, error) {
 			continue
 		}
 
-		// Deduplicate by identifier (first occurrence wins)
+		// Deduplicate by identifier (newest occurrence wins). Bans.cfg can
+		// contain multiple lines for the same player as bans are updated over
+		// time, and we need the latest line to drive import/sync decisions.
 		dedupKey := steamID
 		if dedupKey == "" {
 			dedupKey = "eos:" + eosID
 		}
-		if seen[dedupKey] {
-			continue
-		}
-		seen[dedupKey] = true
 
 		permanent := expiryTimestamp == 0 || expiryTimestamp >= permanentThreshold
 		expired := !permanent && now.After(time.Unix(expiryTimestamp, 0))
 		isAutoBan := strings.HasPrefix(reason, "Automatic ")
 
-		entries = append(entries, models.CfgBanEntry{
+		entry := models.CfgBanEntry{
 			SteamID:         steamID,
 			EOSID:           eosID,
 			ExpiryTimestamp: expiryTimestamp,
@@ -142,7 +140,15 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int, error) {
 			Expired:         expired,
 			IsAutoBan:       isAutoBan,
 			RawLine:         line,
-		})
+		}
+
+		if idx, exists := entryIndexes[dedupKey]; exists {
+			entries[idx] = entry
+			continue
+		}
+
+		entryIndexes[dedupKey] = len(entries)
+		entries = append(entries, entry)
 	}
 
 	return entries, unparseable, nil
@@ -239,6 +245,13 @@ func categorizeBans(entries []models.CfgBanEntry, existingSteamIDs, existingEOSI
 		}
 	}
 	return
+}
+
+func validateBansCfgImport(unparseableCount int) error {
+	if unparseableCount > 0 {
+		return fmt.Errorf("Bans.cfg contains %d unparseable active lines; fix or remove them before importing", unparseableCount)
+	}
+	return nil
 }
 
 // ServerBanImportPreview returns a preview of what would be imported from the server's Bans.cfg.
@@ -340,9 +353,13 @@ func (s *Server) ServerBanImportExecute(c *gin.Context) {
 		return
 	}
 
-	entries, _, parseErr := parseBansCfg(content)
+	entries, unparseableCount, parseErr := parseBansCfg(content)
 	if parseErr != nil {
 		responses.BadRequest(c, "Bans.cfg is too large to parse safely — import aborted to avoid dropping bans", &gin.H{"error": parseErr.Error()})
+		return
+	}
+	if err := validateBansCfgImport(unparseableCount); err != nil {
+		responses.BadRequest(c, "Bans.cfg contains unparseable active lines — import aborted to avoid dropping bans", &gin.H{"error": err.Error()})
 		return
 	}
 

@@ -198,6 +198,27 @@ func TestBuildMergedServerBansCfgContentPreservesLegacyEntries(t *testing.T) {
 	}
 }
 
+func TestBuildMergedServerBansCfgContentFailsOnUnparseableExistingEntries(t *testing.T) {
+	t.Parallel()
+
+	managed := []models.ServerBan{
+		{
+			AdminName:    "Admin",
+			AdminSteamID: "76561198000000010",
+			SteamID:      "76561198000000001",
+			Reason:       "Cheating",
+		},
+	}
+
+	_, err := buildMergedServerBansCfgContent(managed, "this is not a valid ban line\n", nil, nil, nil)
+	if err == nil {
+		t.Fatal("expected merge to fail when existing Bans.cfg has unparseable active lines")
+	}
+	if !strings.Contains(err.Error(), "contains 1 unparseable active lines") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestBuildMergedServerBansCfgContentDropsExcludedExistingEntries(t *testing.T) {
 	t.Parallel()
 
