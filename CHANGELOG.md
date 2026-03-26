@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix: server metric charts [[#190](https://github.com/Codycody31/squad-aegis/pull/190)]
 - fix: add missing ban evidence metadata [[#189](https://github.com/Codycody31/squad-aegis/pull/189)]
 - fix(server): validate server settings log source type [[#175](https://github.com/Codycody31/squad-aegis/pull/175)]
 - fix(ui): normalize optional log fields for server settings [[#176](https://github.com/Codycody31/squad-aegis/pull/176)]
