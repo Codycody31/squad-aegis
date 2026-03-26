@@ -5,10 +5,25 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from "vue";
 import { DualAxes } from "@antv/g2plot";
+import {
+  buildTimeAxis,
+  buildTimeMeta,
+  chartAxisLabelStyle,
+  chartAxisTitleStyle,
+  chartGridLineStyle,
+  formatChartTooltipTime,
+  toChartTime,
+} from "./time";
+
+interface ConnectionValue {
+  connections: number;
+  disconnections: number;
+  total_activity: number;
+}
 
 interface DataPoint {
   timestamp: string;
-  value: number;
+  value: ConnectionValue | number;
 }
 
 interface Props {
@@ -21,183 +36,174 @@ const props = defineProps<Props>();
 const chartContainer = ref<HTMLDivElement>();
 let chart: DualAxes | null = null;
 
-// Create and configure the chart
-const createChart = () => {
-  if (!chartContainer.value || !props.data || props.data.length === 0) return;
+const getConnectionValues = (value: ConnectionValue | number) => {
+  if (typeof value === "object" && value !== null) {
+    return value;
+  }
 
-  // Transform data for G2Plot - simulate connections and disconnections
-  const chartData = props.data.map((point, i) => {
-    const timestamp = new Date(point.timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      ...(props.period === '7d' || props.period === '30d' ? { 
-        month: 'short', 
-        day: 'numeric' 
-      } : {})
-    });
+  return {
+    connections: Number(value) || 0,
+    disconnections: 0,
+    total_activity: Number(value) || 0,
+  };
+};
+
+const buildChartData = () =>
+  props.data.map((point) => {
+    const value = getConnectionValues(point.value);
 
     return {
-      timestamp,
-      connections: i % 2 === 0 ? point.value : Math.max(0, point.value - Math.floor(Math.random() * 3) - 1),
-      disconnections: i % 2 === 1 ? point.value : Math.max(0, point.value - Math.floor(Math.random() * 2) - 1),
-      date: new Date(point.timestamp),
+      time: toChartTime(point.timestamp),
+      connections: value.connections,
+      disconnections: value.disconnections,
+      totalActivity: value.total_activity,
     };
   });
 
-  chart = new DualAxes(chartContainer.value, {
+const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
+  const timestamps = props.data.map((point) => point.timestamp);
+
+  return {
     data: [chartData, chartData],
-    xField: 'timestamp',
-    yField: ['connections', 'disconnections'],
+    xField: "time",
+    yField: ["connections", "disconnections"],
+    meta: {
+      time: buildTimeMeta(timestamps),
+    },
     geometryOptions: [
       {
-        geometry: 'line',
-        color: '#10b981',
+        geometry: "line",
+        color: "#10b981",
         lineStyle: {
           lineWidth: 2,
         },
         point: {
           size: 3,
-          shape: 'circle',
+          shape: "circle",
           style: {
-            fill: '#10b981',
-            stroke: '#fff',
+            fill: "#10b981",
+            stroke: "#fff",
             lineWidth: 1,
           },
         },
-        smooth: true,
+        smooth: false,
       },
       {
-        geometry: 'line',
-        color: '#ef4444',
+        geometry: "line",
+        color: "#ef4444",
         lineStyle: {
           lineWidth: 2,
         },
         point: {
           size: 3,
-          shape: 'circle',
+          shape: "circle",
           style: {
-            fill: '#ef4444',
-            stroke: '#fff',
+            fill: "#ef4444",
+            stroke: "#fff",
             lineWidth: 1,
           },
         },
-        smooth: true,
+        smooth: false,
       },
     ],
-    xAxis: {
-      title: {
-        text: 'Time',
-        style: {
-          fontSize: 12,
-          fill: '#666',
-        },
-      },
-      label: {
-        style: {
-          fontSize: 11,
-          fill: '#666',
-        },
-        autoRotate: true,
-        autoHide: true,
-      },
-    },
+    xAxis: buildTimeAxis(timestamps),
     yAxis: {
       connections: {
         title: {
-          text: 'Connections',
+          text: "Connections",
           style: {
-            fontSize: 12,
-            fill: '#10b981',
+            ...chartAxisTitleStyle,
+            fill: "#10b981",
           },
         },
         label: {
           style: {
-            fontSize: 11,
-            fill: '#10b981',
+            ...chartAxisLabelStyle,
+            fill: "#10b981",
           },
         },
         grid: {
           line: {
-            style: {
-              stroke: '#e5e7eb',
-              lineWidth: 1,
-              lineDash: [4, 5],
-            },
+            style: chartGridLineStyle,
           },
         },
         min: 0,
       },
       disconnections: {
         title: {
-          text: 'Disconnections',
+          text: "Disconnections",
           style: {
-            fontSize: 12,
-            fill: '#ef4444',
+            ...chartAxisTitleStyle,
+            fill: "#ef4444",
           },
         },
         label: {
           style: {
-            fontSize: 11,
-            fill: '#ef4444',
+            ...chartAxisLabelStyle,
+            fill: "#ef4444",
           },
         },
         min: 0,
       },
     },
     legend: {
-      position: 'top-right',
+      position: "top-right",
       itemName: {
         formatter: (text) => {
-          return text === 'connections' ? 'Connections' : 'Disconnections';
+          return text === "connections" ? "Connections" : "Disconnections";
         },
       },
     },
     tooltip: {
-      title: 'Time',
-      formatter: (datum) => {
-        if (datum.connections !== undefined) {
-          return {
-            name: 'Connections',
-            value: `${datum.connections} players`,
-          };
-        } else {
-          return {
-            name: 'Disconnections',
-            value: `${datum.disconnections} players`,
-          };
-        }
+      customContent: (title, items) => {
+        if (!items || items.length === 0) return "";
+        const time = items[0].data.time;
+
+        let content = `<div style="padding: 10px;"><div style="font-weight: 600; margin-bottom: 6px;">${formatChartTooltipTime(time)}</div>`;
+        items.forEach((item) => {
+          const label = item.name === "connections" ? "Connections" : "Disconnections";
+          content += `
+            <div style="display: flex; justify-content: space-between; gap: 12px; padding-top: 4px;">
+              <span style="color: ${item.color};">${label}</span>
+              <span>${item.value}</span>
+            </div>
+          `;
+        });
+        content += "</div>";
+
+        return content;
       },
     },
-  });
+  };
+};
+
+// Create and configure the chart
+const createChart = () => {
+  if (!chartContainer.value || !props.data || props.data.length === 0) return;
+
+  chart = new DualAxes(chartContainer.value, getChartOptions(buildChartData()));
 
   chart.render();
 };
 
 // Update chart when data changes
 const updateChart = () => {
-  if (!chart) return;
-  
-  const chartData = props.data.map((point, i) => {
-    const timestamp = new Date(point.timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      ...(props.period === '7d' || props.period === '30d' ? { 
-        month: 'short', 
-        day: 'numeric' 
-      } : {})
-    });
+  if (!props.data?.length) {
+    if (chart) {
+      chart.destroy();
+      chart = null;
+    }
+    return;
+  }
 
-    return {
-      timestamp,
-      connections: i % 2 === 0 ? point.value : Math.max(0, point.value - Math.floor(Math.random() * 3) - 1),
-      disconnections: i % 2 === 1 ? point.value : Math.max(0, point.value - Math.floor(Math.random() * 2) - 1),
-      date: new Date(point.timestamp),
-    };
-  });
+  const chartData = buildChartData();
 
-  chart.update({
-    data: [chartData, chartData],
-  });
+  if (!chart) {
+    createChart();
+    return;
+  }
+
+  chart.update(getChartOptions(chartData));
 };
 
 // Watch for data changes

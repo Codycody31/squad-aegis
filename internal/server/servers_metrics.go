@@ -18,6 +18,12 @@ type MetricPoint struct {
 	Value     interface{} `json:"value"`
 }
 
+type ConnectionMetricValue struct {
+	Connections    int `json:"connections"`
+	Disconnections int `json:"disconnections"`
+	TotalActivity  int `json:"total_activity"`
+}
+
 // ServerMetricsData represents the metrics response
 type ServerMetricsData struct {
 	PlayerCount            []MetricPoint  `json:"player_count"`
@@ -394,7 +400,7 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 	`
 
 	// Create a map to store connection data
-	connectionDataMap := make(map[int64]int)
+	connectionDataMap := make(map[int64]ConnectionMetricValue)
 	rows, err = clickhouseClient.Query(ctx, connectionQuery,
 		intervalMinutes, serverId, startTime, endTime, intervalMinutes,
 		intervalMinutes, serverId, startTime, endTime, intervalMinutes)
@@ -409,13 +415,16 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 				log.Error().Err(err).Msg("Failed to scan connection metric")
 				continue
 			}
-			// Store total activity (connections + disconnections) as the main metric
-			connectionDataMap[timestamp] = int(totalActivity)
+			connectionDataMap[timestamp] = ConnectionMetricValue{
+				Connections:    int(totalConnections),
+				Disconnections: int(totalDisconnections),
+				TotalActivity:  int(totalActivity),
+			}
 		}
 	}
 
 	// Fill in the connection data with 0s for missing intervals
-	metricsData.ConnectionStats = fillTimeSeriesGaps(startTime, endTime, intervalMinutes, connectionDataMap)
+	metricsData.ConnectionStats = fillConnectionSeriesGaps(startTime, endTime, intervalMinutes, connectionDataMap)
 
 	// Query teamkill metrics
 	teamkillQuery := `
@@ -808,7 +817,9 @@ func (s *Server) getMetricsFromClickHouse(ctx context.Context, serverId uuid.UUI
 		// Total connection activity (connections + disconnections)
 		for _, point := range metricsData.ConnectionStats {
 			if point.Value != nil {
-				if connCount, ok := point.Value.(int); ok {
+				if connData, ok := point.Value.(ConnectionMetricValue); ok {
+					metricsData.Summary.TotalConnections += connData.TotalActivity
+				} else if connCount, ok := point.Value.(int); ok {
 					metricsData.Summary.TotalConnections += connCount
 				}
 			}
@@ -1094,9 +1105,18 @@ func (s *Server) generateSampleMetrics(period string, interval int) ServerMetric
 		if randomInt(0, 100) < 40 { // 40% chance of connection activity in any given interval
 			connectionValue = randomInt(1, 4) // Include both connects and disconnects
 		}
+		connections := (connectionValue + 1) / 2
+		disconnections := connectionValue / 2
+		if i%2 == 1 {
+			connections, disconnections = disconnections, connections
+		}
 		connectionStats = append(connectionStats, MetricPoint{
 			Timestamp: timestamp,
-			Value:     connectionValue,
+			Value: ConnectionMetricValue{
+				Connections:    connections,
+				Disconnections: disconnections,
+				TotalActivity:  connectionValue,
+			},
 		})
 
 		// Teamkill stats (teamkills per interval) - should be rare
@@ -1276,6 +1296,41 @@ func fillTimeSeriesGaps(startTime, endTime time.Time, intervalMinutes int, dataM
 			value = val
 		} else {
 			// Try with small tolerance (±1 second) for potential rounding differences
+			for tolerance := int64(-1000); tolerance <= 1000; tolerance += 1000 {
+				if val, exists := dataMap[timestamp+tolerance]; exists {
+					value = val
+					break
+				}
+			}
+		}
+
+		points = append(points, MetricPoint{
+			Timestamp: current,
+			Value:     value,
+		})
+	}
+
+	return points
+}
+
+func fillConnectionSeriesGaps(startTime, endTime time.Time, intervalMinutes int, dataMap map[int64]ConnectionMetricValue) []MetricPoint {
+	var points []MetricPoint
+
+	interval := time.Duration(intervalMinutes) * time.Minute
+	startTimestamp := startTime.Truncate(interval)
+
+	endTimestamp := endTime.Truncate(interval)
+	if endTime.After(endTimestamp) {
+		endTimestamp = endTimestamp.Add(interval)
+	}
+
+	for current := startTimestamp; current.Before(endTimestamp) || current.Equal(endTimestamp); current = current.Add(interval) {
+		timestamp := current.Unix() * 1000
+		value := ConnectionMetricValue{}
+
+		if val, exists := dataMap[timestamp]; exists {
+			value = val
+		} else {
 			for tolerance := int64(-1000); tolerance <= 1000; tolerance += 1000 {
 				if val, exists := dataMap[timestamp+tolerance]; exists {
 					value = val
