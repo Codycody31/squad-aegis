@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { computed, ref, onMounted, watch } from "vue";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
   Table,
@@ -37,6 +37,14 @@ import {
 } from "lucide-vue-next";
 import type { CombatHistoryEntry } from "~/types/player";
 
+interface CombatHistoryDisplayEntry extends CombatHistoryEntry {
+  row_id: string;
+  grouped_count: number;
+  total_damage: number;
+  min_damage: number;
+  max_damage: number;
+}
+
 const props = defineProps<{
   playerId: string;
 }>();
@@ -46,9 +54,14 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const events = ref<CombatHistoryEntry[]>([]);
+const hasMore = ref(false);
 const page = ref(1);
 const limit = ref(50);
 const eventTypeFilter = ref("all");
+const burstEventTypes = new Set<CombatHistoryEntry["event_type"]>([
+  "damaged",
+  "damaged_by",
+]);
 
 async function fetchCombatHistory() {
   loading.value = true;
@@ -84,6 +97,7 @@ async function fetchCombatHistory() {
 
     const data = await response.json();
     events.value = data.data.events || [];
+    hasMore.value = data.data.has_more ?? false;
   } catch (err: any) {
     error.value = err.message;
   } finally {
@@ -91,8 +105,19 @@ async function fetchCombatHistory() {
   }
 }
 
-function formatDate(dateString: string): string {
-  return new Date(dateString).toLocaleString();
+function formatDate(dateString: string, includeMilliseconds = false): string {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString;
+
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    ...(includeMilliseconds ? { fractionalSecondDigits: 3 as const } : {}),
+  });
 }
 
 function getTimeAgo(dateString: string): string {
@@ -112,10 +137,150 @@ function getOtherPlayerId(entry: CombatHistoryEntry): string | null {
   return entry.other_steam_id || entry.other_eos_id || null;
 }
 
+function getOtherPlayerKey(entry: CombatHistoryEntry): string {
+  return entry.other_steam_id || entry.other_eos_id || entry.other_name || "unknown";
+}
+
+function getSecondBucket(eventTime: string): string {
+  const date = new Date(eventTime);
+  if (Number.isNaN(date.getTime())) return eventTime;
+  return Math.floor(date.getTime() / 1000).toString();
+}
+
+function buildBurstGroupKey(entry: CombatHistoryEntry): string {
+  return [
+    entry.event_type,
+    entry.server_id,
+    entry.chain_id || "",
+    getSecondBucket(entry.event_time),
+    getOtherPlayerKey(entry),
+    entry.weapon || "",
+    entry.teamkill ? "1" : "0",
+  ].join("|");
+}
+
+function shouldMergeBurst(
+  current: CombatHistoryDisplayEntry,
+  next: CombatHistoryEntry
+): boolean {
+  if (!burstEventTypes.has(current.event_type) || !burstEventTypes.has(next.event_type)) {
+    return false;
+  }
+
+  return buildBurstGroupKey(current) === buildBurstGroupKey(next);
+}
+
 const filteredEvents = computed(() => {
   if (eventTypeFilter.value === "all") return events.value;
   return events.value.filter((e) => e.event_type === eventTypeFilter.value);
 });
+
+const displayEvents = computed<CombatHistoryDisplayEntry[]>(() => {
+  const grouped: CombatHistoryDisplayEntry[] = [];
+  const seenEventIds = new Set<string>();
+
+  for (const event of filteredEvents.value) {
+    if (event.event_id) {
+      const dedupeKey = `${event.event_type}:${event.event_id}`;
+      if (seenEventIds.has(dedupeKey)) continue;
+      seenEventIds.add(dedupeKey);
+    }
+
+    const previous = grouped[grouped.length - 1];
+    if (previous && shouldMergeBurst(previous, event)) {
+      previous.grouped_count += 1;
+      previous.total_damage += event.damage;
+      previous.min_damage = Math.min(previous.min_damage, event.damage);
+      previous.max_damage = Math.max(previous.max_damage, event.damage);
+      continue;
+    }
+
+    grouped.push({
+      ...event,
+      row_id: event.event_id
+        ? `${event.event_type}:${event.event_id}`
+        : `${event.event_type}:${event.event_time}:${event.server_id}:${grouped.length}`,
+      grouped_count: 1,
+      total_damage: event.damage,
+      min_damage: event.damage,
+      max_damage: event.damage,
+    });
+  }
+
+  return grouped;
+});
+
+function getEventLabel(type: CombatHistoryEntry["event_type"]): string {
+  switch (type) {
+    case "kill":
+      return "Kill";
+    case "death":
+      return "Death";
+    case "wounded":
+      return "Downed";
+    case "wounded_by":
+      return "Downed By";
+    case "damaged":
+      return "Hit";
+    case "damaged_by":
+      return "Hit By";
+  }
+}
+
+function getEventBadgeClass(type: CombatHistoryEntry["event_type"]): string {
+  switch (type) {
+    case "kill":
+      return "bg-green-600";
+    case "death":
+      return "bg-red-600";
+    case "wounded":
+      return "bg-orange-500";
+    case "wounded_by":
+      return "bg-orange-700";
+    case "damaged":
+      return "bg-blue-500";
+    case "damaged_by":
+      return "bg-blue-700";
+  }
+}
+
+function getEventIcon(type: CombatHistoryEntry["event_type"]) {
+  switch (type) {
+    case "kill":
+      return Target;
+    case "death":
+      return Skull;
+    case "wounded":
+      return Crosshair;
+    case "wounded_by":
+      return Heart;
+    case "damaged":
+      return Crosshair;
+    case "damaged_by":
+      return Heart;
+  }
+}
+
+function getTimeMeta(entry: CombatHistoryDisplayEntry): string {
+  if (entry.grouped_count === 1) return getTimeAgo(entry.event_time);
+  return `${getTimeAgo(entry.event_time)} • ${entry.grouped_count} hits merged`;
+}
+
+function getDamageValue(entry: CombatHistoryDisplayEntry): number {
+  return entry.grouped_count > 1 ? entry.total_damage : entry.damage;
+}
+
+function getDamageMeta(entry: CombatHistoryDisplayEntry): string {
+  if (entry.grouped_count <= 1) return "";
+
+  const min = Math.round(entry.min_damage);
+  const max = Math.round(entry.max_damage);
+  if (min === max) {
+    return `${entry.grouped_count} hits`;
+  }
+
+  return `${entry.grouped_count} hits • ${min}-${max} each`;
+}
 
 watch(eventTypeFilter, () => {
   page.value = 1;
@@ -186,7 +351,7 @@ onMounted(() => {
       </div>
 
       <div
-        v-else-if="filteredEvents.length === 0"
+        v-else-if="displayEvents.length === 0"
         class="text-center py-8 text-muted-foreground"
       >
         No combat history available
@@ -208,68 +373,39 @@ onMounted(() => {
             </TableHeader>
             <TableBody>
               <TableRow
-                v-for="(event, index) in filteredEvents"
-                :key="index"
+                v-for="event in displayEvents"
+                :key="event.row_id"
                 class="hover:bg-muted/50"
                 :class="{
                   'bg-yellow-500/10': event.teamkill,
                 }"
               >
                 <TableCell>
-                  <div class="text-sm">{{ formatDate(event.event_time) }}</div>
+                  <div class="text-sm">
+                    {{ formatDate(event.event_time, event.grouped_count > 1) }}
+                  </div>
                   <div class="text-xs text-muted-foreground">
-                    {{ getTimeAgo(event.event_time) }}
+                    {{ getTimeMeta(event) }}
                   </div>
                 </TableCell>
                 <TableCell>
                   <div class="flex items-center gap-2">
                     <Badge
-                      v-if="event.event_type === 'kill'"
                       variant="default"
-                      class="bg-green-600"
+                      :class="getEventBadgeClass(event.event_type)"
                     >
-                      <Target class="h-3 w-3 mr-1" />
-                      Kill
+                      <component
+                        :is="getEventIcon(event.event_type)"
+                        class="h-3 w-3 mr-1"
+                      />
+                      {{ getEventLabel(event.event_type) }}
                     </Badge>
                     <Badge
-                      v-else-if="event.event_type === 'death'"
-                      variant="default"
-                      class="bg-red-600"
+                      v-if="event.grouped_count > 1"
+                      variant="secondary"
+                      class="font-mono"
                     >
-                      <Skull class="h-3 w-3 mr-1" />
-                      Death
-                    </Badge>
-                    <Badge
-                      v-else-if="event.event_type === 'wounded'"
-                      variant="default"
-                      class="bg-orange-500"
-                    >
-                      <Crosshair class="h-3 w-3 mr-1" />
-                      Downed
-                    </Badge>
-                    <Badge
-                      v-else-if="event.event_type === 'wounded_by'"
-                      variant="default"
-                      class="bg-orange-700"
-                    >
-                      <Heart class="h-3 w-3 mr-1" />
-                      Downed By
-                    </Badge>
-                    <Badge
-                      v-else-if="event.event_type === 'damaged'"
-                      variant="default"
-                      class="bg-blue-500"
-                    >
-                      <Crosshair class="h-3 w-3 mr-1" />
-                      Hit
-                    </Badge>
-                    <Badge
-                      v-else-if="event.event_type === 'damaged_by'"
-                      variant="default"
-                      class="bg-blue-700"
-                    >
-                      <Heart class="h-3 w-3 mr-1" />
-                      Hit By
+                      x{{ event.grouped_count }}
                     </Badge>
                     <TooltipProvider v-if="event.teamkill">
                       <Tooltip>
@@ -307,7 +443,13 @@ onMounted(() => {
                   </code>
                 </TableCell>
                 <TableCell>
-                  <span class="text-sm">{{ Math.round(event.damage) }}</span>
+                  <div class="text-sm">{{ Math.round(getDamageValue(event)) }}</div>
+                  <div
+                    v-if="event.grouped_count > 1"
+                    class="text-xs text-muted-foreground"
+                  >
+                    {{ getDamageMeta(event) }}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <div class="text-sm">
@@ -322,60 +464,29 @@ onMounted(() => {
         <!-- Mobile Cards -->
         <div class="md:hidden space-y-3">
           <div
-            v-for="(event, index) in filteredEvents"
-            :key="index"
+            v-for="event in displayEvents"
+            :key="event.row_id"
             class="border rounded-lg p-3 hover:bg-muted/30 transition-colors"
             :class="{ 'border-yellow-500/50 bg-yellow-500/5': event.teamkill }"
           >
             <div class="flex items-center justify-between mb-2">
               <div class="flex items-center gap-2">
                 <Badge
-                  v-if="event.event_type === 'kill'"
                   variant="default"
-                  class="bg-green-600"
+                  :class="getEventBadgeClass(event.event_type)"
                 >
-                  <Target class="h-3 w-3 mr-1" />
-                  Kill
+                  <component
+                    :is="getEventIcon(event.event_type)"
+                    class="h-3 w-3 mr-1"
+                  />
+                  {{ getEventLabel(event.event_type) }}
                 </Badge>
                 <Badge
-                  v-else-if="event.event_type === 'death'"
-                  variant="default"
-                  class="bg-red-600"
+                  v-if="event.grouped_count > 1"
+                  variant="secondary"
+                  class="font-mono"
                 >
-                  <Skull class="h-3 w-3 mr-1" />
-                  Death
-                </Badge>
-                <Badge
-                  v-else-if="event.event_type === 'wounded'"
-                  variant="default"
-                  class="bg-orange-500"
-                >
-                  <Crosshair class="h-3 w-3 mr-1" />
-                  Downed
-                </Badge>
-                <Badge
-                  v-else-if="event.event_type === 'wounded_by'"
-                  variant="default"
-                  class="bg-orange-700"
-                >
-                  <Heart class="h-3 w-3 mr-1" />
-                  Downed By
-                </Badge>
-                <Badge
-                  v-else-if="event.event_type === 'damaged'"
-                  variant="default"
-                  class="bg-blue-500"
-                >
-                  <Crosshair class="h-3 w-3 mr-1" />
-                  Hit
-                </Badge>
-                <Badge
-                  v-else-if="event.event_type === 'damaged_by'"
-                  variant="default"
-                  class="bg-blue-700"
-                >
-                  <Heart class="h-3 w-3 mr-1" />
-                  Hit By
+                  x{{ event.grouped_count }}
                 </Badge>
                 <AlertTriangle
                   v-if="event.teamkill"
@@ -383,7 +494,7 @@ onMounted(() => {
                 />
               </div>
               <span class="text-xs text-muted-foreground">
-                {{ getTimeAgo(event.event_time) }}
+                {{ getTimeMeta(event) }}
               </span>
             </div>
             <div class="space-y-1 text-sm">
@@ -410,7 +521,13 @@ onMounted(() => {
               </div>
               <div>
                 <span class="text-muted-foreground">Damage: </span>
-                {{ Math.round(event.damage) }}
+                {{ Math.round(getDamageValue(event)) }}
+                <span
+                  v-if="event.grouped_count > 1"
+                  class="text-xs text-muted-foreground ml-1"
+                >
+                  ({{ getDamageMeta(event) }})
+                </span>
               </div>
               <div>
                 <span class="text-muted-foreground">Server: </span>
@@ -418,7 +535,7 @@ onMounted(() => {
               </div>
               <div>
                 <span class="text-muted-foreground">Time: </span>
-                {{ formatDate(event.event_time) }}
+                {{ formatDate(event.event_time, event.grouped_count > 1) }}
               </div>
             </div>
           </div>
@@ -439,7 +556,7 @@ onMounted(() => {
             <Button
               variant="outline"
               size="sm"
-              :disabled="filteredEvents.length < limit"
+              :disabled="!hasMore"
               @click="nextPage"
             >
               <ChevronRight class="h-4 w-4" />
