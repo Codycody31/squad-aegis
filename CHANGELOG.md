@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.0) - 2026-02-15
+## [0.9.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.0) - 2026-03-26
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### 📈 Enhancement
 
+- refactor: server log configuration and overhaul Bans.cfg ban sync/import [[#169](https://github.com/Codycody31/squad-aegis/pull/169)]
 - refactor(settings.vue): show proper server status for components (rcon/game port, log source, etc) [[#181](https://github.com/Codycody31/squad-aegis/pull/181)]
 - refactor(dashboard.vue): add proper status tracking displayment for game/rcon ports & other components [[#180](https://github.com/Codycody31/squad-aegis/pull/180)]
 - refactor(server): rebuild server online status detection with separated game/rcon port and log status checks [[#178](https://github.com/Codycody31/squad-aegis/pull/178)]
