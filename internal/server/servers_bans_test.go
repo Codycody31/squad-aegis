@@ -2,6 +2,9 @@ package server
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -172,6 +175,29 @@ func TestBuildMergedServerBansCfgContentPreservesUnmanagedEntries(t *testing.T) 
 	}
 }
 
+func TestBuildMergedServerBansCfgContentPreservesLegacyEntries(t *testing.T) {
+	t.Parallel()
+
+	managed := []models.ServerBan{
+		{
+			AdminName:    "Admin",
+			AdminSteamID: "76561198000000010",
+			SteamID:      "76561198000000001",
+			Reason:       "Cheating",
+		},
+	}
+	existing := "76561198000000002:0 //Legacy manual ban\n"
+
+	content, err := buildMergedServerBansCfgContent(managed, existing, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("expected merge to succeed, got %v", err)
+	}
+
+	if !strings.Contains(content, "76561198000000002:0 //Legacy manual ban") {
+		t.Fatalf("expected legacy unmanaged ban to be preserved, got %q", content)
+	}
+}
+
 func TestBuildMergedServerBansCfgContentDropsExcludedExistingEntries(t *testing.T) {
 	t.Parallel()
 
@@ -192,5 +218,43 @@ func TestBuildMergedServerBansCfgContentDropsExcludedExistingEntries(t *testing.
 	}
 	if !strings.Contains(content, "N/A Banned:abcdef0123456789abcdef0123456789:0 //Manual server-side ban") {
 		t.Fatalf("expected non-excluded entry to remain, got %q", content)
+	}
+}
+
+func TestWriteFileAtomicallyPreservesOriginalOnFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission-based temp file failure is not reliable on Windows")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Bans.cfg")
+	original := []byte("original bans\n")
+
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatalf("failed to seed original file: %v", err)
+	}
+	if err := os.Chmod(dir, 0555); err != nil {
+		t.Fatalf("failed to make directory read-only: %v", err)
+	}
+	defer func() {
+		_ = os.Chmod(dir, 0755)
+	}()
+	if probe, probeErr := os.CreateTemp(dir, "probe-*"); probeErr == nil {
+		_ = probe.Close()
+		_ = os.Remove(probe.Name())
+		t.Skip("environment still allows temp-file creation in read-only directory")
+	}
+
+	err := writeFileAtomically(path, []byte("updated bans\n"), 0644)
+	if err == nil {
+		t.Fatal("expected atomic write to fail in read-only directory")
+	}
+
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("failed to read original file after failed write: %v", readErr)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("expected original content to remain after failed write, got %q", string(got))
 	}
 }

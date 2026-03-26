@@ -142,6 +142,36 @@ func TestParseBansCfg_NoReason(t *testing.T) {
 	}
 }
 
+func TestParseBansCfg_LegacyFormat(t *testing.T) {
+	content := `76561198000000001:0 //Permanent ban
+ABCDEF0123456789ABCDEF0123456789:1893456000 //Timed EOS ban`
+
+	entries, unparseable, err := parseBansCfg(content)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if unparseable != 0 {
+		t.Fatalf("expected 0 unparseable, got %d", unparseable)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	if entries[0].SteamID != "76561198000000001" {
+		t.Fatalf("expected legacy steam ID to parse, got %q", entries[0].SteamID)
+	}
+	if !entries[0].Permanent {
+		t.Fatal("expected zero-expiry legacy entry to be permanent")
+	}
+	if entries[1].EOSID != "abcdef0123456789abcdef0123456789" {
+		t.Fatalf("expected legacy EOS ID to be normalized, got %q", entries[1].EOSID)
+	}
+	if entries[1].Reason != "Timed EOS ban" {
+		t.Fatalf("expected legacy reason to be preserved, got %q", entries[1].Reason)
+	}
+}
+
 func TestParseBansCfg_InvalidSteamID(t *testing.T) {
 	// "notanumber" is neither a 32-char hex EOS ID nor a numeric Steam ID
 	content := `Admin [SteamID 0] Banned:notanumber:0 //Bad ID`
@@ -520,4 +550,3 @@ func TestParseBansCfg_NormalizesEOSIDCase(t *testing.T) {
 		t.Fatalf("expected normalized lowercase EOS ID, got %q", entries[0].EOSID)
 	}
 }
-

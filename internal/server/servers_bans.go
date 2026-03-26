@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -566,20 +567,83 @@ func (s *Server) syncBansCfgWithExcludedIDsUsingExecutor(ctx context.Context, ex
 		}
 		defer uploader.Close()
 
-		if err := uploader.Upload(ctx, content); err != nil {
+		atomicUploader, ok := uploader.(interface {
+			UploadAtomically(context.Context, string) error
+		})
+		if !ok {
+			return fmt.Errorf("Bans.cfg uploader does not support atomic replacement")
+		}
+
+		if err := atomicUploader.UploadAtomically(ctx, content); err != nil {
 			return fmt.Errorf("failed to write Bans.cfg: %w", err)
 		}
 
 		log.Info().Str("serverId", server.Id.String()).Msg("Synced Bans.cfg via " + *server.LogSourceType)
 
 	case "local":
-		if err := os.WriteFile(bansCfgPath, []byte(content), 0644); err != nil {
+		if err := writeFileAtomically(bansCfgPath, []byte(content), 0644); err != nil {
 			return fmt.Errorf("failed to write local Bans.cfg: %w", err)
 		}
 
 		log.Info().Str("serverId", server.Id.String()).Msg("Synced local Bans.cfg")
 	}
 
+	return nil
+}
+
+func writeFileAtomically(path string, content []byte, mode os.FileMode) error {
+	tempFile, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".aegis-tmp-*")
+	if err != nil {
+		return err
+	}
+
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err := tempFile.Chmod(mode); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if _, err := tempFile.Write(content); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tempPath, path); err == nil {
+		cleanupTemp = false
+		return nil
+	}
+
+	backupPath := filepath.Join(
+		filepath.Dir(path),
+		fmt.Sprintf(".%s.aegis-bak-%d", filepath.Base(path), time.Now().UnixNano()),
+	)
+	if err := os.Rename(path, backupPath); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tempPath, path); err != nil {
+		restoreErr := os.Rename(backupPath, path)
+		if restoreErr != nil {
+			return fmt.Errorf("failed to replace file and failed to restore original: replace: %w; restore: %v", err, restoreErr)
+		}
+		return err
+	}
+
+	cleanupTemp = false
+	_ = os.Remove(backupPath)
 	return nil
 }
 

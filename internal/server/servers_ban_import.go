@@ -48,6 +48,7 @@ var errBansCfgTooLarge = fmt.Errorf("Bans.cfg exceeds safety limits (max %d byte
 //
 //	AdminName [SteamID X] Banned:<id>:<expiryTimestamp> //<reason>
 //	N/A Banned:<id>:<expiryTimestamp> //<reason>
+//	<id>:<expiryTimestamp> //<reason>
 func parseBansCfg(content string) ([]models.CfgBanEntry, int, error) {
 	if len(content) > maxBansCfgReadBytes {
 		return nil, 0, errBansCfgTooLarge
@@ -68,24 +69,24 @@ func parseBansCfg(content string) ([]models.CfgBanEntry, int, error) {
 			continue
 		}
 
-		// Find "Banned:" in the line
-		_, afterBanned, found := strings.Cut(line, "Banned:")
-		if !found {
-			unparseable++
-			continue
+		// Support both the full Squad format ("... Banned:<id>:<expiry>") and
+		// the legacy exported format ("<id>:<expiry>").
+		banSpec := line
+		if _, afterBanned, found := strings.Cut(line, "Banned:"); found {
+			banSpec = afterBanned
 		}
 
 		// Extract reason from "//" suffix before parsing id:expiry
 		reason := ""
-		if commentIdx := strings.Index(afterBanned, "//"); commentIdx >= 0 {
-			reason = strings.TrimSpace(afterBanned[commentIdx+2:])
-			afterBanned = afterBanned[:commentIdx]
+		if commentIdx := strings.Index(banSpec, "//"); commentIdx >= 0 {
+			reason = strings.TrimSpace(banSpec[commentIdx+2:])
+			banSpec = banSpec[:commentIdx]
 		}
 
-		afterBanned = strings.TrimSpace(afterBanned)
+		banSpec = strings.TrimSpace(banSpec)
 
 		// Split into id and expiryTimestamp
-		parts := strings.SplitN(afterBanned, ":", 2)
+		parts := strings.SplitN(banSpec, ":", 2)
 		if len(parts) != 2 {
 			unparseable++
 			continue
