@@ -1288,41 +1288,11 @@ func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.Ba
 			ev.TextContent = &textContent.String
 		}
 
-		// Fetch metadata from ClickHouse if not already stored (only for ClickHouse events)
+		// Fetch metadata from ClickHouse if it is missing or too sparse to render.
 		if ev.EvidenceType != "file_upload" && ev.EvidenceType != "text_paste" {
-			if len(metadataJSON) == 0 || string(metadataJSON) == "{}" {
-				if ev.ClickhouseTable != nil && ev.RecordID != nil {
-					recordUUID, parseErr := uuid.Parse(*ev.RecordID)
-					if parseErr != nil {
-						log.Warn().Err(parseErr).
-							Str("table", *ev.ClickhouseTable).
-							Str("record_id", *ev.RecordID).
-							Msg("Failed to parse record ID as UUID")
-						ev.Metadata = make(map[string]interface{})
-					} else {
-						metadata, err := s.fetchEvidenceMetadataFromClickHouse(ctx, *ev.ClickhouseTable, recordUUID, ev.ServerID, ev.EvidenceType)
-						if err != nil {
-							log.Warn().Err(err).
-								Str("table", *ev.ClickhouseTable).
-								Str("record_id", *ev.RecordID).
-								Msg("Failed to fetch evidence metadata from ClickHouse")
-							// Continue with empty metadata if fetch fails
-							ev.Metadata = make(map[string]interface{})
-						} else {
-							ev.Metadata = metadata
-						}
-					}
-				} else {
-					ev.Metadata = make(map[string]interface{})
-				}
-			} else {
-				// Parse existing metadata JSON
-				var metadata map[string]interface{}
-				if err := json.Unmarshal(metadataJSON, &metadata); err == nil {
-					ev.Metadata = metadata
-				} else {
-					ev.Metadata = make(map[string]interface{})
-				}
+			ev.Metadata = parseEvidenceMetadataJSON(metadataJSON)
+			if shouldHydrateEvidenceMetadata(ev.EvidenceType, ev.Metadata) {
+				ev.Metadata = s.fetchAndMergeEvidenceMetadata(ctx, ev)
 			}
 		} else {
 			// For file/text evidence, parse metadata if present
@@ -1342,6 +1312,73 @@ func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.Ba
 	}
 
 	return evidence, nil
+}
+
+func parseEvidenceMetadataJSON(metadataJSON []byte) map[string]interface{} {
+	if len(metadataJSON) == 0 || string(metadataJSON) == "{}" {
+		return make(map[string]interface{})
+	}
+
+	var metadata map[string]interface{}
+	if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+		return make(map[string]interface{})
+	}
+
+	return metadata
+}
+
+func shouldHydrateEvidenceMetadata(evidenceType string, metadata map[string]interface{}) bool {
+	if len(metadata) == 0 {
+		return true
+	}
+
+	switch evidenceType {
+	case "chat_message":
+		_, hasMessage := metadata["message"]
+		return !hasMessage
+	case "player_connected":
+		_, hasJoinedName := metadata["joined_name"]
+		_, hasPlayerController := metadata["player_controller"]
+		return !hasJoinedName && !hasPlayerController
+	default:
+		return false
+	}
+}
+
+func (s *Server) fetchAndMergeEvidenceMetadata(ctx context.Context, ev models.BanEvidence) map[string]interface{} {
+	if ev.ClickhouseTable == nil || ev.RecordID == nil {
+		return ev.Metadata
+	}
+
+	recordUUID, parseErr := uuid.Parse(*ev.RecordID)
+	if parseErr != nil {
+		log.Warn().Err(parseErr).
+			Str("table", *ev.ClickhouseTable).
+			Str("record_id", *ev.RecordID).
+			Msg("Failed to parse record ID as UUID")
+		return ev.Metadata
+	}
+
+	metadata, err := s.fetchEvidenceMetadataFromClickHouse(ctx, *ev.ClickhouseTable, recordUUID, ev.ServerID, ev.EvidenceType)
+	if err != nil {
+		log.Warn().Err(err).
+			Str("table", *ev.ClickhouseTable).
+			Str("record_id", *ev.RecordID).
+			Msg("Failed to fetch evidence metadata from ClickHouse")
+		return ev.Metadata
+	}
+
+	if len(ev.Metadata) == 0 {
+		return metadata
+	}
+
+	for key, value := range ev.Metadata {
+		if _, exists := metadata[key]; !exists {
+			metadata[key] = value
+		}
+	}
+
+	return metadata
 }
 
 // lookupPlayerNamesBatch looks up player names from ClickHouse for a batch of steam IDs
