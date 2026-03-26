@@ -202,27 +202,30 @@ func (p *RuleLookupPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEven
 		return nil // Not our command
 	}
 
+	// Determine the preferred player ID for RCON commands
+	playerID := event.PreferredPlayerID()
+
 	// Parse the rule number from the message
 	// Expected format: !rule 1.1 or !rule 7.7.1
 	parts := strings.Fields(message)
 	if len(parts) < 2 {
 		// No rule number provided
-		return p.sendHelpMessage(event.SteamID)
+		return p.sendHelpMessage(playerID)
 	}
 
 	ruleNumber := parts[1]
 
 	// Validate rule number format
 	if !p.rulePattern.MatchString(ruleNumber) {
-		return p.sendInvalidFormatMessage(event.SteamID, ruleNumber)
+		return p.sendInvalidFormatMessage(playerID, ruleNumber)
 	}
 
 	// Look up the rule
-	return p.lookupAndSendRule(event, ruleNumber)
+	return p.lookupAndSendRule(event, playerID, ruleNumber)
 }
 
 // lookupAndSendRule finds a rule by its display order pattern and sends it to players
-func (p *RuleLookupPlugin) lookupAndSendRule(event *event_manager.RconChatMessageData, ruleNumber string) error {
+func (p *RuleLookupPlugin) lookupAndSendRule(event *event_manager.RconChatMessageData, playerID string, ruleNumber string) error {
 	serverID := p.apis.ServerAPI.GetServerID()
 
 	// Parse the rule number into components (e.g., "1.1.2" -> [1, 1, 2])
@@ -263,7 +266,7 @@ func (p *RuleLookupPlugin) lookupAndSendRule(event *event_manager.RconChatMessag
 	if isAdmin || event.ChatType == "ChatAdmin" {
 		err = p.apis.RconAPI.Broadcast(response)
 	} else {
-		err = p.apis.RconAPI.SendWarningToPlayer(event.SteamID, response)
+		err = p.apis.RconAPI.SendWarningToPlayer(playerID, response)
 	}
 
 	if err != nil {

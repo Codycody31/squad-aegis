@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
   Table,
@@ -70,6 +70,17 @@ function formatDate(dateString: string): string {
 onMounted(() => {
   fetchTeamkillAnalysis();
 });
+
+watch(
+  () => props.playerId,
+  (newPlayerId, oldPlayerId) => {
+    if (!newPlayerId || newPlayerId === oldPlayerId) return;
+
+    victims.value = [];
+    tkWeapons.value = [];
+    fetchTeamkillAnalysis();
+  }
+);
 </script>
 
 <template>
@@ -145,7 +156,10 @@ onMounted(() => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="victim in victims.slice(0, 10)" :key="victim.victim_steam">
+              <TableRow
+                v-for="(victim, index) in victims.slice(0, 10)"
+                :key="victim.victim_steam || victim.victim_eos || `${victim.victim_name}-${index}`"
+              >
                 <TableCell>
                   <div class="font-medium">{{ victim.victim_name }}</div>
                   <div class="text-xs text-muted-foreground">

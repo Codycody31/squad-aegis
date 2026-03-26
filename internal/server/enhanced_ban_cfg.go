@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // ServerBansCfgEnhanced handles generating the enhanced ban config file for the server
@@ -56,7 +57,7 @@ func (s *Server) ServerBansCfgEnhanced(c *gin.Context) {
 func (s *Server) generateServerSpecificBans(c *gin.Context, serverId uuid.UUID, banCfg *strings.Builder, now time.Time) error {
 	// Query only direct server bans (not from ban lists)
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
+		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.server_id = $1 AND sb.ban_list_id IS NULL
@@ -78,34 +79,42 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 
 	// Process database bans
 	for _, ban := range bans {
-		// Check if this Steam ID is in the ignore list
-		isIgnored, err := core.IsIgnoredSteamID(c.Request.Context(), s.Dependencies.DB, ban.SteamID)
-		if err != nil {
-			// Log error but continue processing
-			log.Warn().Err(err).Str("steam_id", ban.SteamID).Msg("Failed to check if Steam ID is ignored, including ban anyway")
-		} else if isIgnored {
-			// Skip this ban if it's in the ignore list
+		// Determine the player identifier for this ban
+		bannedID := ban.SteamID
+		if bannedID == "" {
+			bannedID = ban.EOSID
+		}
+		if bannedID == "" {
 			continue
 		}
 
+		// Check if this Steam ID is in the ignore list (only for Steam IDs)
+		if ban.SteamID != "" {
+			isIgnored, err := core.IsIgnoredSteamID(c.Request.Context(), s.Dependencies.DB, ban.SteamID)
+			if err != nil {
+				log.Warn().Err(err).Str("steam_id", ban.SteamID).Msg("Failed to check if Steam ID is ignored, including ban anyway")
+			} else if isIgnored {
+				continue
+			}
+		}
+
 		var expiryTimestamp string
-		if ban.Duration == 0 {
+		if ban.ExpiresAt == nil {
 			expiryTimestamp = "0"
 		} else {
-			expiryTime := ban.CreatedAt.Add(time.Duration(ban.Duration) * (time.Hour * 24))
-			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
+			expiryTimestamp = strconv.FormatInt(ban.ExpiresAt.Unix(), 10)
 		}
 
 		// Build the reason comment
 		reasonComment := ""
 		if ban.Reason != "" {
-			reasonComment = " //" + ban.Reason
-		} else if ban.Duration == 0 {
+			reasonComment = " //" + utils.SanitizeBanReason(ban.Reason)
+		} else if ban.ExpiresAt == nil {
 			reasonComment = " //Permanent ban"
 		}
 
 		banCfg.WriteString(fmt.Sprintf("%s:%s%s\n",
-			ban.SteamID, expiryTimestamp, reasonComment))
+			bannedID, expiryTimestamp, reasonComment))
 	}
 
 	// Include remote ban sources if requested
@@ -113,7 +122,7 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 		err = s.appendRemoteBans(c, banCfg, now)
 		if err != nil {
 			// Log error but don't fail the entire request
-			fmt.Printf("Warning: Failed to fetch remote bans: %v\n", err)
+			log.Warn().Err(err).Msg("Failed to fetch remote bans")
 		}
 	}
 
@@ -122,40 +131,46 @@ func (s *Server) generateAllBans(c *gin.Context, serverId uuid.UUID, banCfg *str
 
 func (s *Server) processBanRows(rows *sql.Rows, banCfg *strings.Builder, now time.Time) error {
 	for rows.Next() {
-		var steamIDInt int64
+		var steamIDInt sql.NullInt64
+		var eosIDStr sql.NullString
 		var reason string
-		var duration int
-		var createdAt time.Time
+		var expiresAt sql.NullTime
 		var adminID sql.NullString
 		var adminUsername sql.NullString
 		var adminSteamIDInt sql.NullInt64
 
-		err := rows.Scan(&steamIDInt, &reason, &duration, &createdAt, &adminID, &adminUsername, &adminSteamIDInt)
+		err := rows.Scan(&steamIDInt, &eosIDStr, &reason, &expiresAt, &adminID, &adminUsername, &adminSteamIDInt)
 		if err != nil {
 			return err
 		}
 
-		// Format the ban entry in official Squad format
-		steamIDStr := strconv.FormatInt(steamIDInt, 10)
+		// Determine the banned player ID (prefer Steam ID, fall back to EOS ID)
+		var bannedID string
+		if steamIDInt.Valid {
+			bannedID = strconv.FormatInt(steamIDInt.Int64, 10)
+		} else if eosIDStr.Valid {
+			bannedID = utils.NormalizeEOSID(eosIDStr.String)
+		} else {
+			continue
+		}
 
 		var expiryTimestamp string
-		if duration == 0 {
+		if !expiresAt.Valid {
 			expiryTimestamp = "0"
 		} else {
-			expiryTime := createdAt.Add(time.Duration(duration) * (time.Hour * 24))
-			expiryTimestamp = strconv.FormatInt(expiryTime.Unix(), 10)
+			expiryTimestamp = strconv.FormatInt(expiresAt.Time.Unix(), 10)
 		}
 
 		// Build the reason comment
 		reasonComment := ""
 		if reason != "" {
-			reasonComment = " //" + reason
-		} else if duration == 0 {
+			reasonComment = " //" + utils.SanitizeBanReason(reason)
+		} else if !expiresAt.Valid {
 			reasonComment = " //Permanent ban"
 		}
 
 		banCfg.WriteString(fmt.Sprintf("%s:%s%s\n",
-			steamIDStr, expiryTimestamp, reasonComment))
+			bannedID, expiryTimestamp, reasonComment))
 	}
 	return nil
 }
@@ -175,7 +190,7 @@ func (s *Server) appendRemoteBans(c *gin.Context, banCfg *strings.Builder, now t
 		err = s.fetchAndProcessRemoteBans(c, source.URL, banCfg, now)
 		if err != nil {
 			// Log error but continue with other sources
-			fmt.Printf("Warning: Failed to fetch from %s: %v\n", source.URL, err)
+			log.Warn().Err(err).Str("url", source.URL).Msg("Failed to fetch remote ban source")
 			continue
 		}
 	}
@@ -184,6 +199,11 @@ func (s *Server) appendRemoteBans(c *gin.Context, banCfg *strings.Builder, now t
 }
 
 func (s *Server) fetchAndProcessRemoteBans(c *gin.Context, url string, banCfg *strings.Builder, now time.Time) error {
+	// Validate URL to prevent SSRF
+	if err := utils.ValidateRemoteURL(url); err != nil {
+		return fmt.Errorf("remote ban source URL validation failed: %w", err)
+	}
+
 	// Create HTTP client with timeout
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -324,7 +344,7 @@ func (s *Server) BanListCfg(c *gin.Context) {
 
 	// Query bans from the specific ban list
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.steam_id, sb.reason, sb.duration, sb.created_at, sb.admin_id, u.username, u.steam_id
+		SELECT sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.admin_id, u.username, u.steam_id
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		WHERE sb.ban_list_id = $1

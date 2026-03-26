@@ -112,6 +112,7 @@ async function executeSquadAction() {
                     const moveEndpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/move-player`;
                     const movePayload = {
                         steam_id: player.steam_id,
+                        eos_id: player.eosId || player.eos_id || "",
                     };
 
                     const { error: moveError } = await useFetch(moveEndpoint, {

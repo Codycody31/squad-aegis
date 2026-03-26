@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // MoveStatus tracks the status of a single player move
@@ -168,7 +169,7 @@ func (e *SwapExecutor) executeMove(steamID string) {
 		e.mu.Unlock()
 
 		// Execute the team change command
-		command := fmt.Sprintf("AdminForceTeamChange %s", steamID)
+		command := fmt.Sprintf("AdminForceTeamChange %s", utils.SanitizeRCONParam(steamID))
 		_, err := e.rcon.SendCommand(command)
 
 		e.mu.Lock()

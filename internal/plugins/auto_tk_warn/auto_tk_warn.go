@@ -217,8 +217,12 @@ func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) 
 	victimMessage = p.replaceTemplateVars(victimMessage, event.AttackerName, event.VictimName)
 
 	// Warn the attacker if configured
-	if warnAttacker && attackerMessage != "" && event.AttackerSteam != "" {
-		if err := p.apis.RconAPI.SendWarningToPlayer(event.AttackerSteam, attackerMessage); err != nil {
+	attackerID := event.AttackerSteam
+	if attackerID == "" {
+		attackerID = event.AttackerEOS
+	}
+	if warnAttacker && attackerMessage != "" && attackerID != "" {
+		if err := p.apis.RconAPI.SendWarningToPlayer(attackerID, attackerMessage); err != nil {
 			p.apis.LogAPI.Error("Failed to warn teamkill attacker", err, map[string]interface{}{
 				"attacker_steam_id": event.AttackerSteam,
 				"attacker_eos_id":   event.AttackerEOS,
@@ -231,7 +235,7 @@ func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) 
 	if warnVictim && victimMessage != "" {
 		// For victims, we need to try to find their Steam ID from the player list
 		// since the teamkill event might not have the victim's Steam ID directly
-		victimSteamID, err := p.findPlayerSteamID(event.VictimName)
+		victimSteamID, err := p.findPlayerID(event.VictimName)
 		if err != nil {
 			p.apis.LogAPI.Debug("Could not find victim Steam ID for warning", map[string]interface{}{
 				"victim_name": event.VictimName,
@@ -254,8 +258,8 @@ func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) 
 	return nil
 }
 
-// findPlayerSteamID attempts to find a player's Steam ID by their name
-func (p *AutoTKWarnPlugin) findPlayerSteamID(playerName string) (string, error) {
+// findPlayerID attempts to find a player's preferred ID (Steam ID or EOS ID) by their name
+func (p *AutoTKWarnPlugin) findPlayerID(playerName string) (string, error) {
 	players, err := p.apis.ServerAPI.GetPlayers()
 	if err != nil {
 		return "", fmt.Errorf("failed to get player list: %w", err)
@@ -264,7 +268,7 @@ func (p *AutoTKWarnPlugin) findPlayerSteamID(playerName string) (string, error) 
 	// Look for player by exact name match
 	for _, player := range players {
 		if player.Name == playerName && player.IsOnline {
-			return player.SteamID, nil
+			return player.PreferredID(), nil
 		}
 	}
 

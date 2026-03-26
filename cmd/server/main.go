@@ -213,6 +213,31 @@ func run(ctx context.Context) error {
 	pluginManager := plugin_manager.NewPluginManager(ctx, database, eventManager, rconManager, clickhouseClient)
 	defer pluginManager.Stop()
 
+	// Create workflow manager
+	workflowManager := workflow_manager.NewWorkflowManager(ctx, database, eventManager, rconManager, clickhouseClient)
+	defer workflowManager.Stop()
+
+	// Initialize shared server dependencies early so plugin/workflow bans can sync
+	// Bans.cfg during startup log replay and plugin initialization.
+	permissionService := permissions.NewService(database)
+	permissionRepo := permissions.NewRepository(database)
+	deps := &server.Dependencies{
+		DB:                   database,
+		Clickhouse:           clickhouseClient,
+		Valkey:               valkeyClient,
+		RconManager:          rconManager,
+		EventManager:         eventManager,
+		LogwatcherManager:    logwatcherManager,
+		PluginManager:        pluginManager,
+		WorkflowManager:      workflowManager,
+		RemoteBanSyncService: core.NewRemoteBanSyncService(database, database),
+		PermissionService:    permissionService,
+		PermissionRepo:       permissionRepo,
+	}
+	appServer := server.New(deps)
+	pluginManager.SetBanSyncFunc(appServer.SyncBansCfgByID)
+	workflowManager.SetBanSyncFunc(appServer.SyncBansCfgByID)
+
 	// Register all available plugins and connectors
 	if err := plugin_registry.RegisterAllConnectors(pluginManager); err != nil {
 		return fmt.Errorf("failed to register connectors: %w", err)
@@ -226,10 +251,6 @@ func run(ctx context.Context) error {
 	if err := pluginManager.Start(); err != nil {
 		return fmt.Errorf("failed to start plugin manager: %w", err)
 	}
-
-	// Create workflow manager
-	workflowManager := workflow_manager.NewWorkflowManager(ctx, database, eventManager, rconManager, clickhouseClient)
-	defer workflowManager.Stop()
 
 	// Start workflow manager
 	if err := workflowManager.Start(); err != nil {
@@ -247,6 +268,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize storage: %w", err)
 	}
+	deps.Storage = storageBackend
 	log.Info().Str("type", config.Config.Storage.Type).Msg("Storage initialized successfully")
 
 	// Start connection managers
@@ -298,28 +320,9 @@ func run(ctx context.Context) error {
 			httpPort = "3131"
 		}
 
-		// Initialize permission service and repository
-		permissionService := permissions.NewService(database)
-		permissionRepo := permissions.NewRepository(database)
-
-		deps := &server.Dependencies{
-			DB:                   database,
-			Clickhouse:           clickhouseClient,
-			Valkey:               valkeyClient,
-			RconManager:          rconManager,
-			EventManager:         eventManager,
-			LogwatcherManager:    logwatcherManager,
-			PluginManager:        pluginManager,
-			WorkflowManager:      workflowManager,
-			RemoteBanSyncService: core.NewRemoteBanSyncService(database, database),
-			Storage:              storageBackend,
-			PermissionService:    permissionService,
-			PermissionRepo:       permissionRepo,
-		}
-
 		// Start remote ban sync service
 		go deps.RemoteBanSyncService.StartPeriodicSync(ctx) // Initialize router
-		router := server.NewRouter(deps)
+		router := server.NewRouter(appServer)
 
 		// Create server with timeout
 		srv := &http.Server{

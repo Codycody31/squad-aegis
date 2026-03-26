@@ -1,0 +1,1 @@
+-- EOS ID normalization is irreversible; no-op downgrade.

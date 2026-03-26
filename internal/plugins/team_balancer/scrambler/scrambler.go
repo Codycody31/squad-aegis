@@ -287,7 +287,7 @@ func (s *Scrambler) findOptimalSwaps(
 
 		for _, player := range group.Players {
 			moves = append(moves, PlayerMove{
-				SteamID:     player.SteamID,
+				SteamID:     player.PreferredID(),
 				Name:        player.Name,
 				CurrentTeam: player.TeamID,
 				TargetTeam:  2,
@@ -309,7 +309,7 @@ func (s *Scrambler) findOptimalSwaps(
 
 		for _, player := range group.Players {
 			moves = append(moves, PlayerMove{
-				SteamID:     player.SteamID,
+				SteamID:     player.PreferredID(),
 				Name:        player.Name,
 				CurrentTeam: player.TeamID,
 				TargetTeam:  1,

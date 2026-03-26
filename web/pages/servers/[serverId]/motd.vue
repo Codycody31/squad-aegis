@@ -138,16 +138,6 @@
                     />
                 </div>
 
-                <div v-if="config.upload_enabled" class="grid grid-cols-4 items-center gap-4">
-                    <label class="text-right text-sm">File Path</label>
-                    <Input
-                        v-model="config.motd_file_path"
-                        class="col-span-3"
-                        placeholder="/SquadGame/ServerConfig/MOTD.cfg"
-                        @input="() => markDirty()"
-                    />
-                </div>
-
                 <div v-if="config.upload_enabled" class="flex items-center justify-between">
                     <div class="space-y-0.5">
                         <label class="text-sm font-medium">Use Log Credentials</label>
@@ -328,7 +318,6 @@ interface MOTDConfig {
     include_rule_descriptions: boolean;
     upload_enabled: boolean;
     auto_upload_on_change: boolean;
-    motd_file_path: string;
     use_log_credentials: boolean;
     upload_host: string;
     upload_port: number | null;
@@ -358,7 +347,6 @@ const config = ref<MOTDConfig>({
     include_rule_descriptions: true,
     upload_enabled: false,
     auto_upload_on_change: false,
-    motd_file_path: "/SquadGame/ServerConfig/MOTD.cfg",
     use_log_credentials: true,
     upload_host: "",
     upload_port: null,
@@ -428,7 +416,6 @@ const saveConfig = async () => {
                 include_rule_descriptions: config.value.include_rule_descriptions,
                 upload_enabled: config.value.upload_enabled,
                 auto_upload_on_change: config.value.auto_upload_on_change,
-                motd_file_path: config.value.motd_file_path,
                 use_log_credentials: config.value.use_log_credentials,
                 upload_host: config.value.upload_host || null,
                 upload_port: config.value.upload_port || null,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -360,8 +361,10 @@ func (s *SFTPSource) isConnected() bool {
 		return false
 	}
 
-	// Try a simple operation - list directory of the parent folder
-	parentDir := filepath.Dir(s.filepath)
+	// Try a simple operation - list directory of the parent folder.
+	// Use path.Dir (POSIX) because SFTP paths always use forward slashes,
+	// regardless of the remote OS.
+	parentDir := path.Dir(s.filepath)
 	_, err := s.client.ReadDir(parentDir)
 	return err == nil
 }
@@ -375,6 +378,9 @@ func (s *SFTPSource) connect() error {
 	config := &ssh.ClientConfig{
 		User:            s.username,
 		Auth:            []ssh.AuthMethod{},
+		// Intentionally skipping host key verification: this is a long-lived
+		// connection to trusted, operator-configured infrastructure used to
+		// stream server log data.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         5 * time.Second,
 	}

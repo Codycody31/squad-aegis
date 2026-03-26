@@ -1,6 +1,6 @@
 export interface User {
   id: string;
-  steam_id: number;
+  steam_id: string;
   name: string;
   username: string;
   super_admin: boolean;
@@ -24,8 +24,14 @@ export interface Server {
   game_port: number;
   rcon_ip_address: string | null;
   rcon_port: number;
-  rcon_password: string;
-  ban_enforcement_mode: "server" | "aegis";
+  // Log & file access
+  log_source_type: "local" | "sftp" | "ftp" | null;
+  log_host: string | null;
+  log_port: number | null;
+  log_username: string | null;
+  log_poll_frequency: number | null;
+  log_read_from_start: boolean | null;
+  squad_game_path: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -33,10 +39,12 @@ export interface Server {
 export interface ServerBan {
   id: string;
   server_id: string;
-  admin_id: string;
-  steam_id: number;
+  admin_id?: string;
+  steam_id: string;
+  eos_id?: string;
   reason: string;
-  duration: number;
+  permanent: boolean;
+  expires_at?: string;
   created_at: string;
   updated_at: string;
 }

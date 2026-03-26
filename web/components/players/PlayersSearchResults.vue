@@ -89,7 +89,7 @@ function getTimeAgo(dateString: string | null): string {
           <TableHeader>
             <TableRow>
               <TableHead class="text-xs sm:text-sm">Player Name</TableHead>
-              <TableHead class="text-xs sm:text-sm">Steam ID</TableHead>
+              <TableHead class="text-xs sm:text-sm">Identifier</TableHead>
               <TableHead class="text-xs sm:text-sm">Last Seen</TableHead>
               <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
             </TableRow>

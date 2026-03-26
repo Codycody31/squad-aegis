@@ -17,16 +17,14 @@ type Server struct {
 
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`     // "local", "sftp", "ftp"
-	LogFilePath      *string `json:"log_file_path,omitempty"`       // Path to log file
 	LogHost          *string `json:"log_host,omitempty"`            // Host for SFTP/FTP
 	LogPort          *int    `json:"log_port,omitempty"`            // Port for SFTP/FTP
 	LogUsername      *string `json:"log_username,omitempty"`        // Username for SFTP/FTP
 	LogPassword      *string `json:"-"`                             // Password for SFTP/FTP (hidden in JSON)
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`  // Poll frequency in seconds for SFTP/FTP
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"` // Whether to read from start of file
+	SquadGamePath    *string `json:"squad_game_path,omitempty"`     // Base path to SquadGame folder
 
-	// Ban enforcement mode: "server" (AdminBan via RCON) or "aegis" (watch connections + kick)
-	BanEnforcementMode string `json:"ban_enforcement_mode"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -35,21 +33,21 @@ type Server struct {
 type ServerBan struct {
 	ID           string        `json:"id"`
 	ServerID     uuid.UUID     `json:"server_id"`
-	AdminID      uuid.UUID     `json:"admin_id"`
+	AdminID      *uuid.UUID    `json:"admin_id,omitempty"`
 	AdminName    string        `json:"admin_name"`
 	AdminSteamID string        `json:"admin_steam_id,omitempty"`
 	SteamID      string        `json:"steam_id"`
+	EOSID        string        `json:"eos_id,omitempty"`
 	Name         string        `json:"name"`
 	Reason       string        `json:"reason"`
-	Duration     int           `json:"duration"`
+	ExpiresAt    *time.Time    `json:"expires_at,omitempty"` // DB column, NULL = permanent
 	RuleID       *string       `json:"rule_id,omitempty"`
 	RuleName     *string       `json:"rule_name,omitempty"`
 	BanListID    *string       `json:"ban_list_id,omitempty"`
 	BanListName  *string       `json:"ban_list_name,omitempty"`
 	EvidenceText *string       `json:"evidence_text,omitempty"`
 	Evidence     []BanEvidence `json:"evidence,omitempty"`
-	Permanent    bool          `json:"permanent"`
-	ExpiresAt    time.Time     `json:"expires_at,omitempty"`
+	Permanent    bool          `json:"permanent"` // computed: ExpiresAt == nil
 	CreatedAt    time.Time     `json:"created_at"`
 	UpdatedAt    time.Time     `json:"updated_at"`
 }
@@ -141,8 +139,9 @@ type ServerRole struct {
 
 type ServerBanCreateRequest struct {
 	SteamID      string                  `json:"steam_id"`
+	EOSID        string                  `json:"eos_id,omitempty"`
 	Reason       string                  `json:"reason"`
-	Duration     int                     `json:"duration"`
+	Duration     string                  `json:"duration"` // "0"/"permanent" for permanent, "7d", "2h", "30m", or bare number (days)
 	RuleID       *string                 `json:"rule_id,omitempty"`
 	BanListID    *string                 `json:"ban_list_id,omitempty"`
 	EvidenceText *string                 `json:"evidence_text,omitempty"`
@@ -166,7 +165,7 @@ type BanEvidenceCreateItem struct {
 
 type ServerBanUpdateRequest struct {
 	Reason       *string                  `json:"reason,omitempty"`
-	Duration     *int                     `json:"duration,omitempty"`
+	Duration     *string                  `json:"duration,omitempty"` // "0"/"permanent" for permanent, "7d", "2h", "30m", or bare number (days)
 	BanListID    *string                  `json:"ban_list_id,omitempty"`
 	RuleID       *uuid.UUID               `json:"rule_id,omitempty"`
 	EvidenceText *string                  `json:"evidence_text,omitempty"`
@@ -219,15 +218,14 @@ type ServerCreateRequest struct {
 
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`
-	LogFilePath      *string `json:"log_file_path,omitempty"`
 	LogHost          *string `json:"log_host,omitempty"`
 	LogPort          *int    `json:"log_port,omitempty"`
 	LogUsername      *string `json:"log_username,omitempty"`
 	LogPassword      *string `json:"log_password,omitempty"`
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
+	SquadGamePath    *string `json:"squad_game_path,omitempty"`
 
-	BanEnforcementMode *string `json:"ban_enforcement_mode,omitempty"` // "server" or "aegis"
 }
 
 type ServerRconExecuteRequest struct {
@@ -272,15 +270,14 @@ type ServerUpdateRequest struct {
 
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`
-	LogFilePath      *string `json:"log_file_path,omitempty"`
 	LogHost          *string `json:"log_host,omitempty"`
 	LogPort          *int    `json:"log_port,omitempty"`
 	LogUsername      *string `json:"log_username,omitempty"`
 	LogPassword      *string `json:"log_password,omitempty"`
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
+	SquadGamePath    *string `json:"squad_game_path,omitempty"`
 
-	BanEnforcementMode *string `json:"ban_enforcement_mode,omitempty"` // "server" or "aegis"
 }
 
 // IgnoredSteamID represents a Steam ID that should be ignored from remote ban sources
@@ -303,4 +300,40 @@ type IgnoredSteamIDCreateRequest struct {
 // IgnoredSteamIDUpdateRequest represents a request to update an ignored Steam ID
 type IgnoredSteamIDUpdateRequest struct {
 	Reason *string `json:"reason"`
+}
+
+// CfgBanEntry represents a parsed entry from a Squad Bans.cfg file.
+type CfgBanEntry struct {
+	SteamID         string `json:"steam_id"`          // May be empty for EOS-only bans
+	EOSID           string `json:"eos_id"`            // May be empty for Steam-only bans
+	ExpiryTimestamp int64  `json:"expiry_timestamp"`  // Unix timestamp, 0 = permanent
+	Reason          string `json:"reason"`
+	Permanent       bool   `json:"permanent"`
+	Expired         bool   `json:"expired"`
+	IsAutoBan       bool   `json:"is_auto_ban"`       // Server-generated (e.g., teamkill kicks)
+	RawLine         string `json:"raw_line"`
+}
+
+// BanImportPreview is the response for the ban import preview endpoint.
+type BanImportPreview struct {
+	CfgAvailable     bool          `json:"cfg_available"`
+	CfgPath          string        `json:"cfg_path"`
+	NewBans          []CfgBanEntry `json:"new_bans"`
+	ExistingBans     []CfgBanEntry `json:"existing_bans"`
+	ExpiredBans      []CfgBanEntry `json:"expired_bans"`
+	AutoBans         []CfgBanEntry `json:"auto_bans"`
+	UnparseableCount int           `json:"unparseable_count"`
+}
+
+// BanImportRequest is the request body for the ban import execute endpoint.
+type BanImportRequest struct {
+	Confirm bool `json:"confirm"`
+}
+
+// BanImportResult is the response for the ban import execute endpoint.
+type BanImportResult struct {
+	ImportedCount int      `json:"imported_count"`
+	SkippedCount  int      `json:"skipped_count"`
+	ExpiredCount  int      `json:"expired_count"`
+	Errors        []string `json:"errors"`
 }

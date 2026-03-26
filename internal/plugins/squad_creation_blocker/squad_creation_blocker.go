@@ -409,6 +409,9 @@ func (p *SquadCreationBlockerPlugin) handleSquadCreated(rawEvent *plugin_manager
 
 	p.mu.Lock()
 	steamID := event.SteamID
+	if steamID == "" {
+		steamID = event.EosID
+	}
 	squadName := event.SquadName
 	shouldBlock := p.isBlocking || (p.shouldApplyRateLimitLocked() && p.isPlayerInCooldownLocked(steamID))
 	allowDefault := p.getBoolConfig("allow_default_squad_names")
@@ -738,7 +741,7 @@ func (p *SquadCreationBlockerPlugin) pollSquads() {
 			continue
 		}
 
-		creatorSteamID := squad.Leader.SteamID
+		creatorSteamID := squad.Leader.PreferredID()
 
 		// Check if creator is in cooldown or if we're in blocking period
 		inCooldown := p.isPlayerInCooldownLocked(creatorSteamID)

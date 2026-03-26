@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
   Table,
@@ -79,6 +79,17 @@ function viewPlayer(steamId: string, eosId: string) {
 onMounted(() => {
   fetchRelatedPlayers();
 });
+
+watch(
+  () => props.playerId,
+  (newPlayerId, oldPlayerId) => {
+    if (!newPlayerId || newPlayerId === oldPlayerId) return;
+
+    relatedPlayers.value = [];
+    permissionDenied.value = false;
+    fetchRelatedPlayers();
+  }
+);
 </script>
 
 <template>

@@ -2,14 +2,17 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // PlayerProfile represents a player's comprehensive profile
@@ -96,28 +99,28 @@ type RecentServerInfo struct {
 
 // ViolationSummary represents a summary of player violations
 type ViolationSummary struct {
-	TotalWarns  int64      `json:"total_warns"`
-	TotalKicks  int64      `json:"total_kicks"`
-	TotalBans   int64      `json:"total_bans"`
-	LastAction  *time.Time `json:"last_action,omitempty"`
+	TotalWarns int64      `json:"total_warns"`
+	TotalKicks int64      `json:"total_kicks"`
+	TotalBans  int64      `json:"total_bans"`
+	LastAction *time.Time `json:"last_action,omitempty"`
 }
 
 // TeamkillMetrics represents detailed teamkill statistics
 type TeamkillMetrics struct {
 	TotalTeamkills      int64   `json:"total_teamkills"`
 	TeamkillsPerSession float64 `json:"teamkills_per_session"`
-	TeamkillRatio       float64 `json:"teamkill_ratio"`       // TKs / total kills
-	RecentTeamkills     int64   `json:"recent_teamkills"`     // Last 7 days
-	TotalTeamWounds     int64   `json:"total_team_wounds"`    // Times downed a teammate
-	TotalTeamDamage     int64   `json:"total_team_damage"`    // Times damaged a teammate
-	RecentTeamWounds    int64   `json:"recent_team_wounds"`   // Team wounds in last 7 days
-	RecentTeamDamage    int64   `json:"recent_team_damage"`   // Team damage in last 7 days
+	TeamkillRatio       float64 `json:"teamkill_ratio"`     // TKs / total kills
+	RecentTeamkills     int64   `json:"recent_teamkills"`   // Last 7 days
+	TotalTeamWounds     int64   `json:"total_team_wounds"`  // Times downed a teammate
+	TotalTeamDamage     int64   `json:"total_team_damage"`  // Times damaged a teammate
+	RecentTeamWounds    int64   `json:"recent_team_wounds"` // Team wounds in last 7 days
+	RecentTeamDamage    int64   `json:"recent_team_damage"` // Team damage in last 7 days
 }
 
 // RiskIndicator represents a risk flag for admin attention
 type RiskIndicator struct {
-	Type        string `json:"type"`        // "high_tk_rate", "recent_ban", "multiple_names", "cbl_flagged", "ip_shared"
-	Severity    string `json:"severity"`    // "critical", "high", "medium", "low"
+	Type        string `json:"type"`     // "high_tk_rate", "recent_ban", "multiple_names", "cbl_flagged", "ip_shared"
+	Severity    string `json:"severity"` // "critical", "high", "medium", "low"
 	Description string `json:"description"`
 }
 
@@ -127,7 +130,6 @@ type ActiveBan struct {
 	ServerID   string     `json:"server_id"`
 	ServerName string     `json:"server_name"`
 	Reason     string     `json:"reason"`
-	Duration   int        `json:"duration"`
 	Permanent  bool       `json:"permanent"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -151,13 +153,13 @@ type WeaponStat struct {
 
 // TeamkillVictim represents a player who was teamkilled
 type TeamkillVictim struct {
-	VictimName   string    `json:"victim_name"`
-	VictimSteam  string    `json:"victim_steam"`
-	VictimEOS    string    `json:"victim_eos"`
-	TKCount      int64     `json:"tk_count"`
-	WeaponsUsed  []string  `json:"weapons_used"`
-	FirstTK      time.Time `json:"first_tk"`
-	LastTK       time.Time `json:"last_tk"`
+	VictimName  string    `json:"victim_name"`
+	VictimSteam string    `json:"victim_steam"`
+	VictimEOS   string    `json:"victim_eos"`
+	TKCount     int64     `json:"tk_count"`
+	WeaponsUsed []string  `json:"weapons_used"`
+	FirstTK     time.Time `json:"first_tk"`
+	LastTK      time.Time `json:"last_tk"`
 }
 
 // SessionHistoryEntry represents a paired connection session
@@ -529,6 +531,153 @@ func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern s
 	return players, nil
 }
 
+func normalizePlayerIdentifier(playerID string) (string, bool) {
+	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
+		return playerID, true
+	}
+
+	return utils.NormalizeEOSID(playerID), false
+}
+
+func appendUniquePlayerIdentifier(values []string, value string) []string {
+	if value == "" {
+		return values
+	}
+
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+
+	return append(values, value)
+}
+
+func appendUniqueSteamIdentifier(values []string, steamID string) []string {
+	if !utils.IsSteamID(steamID) {
+		return values
+	}
+
+	return appendUniquePlayerIdentifier(values, steamID)
+}
+
+func appendUniqueEOSIdentifier(values []string, eosID string) []string {
+	normalizedEOSID := utils.NormalizeEOSID(eosID)
+	if normalizedEOSID == "" {
+		return values
+	}
+
+	return appendUniquePlayerIdentifier(values, normalizedEOSID)
+}
+
+// resolveLinkedPlayerIdentifiers returns all known Steam/EOS identifiers linked
+// to the supplied player ID, falling back to the original identifier when no
+// identity graph data is available.
+func (s *Server) resolveLinkedPlayerIdentifiers(c *gin.Context, playerID string, isSteamID bool) ([]string, []string) {
+	lookupPlayerID := playerID
+	if !isSteamID {
+		lookupPlayerID = utils.NormalizeEOSID(playerID)
+	}
+
+	var steamIDs []string
+	var eosIDs []string
+
+	if isSteamID {
+		steamIDs = appendUniqueSteamIdentifier(steamIDs, lookupPlayerID)
+	} else {
+		eosIDs = appendUniqueEOSIdentifier(eosIDs, lookupPlayerID)
+	}
+
+	if profile, err := s.getPlayerBasicInfo(c, lookupPlayerID, isSteamID); err == nil && profile != nil {
+		steamIDs = appendUniqueSteamIdentifier(steamIDs, profile.SteamID)
+		for _, steamID := range profile.AllSteamIDs {
+			steamIDs = appendUniqueSteamIdentifier(steamIDs, steamID)
+		}
+
+		eosIDs = appendUniqueEOSIdentifier(eosIDs, profile.EOSID)
+		for _, eosID := range profile.AllEOSIDs {
+			eosIDs = appendUniqueEOSIdentifier(eosIDs, eosID)
+		}
+	}
+
+	if linkedSteamIDs, linkedEOSIDs, err := s.getLinkedPlayerIdentifiers(c, lookupPlayerID, isSteamID); err == nil {
+		for _, steamID := range linkedSteamIDs {
+			steamIDs = appendUniqueSteamIdentifier(steamIDs, steamID)
+		}
+		for _, eosID := range linkedEOSIDs {
+			eosIDs = appendUniqueEOSIdentifier(eosIDs, eosID)
+		}
+	}
+
+	return steamIDs, eosIDs
+}
+
+func buildServerBanIdentifierWhereClause(steamIDs, eosIDs []string, alias string, startArg int) (string, []interface{}, int) {
+	var conditions []string
+	var args []interface{}
+	argIdx := startArg
+
+	for _, steamID := range steamIDs {
+		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+		if err != nil {
+			continue
+		}
+
+		conditions = append(conditions, fmt.Sprintf("%ssteam_id = $%d", alias, argIdx))
+		args = append(args, steamIDInt)
+		argIdx++
+	}
+
+	for _, eosID := range eosIDs {
+		normalizedEOSID := utils.NormalizeEOSID(eosID)
+		if normalizedEOSID == "" {
+			continue
+		}
+
+		conditions = append(conditions, fmt.Sprintf("%seos_id = $%d", alias, argIdx))
+		args = append(args, normalizedEOSID)
+		argIdx++
+	}
+
+	return strings.Join(conditions, " OR "), args, argIdx
+}
+
+func (s *Server) isPlayerCurrentlyBanned(ctx context.Context, steamID, eosID string) (bool, error) {
+	idConditions := []string{}
+	args := []interface{}{}
+
+	if steamID != "" {
+		args = append(args, steamID)
+		idConditions = append(idConditions, fmt.Sprintf("steam_id = $%d", len(args)))
+	}
+
+	normalizedEOSID := utils.NormalizeEOSID(eosID)
+	if normalizedEOSID != "" {
+		args = append(args, normalizedEOSID)
+		idConditions = append(idConditions, fmt.Sprintf("eos_id = $%d", len(args)))
+	}
+
+	if len(idConditions) == 0 {
+		return false, nil
+	}
+
+	query := fmt.Sprintf(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM server_bans
+			WHERE (%s)
+			AND (expires_at IS NULL OR expires_at > NOW())
+		)
+	`, strings.Join(idConditions, " OR "))
+
+	var isBanned bool
+	if err := s.Dependencies.DB.QueryRowContext(ctx, query, args...).Scan(&isBanned); err != nil {
+		return false, err
+	}
+
+	return isBanned, nil
+}
+
 // PlayerGet handles GET /api/players/:playerId - get player profile by steam or eos id
 func (s *Server) PlayerGet(c *gin.Context) {
 	playerID := c.Param("playerId")
@@ -538,11 +687,7 @@ func (s *Server) PlayerGet(c *gin.Context) {
 		return
 	}
 
-	// Determine if it's a Steam ID (numeric) or EOS ID (alphanumeric)
-	isSteamID := false
-	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
-		isSteamID = true
-	}
+	playerID, isSteamID := normalizePlayerIdentifier(playerID)
 
 	// Get basic player info
 	profile, err := s.getPlayerBasicInfo(c, playerID, isSteamID)
@@ -582,8 +727,8 @@ func (s *Server) PlayerGet(c *gin.Context) {
 	}
 
 	// Get admin-focused data
-	// Active bans
-	activeBans, err := s.getPlayerActiveBans(c, playerID, isSteamID)
+	// Active bans — pass both IDs so legacy steam-only bans are found for EOS lookups
+	activeBans, err := s.getPlayerActiveBans(c, profile.SteamID, profile.EOSID)
 	if err == nil {
 		profile.ActiveBans = activeBans
 	}
@@ -616,6 +761,36 @@ func (s *Server) PlayerGet(c *gin.Context) {
 	profile.RiskIndicators = s.calculateRiskIndicators(profile)
 
 	responses.Success(c, "Player profile fetched successfully", &gin.H{"player": profile})
+}
+
+// PlayerBanHistory handles GET /api/players/:playerId/ban-history - historical
+// bans for a player by Steam or EOS identifier.
+func (s *Server) PlayerBanHistory(c *gin.Context) {
+	playerID := c.Param("playerId")
+	if playerID == "" {
+		responses.BadRequest(c, "Player ID is required", nil)
+		return
+	}
+
+	playerID, isSteamID := normalizePlayerIdentifier(playerID)
+
+	limit := 20
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 100 {
+			limit = parsedLimit
+		}
+	}
+
+	history, err := s.getPlayerBanHistory(c, playerID, isSteamID, limit)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
+	responses.Success(c, "Player ban history fetched successfully", &gin.H{
+		"history": history,
+		"count":   len(history),
+	})
 }
 
 // PlayersStats handles GET /api/players/stats - get player statistics summary
@@ -1302,11 +1477,11 @@ func (s *Server) getPlayerFromRawEvents(ctx context.Context, playerID string, is
 	// Pass the playerID for each subquery in the seed_identifiers UNION ALL
 	row := s.Dependencies.Clickhouse.QueryRow(ctx, query,
 		playerID, playerID, playerID, // join, connected, disconnected
-		playerID,                      // possess
-		playerID, playerID,            // damaged (attacker, victim)
-		playerID, playerID,            // died (attacker, victim)
-		playerID, playerID,            // wounded (attacker, victim)
-		playerID, playerID,            // revived (reviver, victim)
+		playerID,           // possess
+		playerID, playerID, // damaged (attacker, victim)
+		playerID, playerID, // died (attacker, victim)
+		playerID, playerID, // wounded (attacker, victim)
+		playerID, playerID, // revived (reviver, victim)
 	)
 
 	var profile PlayerProfile
@@ -1579,11 +1754,79 @@ func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID
 	return messages, nil
 }
 
+func (s *Server) getPlayerBanHistory(c *gin.Context, playerID string, isSteamID bool, limit int) ([]ActiveBan, error) {
+	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+	whereClause, args, nextArg := buildServerBanIdentifierWhereClause(steamIDs, eosIDs, "b.", 1)
+	if whereClause == "" {
+		return []ActiveBan{}, nil
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			b.id,
+			b.server_id,
+			s.name,
+			b.reason,
+			b.expires_at,
+			b.created_at,
+			COALESCE(u.name, u.username, 'System') as admin_name
+		FROM server_bans b
+		JOIN servers s ON b.server_id = s.id
+		LEFT JOIN users u ON b.admin_id = u.id
+		WHERE (%s)
+		ORDER BY b.created_at DESC
+		LIMIT $%d
+	`, whereClause, nextArg)
+
+	args = append(args, limit)
+
+	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	history := []ActiveBan{}
+	for rows.Next() {
+		var entry ActiveBan
+		var banID uuid.UUID
+		var serverID uuid.UUID
+		var expiresAt sql.NullTime
+		if err := rows.Scan(
+			&banID,
+			&serverID,
+			&entry.ServerName,
+			&entry.Reason,
+			&expiresAt,
+			&entry.CreatedAt,
+			&entry.AdminName,
+		); err != nil {
+			return nil, err
+		}
+
+		entry.BanID = banID.String()
+		entry.ServerID = serverID.String()
+		if expiresAt.Valid {
+			entry.ExpiresAt = &expiresAt.Time
+		}
+		entry.Permanent = entry.ExpiresAt == nil
+
+		history = append(history, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return history, nil
+}
+
 // getPlayerViolations retrieves player rule violations
 func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID bool) ([]RuleViolation, error) {
 	// For EOS ID, we need to first find the steam ID
 	steamIDStr := playerID
 	if !isSteamID {
+		playerID = utils.NormalizeEOSID(playerID)
+
 		// Get steam ID from EOS ID
 		query := `
 			SELECT steam
@@ -1724,38 +1967,50 @@ func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteam
 	return servers, nil
 }
 
-// getPlayerActiveBans retrieves active bans for the player
-func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID bool) ([]ActiveBan, error) {
-	// Get steam ID
-	steamIDStr := playerID
-	if !isSteamID {
-		query := `SELECT steam FROM squad_aegis.server_join_succeeded_events WHERE eos = ? LIMIT 1`
-		row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
-		var steamID *string
-		if err := row.Scan(&steamID); err != nil || steamID == nil {
-			return []ActiveBan{}, nil
+// getPlayerActiveBans retrieves active bans for the player, matching on both
+// steam_id and eos_id so that legacy steam-only bans are found for EOS lookups.
+func (s *Server) getPlayerActiveBans(c *gin.Context, steamID string, eosID string) ([]ActiveBan, error) {
+	var conditions []string
+	var args []interface{}
+	argIdx := 1
+
+	if steamID != "" {
+		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+		if err == nil {
+			conditions = append(conditions, fmt.Sprintf("b.steam_id = $%d", argIdx))
+			args = append(args, steamIDInt)
+			argIdx++
 		}
-		steamIDStr = *steamID
+	}
+	if eosID != "" {
+		normalizedEOS := utils.NormalizeEOSID(eosID)
+		conditions = append(conditions, fmt.Sprintf("b.eos_id = $%d", argIdx))
+		args = append(args, normalizedEOS)
+		argIdx++
 	}
 
-	// Query PostgreSQL for active bans
-	// Duration is in days, 0 means permanent
-	// Calculate expiration as created_at + duration days
-	query := `
-		SELECT
-			b.id, b.server_id, b.reason, b.duration,
-			b.created_at,
-			COALESCE(s.name, 'Unknown Server') as server_name,
-			COALESCE(u.name, 'System') as admin_name
-		FROM server_bans b
-		LEFT JOIN servers s ON b.server_id = s.id
-		LEFT JOIN users u ON b.admin_id = u.id
-		WHERE b.steam_id = $1
-		AND (b.duration = 0 OR b.created_at + (b.duration || ' days')::interval > NOW())
-		ORDER BY b.created_at DESC
-	`
+	if len(conditions) == 0 {
+		return []ActiveBan{}, nil
+	}
 
-	rows, err := s.Dependencies.DB.Query(query, steamIDStr)
+	whereClause := strings.Join(conditions, " OR ")
+
+	// Query PostgreSQL for active bans
+	query := fmt.Sprintf(`
+			SELECT
+				b.id, b.server_id, b.reason, b.expires_at,
+				b.created_at,
+				COALESCE(s.name, 'Unknown Server') as server_name,
+				COALESCE(u.name, u.username, 'System') as admin_name
+			FROM server_bans b
+			LEFT JOIN servers s ON b.server_id = s.id
+			LEFT JOIN users u ON b.admin_id = u.id
+			WHERE (%s)
+			AND (b.expires_at IS NULL OR b.expires_at > NOW())
+			ORDER BY b.created_at DESC
+	`, whereClause)
+
+	rows, err := s.Dependencies.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1764,11 +2019,12 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID 
 	bans := []ActiveBan{}
 	for rows.Next() {
 		var ban ActiveBan
+		var expiresAt sql.NullTime
 		err := rows.Scan(
 			&ban.BanID,
 			&ban.ServerID,
 			&ban.Reason,
-			&ban.Duration,
+			&expiresAt,
 			&ban.CreatedAt,
 			&ban.ServerName,
 			&ban.AdminName,
@@ -1776,12 +2032,10 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, playerID string, isSteamID 
 		if err != nil {
 			continue
 		}
-		// Calculate expiration
-		ban.Permanent = ban.Duration == 0
-		if !ban.Permanent {
-			expiresAt := ban.CreatedAt.AddDate(0, 0, ban.Duration)
-			ban.ExpiresAt = &expiresAt
+		if expiresAt.Valid {
+			ban.ExpiresAt = &expiresAt.Time
 		}
+		ban.Permanent = ban.ExpiresAt == nil
 		bans = append(bans, ban)
 	}
 
@@ -1793,6 +2047,8 @@ func (s *Server) getPlayerViolationSummary(c *gin.Context, playerID string, isSt
 	// Get steam ID
 	steamIDStr := playerID
 	if !isSteamID {
+		playerID = utils.NormalizeEOSID(playerID)
+
 		query := `SELECT steam FROM squad_aegis.server_join_succeeded_events WHERE eos = ? LIMIT 1`
 		row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
 		var steamID *string
@@ -2023,8 +2279,8 @@ func (s *Server) getPlayerNameHistory(c *gin.Context, playerID string, isSteamID
 	// Pass playerID for each seed source (6 sources)
 	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query,
 		playerID, playerID, playerID, // join, connected, disconnected
-		playerID,                      // possess
-		playerID, playerID,            // died (attacker, victim)
+		playerID,           // possess
+		playerID, playerID, // died (attacker, victim)
 	)
 	if err != nil {
 		return nil, err
@@ -2254,10 +2510,7 @@ func (s *Server) PlayerChatHistoryPaginated(c *gin.Context) {
 		}
 	}
 
-	isSteamID := false
-	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
-		isSteamID = true
-	}
+	playerID, isSteamID := normalizePlayerIdentifier(playerID)
 
 	whereClause := "steam_id = ?"
 	if !isSteamID {
@@ -2368,10 +2621,7 @@ func (s *Server) PlayerTeamkillsAnalysis(c *gin.Context) {
 		return
 	}
 
-	isSteamID := false
-	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
-		isSteamID = true
-	}
+	playerID, isSteamID := normalizePlayerIdentifier(playerID)
 
 	whereClause := "attacker_steam = ?"
 	if !isSteamID {
@@ -2486,10 +2736,7 @@ func (s *Server) PlayerSessionHistory(c *gin.Context) {
 		}
 	}
 
-	isSteamID := false
-	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
-		isSteamID = true
-	}
+	playerID, isSteamID := normalizePlayerIdentifier(playerID)
 
 	whereClause := "steam = ?"
 	if !isSteamID {
@@ -2652,10 +2899,7 @@ func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
 		return
 	}
 
-	isSteamID := false
-	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
-		isSteamID = true
-	}
+	playerID, isSteamID := normalizePlayerIdentifier(playerID)
 
 	whereClause := "steam = ?"
 	if !isSteamID {
@@ -2717,13 +2961,9 @@ func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
 		}
 		player.RelationType = "same_ip"
 
-		// Check if this player is banned (duration 0 = permanent, otherwise check if created_at + duration > now)
-		if player.SteamID != "" {
-			banQuery := `SELECT EXISTS(SELECT 1 FROM server_bans WHERE steam_id = $1 AND (duration = 0 OR created_at + (duration || ' days')::interval > NOW()))`
-			var isBanned bool
-			if err := s.Dependencies.DB.QueryRow(banQuery, player.SteamID).Scan(&isBanned); err == nil {
-				player.IsBanned = isBanned
-			}
+		// Check if this player currently has an active ban by either Steam or EOS ID.
+		if isBanned, err := s.isPlayerCurrentlyBanned(c.Request.Context(), player.SteamID, player.EOSID); err == nil {
+			player.IsBanned = isBanned
 		}
 
 		related = append(related, player)
@@ -2755,10 +2995,7 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 		}
 	}
 
-	isSteamID := false
-	if _, err := strconv.ParseUint(playerID, 10, 64); err == nil {
-		isSteamID = true
-	}
+	playerID, isSteamID := normalizePlayerIdentifier(playerID)
 
 	// Build WHERE clauses for kills (player is attacker) and deaths (player is victim)
 	var killWhereClause, deathWhereClause string
@@ -3121,13 +3358,9 @@ func (s *Server) PlayersAltGroups(c *gin.Context) {
 				LastSeen:       &lastSeen,
 			}
 
-			// Check if this player is banned
-			if player.SteamID != "" {
-				banQuery := `SELECT EXISTS(SELECT 1 FROM server_bans WHERE steam_id = $1 AND (duration = 0 OR created_at + (duration || ' days')::interval > NOW()))`
-				var isBanned bool
-				if err := s.Dependencies.DB.QueryRow(banQuery, player.SteamID).Scan(&isBanned); err == nil {
-					player.IsBanned = isBanned
-				}
+			// Check if this player currently has an active ban by either Steam or EOS ID.
+			if isBanned, err := s.isPlayerCurrentlyBanned(c.Request.Context(), player.SteamID, player.EOSID); err == nil {
+				player.IsBanned = isBanned
 			}
 
 			group.Players = append(group.Players, player)

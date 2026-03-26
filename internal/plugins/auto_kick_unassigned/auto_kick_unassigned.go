@@ -575,7 +575,7 @@ func (p *AutoKickUnassignedPlugin) warningLoop(tracker *PlayerTracker) {
 			timeLeftFormatted := p.formatDuration(timeLeft)
 			message := fmt.Sprintf("%s - %s", warningMessage, timeLeftFormatted)
 
-			if err := p.apis.RconAPI.SendWarningToPlayer(tracker.Player.SteamID, message); err != nil {
+			if err := p.apis.RconAPI.SendWarningToPlayer(tracker.Player.PreferredID(), message); err != nil {
 				p.apis.LogAPI.Error("Failed to send warning to player", err, map[string]interface{}{
 					"player":   tracker.Player.Name,
 					"steam_id": tracker.Player.SteamID,
@@ -612,7 +612,7 @@ func (p *AutoKickUnassignedPlugin) kickLoop(tracker *PlayerTracker) {
 		}
 
 		// Kick the player
-		if err := p.apis.RconAPI.KickPlayer(tracker.Player.SteamID, kickMessage); err != nil {
+		if err := p.apis.RconAPI.KickPlayer(tracker.Player.PreferredID(), kickMessage); err != nil {
 			p.apis.LogAPI.Error("Failed to kick unassigned player", err, map[string]interface{}{
 				"player":   tracker.Player.Name,
 				"steam_id": tracker.Player.SteamID,

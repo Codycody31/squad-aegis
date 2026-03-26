@@ -47,7 +47,7 @@ const actionType = ref<
     "kick" | "ban" | "warn" | "move" | "remove-from-squad" | null
 >(null);
 const actionReason = ref("");
-const actionDuration = ref(0); // For ban duration in minutes
+const actionDuration = ref("0"); // Ban duration string: "0" for permanent, "7d", "2h", "30m"
 const selectedRuleId = ref<string>("__none__");
 const serverRules = ref<
     Array<{
@@ -137,8 +137,13 @@ function flattenRulesForDropdown(
 }
 
 // Fetch escalation suggestion when rule is selected
-async function fetchEscalationSuggestion(steamId: string, ruleId: string) {
-    if (!ruleId || !steamId || ruleId === "" || ruleId === "__none__") {
+async function fetchEscalationSuggestion(ruleId: string) {
+    if (!ruleId || ruleId === "" || ruleId === "__none__") {
+        escalationSuggestion.value = null;
+        return;
+    }
+
+    if (!props.player.steam_id && !props.player.eosId) {
         escalationSuggestion.value = null;
         return;
     }
@@ -156,8 +161,16 @@ async function fetchEscalationSuggestion(steamId: string, ruleId: string) {
     }
 
     try {
+        const params = new URLSearchParams({ rule_id: ruleId });
+        if (props.player.steam_id) {
+            params.set("steam_id", props.player.steam_id);
+        }
+        if (props.player.eosId) {
+            params.set("eos_id", props.player.eosId);
+        }
+
         const { data, error: fetchError } = await useFetch(
-            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/escalation-suggestion?steam_id=${steamId}&rule_id=${ruleId}`,
+            `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/escalation-suggestion?${params.toString()}`,
             {
                 method: "GET",
                 headers: {
@@ -201,9 +214,9 @@ async function fetchEscalationSuggestion(steamId: string, ruleId: string) {
             if (
                 actionType.value === "ban" &&
                 suggestion.suggested_duration &&
-                actionDuration.value === 0
+                actionDuration.value === "0"
             ) {
-                actionDuration.value = suggestion.suggested_duration;
+                actionDuration.value = String(suggestion.suggested_duration) + "d";
             }
         } else {
             escalationSuggestion.value = null;
@@ -219,7 +232,7 @@ async function fetchEscalationSuggestion(steamId: string, ruleId: string) {
 // Handle rule selection
 function onRuleSelected(ruleId: string) {
     if (props.player && ruleId && ruleId !== "" && ruleId !== "__none__") {
-        fetchEscalationSuggestion(props.player.steam_id, ruleId);
+        fetchEscalationSuggestion(ruleId);
     } else {
         escalationSuggestion.value = null;
     }
@@ -251,9 +264,9 @@ function switchToSuggestedAction() {
             escalationSuggestion.value.suggested_duration
         ) {
             actionDuration.value =
-                escalationSuggestion.value.suggested_duration;
+                String(escalationSuggestion.value.suggested_duration) + "d";
         } else if (suggestedAction !== "ban") {
-            actionDuration.value = 0;
+            actionDuration.value = "0";
         }
 
         // Set reason/message if not already set
@@ -279,7 +292,7 @@ async function openActionDialog(
 ) {
     actionType.value = action;
     actionReason.value = "";
-    actionDuration.value = action === "ban" ? 0 : 0;
+    actionDuration.value = "0";
     selectedRuleId.value = "__none__";
     escalationSuggestion.value = null;
     showActionDialog.value = true;
@@ -299,7 +312,7 @@ function closeActionDialog() {
     showActionDialog.value = false;
     actionType.value = null;
     actionReason.value = "";
-    actionDuration.value = 0;
+    actionDuration.value = "0";
     selectedRuleId.value = "__none__";
     escalationSuggestion.value = null;
 }
@@ -317,8 +330,20 @@ function getActionTitle() {
     return `${actionMap[actionType.value]} ${props.player.name}`;
 }
 
+const banDurationPattern = /^(0|permanent|\d+[dDhHmM])$/;
+
 async function executePlayerAction() {
     if (!actionType.value) return;
+
+    // Validate ban duration format before submitting
+    if (actionType.value === "ban" && !banDurationPattern.test(actionDuration.value)) {
+        toast({
+            title: "Invalid Duration",
+            description: "Duration must be '0' for permanent, or a number followed by 'd', 'h', or 'm' (e.g., '7d', '2h', '30m')",
+            variant: "destructive",
+        });
+        return;
+    }
 
     isActionLoading.value = true;
     const runtimeConfig = useRuntimeConfig();
@@ -347,6 +372,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/kick`;
                 payload = {
                     steam_id: props.player.steam_id,
+                    eos_id: props.player.eosId,
                     reason: actionReason.value,
                 };
                 if (
@@ -361,8 +387,9 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/ban`;
                 payload = {
                     steam_id: props.player.steam_id,
+                    eos_id: props.player.eosId,
                     reason: actionReason.value,
-                    duration: actionDuration.value, // Duration in days
+                    duration: actionDuration.value,
                 };
                 if (
                     selectedRuleId.value &&
@@ -376,6 +403,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/warn`;
                 payload = {
                     steam_id: props.player.steam_id,
+                    eos_id: props.player.eosId,
                     message: actionReason.value,
                 };
                 if (
@@ -390,6 +418,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/move-player`;
                 payload = {
                     steam_id: props.player.steam_id,
+                    eos_id: props.player.eosId,
                 };
                 break;
             case "remove-from-squad":
@@ -420,13 +449,10 @@ async function executePlayerAction() {
             successMessage += "moved";
         } else if (actionType.value === "ban") {
             successMessage += "banned";
-            if (actionDuration.value) {
-                const days = actionDuration.value;
-                if (days >= 1) {
-                    successMessage += ` for ${days} ${days === 1 ? "day" : "days"}`;
-                } else {
-                    successMessage += " permanently";
-                }
+            if (actionDuration.value && actionDuration.value !== "0") {
+                successMessage += ` for ${actionDuration.value}`;
+            } else {
+                successMessage += " permanently";
             }
         } else if (actionType.value === "remove-from-squad") {
             successMessage += "removed from squad";
@@ -482,7 +508,7 @@ function copyToClipboard(text: string) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
             <RouterLink
-                :to="'/players/' + player.steam_id || player.eosId"
+                :to="'/players/' + (player.steam_id || player.eosId)"
                 as-child
             >
                 <DropdownMenuItem>
@@ -646,11 +672,11 @@ function copyToClipboard(text: string) {
                         v-model="actionDuration"
                         placeholder="0"
                         class="col-span-3"
-                        type="number"
+                        type="text"
                     />
                     <div class="col-span-1"></div>
                     <div class="text-xs text-muted-foreground col-span-3">
-                        Ban duration in days. Use 0 for a permanent ban.
+                        Duration: 0 = permanent, 7d = 7 days, 2h = 2 hours, 30m = 30 minutes
                     </div>
                 </div>
 
@@ -686,9 +712,19 @@ function copyToClipboard(text: string) {
                 </div>
             </div>
 
+            <!-- Escalation Loading -->
+            <div
+                v-if="loadingEscalation"
+                class="p-3 bg-muted border rounded-lg text-sm text-muted-foreground flex items-center gap-2"
+            >
+                <Icon name="mdi:loading" class="h-4 w-4 animate-spin" />
+                Loading escalation suggestion...
+            </div>
+
             <!-- Escalation Suggestion -->
             <div
                 v-if="
+                    !loadingEscalation &&
                     escalationSuggestion &&
                     (actionType === 'kick' ||
                         actionType === 'ban' ||

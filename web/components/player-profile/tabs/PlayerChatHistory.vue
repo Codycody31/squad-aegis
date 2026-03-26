@@ -117,7 +117,9 @@ function getChatTypeBadgeVariant(
 
 // Debounced search
 let searchTimeout: any = null;
+let suppressAutoFetch = false;
 watch(searchQuery, () => {
+  if (suppressAutoFetch) return;
   if (searchTimeout) clearTimeout(searchTimeout);
   searchTimeout = setTimeout(() => {
     page.value = 1;
@@ -126,9 +128,29 @@ watch(searchQuery, () => {
 });
 
 watch(chatTypeFilter, () => {
+  if (suppressAutoFetch) return;
   page.value = 1;
   fetchChat();
 });
+
+watch(
+  () => props.playerId,
+  (newPlayerId, oldPlayerId) => {
+    if (!newPlayerId || newPlayerId === oldPlayerId) return;
+
+    if (searchTimeout) clearTimeout(searchTimeout);
+    suppressAutoFetch = true;
+    searchQuery.value = "";
+    chatTypeFilter.value = "all";
+    suppressAutoFetch = false;
+
+    page.value = 1;
+    total.value = 0;
+    totalPages.value = 1;
+    messages.value = [];
+    fetchChat();
+  }
+);
 
 function nextPage() {
   if (page.value < totalPages.value) {
