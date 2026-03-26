@@ -176,6 +176,8 @@ type SessionHistoryEntry struct {
 
 // CombatHistoryEntry represents a kill or death event
 type CombatHistoryEntry struct {
+	EventID      string    `json:"event_id,omitempty"`
+	ChainID      string    `json:"chain_id,omitempty"`
 	EventTime    time.Time `json:"event_time"`
 	EventType    string    `json:"event_type"` // "kill", "death", "wounded", "damaged", "wounded_by", "damaged_by"
 	ServerID     string    `json:"server_id"`
@@ -3013,6 +3015,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 		SELECT * FROM (
 			-- Kills (player killed someone)
 			SELECT
+				toString(id) as event_id,
+				chain_id,
 				event_time,
 				'kill' as event_type,
 				server_id,
@@ -3031,6 +3035,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			UNION ALL
 			-- Deaths (player was killed)
 			SELECT
+				toString(id) as event_id,
+				chain_id,
 				event_time,
 				'death' as event_type,
 				server_id,
@@ -3049,6 +3055,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			UNION ALL
 			-- Wounded someone (player downed someone)
 			SELECT
+				toString(id) as event_id,
+				chain_id,
 				event_time,
 				'wounded' as event_type,
 				server_id,
@@ -3067,6 +3075,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			UNION ALL
 			-- Wounded by (player was downed)
 			SELECT
+				toString(id) as event_id,
+				chain_id,
 				event_time,
 				'wounded_by' as event_type,
 				server_id,
@@ -3085,6 +3095,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			UNION ALL
 			-- Damaged someone (player dealt damage)
 			SELECT
+				toString(id) as event_id,
+				chain_id,
 				event_time,
 				'damaged' as event_type,
 				server_id,
@@ -3103,6 +3115,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			UNION ALL
 			-- Damaged by (player took damage)
 			SELECT
+				toString(id) as event_id,
+				chain_id,
 				event_time,
 				'damaged_by' as event_type,
 				server_id,
@@ -3122,7 +3136,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 		LIMIT ? OFFSET ?
 	`, killWhereClause, deathWhereClause, killWhereClause, deathWhereClause, killWhereClause, deathWhereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, playerID, playerID, playerID, playerID, limit, offset)
+	// Fetch one extra row to detect whether more pages exist after deduplication.
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, playerID, playerID, playerID, playerID, limit+1, offset)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
@@ -3133,12 +3148,15 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 	serverNameCache := make(map[string]string)
 	missingIdentifiers := []PlayerIdentifier{}
 	identifierSet := make(map[string]bool) // For deduplication
+	eventSet := make(map[string]bool)
 
 	// First pass: scan all events and collect missing player identifiers
 	for rows.Next() {
 		var entry CombatHistoryEntry
 		var teamkillInt uint8
 		err := rows.Scan(
+			&entry.EventID,
+			&entry.ChainID,
 			&entry.EventTime,
 			&entry.EventType,
 			&entry.ServerID,
@@ -3157,6 +3175,22 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			continue
 		}
 		entry.Teamkill = teamkillInt == 1
+
+		eventKey := entry.EventType + ":" + entry.EventID
+		if entry.EventID == "" {
+			eventKey = fmt.Sprintf("%s:%s:%s:%s:%.3f:%s",
+				entry.EventType,
+				entry.EventTime.UTC().Format(time.RFC3339Nano),
+				entry.ServerID,
+				entry.Weapon,
+				entry.Damage,
+				entry.OtherEOSID+entry.OtherSteamID+entry.OtherName,
+			)
+		}
+		if eventSet[eventKey] {
+			continue
+		}
+		eventSet[eventKey] = true
 
 		// Get server name from cache or database
 		if name, ok := serverNameCache[entry.ServerID]; ok {
@@ -3189,6 +3223,12 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 		events = append(events, entry)
 	}
 
+	// Determine if more pages exist, then trim to the requested limit.
+	hasMore := len(events) > limit
+	if hasMore {
+		events = events[:limit]
+	}
+
 	// Batch lookup missing player names
 	playerNameMap := s.lookupPlayerNamesBatchByIdentifiers(c.Request.Context(), missingIdentifiers)
 
@@ -3208,9 +3248,10 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 	}
 
 	responses.Success(c, "Combat history fetched successfully", &gin.H{
-		"events": events,
-		"page":   page,
-		"limit":  limit,
+		"events":   events,
+		"page":     page,
+		"limit":    limit,
+		"has_more": hasMore,
 	})
 }
 

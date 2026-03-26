@@ -1,10 +1,19 @@
 import type { Permission } from "@/constants/permissions";
 
+const FRIENDLY_PERMISSION_NAMES: Record<string, string> = {
+  "ui:maps:change": "Change Maps",
+};
+
 /**
  * Format a permission string into a human-readable display name
  * Example: "ui:players:kick" -> "Kick Players"
  */
 export function formatPermissionName(permission: Permission | string): string {
+  const friendlyName = FRIENDLY_PERMISSION_NAMES[permission];
+  if (friendlyName) {
+    return friendlyName;
+  }
+
   // Handle wildcard
   if (permission === "*") {
     return "Full Access";

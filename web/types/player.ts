@@ -158,6 +158,8 @@ export interface SessionHistoryEntry {
 }
 
 export interface CombatHistoryEntry {
+  event_id?: string;
+  chain_id?: string;
   event_time: string;
   event_type: "kill" | "death" | "wounded" | "wounded_by" | "damaged" | "damaged_by";
   server_id: string;
