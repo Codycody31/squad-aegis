@@ -511,10 +511,10 @@ func (s *Server) syncBansCfgWithExecutor(ctx context.Context, executor dbpkg.Exe
 
 func (s *Server) syncBansCfgWithExcludedIDsUsingExecutor(ctx context.Context, executor dbpkg.Executor, server *models.Server, excludedSteamIDs, excludedEOSIDs map[string]bool) error {
 	if server == nil || server.SquadGamePath == nil || *server.SquadGamePath == "" {
-		return nil // No base path configured, nothing to do
+		return fmt.Errorf("server has no SquadGamePath configured, cannot sync Bans.cfg")
 	}
 	if server.LogSourceType == nil || *server.LogSourceType == "" {
-		return nil // No log source configured, can't access files
+		return fmt.Errorf("server has no LogSourceType configured, cannot sync Bans.cfg")
 	}
 
 	// Acquire a per-server mutex to serialize read-modify-write cycles on

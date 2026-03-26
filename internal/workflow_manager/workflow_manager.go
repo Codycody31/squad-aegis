@@ -1568,11 +1568,12 @@ func (wm *WorkflowManager) executeBanPlayerAction(context *models.WorkflowExecut
 	banID := uuid.New()
 	now := time.Now()
 
-	var expiresAt *time.Time
-	if duration > 0 {
-		t := now.Add(time.Duration(duration) * 24 * time.Hour)
-		expiresAt = &t
+	if duration <= 0 {
+		return fmt.Errorf("invalid ban duration %.2f: must be positive (use a dedicated permanent-ban action for permanent bans)", duration)
 	}
+
+	t := now.Add(time.Duration(duration) * 24 * time.Hour)
+	expiresAt := &t
 
 	_, err = wm.db.ExecContext(wm.ctx, `
 		INSERT INTO server_bans (id, server_id, admin_id, steam_id, eos_id, reason, expires_at, created_at, updated_at)
@@ -1720,11 +1721,12 @@ func (wm *WorkflowManager) executeBanPlayerWithEvidenceAction(context *models.Wo
 	var banArgs []interface{}
 
 	// Compute expires_at from duration (in days)
-	var expiresAt *time.Time
-	if duration > 0 {
-		t := now.Add(time.Duration(duration) * 24 * time.Hour)
-		expiresAt = &t
+	if duration <= 0 {
+		return fmt.Errorf("invalid ban duration %.2f: must be positive (use a dedicated permanent-ban action for permanent bans)", duration)
 	}
+
+	t := now.Add(time.Duration(duration) * 24 * time.Hour)
+	expiresAt := &t
 
 	if ruleID != "" {
 		ruleUUID, err := uuid.Parse(ruleID)
@@ -3681,11 +3683,14 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		var banArgs []interface{}
 
 		// Compute expires_at from duration (in days)
-		var luaExpiresAt *time.Time
-		if duration > 0 {
-			t := now.Add(time.Duration(duration) * 24 * time.Hour)
-			luaExpiresAt = &t
+		if duration <= 0 {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(fmt.Sprintf("invalid ban duration %.2f: must be positive", duration)))
+			return 2
 		}
+
+		luaExpiry := now.Add(time.Duration(duration) * 24 * time.Hour)
+		luaExpiresAt := &luaExpiry
 
 		if ruleID != "" {
 			ruleUUID, err := uuid.Parse(ruleID)
