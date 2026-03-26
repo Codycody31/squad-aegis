@@ -235,7 +235,9 @@ func NewRouter(server *Server) *gin.Engine {
 				serverGroup.GET("/rcon/commands/autocomplete", server.RconCommandAutocomplete)
 				serverGroup.POST("/rcon/execute", server.RequirePermission(permissions.UIConsoleExecute), server.ServerRconExecute)
 				serverGroup.GET("/rcon/server-population", server.ServerRconServerPopulation)
-				serverGroup.GET("/rcon/available-layers", server.ServerRconAvailableLayers)
+				serverGroup.GET("/rcon/available-layers", server.RequirePermission(permissions.UIMapsChange), server.ServerRconAvailableLayers)
+				serverGroup.POST("/rcon/change-layer", server.RequirePermission(permissions.UIMapsChange), server.ServerRconChangeLayer)
+				serverGroup.POST("/rcon/set-next-layer", server.RequirePermission(permissions.UIMapsChange), server.ServerRconSetNextLayer)
 				serverGroup.GET("/rcon/events", server.RequirePermission(permissions.UIConsoleView), server.ServerRconEvents)
 				serverGroup.POST("/rcon/force-restart", server.RequirePermission(permissions.UISettingsManage), server.ServerRconForceRestart)
 
