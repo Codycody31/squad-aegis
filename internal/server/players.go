@@ -3136,7 +3136,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 		LIMIT ? OFFSET ?
 	`, killWhereClause, deathWhereClause, killWhereClause, deathWhereClause, killWhereClause, deathWhereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, playerID, playerID, playerID, playerID, limit, offset)
+	// Fetch one extra row to detect whether more pages exist after deduplication.
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, playerID, playerID, playerID, playerID, limit+1, offset)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
@@ -3222,6 +3223,12 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 		events = append(events, entry)
 	}
 
+	// Determine if more pages exist, then trim to the requested limit.
+	hasMore := len(events) > limit
+	if hasMore {
+		events = events[:limit]
+	}
+
 	// Batch lookup missing player names
 	playerNameMap := s.lookupPlayerNamesBatchByIdentifiers(c.Request.Context(), missingIdentifiers)
 
@@ -3241,9 +3248,10 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 	}
 
 	responses.Success(c, "Combat history fetched successfully", &gin.H{
-		"events": events,
-		"page":   page,
-		"limit":  limit,
+		"events":   events,
+		"page":     page,
+		"limit":    limit,
+		"has_more": hasMore,
 	})
 }
 

@@ -54,6 +54,7 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const events = ref<CombatHistoryEntry[]>([]);
+const hasMore = ref(false);
 const page = ref(1);
 const limit = ref(50);
 const eventTypeFilter = ref("all");
@@ -96,6 +97,7 @@ async function fetchCombatHistory() {
 
     const data = await response.json();
     events.value = data.data.events || [];
+    hasMore.value = data.data.has_more ?? false;
   } catch (err: any) {
     error.value = err.message;
   } finally {
@@ -195,9 +197,9 @@ const displayEvents = computed<CombatHistoryDisplayEntry[]>(() => {
 
     grouped.push({
       ...event,
-      row_id:
-        event.event_id ||
-        `${event.event_type}:${event.event_time}:${event.server_id}:${grouped.length}`,
+      row_id: event.event_id
+        ? `${event.event_type}:${event.event_id}`
+        : `${event.event_type}:${event.event_time}:${event.server_id}:${grouped.length}`,
       grouped_count: 1,
       total_damage: event.damage,
       min_damage: event.damage,
@@ -554,7 +556,7 @@ onMounted(() => {
             <Button
               variant="outline"
               size="sm"
-              :disabled="events.length < limit"
+              :disabled="!hasMore"
               @click="nextPage"
             >
               <ChevronRight class="h-4 w-4" />
