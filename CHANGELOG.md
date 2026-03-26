@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix(player-profile): collapse duplicate-looking combat burst hits [[#191](https://github.com/Codycody31/squad-aegis/pull/191)]
 - fix: server metric charts [[#190](https://github.com/Codycody31/squad-aegis/pull/190)]
 - fix: add missing ban evidence metadata [[#189](https://github.com/Codycody31/squad-aegis/pull/189)]
 - fix(server): validate server settings log source type [[#175](https://github.com/Codycody31/squad-aegis/pull/175)]
