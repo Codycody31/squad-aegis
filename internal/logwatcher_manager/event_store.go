@@ -219,8 +219,12 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 }
 
 // GetPlayerData retrieves persistent player data by playerID.
-// No Go mutex needed: each Redis call is individually atomic.
+// Hold the read lock so alias lookup and record fetch stay consistent while a
+// local writer is updating the multi-key player record.
 func (es *EventStore) GetPlayerData(playerID string) (*PlayerData, bool) {
+	es.mu.RLock()
+	defer es.mu.RUnlock()
+
 	recordID, exists := es.resolvePlayerRecordID(playerID)
 	if !exists {
 		return nil, false
