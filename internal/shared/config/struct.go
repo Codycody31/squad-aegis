@@ -10,8 +10,8 @@ type Struct struct {
 	}
 	Initial struct {
 		Admin struct {
-			Username string `default:"admin"`
-			Password string `default:"admin"`
+			Username string `default:""`
+			Password string `default:""`
 		}
 	}
 	Db struct {

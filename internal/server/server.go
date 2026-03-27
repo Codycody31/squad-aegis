@@ -419,6 +419,7 @@ func NewRouter(server *Server) *gin.Engine {
 		playersGroup := apiGroup.Group("/players")
 		{
 			playersGroup.Use(server.AuthSession)
+			playersGroup.Use(server.RequirePermission(permissions.UIPlayersView))
 
 			playersGroup.GET("", server.PlayersList)
 			playersGroup.GET("/stats", server.PlayersStats)
