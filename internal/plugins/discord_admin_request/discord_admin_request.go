@@ -286,21 +286,24 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 		players = []*plugin_manager.PlayerInfo{}
 	}
 
-	// Build a map of SteamID -> preferred ID from the player list
-	steamIDToPreferredID := make(map[string]string)
+	// Build a map of admin IDs -> preferred IDs from the player list
+	adminIDToPreferredID := make(map[string]string)
 	for _, player := range players {
 		if player.SteamID != "" {
-			steamIDToPreferredID[player.SteamID] = player.PreferredID()
+			adminIDToPreferredID[player.SteamID] = player.PreferredID()
+		}
+		if player.EOSID != "" {
+			adminIDToPreferredID[player.EOSID] = player.PreferredID()
 		}
 	}
 
+	requesterID := event.PreferredPlayerID()
 	onlineAdmins := []string{}
 	for _, admin := range admins {
 		// Exclude the requesting player from notifications
-		if admin.SteamID != event.SteamID && admin.IsOnline {
-			// Use preferred ID (EOS ID fallback) for RCON calls
-			adminID := admin.SteamID
-			if preferredID, ok := steamIDToPreferredID[admin.SteamID]; ok {
+		adminID := admin.PreferredID()
+		if adminID != "" && adminID != requesterID && admin.IsOnline {
+			if preferredID, ok := adminIDToPreferredID[adminID]; ok {
 				adminID = preferredID
 			}
 			onlineAdmins = append(onlineAdmins, adminID)
@@ -315,7 +318,7 @@ func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.P
 	reason = strings.TrimSpace(reason)
 
 	// Send Discord notification
-	if err := p.sendAdminRequestNotification(serverInfo, event.PlayerName, event.SteamID, reason, onlineAdmins); err != nil {
+	if err := p.sendAdminRequestNotification(serverInfo, event.PlayerName, requesterID, reason, onlineAdmins); err != nil {
 		p.apis.LogAPI.Error("Failed to send Discord notification", err, map[string]interface{}{
 			"player":  event.PlayerName,
 			"message": reason,
@@ -367,7 +370,7 @@ func (p *DiscordAdminRequestPlugin) shouldIgnoreChat(chatType string) bool {
 }
 
 // sendAdminRequestNotification sends the Discord notification
-func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plugin_manager.ServerInfo, playerName, steamID, message string, onlineAdmins []string) error {
+func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plugin_manager.ServerInfo, playerName, playerID, message string, onlineAdmins []string) error {
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
 		return fmt.Errorf("channel_id not configured")
@@ -384,48 +387,61 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 
 	player := &plugin_manager.PlayerInfo{}
 	for _, p := range players {
-		if p.SteamID == steamID {
+		if p.MatchesPlayerID(playerID) {
 			player = p
 			break
 		}
 	}
 
+	fields := []*discord.DiscordEmbedField{
+		{
+			Name:   "Player",
+			Value:  playerName,
+			Inline: true,
+		},
+		{
+			Name:   "Player ID",
+			Value:  playerID,
+			Inline: true,
+		},
+	}
+	if player.SteamID != "" {
+		fields = append(fields, &discord.DiscordEmbedField{
+			Name:   "Steam ID",
+			Value:  fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", player.SteamID, player.SteamID),
+			Inline: true,
+		})
+	}
+	if player.EOSID != "" {
+		fields = append(fields, &discord.DiscordEmbedField{
+			Name:   "EOS ID",
+			Value:  player.EOSID,
+			Inline: true,
+		})
+	}
+	fields = append(fields,
+		&discord.DiscordEmbedField{
+			Name:   "Team & Squad",
+			Value:  fmt.Sprintf("Team: %d, Squad: %d", player.TeamID, player.SquadID),
+			Inline: false,
+		},
+		&discord.DiscordEmbedField{
+			Name:   "Reason",
+			Value:  message,
+			Inline: false,
+		},
+		&discord.DiscordEmbedField{
+			Name:   "Online Admins",
+			Value:  fmt.Sprintf("%d", len(onlineAdmins)),
+			Inline: false,
+		},
+	)
+
 	// Create embed
 	embed := &discord.DiscordEmbed{
-		Title: fmt.Sprintf("Player **%s** has requested admin support!", playerName),
-		Color: p.getIntConfig("color"),
-		Fields: []*discord.DiscordEmbedField{
-			{
-				Name:   "Player",
-				Value:  playerName,
-				Inline: true,
-			},
-			{
-				Name:   "Steam ID",
-				Value:  fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", steamID, steamID),
-				Inline: true,
-			},
-			{
-				Name:   "Player's EosID",
-				Value:  player.EOSID,
-				Inline: true,
-			},
-			{
-				Name:   "Team & Squad",
-				Value:  fmt.Sprintf("Team: %d, Squad: %d", player.TeamID, player.SquadID),
-				Inline: false,
-			},
-			{
-				Name:   "Reason",
-				Value:  message,
-				Inline: false,
-			},
-			{
-				Name:   "Online Admins",
-				Value:  fmt.Sprintf("%d", len(onlineAdmins)),
-				Inline: false,
-			},
-		},
+		Title:  fmt.Sprintf("Player **%s** has requested admin support!", playerName),
+		Color:  p.getIntConfig("color"),
+		Fields: fields,
 		Footer: &discord.DiscordEmbedFooter{
 			Text: "Powered by Squad Aegis",
 		},
@@ -462,27 +478,26 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 }
 
 // sendInGameResponse sends a response to the player in-game
-func (p *DiscordAdminRequestPlugin) sendInGameResponse(playerSteamID string, onlineAdmins []string) error {
+func (p *DiscordAdminRequestPlugin) sendInGameResponse(playerID string, onlineAdmins []string) error {
 	if !p.getBoolConfig("show_in_game_admins") {
-		return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, "An admin has been notified. Please wait for us to get back to you.")
+		return p.apis.RconAPI.SendWarningToPlayer(playerID, "An admin has been notified. Please wait for us to get back to you.")
 	}
 
 	if len(onlineAdmins) == 0 {
-		return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, "There are no in-game admins, however, an admin has been notified via Discord. Please wait for us to get back to you.")
+		return p.apis.RconAPI.SendWarningToPlayer(playerID, "There are no in-game admins, however, an admin has been notified via Discord. Please wait for us to get back to you.")
 	}
 
-	return p.apis.RconAPI.SendWarningToPlayer(playerSteamID, fmt.Sprintf("There are %d in-game admin(s). Please wait for us to get back to you.", len(onlineAdmins)))
+	return p.apis.RconAPI.SendWarningToPlayer(playerID, fmt.Sprintf("There are %d in-game admin(s). Please wait for us to get back to you.", len(onlineAdmins)))
 }
 
 // warnInGameAdmins sends a warning to in-game admins
-func (p *DiscordAdminRequestPlugin) warnInGameAdmins(playerName, message string, onlineAdminSteamIDs []string) error {
+func (p *DiscordAdminRequestPlugin) warnInGameAdmins(playerName, message string, onlineAdminIDs []string) error {
 	adminMessage := fmt.Sprintf("[%s] %s", playerName, message)
 
-	// Send to each online admin individually using their Steam IDs
-	for _, steamID := range onlineAdminSteamIDs {
-		if err := p.apis.RconAPI.SendWarningToPlayer(steamID, adminMessage); err != nil {
+	for _, adminID := range onlineAdminIDs {
+		if err := p.apis.RconAPI.SendWarningToPlayer(adminID, adminMessage); err != nil {
 			p.apis.LogAPI.Error("Failed to send warning to admin", err, map[string]interface{}{
-				"adminID": steamID,
+				"adminID": adminID,
 			})
 		}
 	}

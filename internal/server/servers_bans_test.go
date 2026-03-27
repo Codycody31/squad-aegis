@@ -13,6 +13,64 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/models"
 )
 
+func TestNormalizeBanSubject(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		steamID           string
+		eosID             string
+		wantInvalidField  string
+		wantSteamIDVal    interface{}
+		wantEOSIDVal      interface{}
+		wantNormalizedEOS string
+	}{
+		{
+			name:           "valid steam only",
+			steamID:        "76561198000000001",
+			wantSteamIDVal: int64(76561198000000001),
+		},
+		{
+			name:              "valid eos only",
+			eosID:             "  ABCDEF0123456789ABCDEF0123456789  ",
+			wantEOSIDVal:      "abcdef0123456789abcdef0123456789",
+			wantNormalizedEOS: "abcdef0123456789abcdef0123456789",
+		},
+		{
+			name:             "invalid eos only",
+			eosID:            "not-an-eos-id",
+			wantInvalidField: "eos_id",
+		},
+		{
+			name:             "invalid eos with valid steam still fails",
+			steamID:          "76561198000000001",
+			eosID:            "not-an-eos-id",
+			wantInvalidField: "eos_id",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, invalidField := normalizeBanSubject(tt.steamID, tt.eosID)
+			if invalidField != tt.wantInvalidField {
+				t.Fatalf("normalizeBanSubject() invalidField = %q, want %q", invalidField, tt.wantInvalidField)
+			}
+			if got.steamIDVal != tt.wantSteamIDVal {
+				t.Fatalf("normalizeBanSubject() steamIDVal = %#v, want %#v", got.steamIDVal, tt.wantSteamIDVal)
+			}
+			if got.eosIDVal != tt.wantEOSIDVal {
+				t.Fatalf("normalizeBanSubject() eosIDVal = %#v, want %#v", got.eosIDVal, tt.wantEOSIDVal)
+			}
+			if got.normalizedEOSID != tt.wantNormalizedEOS {
+				t.Fatalf("normalizeBanSubject() normalizedEOSID = %q, want %q", got.normalizedEOSID, tt.wantNormalizedEOS)
+			}
+		})
+	}
+}
+
 func TestShouldPreserveExistingBansCfgEntry(t *testing.T) {
 	t.Parallel()
 

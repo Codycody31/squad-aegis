@@ -641,6 +641,9 @@ func buildServerBanIdentifierWhereClause(steamIDs, eosIDs []string, alias string
 		argIdx++
 	}
 
+	if len(conditions) == 0 {
+		return "1 = 0", nil, argIdx
+	}
 	return strings.Join(conditions, " OR "), args, argIdx
 }
 
@@ -1640,10 +1643,12 @@ func (s *Server) getPlayerStatistics(c *gin.Context, playerID string, isSteamID 
 func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isSteamID bool, limit int) ([]PlayerActivity, error) {
 	// Combine multiple event types into a single activity feed
 	// We'll query died events, wounded events, and chat messages
-
-	whereClause := "steam = ?"
-	if !isSteamID {
-		whereClause = "eos = ?"
+	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+	connectionWhereClause, connectionArgs := buildClickHouseIdentifierWhereClause("steam", "eos", steamIDs, eosIDs, false)
+	deathWhereClause, deathArgs := buildClickHouseIdentifierWhereClause("victim_steam", "victim_eos", steamIDs, eosIDs, false)
+	chatWhereClause, chatArgs := buildClickHouseIdentifierWhereClause("steam_id", "eos_id", steamIDs, eosIDs, true)
+	if len(steamIDs) == 0 && len(eosIDs) == 0 {
+		return []PlayerActivity{}, nil
 	}
 
 	query := fmt.Sprintf(`
@@ -1663,7 +1668,7 @@ func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isStea
 			concat('Killed by ', attacker_name, ' with ', weapon) as description,
 			server_id
 		FROM squad_aegis.server_player_died_events
-		WHERE victim_steam = ? OR victim_eos = ?
+		WHERE %s
 
 		UNION ALL
 
@@ -1673,13 +1678,19 @@ func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isStea
 			concat('[', chat_type, '] ', message) as description,
 			server_id
 		FROM squad_aegis.server_player_chat_messages
-		WHERE steam_id = ? OR eos_id = ?
+		WHERE %s
 
 		ORDER BY event_time DESC
 		LIMIT ?
-	`, whereClause)
+	`, connectionWhereClause, deathWhereClause, chatWhereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, playerID, playerID, playerID, limit)
+	queryArgs := make([]interface{}, 0, len(connectionArgs)+len(deathArgs)+len(chatArgs)+1)
+	queryArgs = append(queryArgs, connectionArgs...)
+	queryArgs = append(queryArgs, deathArgs...)
+	queryArgs = append(queryArgs, chatArgs...)
+	queryArgs = append(queryArgs, limit)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1705,19 +1716,10 @@ func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isStea
 
 // getPlayerChatHistory retrieves player chat history
 func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID bool, limit int) ([]ChatMessage, error) {
-	whereClause := "steam_id = ?"
-	if !isSteamID {
-		whereClause = "eos_id = ?"
-	}
-
-	// Convert playerID to uint64 for steam_id
-	var queryPlayerID interface{} = playerID
-	if isSteamID {
-		steamIDUint, err := strconv.ParseUint(playerID, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		queryPlayerID = steamIDUint
+	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+	whereClause, queryArgs := buildClickHouseIdentifierWhereClause("steam_id", "eos_id", steamIDs, eosIDs, true)
+	if whereClause == "1 = 0" {
+		return []ChatMessage{}, nil
 	}
 
 	query := fmt.Sprintf(`
@@ -1732,7 +1734,9 @@ func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID
 		LIMIT ?
 	`, whereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, queryPlayerID, limit)
+	queryArgs = append(queryArgs, limit)
+
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1759,7 +1763,7 @@ func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID
 func (s *Server) getPlayerBanHistory(c *gin.Context, playerID string, isSteamID bool, limit int) ([]ActiveBan, error) {
 	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
 	whereClause, args, nextArg := buildServerBanIdentifierWhereClause(steamIDs, eosIDs, "b.", 1)
-	if whereClause == "" {
+	if whereClause == "1 = 0" {
 		return []ActiveBan{}, nil
 	}
 
@@ -1824,33 +1828,13 @@ func (s *Server) getPlayerBanHistory(c *gin.Context, playerID string, isSteamID 
 
 // getPlayerViolations retrieves player rule violations
 func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID bool) ([]RuleViolation, error) {
-	// For EOS ID, we need to first find the steam ID
-	steamIDStr := playerID
-	if !isSteamID {
-		playerID = utils.NormalizeEOSID(playerID)
-
-		// Get steam ID from EOS ID
-		query := `
-			SELECT steam
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE eos = ?
-			LIMIT 1
-		`
-		row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
-		var steamID *string
-		if err := row.Scan(&steamID); err != nil || steamID == nil {
-			return []RuleViolation{}, nil
-		}
-		steamIDStr = *steamID
-	}
-
-	// Convert steam ID to uint64
-	steamIDUint, err := strconv.ParseUint(steamIDStr, 10, 64)
-	if err != nil {
+	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+	whereClause, args := buildPlayerRuleViolationWhereClause(steamIDs, eosIDs, "")
+	if whereClause == "1 = 0" {
 		return []RuleViolation{}, nil
 	}
 
-	query := `
+	query := fmt.Sprintf(`
 		SELECT
 			violation_id,
 			server_id,
@@ -1859,11 +1843,11 @@ func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID 
 			action_type,
 			created_at
 		FROM squad_aegis.player_rule_violations
-		WHERE player_steam_id = ?
+		WHERE %s
 		ORDER BY created_at DESC
-	`
+	`, whereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, steamIDUint)
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1920,9 +1904,10 @@ func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID 
 
 // getPlayerRecentServers retrieves servers the player has recently played on
 func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteamID bool) ([]RecentServerInfo, error) {
-	whereClause := "steam = ?"
-	if !isSteamID {
-		whereClause = "eos = ?"
+	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+	whereClause, args := buildClickHouseIdentifierWhereClause("steam", "eos", steamIDs, eosIDs, false)
+	if whereClause == "1 = 0" {
+		return []RecentServerInfo{}, nil
 	}
 
 	query := fmt.Sprintf(`
@@ -1937,7 +1922,7 @@ func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteam
 		LIMIT 10
 	`, whereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID)
+	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2046,39 +2031,26 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, steamID string, eosID strin
 
 // getPlayerViolationSummary retrieves a summary of player violations
 func (s *Server) getPlayerViolationSummary(c *gin.Context, playerID string, isSteamID bool) (*ViolationSummary, error) {
-	// Get steam ID
-	steamIDStr := playerID
-	if !isSteamID {
-		playerID = utils.NormalizeEOSID(playerID)
-
-		query := `SELECT steam FROM squad_aegis.server_join_succeeded_events WHERE eos = ? LIMIT 1`
-		row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
-		var steamID *string
-		if err := row.Scan(&steamID); err != nil || steamID == nil {
-			return &ViolationSummary{}, nil
-		}
-		steamIDStr = *steamID
-	}
-
-	steamIDUint, err := strconv.ParseUint(steamIDStr, 10, 64)
-	if err != nil {
+	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+	whereClause, args := buildPlayerRuleViolationWhereClause(steamIDs, eosIDs, "")
+	if whereClause == "1 = 0" {
 		return &ViolationSummary{}, nil
 	}
 
-	query := `
+	query := fmt.Sprintf(`
 		SELECT
 			countIf(action_type = 'WARN') as total_warns,
 			countIf(action_type = 'KICK') as total_kicks,
 			countIf(action_type = 'BAN') as total_bans,
 			max(created_at) as last_action
 		FROM squad_aegis.player_rule_violations
-		WHERE player_steam_id = ?
-	`
+		WHERE %s
+	`, whereClause)
 
-	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, steamIDUint)
+	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, args...)
 
 	var summary ViolationSummary
-	err = row.Scan(
+	err := row.Scan(
 		&summary.TotalWarns,
 		&summary.TotalKicks,
 		&summary.TotalBans,

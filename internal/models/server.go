@@ -25,7 +25,6 @@ type Server struct {
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"` // Whether to read from start of file
 	SquadGamePath    *string `json:"squad_game_path,omitempty"`     // Base path to SquadGame folder
 
-
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -108,6 +107,7 @@ type ServerAdmin struct {
 	ServerId     uuid.UUID  `json:"server_id"`
 	UserId       *uuid.UUID `json:"user_id,omitempty"`
 	SteamId      *int64     `json:"steam_id,string,omitempty"`
+	EOSId        *string    `json:"eos_id,omitempty"`
 	ServerRoleId uuid.UUID  `json:"server_role_id"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	Notes        *string    `json:"notes,omitempty"`
@@ -203,6 +203,7 @@ type RemoteBanSourceUpdateRequest struct {
 type ServerAdminCreateRequest struct {
 	UserID       *string    `json:"user_id,omitempty"`    // Optional: existing user ID
 	SteamID      *string    `json:"steam_id,omitempty"`   // Optional: Steam ID for new admin
+	EOSID        *string    `json:"eos_id,omitempty"`     // Optional: EOS ID for new admin
 	ServerRoleID string     `json:"server_role_id"`       // Required: role to assign
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"` // Optional: expiration date for temporary access
 	Notes        *string    `json:"notes,omitempty"`      // Optional: notes about this admin assignment
@@ -225,7 +226,6 @@ type ServerCreateRequest struct {
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
 	SquadGamePath    *string `json:"squad_game_path,omitempty"`
-
 }
 
 type ServerRconExecuteRequest struct {
@@ -277,7 +277,6 @@ type ServerUpdateRequest struct {
 	LogPollFrequency *int    `json:"log_poll_frequency,omitempty"`
 	LogReadFromStart *bool   `json:"log_read_from_start,omitempty"`
 	SquadGamePath    *string `json:"squad_game_path,omitempty"`
-
 }
 
 // IgnoredSteamID represents a Steam ID that should be ignored from remote ban sources
@@ -304,13 +303,13 @@ type IgnoredSteamIDUpdateRequest struct {
 
 // CfgBanEntry represents a parsed entry from a Squad Bans.cfg file.
 type CfgBanEntry struct {
-	SteamID         string `json:"steam_id"`          // May be empty for EOS-only bans
-	EOSID           string `json:"eos_id"`            // May be empty for Steam-only bans
-	ExpiryTimestamp int64  `json:"expiry_timestamp"`  // Unix timestamp, 0 = permanent
+	SteamID         string `json:"steam_id"`         // May be empty for EOS-only bans
+	EOSID           string `json:"eos_id"`           // May be empty for Steam-only bans
+	ExpiryTimestamp int64  `json:"expiry_timestamp"` // Unix timestamp, 0 = permanent
 	Reason          string `json:"reason"`
 	Permanent       bool   `json:"permanent"`
 	Expired         bool   `json:"expired"`
-	IsAutoBan       bool   `json:"is_auto_ban"`       // Server-generated (e.g., teamkill kicks)
+	IsAutoBan       bool   `json:"is_auto_ban"` // Server-generated (e.g., teamkill kicks)
 	RawLine         string `json:"raw_line"`
 }
 

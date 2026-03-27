@@ -10,6 +10,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // PlayerTracker tracks information about squad leaders with wrong kits
@@ -40,6 +41,70 @@ type AutoWarnSLWrongKitPlugin struct {
 	trackedPlayers map[string]*PlayerTracker
 	updateTicker   *time.Ticker
 	cleanupTicker  *time.Ticker
+}
+
+func normalizePlayerCandidates(playerID string, steamID string, eosID string) []string {
+	candidates := []string{
+		utils.NormalizePlayerID(playerID),
+		utils.NormalizePlayerID(steamID),
+		utils.NormalizePlayerID(eosID),
+	}
+
+	seen := make(map[string]bool, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+	}
+
+	return result
+}
+
+func (p *AutoWarnSLWrongKitPlugin) findTrackedPlayerKeyLocked(playerID string, steamID string, eosID string) (string, *PlayerTracker, bool) {
+	for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+		if tracker := p.trackedPlayers[candidate]; tracker != nil {
+			return candidate, tracker, true
+		}
+	}
+
+	for key, tracker := range p.trackedPlayers {
+		if tracker == nil || tracker.Player == nil {
+			continue
+		}
+		for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+			if tracker.Player.MatchesPlayerID(candidate) {
+				return key, tracker, true
+			}
+		}
+	}
+
+	return "", nil, false
+}
+
+func (p *AutoWarnSLWrongKitPlugin) findTrackedPlayerKeyByTrackerLocked(target *PlayerTracker) (string, bool) {
+	for key, tracker := range p.trackedPlayers {
+		if tracker == target {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func (p *AutoWarnSLWrongKitPlugin) findMatchingPlayer(players []*plugin_manager.PlayerInfo, playerID string, steamID string, eosID string) *plugin_manager.PlayerInfo {
+	for _, player := range players {
+		if player == nil || !player.IsOnline {
+			continue
+		}
+		for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+			if player.MatchesPlayerID(candidate) {
+				return player
+			}
+		}
+	}
+	return nil
 }
 
 // Define returns the plugin definition
@@ -394,8 +459,8 @@ func (p *AutoWarnSLWrongKitPlugin) updateTrackingList() error {
 	if !shouldRun {
 		// Stop tracking all players if conditions aren't met
 		p.mu.Lock()
-		for steamID := range p.trackedPlayers {
-			p.untrackPlayerUnsafe(steamID)
+		for playerID := range p.trackedPlayers {
+			p.untrackPlayerUnsafe(playerID)
 		}
 		p.mu.Unlock()
 		return nil
@@ -410,13 +475,22 @@ func (p *AutoWarnSLWrongKitPlugin) updateTrackingList() error {
 			continue
 		}
 
-		isTracked := p.trackedPlayers[player.SteamID] != nil
+		playerID := player.PreferredID()
+		if playerID == "" {
+			continue
+		}
+
+		trackedKey, tracker, isTracked := p.findTrackedPlayerKeyLocked(playerID, player.SteamID, player.EOSID)
+		if isTracked && trackedKey != playerID {
+			delete(p.trackedPlayers, trackedKey)
+			p.trackedPlayers[playerID] = tracker
+		}
 		isSquadLeader := player.IsSquadLeader
 		hasWrongKit := p.hasWrongKit(player.Role)
 
 		// If player is no longer a squad leader or changed kit, stop tracking them
 		if (!isSquadLeader || !hasWrongKit) && isTracked {
-			p.untrackPlayerUnsafe(player.SteamID)
+			p.untrackPlayerUnsafe(playerID)
 			continue
 		}
 
@@ -443,34 +517,42 @@ func (p *AutoWarnSLWrongKitPlugin) clearDisconnectedPlayers() {
 	}
 
 	// Create lookup map of online players
-	onlineMap := make(map[string]bool)
-	for _, player := range players {
-		if player.IsOnline {
-			onlineMap[player.SteamID] = true
-		}
-	}
-
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	// Remove tracking for players who are no longer online
-	for steamID := range p.trackedPlayers {
-		if !onlineMap[steamID] {
-			p.untrackPlayerUnsafe(steamID)
+	for playerID, tracker := range p.trackedPlayers {
+		var steamID string
+		var eosID string
+		if tracker != nil && tracker.Player != nil {
+			steamID = tracker.Player.SteamID
+			eosID = tracker.Player.EOSID
+		}
+
+		matchingPlayer := p.findMatchingPlayer(players, playerID, steamID, eosID)
+		if matchingPlayer == nil {
+			p.untrackPlayerUnsafe(playerID)
+			continue
+		}
+
+		if newKey := matchingPlayer.PreferredID(); newKey != "" && newKey != playerID {
+			delete(p.trackedPlayers, playerID)
+			p.trackedPlayers[newKey] = tracker
 		}
 	}
 }
 
 // trackPlayerUnsafe starts tracking a player (must be called with mutex held)
 func (p *AutoWarnSLWrongKitPlugin) trackPlayerUnsafe(player *plugin_manager.PlayerInfo) {
-	if p.trackedPlayers[player.SteamID] != nil {
+	playerID := player.PreferredID()
+	if playerID == "" || p.trackedPlayers[playerID] != nil {
 		return // Already tracking
 	}
 
 	p.apis.LogAPI.Debug("Starting to track squad leader with wrong kit", map[string]interface{}{
-		"player":   player.Name,
-		"steam_id": player.SteamID,
-		"role":     player.Role,
+		"player":    player.Name,
+		"player_id": playerID,
+		"role":      player.Role,
 	})
 
 	kickCtx, kickCancel := context.WithCancel(p.ctx)
@@ -497,7 +579,7 @@ func (p *AutoWarnSLWrongKitPlugin) trackPlayerUnsafe(player *plugin_manager.Play
 	}
 	tracker.KickTimer = time.NewTimer(time.Duration(kickTimeout) * time.Second)
 
-	p.trackedPlayers[player.SteamID] = tracker
+	p.trackedPlayers[playerID] = tracker
 
 	// Start warning and kick goroutines
 	go p.warningLoop(tracker)
@@ -505,15 +587,15 @@ func (p *AutoWarnSLWrongKitPlugin) trackPlayerUnsafe(player *plugin_manager.Play
 }
 
 // untrackPlayerUnsafe stops tracking a player (must be called with mutex held)
-func (p *AutoWarnSLWrongKitPlugin) untrackPlayerUnsafe(steamID string) {
-	tracker := p.trackedPlayers[steamID]
+func (p *AutoWarnSLWrongKitPlugin) untrackPlayerUnsafe(playerID string) {
+	tracker := p.trackedPlayers[playerID]
 	if tracker == nil {
 		return
 	}
 
 	p.apis.LogAPI.Debug("Stopping tracking of player", map[string]interface{}{
-		"player":   tracker.Player.Name,
-		"steam_id": steamID,
+		"player":    tracker.Player.Name,
+		"player_id": playerID,
 	})
 
 	// Stop timers and cancel context
@@ -527,7 +609,7 @@ func (p *AutoWarnSLWrongKitPlugin) untrackPlayerUnsafe(steamID string) {
 		tracker.KickCancel()
 	}
 
-	delete(p.trackedPlayers, steamID)
+	delete(p.trackedPlayers, playerID)
 }
 
 // warningLoop handles sending warnings to a tracked player
@@ -558,8 +640,8 @@ func (p *AutoWarnSLWrongKitPlugin) warningLoop(tracker *PlayerTracker) {
 
 			if err := p.apis.RconAPI.SendWarningToPlayer(tracker.Player.PreferredID(), message); err != nil {
 				p.apis.LogAPI.Error("Failed to send warning to player", err, map[string]interface{}{
-					"player":   tracker.Player.Name,
-					"steam_id": tracker.Player.SteamID,
+					"player":    tracker.Player.Name,
+					"player_id": tracker.Player.PreferredID(),
 				})
 			} else {
 				p.apis.LogAPI.Debug("Warned squad leader with wrong kit", map[string]interface{}{
@@ -584,7 +666,7 @@ func (p *AutoWarnSLWrongKitPlugin) kickLoop(tracker *PlayerTracker) {
 		}
 
 		p.mu.Lock()
-		stillTracked := p.trackedPlayers[tracker.Player.SteamID] != nil
+		trackedKey, stillTracked := p.findTrackedPlayerKeyByTrackerLocked(tracker)
 		kickMessage := p.getStringConfig("kick_message")
 		shouldKick := p.getBoolConfig("should_kick")
 		p.mu.Unlock()
@@ -598,37 +680,39 @@ func (p *AutoWarnSLWrongKitPlugin) kickLoop(tracker *PlayerTracker) {
 			// Kick the player
 			if err := p.apis.RconAPI.KickPlayer(tracker.Player.PreferredID(), kickMessage); err != nil {
 				p.apis.LogAPI.Error("Failed to kick squad leader with wrong kit", err, map[string]interface{}{
-					"player":   tracker.Player.Name,
-					"steam_id": tracker.Player.SteamID,
+					"player":    tracker.Player.Name,
+					"player_id": tracker.Player.PreferredID(),
 				})
 			} else {
 				p.apis.LogAPI.Info("Kicked squad leader with wrong kit", map[string]interface{}{
-					"player":   tracker.Player.Name,
-					"steam_id": tracker.Player.SteamID,
-					"warnings": tracker.Warnings,
-					"duration": time.Since(tracker.StartTime),
+					"player":    tracker.Player.Name,
+					"player_id": tracker.Player.PreferredID(),
+					"warnings":  tracker.Warnings,
+					"duration":  time.Since(tracker.StartTime),
 				})
 			}
 		} else {
 			// Remove from squad
 			if err := p.apis.RconAPI.RemovePlayerFromSquadById(tracker.Player.ID); err != nil {
 				p.apis.LogAPI.Error("Failed to remove squad leader from squad", err, map[string]interface{}{
-					"player":   tracker.Player.Name,
-					"steam_id": tracker.Player.SteamID,
+					"player":    tracker.Player.Name,
+					"player_id": tracker.Player.PreferredID(),
 				})
 			} else {
 				p.apis.LogAPI.Info("Removed squad leader from squad (wrong kit)", map[string]interface{}{
-					"player":   tracker.Player.Name,
-					"steam_id": tracker.Player.SteamID,
-					"warnings": tracker.Warnings,
-					"duration": time.Since(tracker.StartTime),
+					"player":    tracker.Player.Name,
+					"player_id": tracker.Player.PreferredID(),
+					"warnings":  tracker.Warnings,
+					"duration":  time.Since(tracker.StartTime),
 				})
 			}
 		}
 
 		// Remove from tracking
 		p.mu.Lock()
-		p.untrackPlayerUnsafe(tracker.Player.SteamID)
+		if stillTracked {
+			p.untrackPlayerUnsafe(trackedKey)
+		}
 		p.mu.Unlock()
 	}
 }

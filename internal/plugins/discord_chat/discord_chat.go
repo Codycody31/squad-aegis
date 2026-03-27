@@ -269,8 +269,9 @@ func (p *DiscordChatPlugin) sendChatEmbed(event *event_manager.RconChatMessageDa
 
 	// Try to get current player list to find team/squad info
 	if players, err := p.apis.ServerAPI.GetPlayers(); err == nil {
+		playerID := event.PreferredPlayerID()
 		for _, player := range players {
-			if player.SteamID == event.SteamID {
+			if player.MatchesPlayerID(playerID) {
 				teamInfo = fmt.Sprintf("%d", player.TeamID)
 				if player.SquadID > 0 {
 					squadInfo = fmt.Sprintf("%d", player.SquadID)
@@ -342,7 +343,7 @@ func (p *DiscordChatPlugin) sendChatEmbed(event *event_manager.RconChatMessageDa
 		"player_name": event.PlayerName,
 		"chat_type":   event.ChatType,
 		"message":     event.Message,
-		"steam_id":    event.SteamID,
+		"player_id":   event.PreferredPlayerID(),
 	})
 
 	return nil
