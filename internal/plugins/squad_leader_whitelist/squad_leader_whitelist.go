@@ -235,6 +235,7 @@ func (p *SquadLeaderWhitelistPlugin) GetCommandExecutionStatus(executionID strin
 // Initialize initializes the plugin with its configuration and dependencies
 func (p *SquadLeaderWhitelistPlugin) Initialize(config map[string]interface{}, apis *plugin_manager.PluginAPIs) error {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	p.config = config
 	p.apis = apis
@@ -251,8 +252,6 @@ func (p *SquadLeaderWhitelistPlugin) Initialize(config map[string]interface{}, a
 
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
-
-	p.mu.Unlock()
 
 	// Load existing player progress from database
 	if err := p.loadPlayerProgress(); err != nil {
