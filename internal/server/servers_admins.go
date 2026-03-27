@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,21 +35,85 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 		return
 	}
 
-	// Query the database for admins (handle both user_id and steam_id cases)
-	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT 
-			sa.id, 
-			sa.server_id, 
-			sa.user_id, 
+	searchQuery := strings.TrimSpace(c.Query("search"))
+	page := 1
+	limit := 30
+	shouldPaginate := c.Query("page") != "" || c.Query("limit") != "" || searchQuery != ""
+
+	if pageString := c.Query("page"); pageString != "" {
+		if parsedPage, parseErr := strconv.Atoi(pageString); parseErr == nil && parsedPage > 0 {
+			page = parsedPage
+		}
+	}
+
+	if limitString := c.Query("limit"); limitString != "" {
+		if parsedLimit, parseErr := strconv.Atoi(limitString); parseErr == nil && parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	whereClause := `WHERE sa.server_id = $1`
+	queryArgs := []interface{}{serverId}
+
+	if searchQuery != "" {
+		searchPattern := "%" + searchQuery + "%"
+		searchPlaceholder := len(queryArgs) + 1
+		whereClause += fmt.Sprintf(`
+			AND (
+				COALESCE(u.name, '') ILIKE $%d OR
+				COALESCE(u.username, '') ILIKE $%d OR
+				COALESCE(sa.steam_id, '') ILIKE $%d OR
+				COALESCE(sa.eos_id, '') ILIKE $%d OR
+				COALESCE(sa.notes, '') ILIKE $%d OR
+				COALESCE(sr.name, '') ILIKE $%d
+			)
+		`, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder)
+		queryArgs = append(queryArgs, searchPattern)
+	}
+
+	countQuery := `
+		SELECT COUNT(*)
+		FROM server_admins sa
+		LEFT JOIN users u ON sa.user_id = u.id
+		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
+	` + whereClause
+
+	var totalCount int
+	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), countQuery, queryArgs...).Scan(&totalCount)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+
+	listQuery := `
+		SELECT
+			sa.id,
+			sa.server_id,
+			sa.user_id,
 			sa.steam_id,
 			sa.eos_id,
-			sa.server_role_id, 
+			sa.server_role_id,
 			sa.expires_at,
 			sa.notes,
 			sa.created_at
 		FROM server_admins sa
-		WHERE sa.server_id = $1
-	`, serverId)
+		LEFT JOIN users u ON sa.user_id = u.id
+		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
+	` + whereClause + `
+		ORDER BY sa.created_at DESC, sa.id DESC
+	`
+
+	listArgs := append([]interface{}{}, queryArgs...)
+	if shouldPaginate {
+		offset := (page - 1) * limit
+		listQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(listArgs)+1, len(listArgs)+2)
+		listArgs = append(listArgs, limit, offset)
+	}
+
+	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), listQuery, listArgs...)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
@@ -92,8 +157,28 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 		adminResponses = append(adminResponses, adminResponse)
 	}
 
+	totalPages := 0
+	responsePage := 1
+	responseLimit := len(adminResponses)
+
+	if shouldPaginate {
+		responsePage = page
+		responseLimit = limit
+		if totalCount > 0 {
+			totalPages = (totalCount + limit - 1) / limit
+		}
+	} else if totalCount > 0 {
+		totalPages = 1
+	}
+
 	responses.Success(c, "Admins fetched successfully", &gin.H{
 		"admins": adminResponses,
+		"pagination": gin.H{
+			"total": totalCount,
+			"pages": totalPages,
+			"page":  responsePage,
+			"limit": responseLimit,
+		},
 	})
 }
 

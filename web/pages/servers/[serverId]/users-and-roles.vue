@@ -82,6 +82,7 @@ const loading = ref({
 const error = ref<string | null>(null);
 const roles = ref<ServerRole[]>([]);
 const admins = ref<ServerAdmin[]>([]);
+const allAdmins = ref<ServerAdmin[]>([]);
 const users = ref<User[]>([]);
 const permissions = ref<PermissionGroup[]>([]);
 const roleTemplates = ref<RoleTemplate[]>([]);
@@ -100,6 +101,11 @@ const selectedAdminType = ref("user");
 const editingAdmin = ref<ServerAdmin | null>(null);
 const showAdminCfgPopover = ref(false);
 const editingRole = ref<ServerRole | null>(null);
+const adminSearchQuery = ref("");
+const adminCurrentPage = ref(1);
+const adminItemsPerPage = ref("30");
+const adminTotalItems = ref(0);
+const adminTotalPages = ref(0);
 
 // Interfaces
 interface PermissionDefinition {
@@ -140,6 +146,7 @@ interface ServerAdmin {
     server_id: string;
     user_id?: string;
     steam_id?: string;
+    eos_id?: string;
     username: string;
     server_role_id: string;
     expires_at?: string;
@@ -167,6 +174,12 @@ interface RolesResponse {
 interface AdminsResponse {
     data: {
         admins: ServerAdmin[];
+        pagination?: {
+            total: number;
+            pages: number;
+            page: number;
+            limit: number;
+        };
     };
 }
 
@@ -433,10 +446,18 @@ async function fetchAdmins() {
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
+    const queryParams = new URLSearchParams({
+        page: adminCurrentPage.value.toString(),
+        limit: adminItemsPerPage.value,
+    });
+
+    if (adminSearchQuery.value.trim()) {
+        queryParams.append("search", adminSearchQuery.value.trim());
+    }
 
     try {
         const { data, error: fetchError } = await useAuthFetch<AdminsResponse>(
-            `${runtimeConfig.public.backendApi}/servers/${serverId}/admins`,
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/admins?${queryParams.toString()}`,
             {
                 method: "GET",
             },
@@ -450,6 +471,20 @@ async function fetchAdmins() {
 
         if (data.value && data.value.data) {
             admins.value = data.value.data.admins || [];
+            adminTotalItems.value =
+                data.value.data.pagination?.total ?? admins.value.length;
+            adminTotalPages.value =
+                data.value.data.pagination?.pages ??
+                (admins.value.length > 0 ? 1 : 0);
+
+            if (
+                adminTotalPages.value > 0 &&
+                adminCurrentPage.value > adminTotalPages.value
+            ) {
+                adminCurrentPage.value = adminTotalPages.value;
+                await fetchAdmins();
+                return;
+            }
         }
     } catch (err: any) {
         error.value = err.message || "An error occurred while fetching admins";
@@ -457,6 +492,61 @@ async function fetchAdmins() {
     } finally {
         loading.value.admins = false;
     }
+}
+
+async function fetchAllAdmins() {
+    const runtimeConfig = useRuntimeConfig();
+
+    try {
+        const { data, error: fetchError } = await useAuthFetch<AdminsResponse>(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/admins`,
+            {
+                method: "GET",
+            },
+        );
+
+        if (fetchError.value) {
+            throw new Error(
+                fetchError.value.message || "Failed to fetch full admin list",
+            );
+        }
+
+        if (data.value && data.value.data) {
+            allAdmins.value = data.value.data.admins || [];
+        }
+    } catch (err) {
+        console.error("Error fetching full admin list:", err);
+    }
+}
+
+function applyAdminFilters() {
+    adminCurrentPage.value = 1;
+    fetchAdmins();
+}
+
+function resetAdminFilters() {
+    adminSearchQuery.value = "";
+    adminCurrentPage.value = 1;
+    fetchAdmins();
+}
+
+function changeAdminPage(page: number) {
+    if (page < 1 || page === adminCurrentPage.value) {
+        return;
+    }
+
+    if (adminTotalPages.value > 0 && page > adminTotalPages.value) {
+        return;
+    }
+
+    adminCurrentPage.value = page;
+    fetchAdmins();
+}
+
+function changeAdminPageSize(value: string) {
+    adminItemsPerPage.value = value;
+    adminCurrentPage.value = 1;
+    fetchAdmins();
 }
 
 // Function to fetch users
@@ -757,7 +847,9 @@ async function addAdmin(values: any) {
         });
 
         // Refresh the admins list
-        fetchAdmins();
+        adminCurrentPage.value = 1;
+        await fetchAdmins();
+        await fetchAllAdmins();
     } catch (err: any) {
         error.value = err.message || "An error occurred while adding the admin";
         console.error(err);
@@ -797,7 +889,8 @@ async function removeAdmin(adminId: string) {
         });
 
         // Refresh the admins list
-        fetchAdmins();
+        await fetchAdmins();
+        await fetchAllAdmins();
     } catch (err: any) {
         error.value =
             err.message || "An error occurred while removing the admin";
@@ -897,7 +990,8 @@ async function cleanupExpiredAdmins() {
         });
 
         // Refresh the admins list
-        fetchAdmins();
+        await fetchAdmins();
+        await fetchAllAdmins();
     } catch (err: any) {
         error.value =
             err.message || "An error occurred while cleaning up expired admins";
@@ -990,7 +1084,7 @@ const availableUsers = computed(() => {
 
 // Get users that already have the selected role (to prevent duplicates)
 const getUsersWithRole = (roleId: string) => {
-    return admins.value
+    return allAdmins.value
         .filter((admin) => admin.user_id && admin.server_role_id === roleId)
         .map((admin) => admin.user_id);
 };
@@ -1007,6 +1101,47 @@ const filteredUsersForSelection = computed(() => {
     const selectedRole = adminForm.values.server_role_id;
     if (!selectedRole) return users.value;
     return getFilteredUsersForRole(selectedRole);
+});
+
+const adminRangeStart = computed(() => {
+    if (adminTotalItems.value === 0 || admins.value.length === 0) {
+        return 0;
+    }
+
+    return (
+        (adminCurrentPage.value - 1) * Number(adminItemsPerPage.value) + 1
+    );
+});
+
+const adminRangeEnd = computed(() => {
+    if (adminTotalItems.value === 0 || admins.value.length === 0) {
+        return 0;
+    }
+
+    return adminRangeStart.value + admins.value.length - 1;
+});
+
+const adminVisiblePages = computed(() => {
+    const totalPages = adminTotalPages.value;
+    if (totalPages <= 0) {
+        return [];
+    }
+
+    if (totalPages <= 5) {
+        return Array.from({ length: totalPages }, (_, index) => index + 1);
+    }
+
+    const visiblePages = new Set<number>([
+        1,
+        totalPages,
+        adminCurrentPage.value - 1,
+        adminCurrentPage.value,
+        adminCurrentPage.value + 1,
+    ]);
+
+    return Array.from(visiblePages)
+        .filter((page) => page >= 1 && page <= totalPages)
+        .sort((left, right) => left - right);
 });
 
 // Group admins by user for better display
@@ -1036,6 +1171,8 @@ const groupedAdmins = computed(() => {
 const getAdminDisplayName = (admin: ServerAdmin): string => {
     if (admin.steam_id) {
         return `Steam ID: ${admin.steam_id}`;
+    } else if (admin.eos_id) {
+        return `EOS ID: ${admin.eos_id}`;
     } else if (admin.user_id) {
         const user = users.value.find((u) => u.id === admin.user_id);
         return user ? `${user.name} (${user.username})` : "Unknown User";
@@ -1099,6 +1236,7 @@ onMounted(() => {
     fetchRoleTemplates();
     fetchRoles();
     fetchAdmins();
+    fetchAllAdmins();
     fetchUsers();
 });
 </script>
@@ -1750,223 +1888,274 @@ onMounted(() => {
             <!-- Admins Tab -->
             <TabsContent value="admins">
                 <Card>
-                    <CardHeader
-                        class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 pb-2 sm:pb-3"
-                    >
-                        <CardTitle class="text-base sm:text-lg">Admin Management</CardTitle>
-                        <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                @click="cleanupExpiredAdmins"
-                                :disabled="cleanupLoading"
-                                class="w-full sm:w-auto text-xs sm:text-sm"
-                            >
-                                {{ cleanupLoading ? "Cleaning..." : "Cleanup Expired" }}
-                            </Button>
-                            <Form
-                                v-slot="{ handleSubmit }"
-                                as=""
-                                keep-values
-                                :validation-schema="adminFormSchema"
-                                :initial-values="{
-                                    adminType: 'user',
-                                    user_id: '',
-                                    steam_id: '',
-                                    server_role_id: '',
-                                    expires_at: '',
-                                    notes: '',
-                                }"
-                            >
-                                <Dialog v-model:open="showAddAdminDialog">
-                                    <DialogTrigger asChild>
-                                        <Button class="w-full sm:w-auto text-sm sm:text-base">Add Admin</Button>
-                                    </DialogTrigger>
-                                    <DialogContent
-                                        class="w-[95vw] sm:max-w-[425px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
-                                    >
-                                        <DialogHeader>
-                                            <DialogTitle class="text-base sm:text-lg">Add New Admin</DialogTitle>
-                                            <DialogDescription class="text-xs sm:text-sm">
-                                                Assign a user as an admin with a specific role.
-                                            </DialogDescription>
-                                        </DialogHeader>
-                                        <form
-                                            id="addAdminDialogForm"
-                                            @submit="handleSubmit($event, addAdmin)"
+                    <CardHeader class="space-y-4 pb-2 sm:pb-3">
+                        <div
+                            class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0"
+                        >
+                            <CardTitle class="text-base sm:text-lg">Admin Management</CardTitle>
+                            <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    @click="cleanupExpiredAdmins"
+                                    :disabled="cleanupLoading"
+                                    class="w-full sm:w-auto text-xs sm:text-sm"
+                                >
+                                    {{ cleanupLoading ? "Cleaning..." : "Cleanup Expired" }}
+                                </Button>
+                                <Form
+                                    v-slot="{ handleSubmit }"
+                                    as=""
+                                    keep-values
+                                    :validation-schema="adminFormSchema"
+                                    :initial-values="{
+                                        adminType: 'user',
+                                        user_id: '',
+                                        steam_id: '',
+                                        server_role_id: '',
+                                        expires_at: '',
+                                        notes: '',
+                                    }"
+                                >
+                                    <Dialog v-model:open="showAddAdminDialog">
+                                        <DialogTrigger asChild>
+                                            <Button class="w-full sm:w-auto text-sm sm:text-base">Add Admin</Button>
+                                        </DialogTrigger>
+                                        <DialogContent
+                                            class="w-[95vw] sm:max-w-[425px] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto p-4 sm:p-6"
                                         >
-                                            <div class="grid gap-4 py-4">
-                                                <FormField
-                                                    name="adminType"
-                                                    v-slot="{ componentField }"
-                                                >
-                                                    <FormItem>
-                                                        <FormLabel>Admin Type</FormLabel>
-                                                        <Select
-                                                            v-bind="componentField"
-                                                            @update:model-value="(value: any) => (selectedAdminType = value || 'user')"
-                                                        >
-                                                            <FormControl>
-                                                                <SelectTrigger>
-                                                                    <SelectValue placeholder="Select admin type" />
-                                                                </SelectTrigger>
-                                                            </FormControl>
-                                                            <SelectContent>
-                                                                <SelectGroup>
-                                                                    <SelectItem value="user">Existing User</SelectItem>
-                                                                    <SelectItem value="steam_id">Steam ID Only</SelectItem>
-                                                                </SelectGroup>
-                                                            </SelectContent>
-                                                        </Select>
-                                                        <FormDescription>
-                                                            Choose whether to assign an existing user or add an admin by Steam ID only.
-                                                        </FormDescription>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                </FormField>
-
-                                                <FormField
-                                                    name="user_id"
-                                                    v-slot="{ componentField }"
-                                                >
-                                                    <FormItem v-if="selectedAdminType === 'user'">
-                                                        <FormLabel>User</FormLabel>
-                                                        <Select v-bind="componentField">
-                                                            <FormControl>
-                                                                <SelectTrigger>
-                                                                    <SelectValue placeholder="Select user" />
-                                                                </SelectTrigger>
-                                                            </FormControl>
-                                                            <SelectContent>
-                                                                <SelectGroup>
-                                                                    <SelectItem
-                                                                        v-for="user in filteredUsersForSelection"
-                                                                        :key="user.id"
-                                                                        :value="user.id"
-                                                                    >
-                                                                        {{ user.name }} ({{ user.username }})
-                                                                    </SelectItem>
-                                                                </SelectGroup>
-                                                            </SelectContent>
-                                                        </Select>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                </FormField>
-
-                                                <FormField
-                                                    name="steam_id"
-                                                    v-slot="{ componentField }"
-                                                >
-                                                    <FormItem v-if="selectedAdminType === 'steam_id'">
-                                                        <FormLabel>Steam ID</FormLabel>
-                                                        <FormControl>
-                                                            <Input
-                                                                placeholder="76561198012345678"
+                                            <DialogHeader>
+                                                <DialogTitle class="text-base sm:text-lg">Add New Admin</DialogTitle>
+                                                <DialogDescription class="text-xs sm:text-sm">
+                                                    Assign a user as an admin with a specific role.
+                                                </DialogDescription>
+                                            </DialogHeader>
+                                            <form
+                                                id="addAdminDialogForm"
+                                                @submit="handleSubmit($event, addAdmin)"
+                                            >
+                                                <div class="grid gap-4 py-4">
+                                                    <FormField
+                                                        name="adminType"
+                                                        v-slot="{ componentField }"
+                                                    >
+                                                        <FormItem>
+                                                            <FormLabel>Admin Type</FormLabel>
+                                                            <Select
                                                                 v-bind="componentField"
-                                                            />
-                                                        </FormControl>
-                                                        <FormDescription>
-                                                            Enter the 17-digit Steam ID of the player you want to make an admin.
-                                                        </FormDescription>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                </FormField>
+                                                                @update:model-value="(value: any) => (selectedAdminType = value || 'user')"
+                                                            >
+                                                                <FormControl>
+                                                                    <SelectTrigger>
+                                                                        <SelectValue placeholder="Select admin type" />
+                                                                    </SelectTrigger>
+                                                                </FormControl>
+                                                                <SelectContent>
+                                                                    <SelectGroup>
+                                                                        <SelectItem value="user">Existing User</SelectItem>
+                                                                        <SelectItem value="steam_id">Steam ID Only</SelectItem>
+                                                                    </SelectGroup>
+                                                                </SelectContent>
+                                                            </Select>
+                                                            <FormDescription>
+                                                                Choose whether to assign an existing user or add an admin by Steam ID only.
+                                                            </FormDescription>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    </FormField>
 
-                                                <FormField
-                                                    name="server_role_id"
-                                                    v-slot="{ componentField }"
-                                                >
-                                                    <FormItem>
-                                                        <FormLabel>Role</FormLabel>
-                                                        <Select v-bind="componentField">
+                                                    <FormField
+                                                        name="user_id"
+                                                        v-slot="{ componentField }"
+                                                    >
+                                                        <FormItem v-if="selectedAdminType === 'user'">
+                                                            <FormLabel>User</FormLabel>
+                                                            <Select v-bind="componentField">
+                                                                <FormControl>
+                                                                    <SelectTrigger>
+                                                                        <SelectValue placeholder="Select user" />
+                                                                    </SelectTrigger>
+                                                                </FormControl>
+                                                                <SelectContent>
+                                                                    <SelectGroup>
+                                                                        <SelectItem
+                                                                            v-for="user in filteredUsersForSelection"
+                                                                            :key="user.id"
+                                                                            :value="user.id"
+                                                                        >
+                                                                            {{ user.name }} ({{ user.username }})
+                                                                        </SelectItem>
+                                                                    </SelectGroup>
+                                                                </SelectContent>
+                                                            </Select>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    </FormField>
+
+                                                    <FormField
+                                                        name="steam_id"
+                                                        v-slot="{ componentField }"
+                                                    >
+                                                        <FormItem v-if="selectedAdminType === 'steam_id'">
+                                                            <FormLabel>Steam ID</FormLabel>
                                                             <FormControl>
-                                                                <SelectTrigger>
-                                                                    <SelectValue placeholder="Select role" />
-                                                                </SelectTrigger>
+                                                                <Input
+                                                                    placeholder="76561198012345678"
+                                                                    v-bind="componentField"
+                                                                />
                                                             </FormControl>
-                                                            <SelectContent>
-                                                                <SelectGroup>
-                                                                    <SelectItem
-                                                                        v-for="role in roles"
-                                                                        :key="role.id"
-                                                                        :value="role.id"
-                                                                    >
-                                                                        <div class="flex items-center gap-2">
-                                                                            <span>{{ role.name }}</span>
-                                                                            <Badge
-                                                                                v-if="!role.is_admin"
-                                                                                variant="secondary"
-                                                                                class="text-xs"
-                                                                            >
-                                                                                Non-Admin
-                                                                            </Badge>
-                                                                        </div>
-                                                                    </SelectItem>
-                                                                </SelectGroup>
-                                                            </SelectContent>
-                                                        </Select>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                </FormField>
+                                                            <FormDescription>
+                                                                Enter the 17-digit Steam ID of the player you want to make an admin.
+                                                            </FormDescription>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    </FormField>
 
-                                                <FormField
-                                                    name="expires_at"
-                                                    v-slot="{ componentField }"
-                                                >
-                                                    <FormItem>
-                                                        <FormLabel>Expiration Date (Optional)</FormLabel>
-                                                        <FormControl>
-                                                            <Input
-                                                                type="datetime-local"
-                                                                v-bind="componentField"
-                                                            />
-                                                        </FormControl>
-                                                        <FormDescription>
-                                                            Leave empty for permanent admin access. Set a date for temporary access.
-                                                        </FormDescription>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                </FormField>
+                                                    <FormField
+                                                        name="server_role_id"
+                                                        v-slot="{ componentField }"
+                                                    >
+                                                        <FormItem>
+                                                            <FormLabel>Role</FormLabel>
+                                                            <Select v-bind="componentField">
+                                                                <FormControl>
+                                                                    <SelectTrigger>
+                                                                        <SelectValue placeholder="Select role" />
+                                                                    </SelectTrigger>
+                                                                </FormControl>
+                                                                <SelectContent>
+                                                                    <SelectGroup>
+                                                                        <SelectItem
+                                                                            v-for="role in roles"
+                                                                            :key="role.id"
+                                                                            :value="role.id"
+                                                                        >
+                                                                            <div class="flex items-center gap-2">
+                                                                                <span>{{ role.name }}</span>
+                                                                                <Badge
+                                                                                    v-if="!role.is_admin"
+                                                                                    variant="secondary"
+                                                                                    class="text-xs"
+                                                                                >
+                                                                                    Non-Admin
+                                                                                </Badge>
+                                                                            </div>
+                                                                        </SelectItem>
+                                                                    </SelectGroup>
+                                                                </SelectContent>
+                                                            </Select>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    </FormField>
 
-                                                <FormField
-                                                    name="notes"
-                                                    v-slot="{ componentField }"
-                                                >
-                                                    <FormItem>
-                                                        <FormLabel>Notes (Optional)</FormLabel>
-                                                        <FormControl>
-                                                            <Input
-                                                                placeholder="e.g., Trial period, VIP supporter, etc."
-                                                                v-bind="componentField"
-                                                            />
-                                                        </FormControl>
-                                                        <FormDescription>
-                                                            Add notes about this admin assignment for future reference.
-                                                        </FormDescription>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                </FormField>
-                                            </div>
-                                            <DialogFooter>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    @click="showAddAdminDialog = false"
-                                                >
-                                                    Cancel
-                                                </Button>
-                                                <Button
-                                                    type="submit"
-                                                    :disabled="addAdminLoading"
-                                                >
-                                                    {{ addAdminLoading ? "Adding..." : "Add Admin" }}
-                                                </Button>
-                                            </DialogFooter>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
-                            </Form>
+                                                    <FormField
+                                                        name="expires_at"
+                                                        v-slot="{ componentField }"
+                                                    >
+                                                        <FormItem>
+                                                            <FormLabel>Expiration Date (Optional)</FormLabel>
+                                                            <FormControl>
+                                                                <Input
+                                                                    type="datetime-local"
+                                                                    v-bind="componentField"
+                                                                />
+                                                            </FormControl>
+                                                            <FormDescription>
+                                                                Leave empty for permanent admin access. Set a date for temporary access.
+                                                            </FormDescription>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    </FormField>
 
+                                                    <FormField
+                                                        name="notes"
+                                                        v-slot="{ componentField }"
+                                                    >
+                                                        <FormItem>
+                                                            <FormLabel>Notes (Optional)</FormLabel>
+                                                            <FormControl>
+                                                                <Input
+                                                                    placeholder="e.g., Trial period, VIP supporter, etc."
+                                                                    v-bind="componentField"
+                                                                />
+                                                            </FormControl>
+                                                            <FormDescription>
+                                                                Add notes about this admin assignment for future reference.
+                                                            </FormDescription>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    </FormField>
+                                                </div>
+                                                <DialogFooter>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        @click="showAddAdminDialog = false"
+                                                    >
+                                                        Cancel
+                                                    </Button>
+                                                    <Button
+                                                        type="submit"
+                                                        :disabled="addAdminLoading"
+                                                    >
+                                                        {{ addAdminLoading ? "Adding..." : "Add Admin" }}
+                                                    </Button>
+                                                </DialogFooter>
+                                            </form>
+                                        </DialogContent>
+                                    </Dialog>
+                                </Form>
+                            </div>
+                        </div>
+
+                        <div
+                            class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3"
+                        >
+                            <div class="flex flex-col sm:flex-row gap-2 w-full xl:max-w-3xl">
+                                <Input
+                                    v-model="adminSearchQuery"
+                                    placeholder="Search by user, Steam ID, EOS ID, role, or notes"
+                                    class="w-full"
+                                    @keyup.enter="applyAdminFilters"
+                                />
+                                <div class="flex gap-2">
+                                    <Button
+                                        variant="outline"
+                                        class="flex-1 sm:flex-none"
+                                        @click="applyAdminFilters"
+                                    >
+                                        Search
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        class="flex-1 sm:flex-none"
+                                        @click="resetAdminFilters"
+                                        :disabled="!adminSearchQuery.trim()"
+                                    >
+                                        Clear
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-2 self-end xl:self-auto">
+                                <span class="text-xs text-muted-foreground uppercase tracking-wide">
+                                    Per Page
+                                </span>
+                                <Select
+                                    :model-value="adminItemsPerPage"
+                                    @update:model-value="changeAdminPageSize"
+                                >
+                                    <SelectTrigger class="w-[90px]">
+                                        <SelectValue placeholder="30" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="30">30</SelectItem>
+                                        <SelectItem value="50">50</SelectItem>
+                                        <SelectItem value="100">100</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
                             <!-- Edit Admin Dialog -->
                             <Form
                                 :key="editingAdmin?.id"
@@ -2025,7 +2214,6 @@ onMounted(() => {
                                     </DialogContent>
                                 </Dialog>
                             </Form>
-                        </div>
                     </CardHeader>
                     <CardContent>
                         <div v-if="loading.admins" class="text-center py-6 sm:py-8">
@@ -2039,7 +2227,13 @@ onMounted(() => {
                             v-else-if="admins.length === 0"
                             class="text-center py-6 sm:py-8"
                         >
-                            <p class="text-sm sm:text-base">No admins found. Add an admin to get started.</p>
+                            <p class="text-sm sm:text-base">
+                                {{
+                                    adminSearchQuery.trim()
+                                        ? "No matching admin or whitelist entries found."
+                                        : "No admins found. Add an admin to get started."
+                                }}
+                            </p>
                         </div>
 
                         <template v-else>
@@ -2164,6 +2358,49 @@ onMounted(() => {
                                             </Button>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-col sm:flex-row justify-between items-center gap-3 pt-4">
+                                <div class="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
+                                    Showing {{ adminRangeStart }}-{{ adminRangeEnd }} of
+                                    {{ adminTotalItems }} entries
+                                </div>
+
+                                <div
+                                    v-if="adminTotalPages > 1"
+                                    class="flex items-center gap-1 sm:gap-2 flex-wrap justify-center"
+                                >
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        @click="changeAdminPage(adminCurrentPage - 1)"
+                                        :disabled="adminCurrentPage === 1"
+                                        class="text-xs sm:text-sm"
+                                    >
+                                        Prev
+                                    </Button>
+
+                                    <Button
+                                        v-for="page in adminVisiblePages"
+                                        :key="page"
+                                        size="sm"
+                                        :variant="page === adminCurrentPage ? 'default' : 'outline'"
+                                        class="min-w-9 text-xs sm:text-sm"
+                                        @click="changeAdminPage(page)"
+                                    >
+                                        {{ page }}
+                                    </Button>
+
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        @click="changeAdminPage(adminCurrentPage + 1)"
+                                        :disabled="adminCurrentPage === adminTotalPages"
+                                        class="text-xs sm:text-sm"
+                                    >
+                                        Next
+                                    </Button>
                                 </div>
                             </div>
                         </template>
