@@ -18,8 +18,8 @@ var (
 	ErrNoNextMap = errors.New("next level is not defined")
 	ErrNoMap     = errors.New("failed to get map")
 
-	listPlayersOnlineRegexp       = regexp.MustCompile(`ID: ([0-9]+) \| Online IDs: EOS: (\w{32}) steam: (\d{17}) \| Name: (.+) \| Team ID: ([0-9]+) \| Squad ID: ([0-9]+|N\/A) \| Is Leader: (True|False) \| Role: (.*)`)
-	listPlayersDisconnectedRegexp = regexp.MustCompile(`^ID: (\d{1,}) \| Online IDs: EOS: (\w{32}) steam: (\d{17}) \| Since Disconnect: (\d{2,})m.(\d{2})s \| Name: (.*?)$`)
+	listPlayersOnlineRegexp       = regexp.MustCompile(`^ID: ([0-9]+) \| Online IDs:(?: EOS: ([^\s|]+))?(?: steam: ([^\s|]+))? \| Name: (.+) \| Team ID: ([0-9]+) \| Squad ID: ([0-9]+|N/A) \| Is Leader: (True|False) \| Role: (.*)$`)
+	listPlayersDisconnectedRegexp = regexp.MustCompile(`^ID: (\d{1,}) \| Online IDs:(?: EOS: ([^\s|]+))?(?: steam: ([^\s|]+))? \| Since Disconnect: (\d{1,})m.(\d{2})s \| Name: (.*?)$`)
 	listSquadsTeamRegexp          = regexp.MustCompile(`^Team ID:\s*(\d+)\s+\((.+)\)$`)
 	listSquadsEntryRegexp         = regexp.MustCompile(`^ID:\s*(\d+)\s+\|\s+Name:\s*(.*?)\s+\|\s+Size:\s*(\d+)(?:/\d+)?\s+\|\s+Locked:\s*(True|False)(?:\s+\|.*)?$`)
 )
@@ -350,23 +350,43 @@ func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
 		return PlayersData{}, err
 	}
 
+	return parsePlayersResponse(playersResponse), nil
+}
+
+func normalizeParsedSteamID(rawSteamID string) string {
+	normalizedSteamID := utils.NormalizePlayerID(rawSteamID)
+	if !utils.IsSteamID(normalizedSteamID) {
+		return ""
+	}
+	return normalizedSteamID
+}
+
+func parsePlayersResponse(response string) PlayersData {
 	onlinePlayers := []Player{}
 	disconnectedPlayers := []Player{}
 
-	lines := strings.Split(playersResponse, "\n")
+	lines := strings.Split(response, "\n")
 	for _, line := range lines {
+		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if line == "" {
+			continue
+		}
+
 		matchOnline := listPlayersOnlineRegexp.FindStringSubmatch(line)
 		matchDisconnected := listPlayersDisconnectedRegexp.FindStringSubmatch(line)
 
 		if len(matchOnline) > 0 {
 			playerId, _ := strconv.Atoi(matchOnline[1])
 			teamId, _ := strconv.Atoi(matchOnline[5])
-			squadId, _ := strconv.Atoi(matchOnline[6])
+			squadId := 0
+			if matchOnline[6] != "N/A" {
+				squadId, _ = strconv.Atoi(matchOnline[6])
+			}
 
 			player := Player{
 				Id:            playerId,
-				EosId:         matchOnline[2],
-				SteamId:       matchOnline[3],
+				EosId:         utils.NormalizeEOSID(matchOnline[2]),
+				SteamId:       normalizeParsedSteamID(matchOnline[3]),
 				Name:          matchOnline[4],
 				TeamId:        teamId,
 				SquadId:       squadId,
@@ -380,8 +400,8 @@ func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
 
 			player := Player{
 				Id:              playerId,
-				EosId:           matchDisconnected[2],
-				SteamId:         matchDisconnected[3],
+				EosId:           utils.NormalizeEOSID(matchDisconnected[2]),
+				SteamId:         normalizeParsedSteamID(matchDisconnected[3]),
 				SinceDisconnect: matchDisconnected[4] + "m" + matchDisconnected[5] + "s",
 				Name:            matchDisconnected[6],
 			}
@@ -393,7 +413,7 @@ func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
 	return PlayersData{
 		OnlinePlayers:       onlinePlayers,
 		DisconnectedPlayers: disconnectedPlayers,
-	}, nil
+	}
 }
 
 func (s *SquadRcon) GetServerSquads() ([]Squad, []string, error) {
