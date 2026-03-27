@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.0) - 2026-03-26
+## [0.9.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.0) - 2026-03-27
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix: support Steam and EOS identifiers in whitelist progress and admin lookups [[#193](https://github.com/Codycody31/squad-aegis/pull/193)]
 - fix(permissions): add dedicated UI permission for map changes [[#192](https://github.com/Codycody31/squad-aegis/pull/192)]
 - fix(player-profile): collapse duplicate-looking combat burst hits [[#191](https://github.com/Codycody31/squad-aegis/pull/191)]
 - fix: server metric charts [[#190](https://github.com/Codycody31/squad-aegis/pull/190)]
