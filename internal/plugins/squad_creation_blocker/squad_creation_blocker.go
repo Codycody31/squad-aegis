@@ -18,6 +18,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // PlayerAttemptData tracks rate limiting data for a player
@@ -52,6 +53,48 @@ type SquadCreationBlockerPlugin struct {
 	knownSquads    map[string]bool               // "teamID-squadID" -> true
 	pollTicker     *time.Ticker
 	pollCancel     context.CancelFunc
+}
+
+func preferredPlayerID(steamID string, eosID string) string {
+	if steamID != "" {
+		return utils.NormalizePlayerID(steamID)
+	}
+	return utils.NormalizePlayerID(eosID)
+}
+
+func normalizePlayerCandidates(playerID string, steamID string, eosID string) []string {
+	candidates := []string{
+		utils.NormalizePlayerID(playerID),
+		utils.NormalizePlayerID(steamID),
+		utils.NormalizePlayerID(eosID),
+	}
+
+	seen := make(map[string]bool, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+	}
+
+	return result
+}
+
+func (p *SquadCreationBlockerPlugin) resolvePlayerAttemptKeyLocked(playerID string, steamID string, eosID string) string {
+	for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+		if attemptData, exists := p.playerAttempts[candidate]; exists {
+			if playerID != "" && candidate != playerID {
+				p.playerAttempts[playerID] = attemptData
+				delete(p.playerAttempts, candidate)
+				return playerID
+			}
+			return candidate
+		}
+	}
+
+	return playerID
 }
 
 // Define returns the plugin definition
@@ -408,12 +451,10 @@ func (p *SquadCreationBlockerPlugin) handleSquadCreated(rawEvent *plugin_manager
 	}
 
 	p.mu.Lock()
-	steamID := event.SteamID
-	if steamID == "" {
-		steamID = event.EosID
-	}
+	playerID := preferredPlayerID(event.SteamID, event.EosID)
+	playerID = p.resolvePlayerAttemptKeyLocked(playerID, event.SteamID, event.EosID)
 	squadName := event.SquadName
-	shouldBlock := p.isBlocking || (p.shouldApplyRateLimitLocked() && p.isPlayerInCooldownLocked(steamID))
+	shouldBlock := p.isBlocking || (p.shouldApplyRateLimitLocked() && p.isPlayerInCooldownLocked(playerID))
 	allowDefault := p.getBoolConfig("allow_default_squad_names")
 	isRoundEnding := p.isRoundEnding
 	blockEndTime := p.blockEndTime
@@ -448,7 +489,7 @@ func (p *SquadCreationBlockerPlugin) handleSquadCreated(rawEvent *plugin_manager
 			"squad_name": squadName,
 			"squad_id":   squadID,
 			"team_id":    teamID,
-			"steam_id":   steamID,
+			"player_id":  playerID,
 		})
 		return err
 	}
@@ -459,12 +500,12 @@ func (p *SquadCreationBlockerPlugin) handleSquadCreated(rawEvent *plugin_manager
 	p.mu.Unlock()
 
 	if shouldApplyRateLimit {
-		return p.processRateLimit(steamID, squadName)
+		return p.processRateLimit(playerID, squadName)
 	}
 
 	// Standard blocking period message
 	if isRoundEnding {
-		if err := p.apis.RconAPI.SendWarningToPlayer(steamID, "You are not allowed to create a custom squad at the end of a round."); err != nil {
+		if err := p.apis.RconAPI.SendWarningToPlayer(playerID, "You are not allowed to create a custom squad at the end of a round."); err != nil {
 			return fmt.Errorf("failed to send warning: %w", err)
 		}
 	} else if !broadcastMode {
@@ -473,14 +514,14 @@ func (p *SquadCreationBlockerPlugin) handleSquadCreated(rawEvent *plugin_manager
 			timeLeft = 0
 		}
 		message := fmt.Sprintf("Please wait for %d second%s before creating a custom squad. Default names (e.g. \"Squad 1\") are allowed.", timeLeft, pluralize(timeLeft))
-		if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
+		if err := p.apis.RconAPI.SendWarningToPlayer(playerID, message); err != nil {
 			return fmt.Errorf("failed to send warning: %w", err)
 		}
 	}
 
 	p.apis.LogAPI.Debug("Disbanded custom squad during blocking period", map[string]interface{}{
 		"player_name": event.PlayerName,
-		"steam_id":    steamID,
+		"player_id":   playerID,
 		"squad_name":  squadName,
 	})
 
@@ -488,17 +529,17 @@ func (p *SquadCreationBlockerPlugin) handleSquadCreated(rawEvent *plugin_manager
 }
 
 // processRateLimit handles rate limiting logic for a player
-func (p *SquadCreationBlockerPlugin) processRateLimit(steamID string, squadName string) error {
+func (p *SquadCreationBlockerPlugin) processRateLimit(playerID string, squadName string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	// Get or create player attempt data
-	attemptData, exists := p.playerAttempts[steamID]
+	attemptData, exists := p.playerAttempts[playerID]
 	if !exists {
 		attemptData = &PlayerAttemptData{
 			AttemptCount: 0,
 		}
-		p.playerAttempts[steamID] = attemptData
+		p.playerAttempts[playerID] = attemptData
 	}
 
 	// Increment attempt counter
@@ -512,17 +553,17 @@ func (p *SquadCreationBlockerPlugin) processRateLimit(steamID string, squadName 
 
 	// Check for kick threshold
 	if kickThreshold > 0 && currentAttempts >= kickThreshold {
-		if err := p.apis.RconAPI.KickPlayer(steamID, "Excessive squad creation spam"); err != nil {
+		if err := p.apis.RconAPI.KickPlayer(playerID, "Excessive squad creation spam"); err != nil {
 			p.apis.LogAPI.Error("Failed to kick player for spam", err, map[string]interface{}{
-				"steam_id": steamID,
+				"player_id": playerID,
 			})
 		} else {
 			p.apis.LogAPI.Info("Kicked player for excessive squad creation spam", map[string]interface{}{
-				"steam_id": steamID,
-				"attempts": currentAttempts,
+				"player_id": playerID,
+				"attempts":  currentAttempts,
 			})
 		}
-		p.resetPlayerDataLocked(steamID)
+		p.resetPlayerDataLocked(playerID)
 		return nil
 	}
 
@@ -531,21 +572,21 @@ func (p *SquadCreationBlockerPlugin) processRateLimit(steamID string, squadName 
 		cooldownEndTime := time.Now().Add(time.Duration(cooldownDuration) * time.Second)
 
 		// Only set/reset cooldown if resetOnAttempt is true, or if player is not currently in cooldown
-		if resetOnAttempt || !p.isPlayerInCooldownLocked(steamID) {
+		if resetOnAttempt || !p.isPlayerInCooldownLocked(playerID) {
 			attemptData.CooldownEnd = cooldownEndTime
 
 			message := fmt.Sprintf("You are on cooldown for %ds due to squad creation spam. Stop spamming or you will be kicked!", cooldownDuration)
-			if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
+			if err := p.apis.RconAPI.SendWarningToPlayer(playerID, message); err != nil {
 				return fmt.Errorf("failed to send cooldown warning: %w", err)
 			}
 
-			p.startCooldownWarningLocked(steamID)
+			p.startCooldownWarningLocked(playerID)
 		}
 	} else {
 		// Send warning about approaching cooldown
 		remaining := warningThreshold - currentAttempts + 1
 		message := fmt.Sprintf("Warning: Stop spamming squad creation! %d more attempt%s before cooldown.", remaining, pluralize(remaining))
-		if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
+		if err := p.apis.RconAPI.SendWarningToPlayer(playerID, message); err != nil {
 			return fmt.Errorf("failed to send warning: %w", err)
 		}
 	}
@@ -554,11 +595,11 @@ func (p *SquadCreationBlockerPlugin) processRateLimit(steamID string, squadName 
 }
 
 // startCooldownWarningLocked starts a periodic warning for a player in cooldown
-func (p *SquadCreationBlockerPlugin) startCooldownWarningLocked(steamID string) {
+func (p *SquadCreationBlockerPlugin) startCooldownWarningLocked(playerID string) {
 	// Clear existing warning if any
-	p.clearCooldownWarningLocked(steamID)
+	p.clearCooldownWarningLocked(playerID)
 
-	attemptData := p.playerAttempts[steamID]
+	attemptData := p.playerAttempts[playerID]
 	if attemptData == nil {
 		return
 	}
@@ -578,7 +619,7 @@ func (p *SquadCreationBlockerPlugin) startCooldownWarningLocked(steamID string) 
 				return
 			case <-ticker.C:
 				p.mu.Lock()
-				data, exists := p.playerAttempts[steamID]
+				data, exists := p.playerAttempts[playerID]
 				if !exists {
 					p.mu.Unlock()
 					return
@@ -588,12 +629,12 @@ func (p *SquadCreationBlockerPlugin) startCooldownWarningLocked(steamID string) 
 				if timeLeft <= 0 {
 					// Cooldown expired
 					data.CooldownEnd = time.Time{}
-					p.clearCooldownWarningLocked(steamID)
+					p.clearCooldownWarningLocked(playerID)
 					p.mu.Unlock()
 
-					if err := p.apis.RconAPI.SendWarningToPlayer(steamID, "Squad creation cooldown has expired."); err != nil {
+					if err := p.apis.RconAPI.SendWarningToPlayer(playerID, "Squad creation cooldown has expired."); err != nil {
 						p.apis.LogAPI.Error("Failed to send cooldown expiry warning", err, map[string]interface{}{
-							"steam_id": steamID,
+							"player_id": playerID,
 						})
 					}
 					return
@@ -602,9 +643,9 @@ func (p *SquadCreationBlockerPlugin) startCooldownWarningLocked(steamID string) 
 				p.mu.Unlock()
 
 				message := fmt.Sprintf("Squad creation cooldown: %d second%s remaining.", timeLeft, pluralize(timeLeft))
-				if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
+				if err := p.apis.RconAPI.SendWarningToPlayer(playerID, message); err != nil {
 					p.apis.LogAPI.Error("Failed to send cooldown reminder", err, map[string]interface{}{
-						"steam_id": steamID,
+						"player_id": playerID,
 					})
 				}
 			}
@@ -613,8 +654,8 @@ func (p *SquadCreationBlockerPlugin) startCooldownWarningLocked(steamID string) 
 }
 
 // clearCooldownWarningLocked stops the cooldown warning for a player (must be called with lock held)
-func (p *SquadCreationBlockerPlugin) clearCooldownWarningLocked(steamID string) {
-	attemptData := p.playerAttempts[steamID]
+func (p *SquadCreationBlockerPlugin) clearCooldownWarningLocked(playerID string) {
+	attemptData := p.playerAttempts[playerID]
 	if attemptData != nil && attemptData.CancelWarning != nil {
 		attemptData.CancelWarning()
 		attemptData.CancelWarning = nil
@@ -623,15 +664,15 @@ func (p *SquadCreationBlockerPlugin) clearCooldownWarningLocked(steamID string) 
 
 // clearAllCooldownWarningsLocked clears all cooldown warnings (must be called with lock held)
 func (p *SquadCreationBlockerPlugin) clearAllCooldownWarningsLocked() {
-	for steamID := range p.playerAttempts {
-		p.clearCooldownWarningLocked(steamID)
+	for playerID := range p.playerAttempts {
+		p.clearCooldownWarningLocked(playerID)
 	}
 }
 
 // resetPlayerDataLocked resets rate limiting data for a player (must be called with lock held)
-func (p *SquadCreationBlockerPlugin) resetPlayerDataLocked(steamID string) {
-	p.clearCooldownWarningLocked(steamID)
-	delete(p.playerAttempts, steamID)
+func (p *SquadCreationBlockerPlugin) resetPlayerDataLocked(playerID string) {
+	p.clearCooldownWarningLocked(playerID)
+	delete(p.playerAttempts, playerID)
 }
 
 // resetRateLimitingDataLocked resets all rate limiting data (must be called with lock held)
@@ -641,8 +682,8 @@ func (p *SquadCreationBlockerPlugin) resetRateLimitingDataLocked() {
 }
 
 // isPlayerInCooldownLocked checks if a player is in cooldown (must be called with lock held)
-func (p *SquadCreationBlockerPlugin) isPlayerInCooldownLocked(steamID string) bool {
-	attemptData, exists := p.playerAttempts[steamID]
+func (p *SquadCreationBlockerPlugin) isPlayerInCooldownLocked(playerID string) bool {
+	attemptData, exists := p.playerAttempts[playerID]
 	if !exists {
 		return false
 	}
@@ -654,7 +695,7 @@ func (p *SquadCreationBlockerPlugin) isPlayerInCooldownLocked(steamID string) bo
 	// Cooldown expired, clean up
 	if !attemptData.CooldownEnd.IsZero() {
 		attemptData.CooldownEnd = time.Time{}
-		p.clearCooldownWarningLocked(steamID)
+		p.clearCooldownWarningLocked(playerID)
 	}
 
 	return false
@@ -741,10 +782,11 @@ func (p *SquadCreationBlockerPlugin) pollSquads() {
 			continue
 		}
 
-		creatorSteamID := squad.Leader.PreferredID()
+		creatorPlayerID := preferredPlayerID(squad.Leader.SteamID, squad.Leader.EOSID)
+		creatorPlayerID = p.resolvePlayerAttemptKeyLocked(creatorPlayerID, squad.Leader.SteamID, squad.Leader.EOSID)
 
 		// Check if creator is in cooldown or if we're in blocking period
-		inCooldown := p.isPlayerInCooldownLocked(creatorSteamID)
+		inCooldown := p.isPlayerInCooldownLocked(creatorPlayerID)
 		if inCooldown || p.isBlocking {
 			// Don't disband if it's a default squad name and default names are allowed
 			if allowDefault && p.isDefaultSquadName(squad.Name) {
@@ -768,7 +810,7 @@ func (p *SquadCreationBlockerPlugin) pollSquads() {
 
 			// Process rate limiting
 			p.mu.Unlock()
-			_ = p.processRateLimit(creatorSteamID, squad.Name)
+			_ = p.processRateLimit(creatorPlayerID, squad.Name)
 			p.mu.Lock()
 		}
 	}

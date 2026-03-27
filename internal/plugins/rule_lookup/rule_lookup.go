@@ -256,7 +256,7 @@ func (p *RuleLookupPlugin) lookupAndSendRule(event *event_manager.RconChatMessag
 
 	isAdmin := false
 	for _, admin := range admins {
-		if admin.SteamID == event.SteamID {
+		if admin.MatchesPlayerID(playerID) {
 			isAdmin = true
 			break
 		}

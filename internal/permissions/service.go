@@ -137,21 +137,26 @@ func (s *Service) GetUserServerPermissions(ctx context.Context, userId, serverId
 	return permissions, nil
 }
 
-// GetUserServerPermissionsBySteamId retrieves permissions for a Steam ID on a specific server.
-// Used for players who may not have a user account.
-func (s *Service) GetUserServerPermissionsBySteamId(ctx context.Context, steamId int64, serverId uuid.UUID) ([]Permission, error) {
+// GetUserServerPermissionsByIdentifiers retrieves permissions for direct admin assignments
+// using any known Steam/EOS identifiers.
+func (s *Service) GetUserServerPermissionsByIdentifiers(ctx context.Context, steamId *int64, eosID string, serverId uuid.UUID) ([]Permission, error) {
+	eosID = strings.TrimSpace(eosID)
+
 	query := `
 		WITH RECURSIVE role_hierarchy AS (
-			-- Base: Get user's direct role by steam_id
 			SELECT sr.id as role_id, 0 as depth
 			FROM server_admins sa
 			JOIN server_roles sr ON sa.server_role_id = sr.id
-			WHERE sa.steam_id = $1 AND sa.server_id = $2
-			AND (sa.expires_at IS NULL OR sa.expires_at > NOW())
+			LEFT JOIN users u ON sa.user_id = u.id
+			WHERE sa.server_id = $1
+			  AND (sa.expires_at IS NULL OR sa.expires_at > NOW())
+			  AND (
+				($2::bigint IS NOT NULL AND (sa.steam_id = $2::bigint OR u.steam_id = $2::bigint))
+				OR ($3::text IS NOT NULL AND sa.eos_id = $3::text)
+			  )
 
 			UNION
 
-			-- Recursive: Get inherited roles
 			SELECT ri.parent_role_id, rh.depth + 1
 			FROM role_inheritance ri
 			JOIN role_hierarchy rh ON ri.child_role_id = rh.role_id
@@ -163,7 +168,17 @@ func (s *Service) GetUserServerPermissionsBySteamId(ctx context.Context, steamId
 		JOIN permissions p ON srp.permission_id = p.id
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, steamId, serverId)
+	var steamIDArg interface{}
+	if steamId != nil {
+		steamIDArg = *steamId
+	}
+
+	var eosIDArg interface{}
+	if eosID != "" {
+		eosIDArg = eosID
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, serverId, steamIDArg, eosIDArg)
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +194,12 @@ func (s *Service) GetUserServerPermissionsBySteamId(ctx context.Context, steamId
 	}
 
 	return permissions, rows.Err()
+}
+
+// GetUserServerPermissionsBySteamId retrieves permissions for a Steam ID on a specific server.
+// Used for players who may not have a user account.
+func (s *Service) GetUserServerPermissionsBySteamId(ctx context.Context, steamId int64, serverId uuid.UUID) ([]Permission, error) {
+	return s.GetUserServerPermissionsByIdentifiers(ctx, &steamId, "", serverId)
 }
 
 // GetRolePermissions retrieves all permissions for a specific role.

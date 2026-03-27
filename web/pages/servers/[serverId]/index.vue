@@ -32,12 +32,18 @@ import {
     DialogTitle,
 } from "~/components/ui/dialog";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "~/components/ui/select";
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "~/components/ui/command";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "~/components/ui/popover";
 import { toast } from "~/components/ui/toast";
 
 definePageMeta({ middleware: ["auth"] });
@@ -78,11 +84,13 @@ const availableLayers = ref<
 const selectedLayer = ref("");
 const loadingLayers = ref(false);
 const changingLayer = ref(false);
+const layerComboboxOpen = ref(false);
 
 // State variables for next layer dialog
 const showNextLayerDialog = ref(false);
 const selectedNextLayer = ref("");
 const settingNextLayer = ref(false);
+const nextLayerComboboxOpen = ref(false);
 
 // State variables for end match confirmation
 const showEndMatchDialog = ref(false);
@@ -1214,30 +1222,39 @@ refresh();
                     <div v-else>
                         <div class="space-y-4">
                             <div class="space-y-2">
-                                <label
-                                    for="layer-select"
-                                    class="text-sm font-medium"
-                                    >Select Layer</label
-                                >
-                                <Select v-model="selectedLayer">
-                                    <SelectTrigger
-                                        id="layer-select"
-                                        class="w-full"
-                                    >
-                                        <SelectValue
-                                            placeholder="Select a layer"
-                                        />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem
-                                            v-for="layer in availableLayers"
-                                            :key="layer.name"
-                                            :value="layer.name"
+                                <label class="text-sm font-medium">Select Layer</label>
+                                <Popover v-model:open="layerComboboxOpen">
+                                    <PopoverTrigger as-child>
+                                        <Button
+                                            variant="outline"
+                                            role="combobox"
+                                            :aria-expanded="layerComboboxOpen"
+                                            class="w-full justify-between"
                                         >
-                                            {{ layer.name }}
-                                        </SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                            {{ selectedLayer || "Search for a layer..." }}
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-2 h-4 w-4 shrink-0 opacity-50"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent class="w-[--reka-popover-trigger-width] p-0">
+                                        <Command>
+                                            <CommandInput placeholder="Search layers..." />
+                                            <CommandEmpty>No layer found.</CommandEmpty>
+                                            <CommandList>
+                                                <CommandGroup>
+                                                    <CommandItem
+                                                        v-for="layer in availableLayers"
+                                                        :key="layer.name"
+                                                        :value="layer.name"
+                                                        @select="selectedLayer = layer.name; layerComboboxOpen = false"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 h-4 w-4" :class="selectedLayer === layer.name ? 'opacity-100' : 'opacity-0'"><path d="M20 6 9 17l-5-5"/></svg>
+                                                        {{ layer.name }}
+                                                    </CommandItem>
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
                             </div>
                         </div>
                     </div>
@@ -1290,30 +1307,39 @@ refresh();
                     <div v-else>
                         <div class="space-y-4">
                             <div class="space-y-2">
-                                <label
-                                    for="next-layer-select"
-                                    class="text-sm font-medium"
-                                    >Select Next Layer</label
-                                >
-                                <Select v-model="selectedNextLayer">
-                                    <SelectTrigger
-                                        id="next-layer-select"
-                                        class="w-full"
-                                    >
-                                        <SelectValue
-                                            placeholder="Select a layer"
-                                        />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem
-                                            v-for="layer in availableLayers"
-                                            :key="layer.name"
-                                            :value="layer.name"
+                                <label class="text-sm font-medium">Select Next Layer</label>
+                                <Popover v-model:open="nextLayerComboboxOpen">
+                                    <PopoverTrigger as-child>
+                                        <Button
+                                            variant="outline"
+                                            role="combobox"
+                                            :aria-expanded="nextLayerComboboxOpen"
+                                            class="w-full justify-between"
                                         >
-                                            {{ layer.name }}
-                                        </SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                            {{ selectedNextLayer || "Search for a layer..." }}
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-2 h-4 w-4 shrink-0 opacity-50"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent class="w-[--reka-popover-trigger-width] p-0">
+                                        <Command>
+                                            <CommandInput placeholder="Search layers..." />
+                                            <CommandEmpty>No layer found.</CommandEmpty>
+                                            <CommandList>
+                                                <CommandGroup>
+                                                    <CommandItem
+                                                        v-for="layer in availableLayers"
+                                                        :key="layer.name"
+                                                        :value="layer.name"
+                                                        @select="selectedNextLayer = layer.name; nextLayerComboboxOpen = false"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 h-4 w-4" :class="selectedNextLayer === layer.name ? 'opacity-100' : 'opacity-0'"><path d="M20 6 9 17l-5-5"/></svg>
+                                                        {{ layer.name }}
+                                                    </CommandItem>
+                                                </CommandGroup>
+                                            </CommandList>
+                                        </Command>
+                                    </PopoverContent>
+                                </Popover>
                             </div>
                             <div
                                 v-if="serverInfo?.metrics?.next?.map"

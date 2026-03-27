@@ -17,6 +17,11 @@ import (
 var (
 	ErrNoNextMap = errors.New("next level is not defined")
 	ErrNoMap     = errors.New("failed to get map")
+
+	listPlayersOnlineRegexp       = regexp.MustCompile(`ID: ([0-9]+) \| Online IDs: EOS: (\w{32}) steam: (\d{17}) \| Name: (.+) \| Team ID: ([0-9]+) \| Squad ID: ([0-9]+|N\/A) \| Is Leader: (True|False) \| Role: (.*)`)
+	listPlayersDisconnectedRegexp = regexp.MustCompile(`^ID: (\d{1,}) \| Online IDs: EOS: (\w{32}) steam: (\d{17}) \| Since Disconnect: (\d{2,})m.(\d{2})s \| Name: (.*?)$`)
+	listSquadsTeamRegexp          = regexp.MustCompile(`^Team ID:\s*(\d+)\s+\((.+)\)$`)
+	listSquadsEntryRegexp         = regexp.MustCompile(`^ID:\s*(\d+)\s+\|\s+Name:\s*(.*?)\s+\|\s+Size:\s*(\d+)(?:/\d+)?\s+\|\s+Locked:\s*(True|False)(?:\s+\|.*)?$`)
 )
 
 type SquadRcon struct {
@@ -350,11 +355,8 @@ func (s *SquadRcon) GetServerPlayers() (PlayersData, error) {
 
 	lines := strings.Split(playersResponse, "\n")
 	for _, line := range lines {
-		matchesOnline := regexp.MustCompile(`ID: ([0-9]+) \| Online IDs: EOS: (\w{32}) steam: (\d{17}) \| Name: (.+) \| Team ID: ([0-9]+) \| Squad ID: ([0-9]+|N\/A) \| Is Leader: (True|False) \| Role: (.*)`)
-		matchesDisconnected := regexp.MustCompile(`^ID: (\d{1,}) \| Online IDs: EOS: (\w{32}) steam: (\d{17}) \| Since Disconnect: (\d{2,})m.(\d{2})s \| Name: (.*?)$`)
-
-		matchOnline := matchesOnline.FindStringSubmatch(line)
-		matchDisconnected := matchesDisconnected.FindStringSubmatch(line)
+		matchOnline := listPlayersOnlineRegexp.FindStringSubmatch(line)
+		matchDisconnected := listPlayersDisconnectedRegexp.FindStringSubmatch(line)
 
 		if len(matchOnline) > 0 {
 			playerId, _ := strconv.Atoi(matchOnline[1])
@@ -400,27 +402,27 @@ func (s *SquadRcon) GetServerSquads() ([]Squad, []string, error) {
 		return []Squad{}, []string{}, err
 	}
 
+	return parseSquadsResponse(squadsResponse), orderedTeamNames(squadsResponse), nil
+}
+
+func parseSquadsResponse(response string) []Squad {
 	squads := []Squad{}
-	teamNames := []string{}
 	var currentTeamID int
 
-	// First pass: Extract teams and squads
-	for _, line := range strings.Split(squadsResponse, "\n") {
-		// Match team information
-		matchesTeam := regexp.MustCompile(`^Team ID: ([1|2]) \((.*)\)`)
-		matchTeam := matchesTeam.FindStringSubmatch(line)
-
-		if len(matchTeam) > 0 {
-			teamId, _ := strconv.Atoi(matchTeam[1])
-			currentTeamID = teamId
-			teamNames = append(teamNames, matchTeam[2])
+	for _, rawLine := range strings.Split(response, "\n") {
+		line := strings.TrimSpace(strings.TrimRight(rawLine, "\r"))
+		if line == "" || strings.HasPrefix(line, "----- Active Squads -----") {
 			continue
 		}
 
-		// Match squad information
-		matchesSquad := regexp.MustCompile(`^ID: (\d{1,}) \| Name: (.*?) \| Size: (\d) \| Locked: (True|False)`)
-		matchSquad := matchesSquad.FindStringSubmatch(line)
+		matchTeam := listSquadsTeamRegexp.FindStringSubmatch(line)
+		if len(matchTeam) > 0 {
+			teamID, _ := strconv.Atoi(matchTeam[1])
+			currentTeamID = teamID
+			continue
+		}
 
+		matchSquad := listSquadsEntryRegexp.FindStringSubmatch(line)
 		if len(matchSquad) > 0 {
 			squadId, _ := strconv.Atoi(matchSquad[1])
 			size, _ := strconv.Atoi(matchSquad[3])
@@ -438,7 +440,36 @@ func (s *SquadRcon) GetServerSquads() ([]Squad, []string, error) {
 		}
 	}
 
-	return squads, teamNames, nil
+	return squads
+}
+
+func orderedTeamNames(response string) []string {
+	teamNamesByID := map[int]string{}
+
+	for _, rawLine := range strings.Split(response, "\n") {
+		line := strings.TrimSpace(strings.TrimRight(rawLine, "\r"))
+		matchTeam := listSquadsTeamRegexp.FindStringSubmatch(line)
+		if len(matchTeam) == 0 {
+			continue
+		}
+
+		teamID, _ := strconv.Atoi(matchTeam[1])
+		if teamID != 1 && teamID != 2 {
+			continue
+		}
+
+		teamNamesByID[teamID] = strings.TrimSpace(matchTeam[2])
+	}
+
+	teamNames := make([]string, 0, 2)
+	if name, ok := teamNamesByID[1]; ok {
+		teamNames = append(teamNames, name)
+	}
+	if name, ok := teamNamesByID[2]; ok {
+		teamNames = append(teamNames, name)
+	}
+
+	return teamNames
 }
 
 func (s *SquadRcon) GetCurrentMap() (Map, error) {
@@ -460,18 +491,23 @@ func (s *SquadRcon) GetCurrentMap() (Map, error) {
 	return Map{}, ErrNoMap
 }
 
-func (s *SquadRcon) GetNextMap() (Map, error) {
-	nextMap, err := s.Manager.ExecuteCommand(s.ServerID, "ShowNextMap")
-	if err != nil {
-		if nextMap == "Next level is not defined" {
-			return Map{}, ErrNoNextMap
-		}
+func isUndefinedNextMapResponse(response string) bool {
+	switch strings.TrimSpace(response) {
+	case "Next level is not defined", "Next map is not defined":
+		return true
+	default:
+		return false
+	}
+}
 
-		return Map{}, err
+func parseNextMapResponse(nextMap string) (Map, error) {
+	trimmedNextMap := strings.TrimSpace(nextMap)
+	if isUndefinedNextMapResponse(trimmedNextMap) {
+		return Map{}, ErrNoNextMap
 	}
 
-	matchesMap := regexp.MustCompile(`^Next level is (.*?), layer is (.*?), factions (.*?) (.*?)$`)
-	matches := matchesMap.FindStringSubmatch(nextMap)
+	matchesMap := regexp.MustCompile(`^Next (?:level|map) is (.*?), layer is (.*?), factions (.*?) (.*?)$`)
+	matches := matchesMap.FindStringSubmatch(trimmedNextMap)
 	if len(matches) > 0 {
 		return Map{
 			Map:      matches[1],
@@ -481,6 +517,19 @@ func (s *SquadRcon) GetNextMap() (Map, error) {
 	}
 
 	return Map{}, ErrNoMap
+}
+
+func (s *SquadRcon) GetNextMap() (Map, error) {
+	nextMap, err := s.Manager.ExecuteCommand(s.ServerID, "ShowNextMap")
+	if err != nil {
+		if isUndefinedNextMapResponse(nextMap) {
+			return Map{}, ErrNoNextMap
+		}
+
+		return Map{}, err
+	}
+
+	return parseNextMapResponse(nextMap)
 }
 
 // GetAvailableMaps gets the available maps from the server

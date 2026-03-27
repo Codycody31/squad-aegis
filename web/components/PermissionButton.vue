@@ -4,6 +4,10 @@ import PermissionTooltip from "@/components/PermissionTooltip.vue";
 import type { Permission } from "@/constants/permissions";
 import type { ButtonVariants } from "@/components/ui/button";
 
+defineOptions({
+  inheritAttrs: false,
+});
+
 interface Props {
   /**
    * The permission required for this button action
@@ -48,6 +52,7 @@ const props = withDefaults(defineProps<Props>(), {
   hasPermission: null,
 });
 
+const attrs = useAttrs();
 const authStore = useAuthStore();
 
 // Determine if user has permission
@@ -79,6 +84,7 @@ const isDisabled = computed(() => {
     :has-permission="userHasPermission"
   >
     <Button
+      v-bind="attrs"
       :variant="variant"
       :size="size"
       :class="class"

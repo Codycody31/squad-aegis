@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // Plugin represents a server-specific plugin instance
@@ -336,13 +337,16 @@ type RconAPI interface {
 // AdminAPI provides admin management functionality to plugins
 type AdminAPI interface {
 	// AddTemporaryAdmin adds a player as a temporary admin with specified role and notes
-	AddTemporaryAdmin(steamID string, roleName string, notes string, expiresAt *time.Time) error
+	AddTemporaryAdmin(playerID string, roleName string, notes string, expiresAt *time.Time) error
 
 	// RemoveTemporaryAdmin removes a player's temporary admin status
-	RemoveTemporaryAdmin(steamID string, notes string) error
+	RemoveTemporaryAdmin(playerID string, notes string) error
+
+	// RemoveTemporaryAdminRole removes a player's temporary admin status for a specific role
+	RemoveTemporaryAdminRole(playerID string, roleName string, notes string) error
 
 	// GetPlayerAdminStatus checks if a player has admin status and returns their roles
-	GetPlayerAdminStatus(steamID string) (*PlayerAdminStatus, error)
+	GetPlayerAdminStatus(playerID string) (*PlayerAdminStatus, error)
 
 	// ListTemporaryAdmins lists all temporary admins managed by plugins
 	ListTemporaryAdmins() ([]*TemporaryAdminInfo, error)
@@ -350,7 +354,8 @@ type AdminAPI interface {
 
 // PlayerAdminStatus contains admin status information for a player
 type PlayerAdminStatus struct {
-	SteamID     string             `json:"steam_id"`
+	SteamID     string             `json:"steam_id,omitempty"`
+	EOSID       string             `json:"eos_id,omitempty"`
 	IsAdmin     bool               `json:"is_admin"`
 	Roles       []*PlayerAdminRole `json:"roles"`
 	HasExpiring bool               `json:"has_expiring"`
@@ -368,7 +373,8 @@ type PlayerAdminRole struct {
 // TemporaryAdminInfo contains information about temporary admins
 type TemporaryAdminInfo struct {
 	ID        string     `json:"id"`
-	SteamID   string     `json:"steam_id"`
+	SteamID   string     `json:"steam_id,omitempty"`
+	EOSID     string     `json:"eos_id,omitempty"`
 	RoleName  string     `json:"role_name"`
 	Notes     string     `json:"notes"`
 	ExpiresAt *time.Time `json:"expires_at"`
@@ -442,18 +448,58 @@ type PlayerInfo struct {
 // Prefers Steam ID, falls back to EOS ID.
 func (p *PlayerInfo) PreferredID() string {
 	if p.SteamID != "" {
-		return p.SteamID
+		return utils.NormalizePlayerID(p.SteamID)
 	}
-	return p.EOSID
+	return utils.NormalizePlayerID(p.EOSID)
+}
+
+// MatchesPlayerID returns true when the provided ID matches this player.
+func (p *PlayerInfo) MatchesPlayerID(playerID string) bool {
+	return utils.MatchPlayerID(playerID, p.SteamID, p.EOSID)
 }
 
 // AdminInfo contains admin information
 type AdminInfo struct {
 	ID       string             `json:"id"`
 	Name     string             `json:"name"`
-	SteamID  string             `json:"steam_id"`
+	SteamID  string             `json:"steam_id,omitempty"`
+	EOSID    string             `json:"eos_id,omitempty"`
 	IsOnline bool               `json:"is_online"`
 	Roles    []*PlayerAdminRole `json:"roles"`
+}
+
+// PreferredID returns the best available admin identifier.
+func (a *AdminInfo) PreferredID() string {
+	if a.SteamID != "" {
+		return utils.NormalizePlayerID(a.SteamID)
+	}
+	return utils.NormalizePlayerID(a.EOSID)
+}
+
+// MatchesPlayerID returns true when the provided ID matches this admin.
+func (a *AdminInfo) MatchesPlayerID(playerID string) bool {
+	return utils.MatchPlayerID(playerID, a.SteamID, a.EOSID)
+}
+
+// PreferredID returns the best available identifier for the admin status.
+func (s *PlayerAdminStatus) PreferredID() string {
+	if s.SteamID != "" {
+		return utils.NormalizePlayerID(s.SteamID)
+	}
+	return utils.NormalizePlayerID(s.EOSID)
+}
+
+// PreferredID returns the best available identifier for the temporary admin.
+func (t *TemporaryAdminInfo) PreferredID() string {
+	if t.SteamID != "" {
+		return utils.NormalizePlayerID(t.SteamID)
+	}
+	return utils.NormalizePlayerID(t.EOSID)
+}
+
+// MatchesPlayerID returns true when the provided ID matches this temporary admin.
+func (t *TemporaryAdminInfo) MatchesPlayerID(playerID string) bool {
+	return utils.MatchPlayerID(playerID, t.SteamID, t.EOSID)
 }
 
 // SquadInfo contains squad information with enriched player data

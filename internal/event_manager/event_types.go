@@ -1,5 +1,7 @@
 package event_manager
 
+import "go.codycody31.dev/squad-aegis/internal/shared/utils"
+
 // EventData is the base interface that all event data types must implement
 type EventData interface {
 	GetEventType() EventType
@@ -21,9 +23,9 @@ func (d RconChatMessageData) GetEventType() EventType { return EventTypeRconChat
 // PreferredPlayerID returns the SteamID if available, falling back to EosID.
 func (d RconChatMessageData) PreferredPlayerID() string {
 	if d.SteamID != "" {
-		return d.SteamID
+		return utils.NormalizePlayerID(d.SteamID)
 	}
-	return d.EosID
+	return utils.NormalizePlayerID(d.EosID)
 }
 
 // RconPlayerWarnedData represents RCON player warned event data
@@ -134,9 +136,9 @@ func (d LogPlayerConnectedData) GetEventType() EventType { return EventTypeLogPl
 // PreferredPlayerID returns the SteamID if available, falling back to EOSID.
 func (d LogPlayerConnectedData) PreferredPlayerID() string {
 	if d.SteamID != "" {
-		return d.SteamID
+		return utils.NormalizePlayerID(d.SteamID)
 	}
-	return d.EOSID
+	return utils.NormalizePlayerID(d.EOSID)
 }
 
 // LogPlayerDamagedData represents log player damaged event data

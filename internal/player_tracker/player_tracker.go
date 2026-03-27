@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 	valkeyClient "go.codycody31.dev/squad-aegis/internal/valkey"
 )
@@ -143,8 +144,16 @@ func (pt *PlayerTracker) Stop() {
 }
 
 // Key generation methods for Redis
-func (pt *PlayerTracker) playerKey(eosID string) string {
-	return fmt.Sprintf("squad-aegis:player-tracker:%s:player:%s", pt.serverID.String(), eosID)
+func (pt *PlayerTracker) playerKey(recordID string) string {
+	return fmt.Sprintf("squad-aegis:player-tracker:%s:player-record:%s", pt.serverID.String(), recordID)
+}
+
+func (pt *PlayerTracker) playerAliasKey(playerID string) string {
+	return fmt.Sprintf("squad-aegis:player-tracker:%s:player-alias:%s", pt.serverID.String(), playerID)
+}
+
+func (pt *PlayerTracker) playerPattern() string {
+	return fmt.Sprintf("squad-aegis:player-tracker:%s:player-record:*", pt.serverID.String())
 }
 
 func (pt *PlayerTracker) playerByNameKey(name string) string {
@@ -218,6 +227,91 @@ func (pt *PlayerTracker) unmarshalSquad(data string) (*SquadInfo, error) {
 		return nil, fmt.Errorf("failed to unmarshal squad info: %w", err)
 	}
 	return &squad, nil
+}
+
+
+func (pt *PlayerTracker) playerRecordIDFromKey(key string) string {
+	return strings.TrimPrefix(key, fmt.Sprintf("squad-aegis:player-tracker:%s:player-record:", pt.serverID.String()))
+}
+
+func (pt *PlayerTracker) resolvePlayerRecordID(playerID string) (string, bool) {
+	playerID = utils.NormalizePlayerID(playerID)
+	if playerID == "" {
+		return "", false
+	}
+
+	recordID, err := pt.valkeyClient.Get(pt.ctx, pt.playerAliasKey(playerID))
+	if err == nil && recordID != "" {
+		return recordID, true
+	}
+
+	exists, err := pt.valkeyClient.Exists(pt.ctx, pt.playerKey(playerID))
+	if err == nil && exists > 0 {
+		return playerID, true
+	}
+
+	return "", false
+}
+
+func (pt *PlayerTracker) getPlayerByRecordID(recordID string) (*PlayerInfo, bool) {
+	if recordID == "" {
+		return nil, false
+	}
+
+	playerData, err := pt.valkeyClient.Get(pt.ctx, pt.playerKey(recordID))
+	if err != nil {
+		return nil, false
+	}
+
+	player, err := pt.unmarshalPlayer(playerData)
+	if err != nil {
+		log.Error().Err(err).Str("recordID", recordID).Msg("Failed to unmarshal player data")
+		return nil, false
+	}
+
+	playerCopy := *player
+	return &playerCopy, true
+}
+
+func (pt *PlayerTracker) lookupPlayerRecord(ids ...string) (string, *PlayerInfo, bool) {
+	for _, id := range ids {
+		recordID, exists := pt.resolvePlayerRecordID(id)
+		if !exists {
+			continue
+		}
+
+		player, ok := pt.getPlayerByRecordID(recordID)
+		if !ok {
+			continue
+		}
+
+		return recordID, player, true
+	}
+
+	return "", nil, false
+}
+
+func (pt *PlayerTracker) GetPlayerByIdentifier(playerID string) (*PlayerInfo, bool) {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+
+	recordID, exists := pt.resolvePlayerRecordID(playerID)
+	if !exists {
+		return nil, false
+	}
+
+	return pt.getPlayerByRecordID(recordID)
+}
+
+func (pt *PlayerTracker) findExistingPlayer(existingPlayers map[string]*PlayerInfo, steamID string, eosID string) (*PlayerInfo, bool) {
+	identifiers := utils.NormalizePlayerIdentifiers("", steamID, eosID)
+	for _, candidate := range identifiers.StorageIDs() {
+		if player, exists := existingPlayers[candidate]; exists {
+			return player, true
+		}
+	}
+
+	return nil, false
 }
 
 // refreshLoop periodically refreshes player data
@@ -297,7 +391,7 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 	// Get all existing players to preserve their custom data - needs read lock
 	existingPlayers := pt.GetAllPlayers()
 
-	// Track current connected players to clean up disconnected ones
+	// Track current connected player identifiers to clean up disconnected ones.
 	currentConnectedPlayers := make(map[string]bool)
 
 	// Process teams and squads - no lock needed for Redis operations
@@ -357,7 +451,7 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 
 				// Check if player already exists and preserve custom data
 				var playerInfo *PlayerInfo
-				if existingPlayer, exists := existingPlayers[player.EosId]; exists {
+				if existingPlayer, exists := pt.findExistingPlayer(existingPlayers, player.SteamId, player.EosId); exists {
 					// Preserve existing player data but update team/squad info
 					playerInfo = existingPlayer
 					playerInfo.TeamID = teamIDStr
@@ -398,7 +492,9 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 					continue
 				}
 
-				currentConnectedPlayers[player.EosId] = true
+				for _, playerID := range utils.NormalizePlayerIdentifiers("", playerInfo.SteamID, playerInfo.EOSID).StorageIDs() {
+					currentConnectedPlayers[playerID] = true
+				}
 			}
 		}
 
@@ -409,7 +505,7 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 
 			// Check if player already exists and preserve custom data
 			var playerInfo *PlayerInfo
-			if existingPlayer, exists := existingPlayers[player.EosId]; exists {
+			if existingPlayer, exists := pt.findExistingPlayer(existingPlayers, player.SteamId, player.EosId); exists {
 				// Preserve existing player data but update team info
 				playerInfo = existingPlayer
 				playerInfo.TeamID = teamIDStr
@@ -450,7 +546,9 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 				continue
 			}
 
-			currentConnectedPlayers[player.EosId] = true
+			for _, playerID := range utils.NormalizePlayerIdentifiers("", playerInfo.SteamID, playerInfo.EOSID).StorageIDs() {
+				currentConnectedPlayers[playerID] = true
+			}
 		}
 	}
 
@@ -464,7 +562,7 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 
 // Helper methods to get counts from Redis
 func (pt *PlayerTracker) getPlayerCount() (int, error) {
-	keys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:player:*", pt.serverID.String()))
+	keys, err := pt.valkeyClient.Scan(pt.ctx, pt.playerPattern())
 	if err != nil {
 		return 0, err
 	}
@@ -472,7 +570,7 @@ func (pt *PlayerTracker) getPlayerCount() (int, error) {
 }
 
 func (pt *PlayerTracker) getTeamCount() (int, error) {
-	keys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:team:*", pt.serverID.String()))
+	keys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:team:*", pt.serverID.String()))
 	if err != nil {
 		return 0, err
 	}
@@ -480,7 +578,7 @@ func (pt *PlayerTracker) getTeamCount() (int, error) {
 }
 
 func (pt *PlayerTracker) getSquadCount() (int, error) {
-	keys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squad:*", pt.serverID.String()))
+	keys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squad:*", pt.serverID.String()))
 	if err != nil {
 		return 0, err
 	}
@@ -492,13 +590,13 @@ func (pt *PlayerTracker) parseSquadList(response string) error {
 	lines := strings.Split(response, "\n")
 
 	// Clear existing squads from Redis
-	squadKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squad:*", pt.serverID.String()))
+	squadKeys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squad:*", pt.serverID.String()))
 	if err == nil && len(squadKeys) > 0 {
 		pt.valkeyClient.Del(pt.ctx, squadKeys...)
 	}
 
 	// Clear squads-by-team hashes
-	squadsByTeamKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squads-by-team:*", pt.serverID.String()))
+	squadsByTeamKeys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squads-by-team:*", pt.serverID.String()))
 	if err == nil && len(squadsByTeamKeys) > 0 {
 		pt.valkeyClient.Del(pt.ctx, squadsByTeamKeys...)
 	}
@@ -772,7 +870,7 @@ func (pt *PlayerTracker) updateFromSquadRconData(teams []squadRcon.Team) error {
 // Helper methods for Redis operations
 func (pt *PlayerTracker) clearTeamsAndSquadsData() error {
 	// Clear all team keys
-	teamKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:team:*", pt.serverID.String()))
+	teamKeys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:team:*", pt.serverID.String()))
 	if err != nil {
 		return err
 	}
@@ -783,7 +881,7 @@ func (pt *PlayerTracker) clearTeamsAndSquadsData() error {
 	}
 
 	// Clear all squad keys
-	squadKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squad:*", pt.serverID.String()))
+	squadKeys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squad:*", pt.serverID.String()))
 	if err != nil {
 		return err
 	}
@@ -794,7 +892,7 @@ func (pt *PlayerTracker) clearTeamsAndSquadsData() error {
 	}
 
 	// Clear all squads-by-team keys
-	squadsByTeamKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squads-by-team:*", pt.serverID.String()))
+	squadsByTeamKeys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squads-by-team:*", pt.serverID.String()))
 	if err != nil {
 		return err
 	}
@@ -808,32 +906,80 @@ func (pt *PlayerTracker) clearTeamsAndSquadsData() error {
 }
 
 func (pt *PlayerTracker) storePlayer(player *PlayerInfo) error {
-	// Store player by EOSID
+	identifiers := utils.NormalizePlayerIdentifiers("", player.SteamID, player.EOSID)
+	if identifiers.PlayerID == "" {
+		return fmt.Errorf("player requires a Steam ID or EOS ID")
+	}
+
+	recordID, existingPlayer, exists := pt.lookupPlayerRecord(identifiers.StorageIDs()...)
+	resolvedIdentifiers := identifiers
+	if !exists {
+		recordID = identifiers.PlayerID
+	} else {
+		existingIdentifiers := utils.NormalizePlayerIdentifiers("", existingPlayer.SteamID, existingPlayer.EOSID)
+		resolvedIdentifiers = utils.MergePlayerIdentifiers(existingIdentifiers, identifiers)
+		oldIdentifiers := existingIdentifiers.StorageIDs()
+		newIdentifiers := resolvedIdentifiers.StorageIDs()
+		for _, oldIdentifier := range oldIdentifiers {
+			if utils.ContainsIdentifier(newIdentifiers, oldIdentifier) {
+				continue
+			}
+			if err := pt.valkeyClient.Del(pt.ctx, pt.playerAliasKey(oldIdentifier)); err != nil {
+				return err
+			}
+		}
+
+		if existingPlayer.Name != "" && existingPlayer.Name != player.Name {
+			if err := pt.valkeyClient.Del(pt.ctx, pt.playerByNameKey(existingPlayer.Name)); err != nil {
+				return err
+			}
+		}
+		if existingPlayer.PlayerSuffix != "" && existingPlayer.PlayerSuffix != player.PlayerSuffix {
+			if err := pt.valkeyClient.Del(pt.ctx, pt.playerBySuffixKey(existingPlayer.PlayerSuffix)); err != nil {
+				return err
+			}
+		}
+		if existingPlayer.PlayerController != "" && existingPlayer.PlayerController != player.PlayerController {
+			if err := pt.valkeyClient.Del(pt.ctx, pt.playerByControllerKey(existingPlayer.PlayerController)); err != nil {
+				return err
+			}
+		}
+	}
+
+	player.SteamID = resolvedIdentifiers.SteamID
+	player.EOSID = resolvedIdentifiers.EOSID
+
 	playerData, err := pt.marshalPlayer(player)
 	if err != nil {
 		return err
 	}
-	if err := pt.valkeyClient.Set(pt.ctx, pt.playerKey(player.EOSID), playerData, playerTTL); err != nil {
+	if err := pt.valkeyClient.Set(pt.ctx, pt.playerKey(recordID), playerData, playerTTL); err != nil {
 		return err
+	}
+
+	for _, playerID := range resolvedIdentifiers.StorageIDs() {
+		if err := pt.valkeyClient.Set(pt.ctx, pt.playerAliasKey(playerID), recordID, playerTTL); err != nil {
+			return err
+		}
 	}
 
 	// Store player by name
 	if player.Name != "" {
-		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByNameKey(player.Name), player.EOSID, playerTTL); err != nil {
+		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByNameKey(player.Name), recordID, playerTTL); err != nil {
 			return err
 		}
 	}
 
 	// Store player by suffix (log name)
 	if player.PlayerSuffix != "" {
-		if err := pt.valkeyClient.Set(pt.ctx, pt.playerBySuffixKey(player.PlayerSuffix), player.EOSID, playerTTL); err != nil {
+		if err := pt.valkeyClient.Set(pt.ctx, pt.playerBySuffixKey(player.PlayerSuffix), recordID, playerTTL); err != nil {
 			return err
 		}
 	}
 
 	// Store player by controller
 	if player.PlayerController != "" {
-		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByControllerKey(player.PlayerController), player.EOSID, playerTTL); err != nil {
+		if err := pt.valkeyClient.Set(pt.ctx, pt.playerByControllerKey(player.PlayerController), recordID, playerTTL); err != nil {
 			return err
 		}
 	}
@@ -867,39 +1013,41 @@ func (pt *PlayerTracker) addSquadToTeam(teamID, squadID string) error {
 
 func (pt *PlayerTracker) cleanupDisconnectedPlayers(currentConnectedPlayers map[string]bool) error {
 	// Get all existing player keys
-	playerKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:player:*", pt.serverID.String()))
+	playerKeys, err := pt.valkeyClient.Scan(pt.ctx, pt.playerPattern())
 	if err != nil {
 		return err
 	}
 
 	for _, key := range playerKeys {
-		// Extract EOSID from key
-		parts := strings.Split(key, ":")
-		if len(parts) < 6 {
+		recordID := pt.playerRecordIDFromKey(key)
+
+		// Check if this player is currently connected.
+		playerData, err := pt.valkeyClient.Get(pt.ctx, key)
+		if err != nil {
 			continue
 		}
-		eosID := parts[5]
 
-		// Check if this player is currently connected
-		if !currentConnectedPlayers[eosID] {
-			// Get player data
-			playerData, err := pt.valkeyClient.Get(pt.ctx, key)
-			if err != nil {
-				continue
+		player, err := pt.unmarshalPlayer(playerData)
+		if err != nil {
+			continue
+		}
+
+		connected := false
+		for _, playerID := range utils.NormalizePlayerIdentifiers("", player.SteamID, player.EOSID).StorageIDs() {
+			if currentConnectedPlayers[playerID] {
+				connected = true
+				break
 			}
+		}
 
-			player, err := pt.unmarshalPlayer(playerData)
-			if err != nil {
-				continue
-			}
-
+		if !connected {
 			// Mark as disconnected
 			player.IsConnected = false
 			player.LastUpdated = time.Now()
 
 			// Update player data
 			if err := pt.storePlayer(player); err != nil {
-				log.Error().Err(err).Str("eosID", eosID).Msg("Failed to update disconnected player in Redis")
+				log.Error().Err(err).Str("recordID", recordID).Msg("Failed to update disconnected player in Redis")
 			}
 		}
 	}
@@ -909,23 +1057,7 @@ func (pt *PlayerTracker) cleanupDisconnectedPlayers(currentConnectedPlayers map[
 
 // GetPlayerByEOSID retrieves player information by EOS ID
 func (pt *PlayerTracker) GetPlayerByEOSID(eosID string) (*PlayerInfo, bool) {
-	pt.mu.RLock()
-	defer pt.mu.RUnlock()
-
-	playerData, err := pt.valkeyClient.Get(pt.ctx, pt.playerKey(eosID))
-	if err != nil {
-		return nil, false
-	}
-
-	player, err := pt.unmarshalPlayer(playerData)
-	if err != nil {
-		log.Error().Err(err).Str("eosID", eosID).Msg("Failed to unmarshal player data")
-		return nil, false
-	}
-
-	// Return a copy to avoid race conditions
-	playerCopy := *player
-	return &playerCopy, true
+	return pt.GetPlayerByIdentifier(eosID)
 }
 
 // GetPlayerByName retrieves player information by name
@@ -933,12 +1065,12 @@ func (pt *PlayerTracker) GetPlayerByName(name string) (*PlayerInfo, bool) {
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
 
-	eosID, err := pt.valkeyClient.Get(pt.ctx, pt.playerByNameKey(name))
+	recordID, err := pt.valkeyClient.Get(pt.ctx, pt.playerByNameKey(name))
 	if err != nil {
 		return nil, false
 	}
 
-	return pt.GetPlayerByEOSID(eosID)
+	return pt.getPlayerByRecordID(recordID)
 }
 
 // GetPlayerByPlayerSuffix retrieves player information by player suffix (log name)
@@ -946,12 +1078,12 @@ func (pt *PlayerTracker) GetPlayerByPlayerSuffix(suffix string) (*PlayerInfo, bo
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
 
-	eosID, err := pt.valkeyClient.Get(pt.ctx, pt.playerBySuffixKey(suffix))
+	recordID, err := pt.valkeyClient.Get(pt.ctx, pt.playerBySuffixKey(suffix))
 	if err != nil {
 		return nil, false
 	}
 
-	return pt.GetPlayerByEOSID(eosID)
+	return pt.getPlayerByRecordID(recordID)
 }
 
 // GetPlayerByController retrieves player information by player controller
@@ -959,23 +1091,20 @@ func (pt *PlayerTracker) GetPlayerByController(controller string) (*PlayerInfo, 
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
 
-	eosID, err := pt.valkeyClient.Get(pt.ctx, pt.playerByControllerKey(controller))
+	recordID, err := pt.valkeyClient.Get(pt.ctx, pt.playerByControllerKey(controller))
 	if err != nil {
 		return nil, false
 	}
 
-	return pt.GetPlayerByEOSID(eosID)
+	return pt.getPlayerByRecordID(recordID)
 }
 
-// GetAllPlayers returns all current players
-func (pt *PlayerTracker) GetAllPlayers() map[string]*PlayerInfo {
-	pt.mu.RLock()
-	defer pt.mu.RUnlock()
-
+// getAllPlayersLocked returns all current players. Caller MUST hold pt.mu.RLock().
+func (pt *PlayerTracker) getAllPlayersLocked() map[string]*PlayerInfo {
 	players := make(map[string]*PlayerInfo)
 
 	// Get all player keys
-	playerKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:player:*", pt.serverID.String()))
+	playerKeys, err := pt.valkeyClient.Scan(pt.ctx, pt.playerPattern())
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to get player keys from Redis")
 		return players
@@ -995,15 +1124,22 @@ func (pt *PlayerTracker) GetAllPlayers() map[string]*PlayerInfo {
 			continue
 		}
 
-		// Extract EOSID from key
-		parts := strings.Split(key, ":")
-		if len(parts) >= 6 {
-			eosID := parts[5]
-			players[eosID] = player
+		playerID := utils.NormalizePlayerIdentifiers("", player.SteamID, player.EOSID).PlayerID
+		if playerID == "" {
+			playerID = pt.playerRecordIDFromKey(key)
 		}
+		players[playerID] = player
 	}
 
 	return players
+}
+
+// GetAllPlayers returns all current players
+func (pt *PlayerTracker) GetAllPlayers() map[string]*PlayerInfo {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+
+	return pt.getAllPlayersLocked()
 }
 
 // GetTeamInfo retrieves team information
@@ -1056,7 +1192,7 @@ func (pt *PlayerTracker) GetPlayersByTeam(teamID string) []*PlayerInfo {
 	var teamPlayers []*PlayerInfo
 
 	// Get all players and filter by team
-	allPlayers := pt.GetAllPlayers()
+	allPlayers := pt.getAllPlayersLocked()
 	for _, player := range allPlayers {
 		if player.TeamID == teamID {
 			playerCopy := *player
@@ -1075,7 +1211,7 @@ func (pt *PlayerTracker) GetPlayersBySquad(squadID string) []*PlayerInfo {
 	var squadPlayers []*PlayerInfo
 
 	// Get all players and filter by squad
-	allPlayers := pt.GetAllPlayers()
+	allPlayers := pt.getAllPlayersLocked()
 	for _, player := range allPlayers {
 		if player.SquadID == squadID {
 			playerCopy := *player
@@ -1096,8 +1232,8 @@ func (pt *PlayerTracker) IsTeamkill(attackerEOSID, victimEOSID string) (bool, *P
 		return false, nil, nil
 	}
 
-	attacker, attackerExists := pt.GetPlayerByEOSID(attackerEOSID)
-	victim, victimExists := pt.GetPlayerByEOSID(victimEOSID)
+	attacker, attackerExists := pt.GetPlayerByIdentifier(attackerEOSID)
+	victim, victimExists := pt.GetPlayerByIdentifier(victimEOSID)
 
 	if !attackerExists || !victimExists {
 		return false, nil, nil
@@ -1169,124 +1305,53 @@ func (pt *PlayerTracker) ForceRefresh() error {
 
 // UpdatePlayerFromLog updates player information based on log events
 func (pt *PlayerTracker) UpdatePlayerFromLog(eosID, steamID, name, playerController, playerSuffix string) {
-	// Try to get existing player by EOSID - no lock needed for Redis operations
-	playerData, err := pt.valkeyClient.Get(pt.ctx, pt.playerKey(eosID))
-	if err == nil {
-		// Player exists, update it
-		player, err := pt.unmarshalPlayer(playerData)
-		if err != nil {
-			log.Error().Err(err).Str("eosID", eosID).Msg("Failed to unmarshal existing player for update")
-			return
-		}
+	player, exists := pt.GetPlayerByIdentifier(eosID)
+	if !exists {
+		player, exists = pt.GetPlayerByIdentifier(steamID)
+	}
 
-		// Update existing player
-		updated := false
-		if name != "" && player.Name != name {
-			// Name changed, remove old name index
-			if player.Name != "" {
-				pt.valkeyClient.Del(pt.ctx, pt.playerByNameKey(player.Name))
-			}
-			player.Name = name
-			updated = true
-		}
-		if steamID != "" && player.SteamID == "" {
-			player.SteamID = steamID
-			updated = true
-		}
-		if playerController != "" && player.PlayerController != playerController {
-			// Controller changed, remove old controller index
-			if player.PlayerController != "" {
-				pt.valkeyClient.Del(pt.ctx, pt.playerByControllerKey(player.PlayerController))
-			}
-			player.PlayerController = playerController
-			updated = true
-		}
-		if playerSuffix != "" && player.PlayerSuffix != playerSuffix {
-			// Suffix changed, remove old suffix index
-			if player.PlayerSuffix != "" {
-				pt.valkeyClient.Del(pt.ctx, pt.playerBySuffixKey(player.PlayerSuffix))
-			}
-			player.PlayerSuffix = playerSuffix
-			updated = true
-		}
+	if !exists {
+		player = &PlayerInfo{}
+	}
 
-		if updated {
-			player.LastUpdated = time.Now()
-			if err := pt.storePlayer(player); err != nil {
-				log.Error().Err(err).Str("eosID", eosID).Msg("Failed to store updated player")
-			}
-		}
-	} else {
-		// Player doesn't exist, try to find by Steam ID
-		if steamID != "" {
-			// Get all players and check for Steam ID match (needs read lock)
-			allPlayers := pt.GetAllPlayers()
-			for _, existingPlayer := range allPlayers {
-				if existingPlayer.SteamID == steamID {
-					// Found by Steam ID, update EOSID and other info
-					if eosID != "" && existingPlayer.EOSID != eosID {
-						// Remove old EOSID key
-						pt.valkeyClient.Del(pt.ctx, pt.playerKey(existingPlayer.EOSID))
-						existingPlayer.EOSID = eosID
-					}
-					if name != "" && existingPlayer.Name != name {
-						if existingPlayer.Name != "" {
-							pt.valkeyClient.Del(pt.ctx, pt.playerByNameKey(existingPlayer.Name))
-						}
-						existingPlayer.Name = name
-					}
-					if playerController != "" && existingPlayer.PlayerController != playerController {
-						// Controller changed, remove old controller index
-						if existingPlayer.PlayerController != "" {
-							pt.valkeyClient.Del(pt.ctx, pt.playerByControllerKey(existingPlayer.PlayerController))
-						}
-						existingPlayer.PlayerController = playerController
-					}
-					if playerSuffix != "" && existingPlayer.PlayerSuffix != playerSuffix {
-						if existingPlayer.PlayerSuffix != "" {
-							pt.valkeyClient.Del(pt.ctx, pt.playerBySuffixKey(existingPlayer.PlayerSuffix))
-						}
-						existingPlayer.PlayerSuffix = playerSuffix
-					}
-					existingPlayer.LastUpdated = time.Now()
+	updated := false
+	if eosID != "" && player.EOSID != eosID {
+		player.EOSID = eosID
+		updated = true
+	}
+	if steamID != "" && player.SteamID != steamID {
+		player.SteamID = steamID
+		updated = true
+	}
+	if name != "" && player.Name != name {
+		player.Name = name
+		updated = true
+	}
+	if playerController != "" && player.PlayerController != playerController {
+		player.PlayerController = playerController
+		updated = true
+	}
+	if playerSuffix != "" && player.PlayerSuffix != playerSuffix {
+		player.PlayerSuffix = playerSuffix
+		updated = true
+	}
 
-					if err := pt.storePlayer(existingPlayer); err != nil {
-						log.Error().Err(err).Str("eosID", eosID).Msg("Failed to store player found by Steam ID")
-					}
-					return
-				}
-			}
-		}
+	if !updated && exists {
+		return
+	}
 
-		// Create new player with minimal info
-		newPlayer := &PlayerInfo{
-			EOSID:            eosID,
-			SteamID:          steamID,
-			Name:             name,
-			PlayerController: playerController,
-			PlayerSuffix:     playerSuffix,
-			IsConnected:      true,
-			LastUpdated:      time.Now(),
-		}
+	player.IsConnected = true
+	player.LastUpdated = time.Now()
 
-		if err := pt.storePlayer(newPlayer); err != nil {
-			log.Error().Err(err).Str("eosID", eosID).Msg("Failed to store new player")
-		}
+	if err := pt.storePlayer(player); err != nil {
+		log.Error().Err(err).Str("eosID", eosID).Str("steamID", steamID).Msg("Failed to store player from log update")
 	}
 }
 
 // MarkPlayerDisconnected marks a player as disconnected
 func (pt *PlayerTracker) MarkPlayerDisconnected(eosID string) {
-	// Get player data - no lock needed for Redis operations
-	playerData, err := pt.valkeyClient.Get(pt.ctx, pt.playerKey(eosID))
-	if err != nil {
-		// Player not found
-		return
-	}
-
-	player, err := pt.unmarshalPlayer(playerData)
-	if err != nil {
-		log.Error().Err(err).Str("eosID", eosID).Msg("Failed to unmarshal player for disconnect")
+	player, exists := pt.GetPlayerByIdentifier(eosID)
+	if !exists {
 		return
 	}
 
@@ -1309,10 +1374,10 @@ func (pt *PlayerTracker) ExportData() (string, error) {
 	defer pt.mu.RUnlock()
 
 	// Get all data from Redis
-	players := pt.GetAllPlayers()
+	players := pt.getAllPlayersLocked()
 
 	teams := make(map[string]*TeamInfo)
-	teamKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:team:*", pt.serverID.String()))
+	teamKeys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:team:*", pt.serverID.String()))
 	if err == nil {
 		for _, key := range teamKeys {
 			teamData, err := pt.valkeyClient.Get(pt.ctx, key)
@@ -1328,7 +1393,7 @@ func (pt *PlayerTracker) ExportData() (string, error) {
 	}
 
 	squads := make(map[string]*SquadInfo)
-	squadKeys, err := pt.valkeyClient.Keys(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squad:*", pt.serverID.String()))
+	squadKeys, err := pt.valkeyClient.Scan(pt.ctx, fmt.Sprintf("squad-aegis:player-tracker:%s:squad:*", pt.serverID.String()))
 	if err == nil {
 		for _, key := range squadKeys {
 			squadData, err := pt.valkeyClient.Get(pt.ctx, key)

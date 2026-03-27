@@ -152,12 +152,20 @@ func (api *serverAPI) GetPlayers() ([]*PlayerInfo, error) {
 }
 
 func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
-	// Get admins that have either a user account or are defined by steam ID only
+	// Get admins that have either a user account or are defined directly by a player ID
 	// Only include admins with roles where is_admin = true
 	query := `
 		SELECT sa.id,
-		       COALESCE(u.name, 'Steam ID: ' || sa.steam_id) as name,
+		       COALESCE(
+		           u.name,
+		           CASE
+		               WHEN COALESCE(u.steam_id, sa.steam_id) IS NOT NULL THEN 'Steam ID: ' || COALESCE(u.steam_id, sa.steam_id)::text
+		               WHEN sa.eos_id IS NOT NULL THEN 'EOS ID: ' || sa.eos_id
+		               ELSE 'Unknown'
+		           END
+		       ) as name,
 		       COALESCE(u.steam_id, sa.steam_id) as steam_id,
+		       sa.eos_id,
 		       sr.id as role_id,
 		       sr.name as role_name,
 		       sa.notes,
@@ -166,7 +174,14 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 		LEFT JOIN users u ON sa.user_id = u.id
 		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
 		WHERE sa.server_id = $1 AND sr.is_admin = true
-		ORDER BY COALESCE(u.name, 'Steam ID: ' || sa.steam_id), sr.name
+		ORDER BY COALESCE(
+			u.name,
+			CASE
+				WHEN COALESCE(u.steam_id, sa.steam_id) IS NOT NULL THEN 'Steam ID: ' || COALESCE(u.steam_id, sa.steam_id)::text
+				WHEN sa.eos_id IS NOT NULL THEN 'EOS ID: ' || sa.eos_id
+				ELSE 'Unknown'
+			END
+		), sr.name
 	`
 
 	rows, err := api.db.Query(query, api.serverID)
@@ -176,16 +191,32 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	defer rows.Close()
 
 	adminMap := make(map[string]*AdminInfo)
-	adminSteamIDs := make(map[string]*AdminInfo)
+	adminPlayerIDs := make(map[string][]*AdminInfo)
+
+	registerAdminPlayerID := func(playerID string, admin *AdminInfo) {
+		playerID = utils.NormalizePlayerID(playerID)
+		if playerID == "" || admin == nil {
+			return
+		}
+
+		for _, existingAdmin := range adminPlayerIDs[playerID] {
+			if existingAdmin == admin {
+				return
+			}
+		}
+
+		adminPlayerIDs[playerID] = append(adminPlayerIDs[playerID], admin)
+	}
 
 	for rows.Next() {
 		var adminID, roleID string
 		var steamID sql.NullInt64
+		var eosID sql.NullString
 		var name, roleName sql.NullString
 		var notes sql.NullString
 		var expiresAt sql.NullTime
 
-		err := rows.Scan(&adminID, &name, &steamID, &roleID, &roleName, &notes, &expiresAt)
+		err := rows.Scan(&adminID, &name, &steamID, &eosID, &roleID, &roleName, &notes, &expiresAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan admin row: %w", err)
 		}
@@ -201,6 +232,7 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 			admin = &AdminInfo{
 				ID:       adminID,
 				SteamID:  steamIDStr,
+				EOSID:    utils.NormalizePlayerID(eosID.String),
 				IsOnline: false,
 				Roles:    make([]*PlayerAdminRole, 0),
 			}
@@ -212,9 +244,8 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 			}
 
 			adminMap[adminID] = admin
-			if steamIDStr != "" {
-				adminSteamIDs[steamIDStr] = admin
-			}
+			registerAdminPlayerID(steamIDStr, admin)
+			registerAdminPlayerID(admin.EOSID, admin)
 		}
 
 		// Add role to admin
@@ -251,8 +282,27 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 	players, err := api.GetPlayers()
 	if err == nil {
 		for _, player := range players {
-			if admin, exists := adminSteamIDs[player.SteamID]; exists {
-				admin.IsOnline = true
+			playerSteamID := utils.NormalizePlayerID(player.SteamID)
+			playerEOSID := utils.NormalizePlayerID(player.EOSID)
+
+			if playerSteamID != "" {
+				for _, admin := range adminPlayerIDs[playerSteamID] {
+					admin.IsOnline = true
+					if admin.EOSID == "" && playerEOSID != "" {
+						admin.EOSID = playerEOSID
+						registerAdminPlayerID(playerEOSID, admin)
+					}
+				}
+			}
+
+			if playerEOSID != "" {
+				for _, admin := range adminPlayerIDs[playerEOSID] {
+					admin.IsOnline = true
+					if admin.SteamID == "" && playerSteamID != "" {
+						admin.SteamID = playerSteamID
+						registerAdminPlayerID(playerSteamID, admin)
+					}
+				}
 			}
 		}
 	}
@@ -331,7 +381,113 @@ func NewAdminAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconM
 	}
 }
 
-func (api *adminAPI) AddTemporaryAdmin(steamID string, roleName string, notes string, expiresAt *time.Time) error {
+func databasePlayerIDArgs(playerID string) (steamID interface{}, eosID interface{}, normalized string, err error) {
+	parsedSteamID, parsedEOSID, normalized, err := utils.ParsePlayerID(playerID)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	if parsedSteamID != nil {
+		steamID = *parsedSteamID
+	}
+	if parsedEOSID != nil {
+		eosID = *parsedEOSID
+	}
+
+	return steamID, eosID, normalized, nil
+}
+
+func databasePlayerIDArgsFromIdentifiers(steamID string, eosID string) (steamIDArg interface{}, eosIDArg interface{}, err error) {
+	identifiers := utils.NormalizePlayerIdentifiers("", steamID, eosID)
+	return identifiers.DatabaseArgs()
+}
+
+func resolvePlayerIdentifiers(playerID string, players []*PlayerInfo) (steamID string, eosID string, normalizedPlayerID string, err error) {
+	_, _, normalizedPlayerID, err = databasePlayerIDArgs(playerID)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	if utils.IsSteamID(normalizedPlayerID) {
+		steamID = normalizedPlayerID
+	}
+	if utils.IsEOSID(normalizedPlayerID) {
+		eosID = normalizedPlayerID
+	}
+
+	for _, player := range players {
+		if player == nil || !player.MatchesPlayerID(normalizedPlayerID) {
+			continue
+		}
+
+		if candidateSteamID := utils.NormalizePlayerID(player.SteamID); utils.IsSteamID(candidateSteamID) {
+			steamID = candidateSteamID
+		}
+		if candidateEOSID := utils.NormalizePlayerID(player.EOSID); utils.IsEOSID(candidateEOSID) {
+			eosID = candidateEOSID
+		}
+		break
+	}
+
+	if steamID != "" {
+		normalizedPlayerID = steamID
+	} else if eosID != "" {
+		normalizedPlayerID = eosID
+	}
+
+	return steamID, eosID, normalizedPlayerID, nil
+}
+
+func (api *rconAPI) resolvePlayerIdentifiers(playerID string) (utils.PlayerIdentifiers, error) {
+	normalizedPlayerID := utils.NormalizePlayerID(playerID)
+	if normalizedPlayerID == "" {
+		return utils.PlayerIdentifiers{}, fmt.Errorf("player ID is required")
+	}
+
+	var players []*PlayerInfo
+	if api.rconManager != nil {
+		serverPlayers, playersErr := NewServerAPI(api.serverID, api.db, api.rconManager).GetPlayers()
+		if playersErr == nil {
+			players = serverPlayers
+		}
+	}
+
+	steamID, eosID, resolvedPlayerID, err := resolvePlayerIdentifiers(normalizedPlayerID, players)
+	if err != nil {
+		return utils.PlayerIdentifiers{}, err
+	}
+
+	return utils.NormalizePlayerIdentifiers(resolvedPlayerID, steamID, eosID), nil
+}
+
+func (api *adminAPI) resolvePlayerIdentifierArgs(playerID string) (steamIDArg interface{}, eosIDArg interface{}, normalizedPlayerID string, steamID string, eosID string, err error) {
+	normalizedPlayerID = utils.NormalizePlayerID(playerID)
+	if normalizedPlayerID == "" {
+		return nil, nil, "", "", "", fmt.Errorf("player ID is required")
+	}
+
+	var players []*PlayerInfo
+	if api.rconManager != nil {
+		serverPlayers, playersErr := NewServerAPI(api.serverID, api.db, api.rconManager).GetPlayers()
+		if playersErr == nil {
+			players = serverPlayers
+		}
+	}
+
+	steamID, eosID, normalizedPlayerID, err = resolvePlayerIdentifiers(playerID, players)
+	if err != nil {
+		return nil, nil, "", "", "", err
+	}
+
+	steamIDArg, eosIDArg, err = databasePlayerIDArgsFromIdentifiers(steamID, eosID)
+	if err != nil {
+		return nil, nil, "", "", "", err
+	}
+
+	return steamIDArg, eosIDArg, normalizedPlayerID, steamID, eosID, nil
+}
+
+func (api *adminAPI) AddTemporaryAdmin(playerID string, roleName string, notes string, expiresAt *time.Time) error {
 	// First, get or create the role for this server
 	var roleID uuid.UUID
 	err := api.db.QueryRow(`
@@ -353,26 +509,30 @@ func (api *adminAPI) AddTemporaryAdmin(steamID string, roleName string, notes st
 		return fmt.Errorf("failed to query role %s: %w", roleName, err)
 	}
 
-	// Parse steamID to int64 for database storage
-	steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+	steamIDArg, eosIDArg, _, _, _, err := api.resolvePlayerIdentifierArgs(playerID)
 	if err != nil {
-		return fmt.Errorf("invalid steam ID format: %w", err)
+		return fmt.Errorf("invalid player ID: %w", err)
 	}
 
 	// Check if admin record already exists
 	var existingID uuid.UUID
 	err = api.db.QueryRow(`
 		SELECT id FROM server_admins
-		WHERE server_id = $1 AND steam_id = $2 AND server_role_id = $3
-	`, api.serverID, steamIDInt, roleID).Scan(&existingID)
+		WHERE server_id = $1
+		  AND server_role_id = $2
+		  AND (
+			($3::bigint IS NOT NULL AND steam_id = $3::bigint)
+			OR ($4::text IS NOT NULL AND eos_id = $4::text)
+		  )
+	`, api.serverID, roleID, steamIDArg, eosIDArg).Scan(&existingID)
 
 	if err == sql.ErrNoRows {
 		// Create new admin record
 		adminID := uuid.New()
 		_, err = api.db.Exec(`
-			INSERT INTO server_admins (id, server_id, steam_id, server_role_id, expires_at, notes, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, NOW())
-		`, adminID, api.serverID, steamIDInt, roleID, expiresAt, notes)
+			INSERT INTO server_admins (id, server_id, steam_id, eos_id, server_role_id, expires_at, notes, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		`, adminID, api.serverID, steamIDArg, eosIDArg, roleID, expiresAt, notes)
 		if err != nil {
 			return fmt.Errorf("failed to create admin record: %w", err)
 		}
@@ -382,9 +542,9 @@ func (api *adminAPI) AddTemporaryAdmin(steamID string, roleName string, notes st
 		// Update existing admin record
 		_, err = api.db.Exec(`
 			UPDATE server_admins
-			SET expires_at = $1, notes = $2
-			WHERE id = $3
-		`, expiresAt, notes, existingID)
+			SET steam_id = $1, eos_id = $2, expires_at = $3, notes = $4
+			WHERE id = $5
+		`, steamIDArg, eosIDArg, expiresAt, notes, existingID)
 		if err != nil {
 			return fmt.Errorf("failed to update admin record: %w", err)
 		}
@@ -393,18 +553,21 @@ func (api *adminAPI) AddTemporaryAdmin(steamID string, roleName string, notes st
 	return nil
 }
 
-func (api *adminAPI) RemoveTemporaryAdmin(steamID string, notes string) error {
-	// Parse steamID to int64 for database query
-	steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+func (api *adminAPI) RemoveTemporaryAdmin(playerID string, notes string) error {
+	steamIDArg, eosIDArg, normalizedPlayerID, _, _, err := api.resolvePlayerIdentifierArgs(playerID)
 	if err != nil {
-		return fmt.Errorf("invalid steam ID format: %w", err)
+		return fmt.Errorf("invalid player ID: %w", err)
 	}
 
-	// Find and remove admin records for this steam ID
+	// Find and remove admin records for this player ID
 	rows, err := api.db.Query(`
 		SELECT id FROM server_admins
-		WHERE server_id = $1 AND steam_id = $2
-	`, api.serverID, steamIDInt)
+		WHERE server_id = $1
+		  AND (
+			($2::bigint IS NOT NULL AND steam_id = $2::bigint)
+			OR ($3::text IS NOT NULL AND eos_id = $3::text)
+		  )
+	`, api.serverID, steamIDArg, eosIDArg)
 	if err != nil {
 		return fmt.Errorf("failed to query admin records: %w", err)
 	}
@@ -420,7 +583,7 @@ func (api *adminAPI) RemoveTemporaryAdmin(steamID string, notes string) error {
 	}
 
 	if len(adminIDs) == 0 {
-		return fmt.Errorf("no admin records found for steam ID %s", steamID)
+		return fmt.Errorf("no admin records found for player ID %s", normalizedPlayerID)
 	}
 
 	// Remove admin records
@@ -434,11 +597,43 @@ func (api *adminAPI) RemoveTemporaryAdmin(steamID string, notes string) error {
 	return nil
 }
 
-func (api *adminAPI) GetPlayerAdminStatus(steamID string) (*PlayerAdminStatus, error) {
-	// Parse steamID to int64 for database query
-	steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
+func (api *adminAPI) RemoveTemporaryAdminRole(playerID string, roleName string, notes string) error {
+	steamIDArg, eosIDArg, normalizedPlayerID, _, _, err := api.resolvePlayerIdentifierArgs(playerID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid steam ID format: %w", err)
+		return fmt.Errorf("invalid player ID: %w", err)
+	}
+
+	result, err := api.db.Exec(`
+		DELETE FROM server_admins sa
+		USING server_roles sr
+		WHERE sa.server_role_id = sr.id
+			AND sa.server_id = $1
+			AND (
+				($2::bigint IS NOT NULL AND sa.steam_id = $2::bigint)
+				OR ($3::text IS NOT NULL AND sa.eos_id = $3::text)
+			)
+			AND sr.server_id = $1
+			AND sr.name = $4
+	`, api.serverID, steamIDArg, eosIDArg, roleName)
+	if err != nil {
+		return fmt.Errorf("failed to remove admin role %q for player ID %s: %w", roleName, normalizedPlayerID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to determine removed admin role count: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("no admin role %q found for player ID %s", roleName, normalizedPlayerID)
+	}
+
+	return nil
+}
+
+func (api *adminAPI) GetPlayerAdminStatus(playerID string) (*PlayerAdminStatus, error) {
+	steamIDArg, eosIDArg, _, steamID, eosID, err := api.resolvePlayerIdentifierArgs(playerID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid player ID: %w", err)
 	}
 
 	// Query admin roles for this player - only include roles where is_admin = true
@@ -446,8 +641,14 @@ func (api *adminAPI) GetPlayerAdminStatus(steamID string) (*PlayerAdminStatus, e
 		SELECT sa.id, sr.name, sa.notes, sa.expires_at, sa.created_at
 		FROM server_admins sa
 		JOIN server_roles sr ON sa.server_role_id = sr.id
-		WHERE sa.server_id = $1 AND sa.steam_id = $2 AND sr.is_admin = true
-	`, api.serverID, steamIDInt)
+		LEFT JOIN users u ON sa.user_id = u.id
+		WHERE sa.server_id = $1
+		  AND sr.is_admin = true
+		  AND (
+			($2::bigint IS NOT NULL AND (sa.steam_id = $2::bigint OR u.steam_id = $2::bigint))
+			OR ($3::text IS NOT NULL AND sa.eos_id = $3::text)
+		  )
+	`, api.serverID, steamIDArg, eosIDArg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query admin status: %w", err)
 	}
@@ -484,6 +685,7 @@ func (api *adminAPI) GetPlayerAdminStatus(steamID string) (*PlayerAdminStatus, e
 
 	status := &PlayerAdminStatus{
 		SteamID:     steamID,
+		EOSID:       eosID,
 		IsAdmin:     len(roles) > 0,
 		Roles:       roles,
 		HasExpiring: hasExpiring,
@@ -495,7 +697,7 @@ func (api *adminAPI) GetPlayerAdminStatus(steamID string) (*PlayerAdminStatus, e
 func (api *adminAPI) ListTemporaryAdmins() ([]*TemporaryAdminInfo, error) {
 	// Query all temporary admins for this server with notes containing plugin information
 	rows, err := api.db.Query(`
-		SELECT sa.id, sa.steam_id, sr.name as role_name, sa.notes, sa.expires_at, sa.created_at
+		SELECT sa.id, sa.steam_id, sa.eos_id, sr.name as role_name, sa.notes, sa.expires_at, sa.created_at
 		FROM server_admins sa
 		JOIN server_roles sr ON sa.server_role_id = sr.id
 		WHERE sa.server_id = $1 AND sa.notes IS NOT NULL AND sa.notes LIKE '%Plugin:%'
@@ -507,18 +709,41 @@ func (api *adminAPI) ListTemporaryAdmins() ([]*TemporaryAdminInfo, error) {
 	defer rows.Close()
 
 	var admins []*TemporaryAdminInfo
+	adminPlayerIDs := make(map[string][]*TemporaryAdminInfo)
+
+	registerAdminPlayerID := func(playerID string, admin *TemporaryAdminInfo) {
+		playerID = utils.NormalizePlayerID(playerID)
+		if playerID == "" || admin == nil {
+			return
+		}
+
+		for _, existingAdmin := range adminPlayerIDs[playerID] {
+			if existingAdmin == admin {
+				return
+			}
+		}
+
+		adminPlayerIDs[playerID] = append(adminPlayerIDs[playerID], admin)
+	}
+
 	for rows.Next() {
 		var admin TemporaryAdminInfo
-		var steamIDInt int64
+		var steamIDInt sql.NullInt64
+		var eosID sql.NullString
 		var notes sql.NullString
 		var expiresAt sql.NullTime
 
-		err := rows.Scan(&admin.ID, &steamIDInt, &admin.RoleName, &notes, &expiresAt, &admin.CreatedAt)
+		err := rows.Scan(&admin.ID, &steamIDInt, &eosID, &admin.RoleName, &notes, &expiresAt, &admin.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan temporary admin: %w", err)
 		}
 
-		admin.SteamID = fmt.Sprintf("%d", steamIDInt)
+		if steamIDInt.Valid {
+			admin.SteamID = fmt.Sprintf("%d", steamIDInt.Int64)
+		}
+		if eosID.Valid {
+			admin.EOSID = utils.NormalizePlayerID(eosID.String)
+		}
 
 		if notes.Valid {
 			admin.Notes = notes.String
@@ -529,7 +754,37 @@ func (api *adminAPI) ListTemporaryAdmins() ([]*TemporaryAdminInfo, error) {
 			admin.IsExpired = expiresAt.Time.Before(time.Now())
 		}
 
+		registerAdminPlayerID(admin.SteamID, &admin)
+		registerAdminPlayerID(admin.EOSID, &admin)
 		admins = append(admins, &admin)
+	}
+
+	if api.rconManager != nil {
+		players, err := NewServerAPI(api.serverID, api.db, api.rconManager).GetPlayers()
+		if err == nil {
+			for _, player := range players {
+				playerSteamID := utils.NormalizePlayerID(player.SteamID)
+				playerEOSID := utils.NormalizePlayerID(player.EOSID)
+
+				if playerSteamID != "" {
+					for _, admin := range adminPlayerIDs[playerSteamID] {
+						if admin.EOSID == "" && playerEOSID != "" {
+							admin.EOSID = playerEOSID
+							registerAdminPlayerID(playerEOSID, admin)
+						}
+					}
+				}
+
+				if playerEOSID != "" {
+					for _, admin := range adminPlayerIDs[playerEOSID] {
+						if admin.SteamID == "" && playerSteamID != "" {
+							admin.SteamID = playerSteamID
+							registerAdminPlayerID(playerSteamID, admin)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return admins, nil
@@ -1039,15 +1294,14 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 
 // storeBanInDatabase stores the ban information in the database
 func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt *time.Time) (uuid.UUID, error) {
-	// Detect player ID type (Steam ID or EOS ID)
-	var steamIDVal interface{}
-	var eosIDVal interface{}
-	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
-		steamIDVal = sid
-	} else if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
-		eosIDVal = normalizedEOSID
-	} else {
-		return uuid.Nil, fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
+	identifiers, err := api.resolvePlayerIdentifiers(playerID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	steamIDVal, eosIDVal, err := identifiers.DatabaseArgs()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to parse player identifiers: %w", err)
 	}
 
 	// Insert ban into database
@@ -1059,7 +1313,7 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt
 		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
 	`
 
-	_, err := api.db.Exec(query,
+	_, err = api.db.Exec(query,
 		banID,        // id
 		api.serverID, // server_id
 		steamIDVal,   // steam_id (nil if EOS-only)
@@ -1095,16 +1349,23 @@ func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, acti
 		return nil // Don't fail if rule ID invalid
 	}
 
-	steamID, err := strconv.ParseInt(playerID, 10, 64)
+	identifiers, err := api.resolvePlayerIdentifiers(playerID)
 	if err != nil {
-		log.Warn().Err(err).Str("player_id", playerID).Msg("Non-numeric player ID (likely EOS ID), skipping ClickHouse violation log")
-		return nil // ClickHouse schema requires UInt64 for player_steam_id; EOS IDs not supported yet
+		return err
+	}
+
+	steamIDVal, _, err := identifiers.DatabaseArgs()
+	if err != nil {
+		return fmt.Errorf("failed to parse violation identifiers: %w", err)
+	}
+	if steamIDVal != nil {
+		steamIDVal = uint64(steamIDVal.(int64))
 	}
 
 	query := `
 		INSERT INTO squad_aegis.player_rule_violations
-		(violation_id, server_id, player_steam_id, rule_id, admin_user_id, action_type, created_at, ingested_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		(violation_id, server_id, player_id, player_steam_id, player_eos_id, rule_id, admin_user_id, action_type, created_at, ingested_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1113,7 +1374,9 @@ func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, acti
 	err = api.clickhouseClient.Exec(ctx, query,
 		uuid.New(),
 		api.serverID,
-		uint64(steamID),
+		identifiers.PlayerID,
+		steamIDVal,
+		identifiers.EOSID,
 		&ruleUUID,
 		nil, // No admin_user_id for plugin actions
 		actionType,

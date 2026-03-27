@@ -459,7 +459,7 @@ func (s *Scrambler) countPreservedSquads(moves []PlayerMove, groups []*SquadGrou
 		for _, player := range group.Players {
 			moved := false
 			for _, move := range moves {
-				if move.SteamID == player.SteamID {
+				if move.SteamID == player.PreferredID() {
 					moved = true
 					movedCount++
 					break
@@ -492,7 +492,7 @@ func (s *Scrambler) countSplitSquads(moves []PlayerMove, groups []*SquadGroup) i
 		movedCount := 0
 		for _, player := range group.Players {
 			for _, move := range moves {
-				if move.SteamID == player.SteamID {
+				if move.SteamID == player.PreferredID() {
 					movedCount++
 					break
 				}

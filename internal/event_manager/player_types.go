@@ -1,5 +1,7 @@
 package event_manager
 
+import "go.codycody31.dev/squad-aegis/internal/shared/utils"
+
 // PlayerInfo represents player information used in events
 type PlayerInfo struct {
 	PlayerController string `json:"playercontroller,omitempty"`
@@ -10,6 +12,17 @@ type PlayerInfo struct {
 	Controller       string `json:"controller,omitempty"`
 	TeamID           string `json:"teamID,omitempty"`
 	SquadID          string `json:"squadID,omitempty"`
+}
+
+// PreferredID returns the Steam ID when available, otherwise the EOS ID.
+func (p *PlayerInfo) PreferredID() string {
+	if p == nil {
+		return ""
+	}
+	if p.SteamID != "" {
+		return utils.NormalizePlayerID(p.SteamID)
+	}
+	return utils.NormalizePlayerID(p.EOSID)
 }
 
 // RoundWinnerInfo represents round winner information in events

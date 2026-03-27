@@ -229,11 +229,12 @@ func (p *TeamRandomizerPlugin) handleChatMessage(rawEvent *plugin_manager.Plugin
 
 	// Check if admin only and validate admin status
 	if p.getBoolConfig("admin_only") {
-		isAdmin, err := p.isPlayerAdmin(event.SteamID)
+		playerID := event.PreferredPlayerID()
+		isAdmin, err := p.isPlayerAdmin(playerID)
 		if err != nil {
 			p.apis.LogAPI.Error("Failed to check admin status", err, map[string]interface{}{
-				"player":  event.PlayerName,
-				"steamID": event.SteamID,
+				"player":    event.PlayerName,
+				"player_id": playerID,
 			})
 			return err
 		}
@@ -244,7 +245,7 @@ func (p *TeamRandomizerPlugin) handleChatMessage(rawEvent *plugin_manager.Plugin
 	}
 
 	// Execute team randomization
-	if err := p.randomizeTeams(event.PlayerName, event.SteamID); err != nil {
+	if err := p.randomizeTeams(event.PlayerName, event.PreferredPlayerID()); err != nil {
 		p.apis.LogAPI.Error("Failed to randomize teams", err, map[string]interface{}{
 			"initiator": event.PlayerName,
 		})
@@ -262,14 +263,14 @@ func (p *TeamRandomizerPlugin) isRandomizeCommand(message string) bool {
 }
 
 // isPlayerAdmin checks if a player is an admin
-func (p *TeamRandomizerPlugin) isPlayerAdmin(steamID string) (bool, error) {
+func (p *TeamRandomizerPlugin) isPlayerAdmin(playerID string) (bool, error) {
 	admins, err := p.apis.ServerAPI.GetAdmins()
 	if err != nil {
 		return false, fmt.Errorf("failed to get admin list: %w", err)
 	}
 
 	for _, admin := range admins {
-		if admin.SteamID == steamID {
+		if admin.MatchesPlayerID(playerID) {
 			return true, nil
 		}
 	}
@@ -277,7 +278,7 @@ func (p *TeamRandomizerPlugin) isPlayerAdmin(steamID string) (bool, error) {
 }
 
 // randomizeTeams performs the team randomization
-func (p *TeamRandomizerPlugin) randomizeTeams(initiatorName, steamID string) error {
+func (p *TeamRandomizerPlugin) randomizeTeams(initiatorName, playerID string) error {
 	// Get current players
 	players, err := p.apis.ServerAPI.GetPlayers()
 	if err != nil {
@@ -287,7 +288,7 @@ func (p *TeamRandomizerPlugin) randomizeTeams(initiatorName, steamID string) err
 	// Filter out players who are not online or don't have valid IDs
 	var validPlayers []*plugin_manager.PlayerInfo
 	for _, player := range players {
-		if player.IsOnline && player.SteamID != "" {
+		if player.IsOnline && player.PreferredID() != "" {
 			validPlayers = append(validPlayers, player)
 		}
 	}
@@ -330,17 +331,17 @@ func (p *TeamRandomizerPlugin) randomizeTeams(initiatorName, steamID string) err
 			if _, err := p.apis.RconAPI.SendCommand(command); err != nil {
 				p.apis.LogAPI.Error("Failed to move player to team", err, map[string]interface{}{
 					"player":     player.Name,
-					"steamID":    player.SteamID,
+					"player_id":  player.PreferredID(),
 					"targetTeam": targetTeam,
 				})
 				// Continue with other players instead of failing completely
 			} else {
 				moveCount++
 				p.apis.LogAPI.Debug("Moved player to team", map[string]interface{}{
-					"player":   player.Name,
-					"steamID":  player.SteamID,
-					"fromTeam": player.TeamID,
-					"toTeam":   targetTeam,
+					"player":    player.Name,
+					"player_id": player.PreferredID(),
+					"fromTeam":  player.TeamID,
+					"toTeam":    targetTeam,
 				})
 			}
 		}
@@ -367,7 +368,7 @@ func (p *TeamRandomizerPlugin) randomizeTeams(initiatorName, steamID string) err
 		"totalPlayers": len(validPlayers),
 		"playersMoved": moveCount,
 		"initiator":    initiatorName,
-		"steamID":      steamID,
+		"player_id":    playerID,
 	})
 
 	return nil

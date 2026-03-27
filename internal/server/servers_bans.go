@@ -25,6 +25,36 @@ import (
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
 )
 
+type normalizedBanSubject struct {
+	steamIDVal      interface{}
+	eosIDVal        interface{}
+	normalizedEOSID string
+}
+
+func normalizeBanSubject(steamID string, eosID string) (normalizedBanSubject, string) {
+	steamID = strings.TrimSpace(steamID)
+	eosID = strings.TrimSpace(eosID)
+
+	subject := normalizedBanSubject{}
+	if steamID != "" {
+		parsedSteamID, err := strconv.ParseInt(steamID, 10, 64)
+		if err != nil {
+			return normalizedBanSubject{}, "steam_id"
+		}
+		subject.steamIDVal = parsedSteamID
+	}
+
+	if eosID != "" {
+		subject.normalizedEOSID = utils.NormalizeEOSID(eosID)
+		if subject.normalizedEOSID == "" {
+			return normalizedBanSubject{}, "eos_id"
+		}
+		subject.eosIDVal = subject.normalizedEOSID
+	}
+
+	return subject, ""
+}
+
 // ServerBansList handles listing all bans for a server
 func (s *Server) ServerBansList(c *gin.Context) {
 	user := s.getUserFromSession(c)
@@ -60,7 +90,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	defer rows.Close()
 
 	bans := []models.ServerBan{}
-	steamIDs := []string{}
+	identifiers := []PlayerIdentifier{}
 	for rows.Next() {
 		var ban models.ServerBan
 		var adminIDStr sql.NullString
@@ -109,9 +139,12 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			ban.EOSID = utils.NormalizeEOSID(eosIDStr.String)
 		}
 
-		// Collect steam IDs for batch lookup
+		// Collect identifiers for batch name lookup
 		if ban.SteamID != "" {
-			steamIDs = append(steamIDs, ban.SteamID)
+			identifiers = append(identifiers, PlayerIdentifier{Value: ban.SteamID, IsSteam: true})
+		}
+		if ban.EOSID != "" {
+			identifiers = append(identifiers, PlayerIdentifier{Value: ban.EOSID, IsSteam: false})
 		}
 
 		// Set rule ID if present
@@ -158,13 +191,23 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	}
 
 	// Batch lookup player names from ClickHouse
-	playerNames := s.lookupPlayerNamesBatch(c.Request.Context(), steamIDs)
+	playerNames := s.lookupPlayerNamesBatchByIdentifiers(c.Request.Context(), identifiers)
 
 	// Assign player names to bans
 	for i := range bans {
-		if name, ok := playerNames[bans[i].SteamID]; ok {
-			bans[i].Name = name
-		} else if bans[i].SteamID != "" {
+		if bans[i].SteamID != "" {
+			if name, ok := playerNames["steam:"+bans[i].SteamID]; ok {
+				bans[i].Name = name
+				continue
+			}
+		}
+		if bans[i].EOSID != "" {
+			if name, ok := playerNames["eos:"+bans[i].EOSID]; ok {
+				bans[i].Name = name
+				continue
+			}
+		}
+		if bans[i].SteamID != "" {
 			bans[i].Name = bans[i].SteamID
 		} else {
 			bans[i].Name = bans[i].EOSID
@@ -219,29 +262,20 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 	}
 
 	// Detect and validate player ID types
-	var steamIDVal interface{}
-	var eosIDVal interface{}
-	normalizedEOSID := utils.NormalizeEOSID(request.EOSID)
-	if request.SteamID != "" {
-		steamID, parseErr := strconv.ParseInt(request.SteamID, 10, 64)
-		if parseErr != nil {
-			responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
-			return
-		}
-		steamIDVal = steamID
-	}
-	if normalizedEOSID != "" {
-		if !utils.IsEOSID(normalizedEOSID) {
-			responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
-			return
-		}
-		eosIDVal = normalizedEOSID
+	subject, invalidField := normalizeBanSubject(request.SteamID, request.EOSID)
+	switch invalidField {
+	case "steam_id":
+		responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
+		return
+	case "eos_id":
+		responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
+		return
 	}
 
 	// Determine the player ID to use for RCON commands (prefer Steam ID)
 	rconPlayerID := request.SteamID
 	if rconPlayerID == "" {
-		rconPlayerID = normalizedEOSID
+		rconPlayerID = subject.normalizedEOSID
 	}
 
 	restoreExcludedSteamIDs := map[string]bool(nil)
@@ -249,8 +283,8 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		restoreExcludedSteamIDs = map[string]bool{request.SteamID: true}
 	}
 	restoreExcludedEOSIDs := map[string]bool(nil)
-	if normalizedEOSID != "" {
-		restoreExcludedEOSIDs = map[string]bool{normalizedEOSID: true}
+	if subject.normalizedEOSID != "" {
+		restoreExcludedEOSIDs = map[string]bool{subject.normalizedEOSID: true}
 	}
 
 	// Build INSERT query dynamically
@@ -259,7 +293,7 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 
 	columns := "id, server_id, admin_id, steam_id, eos_id, reason, expires_at, evidence_text, created_at, updated_at"
 	placeholders := "$1, $2, $3, $4, $5, $6, $7, $8, $9, $10"
-	args := []interface{}{banID, serverId, user.Id, steamIDVal, eosIDVal, request.Reason, expiresAt, request.EvidenceText, now, now}
+	args := []interface{}{banID, serverId, user.Id, subject.steamIDVal, subject.eosIDVal, request.Reason, expiresAt, request.EvidenceText, now, now}
 	nextParam := 11
 
 	if request.RuleID != nil && *request.RuleID != "" {
@@ -324,10 +358,11 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
-	// Log rule violation to ClickHouse if rule ID is provided (Steam ID only - ClickHouse schema requires UInt64)
-	if request.RuleID != nil && *request.RuleID != "" && request.SteamID != "" {
-		if err := s.logRuleViolation(c.Request.Context(), serverId, request.SteamID, request.RuleID, &user.Id, "BAN"); err != nil {
-			log.Warn().Err(err).Str("steamId", request.SteamID).Str("ruleId", *request.RuleID).Msg("Failed to log rule violation for manual ban")
+	// Log rule violation to ClickHouse if rule ID is provided.
+	if request.RuleID != nil && *request.RuleID != "" {
+		identifiers := utils.NormalizePlayerIdentifiers("", request.SteamID, request.EOSID)
+		if err := s.logRuleViolation(c, serverId, identifiers.PlayerID, identifiers.SteamID, identifiers.EOSID, request.RuleID, &user.Id, "BAN"); err != nil {
+			log.Warn().Err(err).Str("playerId", identifiers.PlayerID).Str("ruleId", *request.RuleID).Msg("Failed to log rule violation for manual ban")
 		}
 	}
 

@@ -248,7 +248,7 @@ function clearCommandHistory() {
 </script>
 
 <template>
-  <div class="p-4">
+  <div class="console-page p-4">
     <h1 class="text-2xl font-bold mb-4">Console</h1>
 
     <!-- Replace the command input section with a responsive layout -->
@@ -343,7 +343,7 @@ function clearCommandHistory() {
     </ul>
 
     <div class="terminal-output mt-4">
-      <pre>{{ output }}</pre>
+      <pre class="console-pre">{{ output }}</pre>
     </div>
 
     <!-- All Commands Dialog -->
@@ -483,7 +483,7 @@ function clearCommandHistory() {
                 </div>
               </div>
               <div class="history-response">
-                <pre>{{ entry.response }}</pre>
+                <pre class="console-pre">{{ entry.response }}</pre>
               </div>
             </div>
           </div>
@@ -501,6 +501,10 @@ function clearCommandHistory() {
 </template>
 
 <style scoped>
+.console-page {
+  min-width: 0;
+}
+
 .terminal-input {
   font-family: monospace;
   background-color: #1e1e1e;
@@ -517,16 +521,25 @@ function clearCommandHistory() {
   color: #d4d4d4;
   padding: 10px;
   height: 200px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   overflow-y: auto;
   overflow-x: auto;
   border-radius: 4px;
   border: 1px solid #333;
 }
 
-.terminal-output pre {
-  white-space: pre-wrap;
-  word-wrap: break-word;
+.console-pre {
+  margin: 0;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  word-wrap: break-word;
 }
 
 .suggestions-list {
@@ -683,14 +696,15 @@ function clearCommandHistory() {
   border-radius: 4px;
   padding: 0.5rem;
   margin-top: 0.5rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   max-height: 200px;
   overflow-y: auto;
 }
 
 .history-response pre {
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  max-width: 100%;
   font-family: monospace;
   font-size: 0.9rem;
 }

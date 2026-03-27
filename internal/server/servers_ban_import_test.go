@@ -500,7 +500,7 @@ func TestIsHex(t *testing.T) {
 		{"abcdef0123456789ABCDEF0123456789", true},
 		{"0000000000000000000000000000000g", false}, // 'g' is not hex
 		{"", false},
-		{"76561199814503607", false}, // numeric but not 32 chars (handled separately in parser)
+		{"76561199814503607", true}, // numeric strings are valid hex (length check is in IsEOSID, not IsHex)
 	}
 
 	for _, tt := range tests {

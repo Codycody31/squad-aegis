@@ -39,6 +39,7 @@ type EventStoreInterface interface {
 
 	// Player lookup methods (new interface)
 	GetPlayerInfoByName(name string) (*event_manager.PlayerInfo, bool)
+	GetPlayerInfoByIdentifier(playerID string) (*event_manager.PlayerInfo, bool)
 	GetPlayerInfoByEOSID(eosID string) (*event_manager.PlayerInfo, bool)
 	GetPlayerInfoByController(controllerID string) (*event_manager.PlayerInfo, bool)
 }

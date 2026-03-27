@@ -331,6 +331,13 @@ func (p *CBLPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEvent) 
 
 // checkPlayerAndAlertAutoKickIfNeeded queries the CBL API and sends Discord alert if needed
 func (p *CBLPlugin) checkPlayerAndAlertAutoKickIfNeeded(ctx context.Context, event *event_manager.LogPlayerConnectedData) error {
+	if event.SteamID == "" {
+		p.apis.LogAPI.Debug("Skipping Community Ban List check for EOS-only player", map[string]interface{}{
+			"player_id": event.PreferredPlayerID(),
+		})
+		return nil
+	}
+
 	// Check if Steam ID is in the ignore list
 	ignoredSteamIDs := p.getArrayStringConfig("ignored_steam_ids")
 	for _, ignoredID := range ignoredSteamIDs {

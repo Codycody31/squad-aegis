@@ -5,6 +5,7 @@ package squad_leader_whitelist
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -14,6 +15,8 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
+	"go.codycody31.dev/squad-aegis/internal/shared/whitelistprogress"
 )
 
 // SquadLeaderWhitelistPlugin manages a progressive whitelist for players who lead squads effectively
@@ -39,7 +42,9 @@ type SquadLeaderWhitelistPlugin struct {
 }
 
 // PlayerProgressRecord tracks a player's squad leadership progress
-type PlayerProgressRecord struct {
+type PlayerProgressRecord = whitelistprogress.PlayerRecord
+
+type legacyPlayerProgressRecord struct {
 	SteamID         string    `json:"steam_id"`
 	Progress        float64   `json:"progress"`
 	LastProgressed  time.Time `json:"last_progressed"`
@@ -49,7 +54,9 @@ type PlayerProgressRecord struct {
 
 // SquadLeaderSession tracks an active squad leadership session
 type SquadLeaderSession struct {
-	SteamID   string    `json:"steam_id"`
+	PlayerID  string    `json:"player_id"`
+	SteamID   string    `json:"steam_id,omitempty"`
+	EOSID     string    `json:"eos_id,omitempty"`
 	StartTime time.Time `json:"start_time"`
 	LastCheck time.Time `json:"last_check"`
 	SquadSize int       `json:"squad_size"`
@@ -370,11 +377,11 @@ func (p *SquadLeaderWhitelistPlugin) GetConfig() map[string]interface{} {
 // UpdateConfig updates the plugin configuration
 func (p *SquadLeaderWhitelistPlugin) UpdateConfig(config map[string]interface{}) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	// Validate new config
 	definition := p.GetDefinition()
 	if err := definition.ConfigSchema.Validate(config); err != nil {
+		p.mu.Unlock()
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
@@ -382,6 +389,7 @@ func (p *SquadLeaderWhitelistPlugin) UpdateConfig(config map[string]interface{})
 	definition.ConfigSchema.FillDefaults(config)
 
 	p.config = config
+	shouldSyncAdmins := false
 
 	// If running, restart tickers with new intervals
 	if p.status == plugin_manager.PluginStatusRunning {
@@ -401,12 +409,14 @@ func (p *SquadLeaderWhitelistPlugin) UpdateConfig(config map[string]interface{})
 
 		// Restart admin sync ticker if enabled
 		if p.getBoolConfig("auto_add_temporary_admins") {
+			shouldSyncAdmins = true
+			startAdminSyncLoop := p.adminSyncTicker == nil
 			if p.adminSyncTicker != nil {
 				p.adminSyncTicker.Stop()
 			}
 			adminSyncInterval := time.Duration(p.getIntConfig("admin_sync_interval_minutes")) * time.Minute
 			p.adminSyncTicker = time.NewTicker(adminSyncInterval)
-			if p.adminSyncTicker == nil {
+			if startAdminSyncLoop {
 				go p.adminSyncLoop()
 			}
 		} else {
@@ -418,11 +428,19 @@ func (p *SquadLeaderWhitelistPlugin) UpdateConfig(config map[string]interface{})
 		}
 	}
 
+	p.mu.Unlock()
+
 	p.apis.LogAPI.Info("Squad Leader Whitelist plugin configuration updated", map[string]interface{}{
 		"min_squad_size":          config["min_squad_size"],
 		"hours_to_whitelist":      config["hours_to_whitelist"],
 		"whitelist_duration_days": config["whitelist_duration_days"],
 	})
+
+	if shouldSyncAdmins {
+		if err := p.syncTemporaryAdmins(); err != nil {
+			p.apis.LogAPI.Error("Failed to reconcile squad leader whitelist admins after config update", err, nil)
+		}
+	}
 
 	return nil
 }
@@ -483,26 +501,38 @@ func (p *SquadLeaderWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager.
 	}
 
 	playerID := event.PreferredPlayerID()
-	return p.sendProgressToPlayer(playerID)
+	return p.sendProgressToPlayer(playerID, event.SteamID, event.EosID)
 }
 
 // handlePlayerConnected tracks when players connect for statistics
 func (p *SquadLeaderWhitelistPlugin) handlePlayerConnected(event *plugin_manager.PluginEvent) error {
-	// Extract player info from event data
-	eventData, ok := event.Data.(map[string]interface{})
-	if !ok {
-		return nil
+	var steamID string
+	var eosID string
+	switch data := event.Data.(type) {
+	case *event_manager.LogPlayerConnectedData:
+		steamID = data.SteamID
+		eosID = data.EOSID
+	case event_manager.LogPlayerConnectedData:
+		steamID = data.SteamID
+		eosID = data.EOSID
+	case map[string]interface{}:
+		steamID, _ = data["steam_id"].(string)
+		eosID, _ = data["eos_id"].(string)
 	}
 
-	steamID, ok := eventData["steam_id"].(string)
-	if !ok || steamID == "" {
+	playerID := utils.NormalizePlayerID(steamID)
+	if playerID == "" {
+		playerID = utils.NormalizePlayerID(eosID)
+	}
+	playerID = utils.NormalizePlayerID(playerID)
+	if playerID == "" {
 		return nil
 	}
 
 	// Update last seen time for the player
 	p.mu.Lock()
-	if record, exists := p.playerProgress[steamID]; exists {
-		record.LastSeen = time.Now()
+	if record, exists := whitelistprogress.FindRecordByIdentifiers(p.playerProgress, steamID, eosID); exists {
+		record.LastSeenAt = time.Now()
 	}
 	p.mu.Unlock()
 
@@ -517,8 +547,14 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 		return nil
 	}
 
-	steamID, ok := eventData["steam_id"].(string)
-	if !ok || steamID == "" {
+	var playerID string
+	if steamID, ok := eventData["steam_id"].(string); ok && steamID != "" {
+		playerID = steamID
+	} else if eosID, ok := eventData["eos_id"].(string); ok {
+		playerID = eosID
+	}
+	playerID = utils.NormalizePlayerID(playerID)
+	if playerID == "" {
 		return nil
 	}
 
@@ -536,7 +572,12 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 	if !isLeader {
 		// Player is no longer a squad leader, remove their session
 		p.mu.Lock()
-		delete(p.squadLeaderSession, steamID)
+		sessionKey, _, exists := p.findSquadLeaderSessionLocked(playerID, eventData["steam_id"], eventData["eos_id"])
+		if exists {
+			delete(p.squadLeaderSession, sessionKey)
+		} else {
+			delete(p.squadLeaderSession, playerID)
+		}
 		p.mu.Unlock()
 		return nil
 	}
@@ -545,14 +586,29 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if session, exists := p.squadLeaderSession[steamID]; exists {
+	if sessionKey, session, exists := p.findSquadLeaderSessionLocked(playerID, eventData["steam_id"], eventData["eos_id"]); exists {
+		if sessionKey != playerID {
+			delete(p.squadLeaderSession, sessionKey)
+			p.squadLeaderSession[playerID] = session
+		}
+		session.PlayerID = playerID
+		if steamID, ok := eventData["steam_id"].(string); ok && steamID != "" {
+			session.SteamID = utils.NormalizePlayerID(steamID)
+		}
+		if eosID, ok := eventData["eos_id"].(string); ok && eosID != "" {
+			session.EOSID = utils.NormalizePlayerID(eosID)
+		}
 		session.LastCheck = time.Now()
 		session.SquadSize = int(memberCount)
 		session.SquadName = squadName
 		session.Unlocked = unlocked
 	} else {
-		p.squadLeaderSession[steamID] = &SquadLeaderSession{
-			SteamID:   steamID,
+		steamID, _ := eventData["steam_id"].(string)
+		eosID, _ := eventData["eos_id"].(string)
+		p.squadLeaderSession[playerID] = &SquadLeaderSession{
+			PlayerID:  playerID,
+			SteamID:   utils.NormalizePlayerID(steamID),
+			EOSID:     utils.NormalizePlayerID(eosID),
 			StartTime: time.Now(),
 			LastCheck: time.Now(),
 			SquadSize: int(memberCount),
@@ -562,6 +618,42 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 	}
 
 	return nil
+}
+
+func (p *SquadLeaderWhitelistPlugin) findSquadLeaderSessionLocked(playerID string, steamIDValue interface{}, eosIDValue interface{}) (string, *SquadLeaderSession, bool) {
+	steamID, _ := steamIDValue.(string)
+	eosID, _ := eosIDValue.(string)
+
+	candidates := []string{
+		utils.NormalizePlayerID(playerID),
+		utils.NormalizePlayerID(steamID),
+		utils.NormalizePlayerID(eosID),
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if session, exists := p.squadLeaderSession[candidate]; exists && session != nil {
+			return candidate, session, true
+		}
+	}
+
+	for key, session := range p.squadLeaderSession {
+		if session == nil {
+			continue
+		}
+		for _, candidate := range candidates {
+			if candidate == "" {
+				continue
+			}
+			if utils.MatchPlayerID(candidate, session.SteamID, session.EOSID) || candidate == utils.NormalizePlayerID(session.PlayerID) {
+				return key, session, true
+			}
+		}
+	}
+
+	return "", nil, false
 }
 
 // updateSquadLeaderSessions updates the squad leader sessions based on current player state
@@ -580,19 +672,28 @@ func (p *SquadLeaderWhitelistPlugin) updateSquadLeaderSessions(players []*plugin
 			continue
 		}
 
-		activeLeaders[player.SteamID] = true
+		playerID := player.PreferredID()
+		if playerID == "" {
+			continue
+		}
+
+		activeLeaders[playerID] = true
 
 		// Update or create squad leader session
-		if session, exists := p.squadLeaderSession[player.SteamID]; exists {
+		if session, exists := p.squadLeaderSession[playerID]; exists {
 			// Update existing session
+			session.SteamID = utils.NormalizePlayerID(player.SteamID)
+			session.EOSID = utils.NormalizePlayerID(player.EOSID)
 			session.LastCheck = now
 			session.SquadSize = p.getSquadSize(players, player.TeamID, player.SquadID)
 			session.SquadName = fmt.Sprintf("Squad %d", player.SquadID)
 			session.Unlocked = true // We don't have unlock info from the player API, assume unlocked for now
 		} else {
 			// Create new session for this squad leader
-			p.squadLeaderSession[player.SteamID] = &SquadLeaderSession{
-				SteamID:   player.SteamID,
+			p.squadLeaderSession[playerID] = &SquadLeaderSession{
+				PlayerID:  playerID,
+				SteamID:   utils.NormalizePlayerID(player.SteamID),
+				EOSID:     utils.NormalizePlayerID(player.EOSID),
 				StartTime: now,
 				LastCheck: now,
 				SquadSize: p.getSquadSize(players, player.TeamID, player.SquadID),
@@ -603,9 +704,9 @@ func (p *SquadLeaderWhitelistPlugin) updateSquadLeaderSessions(players []*plugin
 	}
 
 	// Remove sessions for players who are no longer squad leaders
-	for steamID := range p.squadLeaderSession {
-		if !activeLeaders[steamID] {
-			delete(p.squadLeaderSession, steamID)
+	for playerID := range p.squadLeaderSession {
+		if !activeLeaders[playerID] {
+			delete(p.squadLeaderSession, playerID)
 		}
 	}
 }
@@ -698,19 +799,25 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 	// Get configuration values
 	minSquadSize := p.getIntConfig("min_squad_size")
 	requireUnlocked := p.getBoolConfig("require_unlocked_squad")
-	hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
-	intervalSeconds := float64(p.getIntConfig("progress_interval_seconds"))
-	progressIncrement := (intervalSeconds / 3600.0) / hoursToWhitelist * 100.0
+	requiredSeconds := p.requiredWhitelistSeconds()
+	if requiredSeconds <= 0 {
+		return nil
+	}
 
-	whitelistThreshold := 100.0
+	intervalSeconds := int64(p.getIntConfig("progress_interval_seconds"))
+	if intervalSeconds <= 0 {
+		return nil
+	}
+
 	notificationThresholds := p.getIntArrayConfig("progress_notification_thresholds")
+	manageTemporaryAdmins := p.getBoolConfig("auto_add_temporary_admins")
 
 	now := time.Now()
 	var updatedPlayers []string
 
 	p.mu.Lock()
 	// Process active squad leader sessions
-	for steamID, session := range p.squadLeaderSession {
+	for playerID, session := range p.squadLeaderSession {
 		// Check if squad meets size requirement
 		if session.SquadSize < minSquadSize {
 			continue
@@ -723,60 +830,49 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 
 		// Find player name and preferred ID for RCON calls
 		var playerName string
-		var playerPreferredID string
 		for _, player := range players {
-			if player.SteamID == steamID {
+			if player.MatchesPlayerID(playerID) {
 				playerName = player.Name
-				playerPreferredID = player.PreferredID()
 				break
 			}
-		}
-		if playerPreferredID == "" {
-			playerPreferredID = steamID
 		}
 
 		// Update session check time
 		session.LastCheck = now
 
 		// Get or create player progress record
-		record, exists := p.playerProgress[steamID]
-		if !exists {
-			record = &PlayerProgressRecord{
-				SteamID:         steamID,
-				Progress:        0,
-				LastProgressed:  now,
-				TotalLeadership: 0,
-				LastSeen:        now,
-			}
-			p.playerProgress[steamID] = record
+		record := whitelistprogress.EnsureRecord(p.playerProgress, session.SteamID, session.EOSID, now)
+		if record == nil {
+			continue
 		}
 
-		oldProgress := record.Progress
-		newProgress := record.Progress + progressIncrement
-		record.Progress = newProgress
-		record.LastProgressed = now
-		record.TotalLeadership += progressIncrement
-		record.LastSeen = now
+		oldQualifiedSeconds := record.QualifiedSeconds
+		record.QualifiedSeconds += intervalSeconds
+		record.LastEarnedAt = now
+		record.LifetimeSeconds += intervalSeconds
+		record.LastSeenAt = now
+		newQualifiedSeconds := record.QualifiedSeconds
 
-		updatedPlayers = append(updatedPlayers, steamID)
+		updatedPlayers = append(updatedPlayers, record.PlayerID)
 
 		// Check for notification thresholds and whitelist status changes
-		oldPercentage := oldProgress
-		newPercentage := newProgress
+		oldPercentage := whitelistprogress.Percent(oldQualifiedSeconds, requiredSeconds)
+		newPercentage := whitelistprogress.Percent(newQualifiedSeconds, requiredSeconds)
 
 		// Check if player just reached whitelist threshold
-		if oldProgress < whitelistThreshold && newProgress >= whitelistThreshold {
+		if manageTemporaryAdmins &&
+			oldQualifiedSeconds < requiredSeconds &&
+			newQualifiedSeconds >= requiredSeconds {
 			// Player just became whitelisted - add them as admin (skip if shutting down)
 			if !p.shuttingDown {
-				go p.addPlayerAsTemporaryAdmin(steamID, playerName)
+				go p.addPlayerAsTemporaryAdmin(record.PlayerID, playerName)
 			}
 		}
 
 		for _, threshold := range notificationThresholds {
 			thresholdFloat := float64(threshold)
 			if oldPercentage < thresholdFloat && newPercentage >= thresholdFloat {
-				// Player crossed a notification threshold - use preferred ID for RCON call
-				go p.sendProgressNotification(playerPreferredID, playerName, newPercentage, newProgress >= whitelistThreshold)
+				go p.sendProgressNotification(playerID, playerName, newPercentage, newQualifiedSeconds >= requiredSeconds)
 				break
 			}
 		}
@@ -792,10 +888,10 @@ func (p *SquadLeaderWhitelistPlugin) trackProgress() error {
 		// Only log occasionally to reduce log spam
 		if len(updatedPlayers) >= 3 {
 			p.apis.LogAPI.Debug("Awarded squad leader progress", map[string]interface{}{
-				"player_count":       onlinePlayerCount,
-				"min_squad_size":     minSquadSize,
-				"progress_increment": progressIncrement,
-				"updated_players":    len(updatedPlayers),
+				"player_count":    onlinePlayerCount,
+				"min_squad_size":  minSquadSize,
+				"seconds_awarded": intervalSeconds,
+				"updated_players": len(updatedPlayers),
 			})
 		}
 	}
@@ -823,13 +919,17 @@ func (p *SquadLeaderWhitelistPlugin) decayProgress() error {
 		return nil // Server population too low for decay
 	}
 
-	// Calculate decay increment
-	hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
-	decayAfterHours := float64(p.getIntConfig("decay_after_hours"))
-	intervalSeconds := float64(p.getIntConfig("decay_interval_seconds"))
+	requiredSeconds := p.requiredWhitelistSeconds()
+	if requiredSeconds <= 0 {
+		return nil
+	}
 
-	// Decay rate: lose 100% progress over the same time it took to earn it
-	decayIncrement := (intervalSeconds / 3600.0) / hoursToWhitelist * 100.0
+	decayAfterHours := float64(p.getIntConfig("decay_after_hours"))
+	decaySeconds := int64(p.getIntConfig("decay_interval_seconds"))
+	if decaySeconds <= 0 {
+		return nil
+	}
+	manageTemporaryAdmins := p.getBoolConfig("auto_add_temporary_admins")
 
 	now := time.Now()
 	decayThreshold := time.Duration(decayAfterHours * float64(time.Hour))
@@ -837,19 +937,20 @@ func (p *SquadLeaderWhitelistPlugin) decayProgress() error {
 
 	p.mu.Lock()
 	for _, record := range p.playerProgress {
-		timeSinceProgress := now.Sub(record.LastProgressed)
+		timeSinceProgress := now.Sub(record.LastEarnedAt)
 		if timeSinceProgress > decayThreshold {
-			if record.Progress > 0 {
-				oldProgress := record.Progress
-				record.Progress = max(0, record.Progress-decayIncrement)
+			if record.QualifiedSeconds > 0 {
+				oldQualifiedSeconds := record.QualifiedSeconds
+				record.QualifiedSeconds = whitelistprogress.DecayQualifiedSeconds(record.QualifiedSeconds, decaySeconds)
 				decayedPlayers++
 
 				// Check if player lost whitelist status due to decay
-				whitelistThreshold := 100.0
-				if oldProgress >= whitelistThreshold && record.Progress < whitelistThreshold {
+				if manageTemporaryAdmins &&
+					oldQualifiedSeconds >= requiredSeconds &&
+					record.QualifiedSeconds < requiredSeconds {
 					// Player lost whitelist status - remove admin privileges (skip if shutting down)
 					if !p.shuttingDown {
-						go p.removePlayerAsTemporaryAdmin(record.SteamID, "")
+						go p.removePlayerAsTemporaryAdmin(record.PlayerID, "")
 					}
 				}
 			}
@@ -867,7 +968,7 @@ func (p *SquadLeaderWhitelistPlugin) decayProgress() error {
 		if decayedPlayers >= 3 {
 			p.apis.LogAPI.Debug("Applied squad leader progress decay", map[string]interface{}{
 				"decayed_players":   decayedPlayers,
-				"decay_increment":   decayIncrement,
+				"decay_seconds":     decaySeconds,
 				"server_population": onlinePlayerCount,
 			})
 		}
@@ -877,35 +978,37 @@ func (p *SquadLeaderWhitelistPlugin) decayProgress() error {
 }
 
 // sendProgressToPlayer sends progress information to a specific player
-func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(steamID string) error {
+func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(playerID string, steamID string, eosID string) error {
 	p.mu.Lock()
-	record, exists := p.playerProgress[steamID]
-	session, hasActiveSession := p.squadLeaderSession[steamID]
+	record, exists := whitelistprogress.FindRecordByIdentifiers(p.playerProgress, steamID, eosID)
+	if !exists {
+		record, exists = whitelistprogress.FindRecord(p.playerProgress, playerID)
+	}
+	_, session, hasActiveSession := p.findSquadLeaderSessionLocked(playerID, steamID, eosID)
 	p.mu.Unlock()
 
-	whitelistThreshold := 100.0
+	requiredSeconds := p.requiredWhitelistSeconds()
 
 	var message string
-	if !exists || record.Progress == 0 {
+	if !exists || record.QualifiedSeconds == 0 || requiredSeconds <= 0 {
 		message = "No squad leadership progress found.\n" +
 			"Lead a squad with 5+ members to earn progress!"
 	} else {
-		percentage := record.Progress
+		percentage := whitelistprogress.Percent(record.QualifiedSeconds, requiredSeconds)
 		if percentage > 100 {
 			percentage = 100
 		}
 
 		var status string
-		if record.Progress >= whitelistThreshold {
+		if whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
 			// Get rank among whitelisted players
-			rank := p.getPlayerRank(steamID)
+			rank := p.getPlayerRank(record.PlayerID)
 			status = fmt.Sprintf("WHITELISTED (Rank #%d)", rank)
 		} else {
 			status = fmt.Sprintf("Progress: %.1f%%", percentage)
 		}
 
-		hoursToWhitelist := float64(p.getIntConfig("hours_to_whitelist"))
-		totalHours := record.TotalLeadership / 100.0 * hoursToWhitelist
+		totalHours := whitelistprogress.SecondsToHours(record.LifetimeSeconds)
 
 		message = status + "\n" +
 			fmt.Sprintf("Total Leadership: %.1f hours", totalHours)
@@ -919,7 +1022,7 @@ func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(steamID string) error 
 		}
 	}
 
-	if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
+	if err := p.apis.RconAPI.SendWarningToPlayer(playerID, message); err != nil {
 		return fmt.Errorf("failed to send progress message: %w", err)
 	}
 
@@ -927,7 +1030,7 @@ func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(steamID string) error 
 }
 
 // sendProgressNotification sends a notification when a player crosses a threshold
-func (p *SquadLeaderWhitelistPlugin) sendProgressNotification(steamID, playerName string, percentage float64, isWhitelisted bool) {
+func (p *SquadLeaderWhitelistPlugin) sendProgressNotification(playerID, playerName string, percentage float64, isWhitelisted bool) {
 	var message string
 	if isWhitelisted {
 		message = "CONGRATULATIONS!\n" +
@@ -939,30 +1042,37 @@ func (p *SquadLeaderWhitelistPlugin) sendProgressNotification(steamID, playerNam
 			"Keep leading to earn whitelist!"
 	}
 
-	if err := p.apis.RconAPI.SendWarningToPlayer(steamID, message); err != nil {
+	if err := p.apis.RconAPI.SendWarningToPlayer(playerID, message); err != nil {
 		p.apis.LogAPI.Error("Failed to send progress notification", err, map[string]interface{}{
-			"steam_id":    steamID,
+			"player_id":   playerID,
 			"player_name": playerName,
 		})
 	}
 }
 
 // getPlayerRank returns the rank of a player among whitelisted players
-func (p *SquadLeaderWhitelistPlugin) getPlayerRank(steamID string) int {
-	whitelistThreshold := 100.0
+func (p *SquadLeaderWhitelistPlugin) getPlayerRank(playerID string) int {
+	requiredSeconds := p.requiredWhitelistSeconds()
+	if requiredSeconds <= 0 {
+		return 1
+	}
 
 	type playerRank struct {
-		steamID  string
-		progress float64
+		playerID string
+		progress int64
 	}
 
 	var whitelistedPlayers []playerRank
 	p.mu.Lock()
+	record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID)
+	if exists {
+		playerID = record.PlayerID
+	}
 	for _, record := range p.playerProgress {
-		if record.Progress >= whitelistThreshold {
+		if whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
 			whitelistedPlayers = append(whitelistedPlayers, playerRank{
-				steamID:  record.SteamID,
-				progress: record.Progress,
+				playerID: record.PlayerID,
+				progress: record.QualifiedSeconds,
 			})
 		}
 	}
@@ -975,7 +1085,7 @@ func (p *SquadLeaderWhitelistPlugin) getPlayerRank(steamID string) int {
 
 	// Find rank
 	for i, player := range whitelistedPlayers {
-		if player.steamID == steamID {
+		if player.playerID == playerID {
 			return i + 1
 		}
 	}
@@ -991,19 +1101,80 @@ func (p *SquadLeaderWhitelistPlugin) loadPlayerProgress() error {
 		return nil
 	}
 
-	var progress map[string]*PlayerProgressRecord
-	if err := json.Unmarshal([]byte(data), &progress); err != nil {
-		return fmt.Errorf("failed to unmarshal player progress: %w", err)
+	state, err := whitelistprogress.ParseState(data)
+	if err == nil {
+		p.playerProgress = state.Players
+		return nil
 	}
 
-	p.playerProgress = progress
+	if !errors.Is(err, whitelistprogress.ErrUnknownFormat) {
+		return fmt.Errorf("failed to parse player progress: %w", err)
+	}
+
+	var legacyProgress map[string]*legacyPlayerProgressRecord
+	if err := json.Unmarshal([]byte(data), &legacyProgress); err != nil {
+		return fmt.Errorf("failed to unmarshal legacy player progress: %w", err)
+	}
+
+	requiredHours := p.getIntConfig("hours_to_whitelist")
+	migratedProgress := make(map[string]*PlayerProgressRecord, len(legacyProgress))
+	for legacyPlayerID, record := range legacyProgress {
+		if record == nil {
+			continue
+		}
+
+		recordPlayerID := utils.NormalizePlayerID(record.SteamID)
+		if recordPlayerID == "" {
+			recordPlayerID = utils.NormalizePlayerID(legacyPlayerID)
+		}
+		if recordPlayerID == "" {
+			continue
+		}
+
+		migratedProgress[recordPlayerID] = &PlayerProgressRecord{
+			PlayerID: recordPlayerID,
+			SteamID: func() string {
+				if utils.IsSteamID(recordPlayerID) {
+					return recordPlayerID
+				}
+				return ""
+			}(),
+			EOSID: func() string {
+				if utils.IsEOSID(recordPlayerID) {
+					return recordPlayerID
+				}
+				return ""
+			}(),
+			QualifiedSeconds: whitelistprogress.LegacyPercentToSeconds(record.Progress, requiredHours),
+			LifetimeSeconds:  whitelistprogress.LegacyPercentToSeconds(record.TotalLeadership, requiredHours),
+			LastEarnedAt:     record.LastProgressed,
+			LastSeenAt:       record.LastSeen,
+		}
+	}
+
+	p.playerProgress = migratedProgress
+
+	migratedData, err := p.marshalPlayerProgressLocked()
+	if err != nil {
+		p.apis.LogAPI.Warn("Failed to marshal migrated squad leader player progress", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil
+	}
+
+	if err := p.apis.DatabaseAPI.SetPluginData("player_progress", string(migratedData)); err != nil {
+		p.apis.LogAPI.Warn("Failed to persist migrated squad leader player progress", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
 	return nil
 }
 
 // savePlayerProgress saves player progress to database
 func (p *SquadLeaderWhitelistPlugin) savePlayerProgress() error {
 	p.mu.Lock()
-	data, err := json.Marshal(p.playerProgress)
+	data, err := p.marshalPlayerProgressLocked()
 	p.mu.Unlock()
 
 	if err != nil {
@@ -1011,6 +1182,11 @@ func (p *SquadLeaderWhitelistPlugin) savePlayerProgress() error {
 	}
 
 	return p.apis.DatabaseAPI.SetPluginData("player_progress", string(data))
+}
+
+// marshalPlayerProgressLocked serializes player progress while p.mu is held.
+func (p *SquadLeaderWhitelistPlugin) marshalPlayerProgressLocked() ([]byte, error) {
+	return whitelistprogress.MarshalPlayers(p.playerProgress)
 }
 
 // Helper methods for config access
@@ -1058,12 +1234,21 @@ func (p *SquadLeaderWhitelistPlugin) getIntArrayConfig(key string) []int {
 	return []int{}
 }
 
-// addPlayerAsTemporaryAdmin adds a player as a temporary admin via direct database operations
-func (p *SquadLeaderWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerName string) {
+func (p *SquadLeaderWhitelistPlugin) requiredWhitelistSeconds() int64 {
+	return whitelistprogress.RequiredSeconds(p.getIntConfig("hours_to_whitelist"))
+}
+
+func (p *SquadLeaderWhitelistPlugin) whitelistGroupName() string {
 	groupName := p.getStringConfig("whitelist_group_name")
 	if groupName == "" {
-		groupName = "squad_leader_whitelist"
+		return "squad_leader_whitelist"
 	}
+	return groupName
+}
+
+// addPlayerAsTemporaryAdmin adds a player as a temporary admin via direct database operations
+func (p *SquadLeaderWhitelistPlugin) addPlayerAsTemporaryAdmin(playerID, playerName string) {
+	groupName := p.whitelistGroupName()
 
 	// Create admin notes indicating this is from the Squad Leader Whitelist plugin
 	notes := fmt.Sprintf("Plugin: Squad Leader Whitelist - Automatically added for squad leadership contributions. Player: %s", playerName)
@@ -1077,9 +1262,9 @@ func (p *SquadLeaderWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerNa
 	}
 
 	// Add player as temporary admin with configured expiration
-	if err := p.apis.AdminAPI.AddTemporaryAdmin(steamID, groupName, notes, expiresAt); err != nil {
+	if err := p.apis.AdminAPI.AddTemporaryAdmin(playerID, groupName, notes, expiresAt); err != nil {
 		p.apis.LogAPI.Error("Failed to add player as temporary admin via AdminAPI", err, map[string]interface{}{
-			"steam_id":    steamID,
+			"player_id":   playerID,
 			"player_name": playerName,
 			"group_name":  groupName,
 			"notes":       notes,
@@ -1096,13 +1281,13 @@ func (p *SquadLeaderWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerNa
 	if !isShuttingDown {
 		if _, err := p.apis.RconAPI.SendCommand("AdminReloadServerConfig"); err != nil {
 			p.apis.LogAPI.Error("Failed to reload server admin config after adding admin", err, map[string]interface{}{
-				"steam_id": steamID,
+				"player_id": playerID,
 			})
 		}
 	}
 
 	p.apis.LogAPI.Info("Added player as temporary admin", map[string]interface{}{
-		"steam_id":    steamID,
+		"player_id":   playerID,
 		"player_name": playerName,
 		"group_name":  groupName,
 		"notes":       notes,
@@ -1110,15 +1295,18 @@ func (p *SquadLeaderWhitelistPlugin) addPlayerAsTemporaryAdmin(steamID, playerNa
 }
 
 // removePlayerAsTemporaryAdmin removes a player as a temporary admin via direct database operations
-func (p *SquadLeaderWhitelistPlugin) removePlayerAsTemporaryAdmin(steamID, playerName string) {
+func (p *SquadLeaderWhitelistPlugin) removePlayerAsTemporaryAdmin(playerID, playerName string) {
+	groupName := p.whitelistGroupName()
+
 	// Create admin notes indicating this is from the Squad Leader Whitelist plugin
 	notes := fmt.Sprintf("Plugin: Squad Leader Whitelist - Automatically removed (no longer qualifies). Player: %s", playerName)
 
 	// Remove player as temporary admin
-	if err := p.apis.AdminAPI.RemoveTemporaryAdmin(steamID, notes); err != nil {
+	if err := p.apis.AdminAPI.RemoveTemporaryAdminRole(playerID, groupName, notes); err != nil {
 		p.apis.LogAPI.Error("Failed to remove player as temporary admin via AdminAPI", err, map[string]interface{}{
-			"steam_id":    steamID,
+			"player_id":   playerID,
 			"player_name": playerName,
+			"group_name":  groupName,
 			"notes":       notes,
 		})
 		return
@@ -1133,36 +1321,25 @@ func (p *SquadLeaderWhitelistPlugin) removePlayerAsTemporaryAdmin(steamID, playe
 	if !isShuttingDown {
 		if _, err := p.apis.RconAPI.SendCommand("AdminReloadServerConfig"); err != nil {
 			p.apis.LogAPI.Error("Failed to reload server admin config after removing admin", err, map[string]interface{}{
-				"steam_id": steamID,
+				"player_id": playerID,
 			})
 		}
 	}
 
 	p.apis.LogAPI.Info("Removed player as temporary admin", map[string]interface{}{
-		"steam_id":    steamID,
+		"player_id":   playerID,
 		"player_name": playerName,
+		"group_name":  groupName,
 		"notes":       notes,
 	})
 }
 
-// renewPlayerAdminRole removes and re-adds a player's admin role to extend expiration
-func (p *SquadLeaderWhitelistPlugin) renewPlayerAdminRole(steamID, playerName string) {
-	groupName := p.getStringConfig("whitelist_group_name")
-	if groupName == "" {
-		groupName = "squad_leader_whitelist"
-	}
+// renewPlayerAdminRole refreshes a player's managed admin role to extend expiration
+func (p *SquadLeaderWhitelistPlugin) renewPlayerAdminRole(playerID, playerName string) {
+	groupName := p.whitelistGroupName()
 
 	// Create admin notes indicating this is a renewal from the Squad Leader Whitelist plugin
 	notes := fmt.Sprintf("Plugin: Squad Leader Whitelist - Role renewed to extend expiration. Player: %s", playerName)
-
-	// First remove the existing admin role
-	if err := p.apis.AdminAPI.RemoveTemporaryAdmin(steamID, "Role renewal - removing old assignment"); err != nil {
-		p.apis.LogAPI.Error("Failed to remove admin role for renewal", err, map[string]interface{}{
-			"steam_id":    steamID,
-			"player_name": playerName,
-		})
-		return
-	}
 
 	// Calculate new expiration time
 	var expiresAt *time.Time
@@ -1173,9 +1350,9 @@ func (p *SquadLeaderWhitelistPlugin) renewPlayerAdminRole(steamID, playerName st
 	}
 
 	// Add new admin role with fresh expiration
-	if err := p.apis.AdminAPI.AddTemporaryAdmin(steamID, groupName, notes, expiresAt); err != nil {
+	if err := p.apis.AdminAPI.AddTemporaryAdmin(playerID, groupName, notes, expiresAt); err != nil {
 		p.apis.LogAPI.Error("Failed to re-add admin role after renewal", err, map[string]interface{}{
-			"steam_id":    steamID,
+			"player_id":   playerID,
 			"player_name": playerName,
 			"group_name":  groupName,
 			"notes":       notes,
@@ -1192,13 +1369,13 @@ func (p *SquadLeaderWhitelistPlugin) renewPlayerAdminRole(steamID, playerName st
 	if !isShuttingDown {
 		if _, err := p.apis.RconAPI.SendCommand("AdminReloadServerConfig"); err != nil {
 			p.apis.LogAPI.Error("Failed to reload server admin config after renewing admin role", err, map[string]interface{}{
-				"steam_id": steamID,
+				"player_id": playerID,
 			})
 		}
 	}
 
 	p.apis.LogAPI.Info("Renewed player admin role with extended expiration", map[string]interface{}{
-		"steam_id":    steamID,
+		"player_id":   playerID,
 		"player_name": playerName,
 		"group_name":  groupName,
 		"notes":       notes,
@@ -1207,79 +1384,81 @@ func (p *SquadLeaderWhitelistPlugin) renewPlayerAdminRole(steamID, playerName st
 
 // syncTemporaryAdmins synchronizes temporary admin status with current whitelist
 func (p *SquadLeaderWhitelistPlugin) syncTemporaryAdmins() error {
-	// This function ensures database consistency for all whitelisted players
-	// and refreshes admin roles that are about to expire
-	whitelistThreshold := 100.0
-	whitelistDurationDays := p.getIntConfig("whitelist_duration_days")
-
-	if whitelistDurationDays <= 0 {
-		return nil // No expiration handling needed
+	requiredSeconds := p.requiredWhitelistSeconds()
+	if requiredSeconds <= 0 {
+		return nil
 	}
 
+	groupName := p.whitelistGroupName()
+	whitelistDurationDays := p.getIntConfig("whitelist_duration_days")
+	renewalHours := p.getIntConfig("admin_renewal_hours_before_expiry")
+	if renewalHours <= 0 {
+		renewalHours = 48
+	}
+	renewalWindow := time.Duration(renewalHours) * time.Hour
+
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Check all players and manage their admin status
-	for steamID, record := range p.playerProgress {
-		if record.Progress >= whitelistThreshold {
-			// Player should be whitelisted
-
-			// Check if they have an existing admin role that's about to expire (within 1 day)
-			adminStatus, err := p.apis.AdminAPI.GetPlayerAdminStatus(steamID)
-			if err != nil {
-				// No existing admin status or error checking - add new admin (skip if shutting down)
-				if !p.shuttingDown {
-					go p.addPlayerAsTemporaryAdmin(steamID, "")
-				}
-				continue
-			}
-
-			// Check if any of their admin roles are about to expire
-			needsRenewal := false
-			groupName := p.getStringConfig("whitelist_group_name")
-			if groupName == "" {
-				groupName = "squad_leader_whitelist"
-			}
-
-			for _, role := range adminStatus.Roles {
-				if role.RoleName == groupName && role.ExpiresAt != nil {
-					renewalHours := p.getIntConfig("admin_renewal_hours_before_expiry")
-					if renewalHours <= 0 {
-						renewalHours = 48 // Default to 48 hours
-					}
-
-					timeUntilExpiry := time.Until(*role.ExpiresAt)
-					renewalWindow := time.Duration(renewalHours) * time.Hour
-
-					// If expires within the renewal window, renew it
-					if timeUntilExpiry <= renewalWindow && timeUntilExpiry > 0 {
-						needsRenewal = true
-						break
-					}
-				}
-			}
-
-			if needsRenewal {
-				// Remove old admin role and add new one to extend expiration (skip if shutting down)
-				if !p.shuttingDown {
-					go p.renewPlayerAdminRole(steamID, "")
-				}
-			} else if len(adminStatus.Roles) == 0 {
-				// No admin roles found, add new one (skip if shutting down)
-				if !p.shuttingDown {
-					go p.addPlayerAsTemporaryAdmin(steamID, "")
-				}
-			}
+	shuttingDown := p.shuttingDown
+	qualifiedPlayers := make(map[string]bool, len(p.playerProgress))
+	for playerID, record := range p.playerProgress {
+		if record != nil && whitelistprogress.IsQualified(record.QualifiedSeconds, requiredSeconds) {
+			qualifiedPlayers[playerID] = true
 		}
+	}
+	p.mu.Unlock()
+
+	admins, err := p.apis.AdminAPI.ListTemporaryAdmins()
+	if err != nil {
+		return fmt.Errorf("failed to list temporary admins: %w", err)
+	}
+
+	managedAdmins := make(map[string]*plugin_manager.TemporaryAdminInfo)
+	for _, admin := range admins {
+		if admin == nil || admin.RoleName != groupName {
+			continue
+		}
+		if adminID := admin.PreferredID(); adminID != "" {
+			managedAdmins[adminID] = admin
+		}
+	}
+
+	if shuttingDown {
+		return nil
+	}
+
+	for playerID := range qualifiedPlayers {
+		admin, exists := managedAdmins[playerID]
+		if !exists {
+			p.addPlayerAsTemporaryAdmin(playerID, "")
+			continue
+		}
+
+		if whitelistDurationDays <= 0 {
+			delete(managedAdmins, playerID)
+			continue
+		}
+
+		if admin.ExpiresAt == nil {
+			p.renewPlayerAdminRole(playerID, "")
+			delete(managedAdmins, playerID)
+			continue
+		}
+
+		timeUntilExpiry := time.Until(*admin.ExpiresAt)
+		if timeUntilExpiry <= renewalWindow && timeUntilExpiry > 0 {
+			p.renewPlayerAdminRole(playerID, "")
+		}
+		delete(managedAdmins, playerID)
+	}
+
+	for playerID := range managedAdmins {
+		if qualifiedPlayers[playerID] {
+			continue
+		}
+		p.removePlayerAsTemporaryAdmin(playerID, "")
 	}
 
 	return nil
 }
 
 // max returns the maximum of two float64 values
-func max(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
-}
