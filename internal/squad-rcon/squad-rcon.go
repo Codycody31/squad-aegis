@@ -491,18 +491,23 @@ func (s *SquadRcon) GetCurrentMap() (Map, error) {
 	return Map{}, ErrNoMap
 }
 
-func (s *SquadRcon) GetNextMap() (Map, error) {
-	nextMap, err := s.Manager.ExecuteCommand(s.ServerID, "ShowNextMap")
-	if err != nil {
-		if nextMap == "Next level is not defined" {
-			return Map{}, ErrNoNextMap
-		}
+func isUndefinedNextMapResponse(response string) bool {
+	switch strings.TrimSpace(response) {
+	case "Next level is not defined", "Next map is not defined":
+		return true
+	default:
+		return false
+	}
+}
 
-		return Map{}, err
+func parseNextMapResponse(nextMap string) (Map, error) {
+	trimmedNextMap := strings.TrimSpace(nextMap)
+	if isUndefinedNextMapResponse(trimmedNextMap) {
+		return Map{}, ErrNoNextMap
 	}
 
-	matchesMap := regexp.MustCompile(`^Next level is (.*?), layer is (.*?), factions (.*?) (.*?)$`)
-	matches := matchesMap.FindStringSubmatch(nextMap)
+	matchesMap := regexp.MustCompile(`^Next (?:level|map) is (.*?), layer is (.*?), factions (.*?) (.*?)$`)
+	matches := matchesMap.FindStringSubmatch(trimmedNextMap)
 	if len(matches) > 0 {
 		return Map{
 			Map:      matches[1],
@@ -512,6 +517,19 @@ func (s *SquadRcon) GetNextMap() (Map, error) {
 	}
 
 	return Map{}, ErrNoMap
+}
+
+func (s *SquadRcon) GetNextMap() (Map, error) {
+	nextMap, err := s.Manager.ExecuteCommand(s.ServerID, "ShowNextMap")
+	if err != nil {
+		if isUndefinedNextMapResponse(nextMap) {
+			return Map{}, ErrNoNextMap
+		}
+
+		return Map{}, err
+	}
+
+	return parseNextMapResponse(nextMap)
 }
 
 // GetAvailableMaps gets the available maps from the server

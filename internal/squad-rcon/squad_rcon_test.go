@@ -1,6 +1,9 @@
 package squadRcon
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestOrderedTeamNamesFromHeaderOnlyListSquadsResponse(t *testing.T) {
 	response := `----- Active Squads -----
@@ -40,5 +43,39 @@ ID: 1 | Name: INF | Size: 4/9 | Locked: True`
 
 	if squads[1].TeamId != 2 || squads[1].ID != 1 || squads[1].Name != "INF" || squads[1].Size != 4 || !squads[1].Locked {
 		t.Fatalf("unexpected second squad parse result: %+v", squads[1])
+	}
+}
+
+func TestParseNextMapResponseHandlesUndefinedNextMap(t *testing.T) {
+	_, err := parseNextMapResponse("Next map is not defined")
+	if !errors.Is(err, ErrNoNextMap) {
+		t.Fatalf("expected ErrNoNextMap, got %v", err)
+	}
+}
+
+func TestParseNextMapResponseParsesNextMapVariants(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+	}{
+		{
+			name:     "level wording",
+			response: "Next level is Gorodok, layer is AAS v1, factions USA RGF",
+		},
+		{
+			name:     "map wording",
+			response: "Next map is Narva, layer is RAAS v2, factions CAF VDV",
+		},
+	}
+
+	for _, tt := range tests {
+		nextMap, err := parseNextMapResponse(tt.response)
+		if err != nil {
+			t.Fatalf("%s: expected map to parse, got %v", tt.name, err)
+		}
+
+		if nextMap.Map == "" || nextMap.Layer == "" || len(nextMap.Factions) != 2 {
+			t.Fatalf("%s: unexpected parse result %+v", tt.name, nextMap)
+		}
 	}
 }

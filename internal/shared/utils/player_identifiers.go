@@ -105,6 +105,18 @@ func (ids PlayerIdentifiers) Match(candidate string) bool {
 	return false
 }
 
+// IncludesAll reports whether every non-empty identifier in other is covered
+// by this identifier set.
+func (ids PlayerIdentifiers) IncludesAll(other PlayerIdentifiers) bool {
+	for _, candidate := range other.StorageIDs() {
+		if !ids.Match(candidate) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // ContainsIdentifier reports whether values contains target.
 func ContainsIdentifier(values []string, target string) bool {
 	for _, value := range values {

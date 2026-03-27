@@ -196,7 +196,7 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 			responses.BadRequest(c, "Either steam_id or eos_id is required", &gin.H{"error": "Either steam_id or eos_id is required"})
 			return
 		}
-		if hasSteamID && hasEOSID && (identifiers.SteamID == "" || identifiers.EOSID == "") {
+		if hasSteamID && hasEOSID && !identifiers.IncludesAll(inputIdentifiers) {
 			responses.BadRequest(c, "steam_id and eos_id must resolve to the same player", &gin.H{"error": "steam_id and eos_id must resolve to the same player"})
 			return
 		}

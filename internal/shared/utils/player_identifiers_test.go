@@ -84,3 +84,59 @@ func TestMergePlayerIdentifiersPreservesExistingAliasesOnPartialUpdate(t *testin
 		t.Fatalf("MergePlayerIdentifiers() = %+v, want %+v", got, want)
 	}
 }
+
+func TestPlayerIdentifiersIncludesAll(t *testing.T) {
+	tests := []struct {
+		name     string
+		resolved PlayerIdentifiers
+		request  PlayerIdentifiers
+		want     bool
+	}{
+		{
+			name: "matched steam and eos pair",
+			resolved: NormalizePlayerIdentifiers(
+				"",
+				"76561198000000042",
+				"abcdef0123456789abcdef0123456789",
+			),
+			request: NormalizePlayerIdentifiers(
+				"",
+				"76561198000000042",
+				"ABCDEF0123456789ABCDEF0123456789",
+			),
+			want: true,
+		},
+		{
+			name: "mismatched eos is rejected even when another eos exists",
+			resolved: NormalizePlayerIdentifiers(
+				"",
+				"76561198000000042",
+				"abcdef0123456789abcdef0123456789",
+			),
+			request: NormalizePlayerIdentifiers(
+				"",
+				"76561198000000042",
+				"ffffffffffffffffffffffffffffffff",
+			),
+			want: false,
+		},
+		{
+			name: "single identifier only needs to match itself",
+			resolved: NormalizePlayerIdentifiers(
+				"",
+				"76561198000000042",
+				"abcdef0123456789abcdef0123456789",
+			),
+			request: NormalizePlayerIdentifiers("", "", "abcdef0123456789abcdef0123456789"),
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.resolved.IncludesAll(tt.request); got != tt.want {
+				t.Fatalf("IncludesAll() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

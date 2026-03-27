@@ -813,6 +813,15 @@ func normalizeCommandName(command string) string {
 	return strings.ToLower(fields[0])
 }
 
+func isUndefinedShowNextMapResponse(response string) bool {
+	switch strings.TrimSpace(response) {
+	case "Next level is not defined", "Next map is not defined":
+		return true
+	default:
+		return false
+	}
+}
+
 func validateCommandResponse(command string, response string) error {
 	switch normalizeCommandName(command) {
 	case "showserverinfo":
@@ -832,7 +841,9 @@ func validateCommandResponse(command string, response string) error {
 			return fmt.Errorf("unexpected ShowCurrentMap response format")
 		}
 	case "shownextmap":
-		if !strings.HasPrefix(response, "Next level is ") {
+		if !strings.HasPrefix(response, "Next level is ") &&
+			!strings.HasPrefix(response, "Next map is ") &&
+			!isUndefinedShowNextMapResponse(response) {
 			return fmt.Errorf("unexpected ShowNextMap response format")
 		}
 	case "listlayers":

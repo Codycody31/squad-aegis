@@ -45,6 +45,14 @@ func TestValidateCommandResponseAcceptsExpectedPayloads(t *testing.T) {
 			command:  "ListSquads",
 			response: "----- Active Squads -----\nTeam ID: 1 (Blue)\nTeam ID: 2 (Red)",
 		},
+		{
+			command:  "ShowNextMap",
+			response: "Next map is not defined",
+		},
+		{
+			command:  "ShowNextMap",
+			response: "Next map is Gorodok, layer is AAS v1, factions USA RGF",
+		},
 	}
 
 	for _, tt := range tests {
