@@ -79,3 +79,123 @@ func TestParseNextMapResponseParsesNextMapVariants(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePlayersResponseToleratesEpicIdentifiers(t *testing.T) {
+	response := `ID: 1 | Online IDs: EOS: ABCDEF0123456789ABCDEF0123456789 steam: 76561198000000000 | Name: Steam User | Team ID: 1 | Squad ID: 2 | Is Leader: False | Role: Rifleman
+ID: 2 | Online IDs: EOS: fedcba9876543210fedcba9876543210 steam: INVALID | Name: Epic Placeholder | Team ID: 1 | Squad ID: 3 | Is Leader: True | Role: TL_SL
+ID: 3 | Online IDs: EOS: 00112233445566778899AABBCCDDEEFF | Name: Epic EOS Only | Team ID: 2 | Squad ID: N/A | Is Leader: False | Role: Rifleman
+ID: 4 | Online IDs: EOS: AABBCCDDEEFF00112233445566778899 steam: INVALID | Since Disconnect: 05m 12s | Name: Left Epic`
+
+	players := parsePlayersResponse(response)
+
+	if got, want := len(players.OnlinePlayers), 3; got != want {
+		t.Fatalf("online player count = %d, want %d", got, want)
+	}
+	if got, want := len(players.DisconnectedPlayers), 1; got != want {
+		t.Fatalf("disconnected player count = %d, want %d", got, want)
+	}
+
+	steamAndEOS := players.OnlinePlayers[0]
+	if steamAndEOS.SteamId != "76561198000000000" {
+		t.Fatalf("steam user steam ID = %q, want valid steam ID", steamAndEOS.SteamId)
+	}
+	if steamAndEOS.EosId != "abcdef0123456789abcdef0123456789" {
+		t.Fatalf("steam user EOS ID = %q, want normalized EOS ID", steamAndEOS.EosId)
+	}
+
+	epicWithInvalidSteam := players.OnlinePlayers[1]
+	if epicWithInvalidSteam.SteamId != "" {
+		t.Fatalf("epic placeholder steam ID = %q, want empty string", epicWithInvalidSteam.SteamId)
+	}
+	if !epicWithInvalidSteam.IsSquadLeader {
+		t.Fatalf("expected epic placeholder player to remain squad leader")
+	}
+	if epicWithInvalidSteam.SquadId != 3 {
+		t.Fatalf("epic placeholder squad ID = %d, want 3", epicWithInvalidSteam.SquadId)
+	}
+
+	epicEOSOnly := players.OnlinePlayers[2]
+	if epicEOSOnly.SteamId != "" {
+		t.Fatalf("epic EOS-only steam ID = %q, want empty string", epicEOSOnly.SteamId)
+	}
+	if epicEOSOnly.EosId != "00112233445566778899aabbccddeeff" {
+		t.Fatalf("epic EOS-only EOS ID = %q, want normalized EOS ID", epicEOSOnly.EosId)
+	}
+	if epicEOSOnly.SquadId != 0 {
+		t.Fatalf("epic EOS-only squad ID = %d, want 0 for N/A", epicEOSOnly.SquadId)
+	}
+
+	disconnectedEpic := players.DisconnectedPlayers[0]
+	if disconnectedEpic.SteamId != "" {
+		t.Fatalf("disconnected epic steam ID = %q, want empty string", disconnectedEpic.SteamId)
+	}
+	if disconnectedEpic.EosId != "aabbccddeeff00112233445566778899" {
+		t.Fatalf("disconnected epic EOS ID = %q, want normalized EOS ID", disconnectedEpic.EosId)
+	}
+	if disconnectedEpic.SinceDisconnect != "05m12s" {
+		t.Fatalf("disconnected epic time = %q, want %q", disconnectedEpic.SinceDisconnect, "05m12s")
+	}
+}
+
+func TestParseTeamsAndSquadsIncludesEOSOnlyPlayers(t *testing.T) {
+	squads := []Squad{
+		{ID: 3, TeamId: 1, Name: "Armor"},
+		{ID: 1, TeamId: 2, Name: "Inf"},
+	}
+	teamNames := []string{"Blue", "Red"}
+	players := PlayersData{
+		OnlinePlayers: []Player{
+			{
+				Id:            1,
+				EosId:         "abcdef0123456789abcdef0123456789",
+				Name:          "Epic Squad Leader",
+				TeamId:        1,
+				SquadId:       3,
+				IsSquadLeader: true,
+				Role:          "TL_SL",
+			},
+			{
+				Id:      2,
+				SteamId: "76561198000000000",
+				Name:    "Steam Squadmate",
+				TeamId:  1,
+				SquadId: 3,
+				Role:    "Rifleman",
+			},
+			{
+				Id:      3,
+				EosId:   "00112233445566778899aabbccddeeff",
+				Name:    "Epic Unassigned",
+				TeamId:  2,
+				SquadId: 0,
+				Role:    "Medic",
+			},
+		},
+	}
+
+	teams, err := ParseTeamsAndSquads(squads, teamNames, players)
+	if err != nil {
+		t.Fatalf("ParseTeamsAndSquads() returned error: %v", err)
+	}
+
+	if got, want := len(teams), 2; got != want {
+		t.Fatalf("team count = %d, want %d", got, want)
+	}
+
+	if got, want := len(teams[0].Squads), 1; got != want {
+		t.Fatalf("team 1 squad count = %d, want %d", got, want)
+	}
+	if got, want := len(teams[0].Squads[0].Players), 2; got != want {
+		t.Fatalf("team 1 squad player count = %d, want %d", got, want)
+	}
+	if teams[0].Squads[0].Leader == nil || teams[0].Squads[0].Leader.Name != "Epic Squad Leader" {
+		t.Fatalf("expected EOS-only squad leader to be preserved, got %+v", teams[0].Squads[0].Leader)
+	}
+
+	if got, want := len(teams[1].Players), 1; got != want {
+		t.Fatalf("team 2 unassigned player count = %d, want %d", got, want)
+	}
+	if teams[1].Players[0].Name != "Epic Unassigned" {
+		t.Fatalf("unexpected team 2 unassigned player: %+v", teams[1].Players[0])
+	}
+}

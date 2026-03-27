@@ -41,6 +41,14 @@ const emit = defineEmits<{
     (e: "action-completed"): void;
 }>();
 
+function getPlayerEOSID(player: Player): string {
+    return player.eosId || player.eos_id || "";
+}
+
+function getPlayerProfileID(player: Player): string {
+    return player.steam_id || getPlayerEOSID(player);
+}
+
 // Action dialog state
 const showActionDialog = ref(false);
 const actionType = ref<
@@ -143,7 +151,8 @@ async function fetchEscalationSuggestion(ruleId: string) {
         return;
     }
 
-    if (!props.player.steam_id && !props.player.eosId) {
+    const eosID = getPlayerEOSID(props.player);
+    if (!props.player.steam_id && !eosID) {
         escalationSuggestion.value = null;
         return;
     }
@@ -165,8 +174,8 @@ async function fetchEscalationSuggestion(ruleId: string) {
         if (props.player.steam_id) {
             params.set("steam_id", props.player.steam_id);
         }
-        if (props.player.eosId) {
-            params.set("eos_id", props.player.eosId);
+        if (eosID) {
+            params.set("eos_id", eosID);
         }
 
         const { data, error: fetchError } = await useFetch(
@@ -372,7 +381,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/kick`;
                 payload = {
                     steam_id: props.player.steam_id,
-                    eos_id: props.player.eosId,
+                    eos_id: getPlayerEOSID(props.player),
                     reason: actionReason.value,
                 };
                 if (
@@ -387,7 +396,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/ban`;
                 payload = {
                     steam_id: props.player.steam_id,
-                    eos_id: props.player.eosId,
+                    eos_id: getPlayerEOSID(props.player),
                     reason: actionReason.value,
                     duration: actionDuration.value,
                 };
@@ -403,7 +412,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/warn`;
                 payload = {
                     steam_id: props.player.steam_id,
-                    eos_id: props.player.eosId,
+                    eos_id: getPlayerEOSID(props.player),
                     message: actionReason.value,
                 };
                 if (
@@ -418,7 +427,7 @@ async function executePlayerAction() {
                 endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/move-player`;
                 payload = {
                     steam_id: props.player.steam_id,
-                    eos_id: props.player.eosId,
+                    eos_id: getPlayerEOSID(props.player),
                 };
                 break;
             case "remove-from-squad":
@@ -508,7 +517,7 @@ function copyToClipboard(text: string) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
             <RouterLink
-                :to="'/players/' + (player.steam_id || player.eosId)"
+                :to="'/players/' + getPlayerProfileID(player)"
                 as-child
             >
                 <DropdownMenuItem>
@@ -523,7 +532,7 @@ function copyToClipboard(text: string) {
                 <Icon name="lucide:copy" class="mr-2 h-4 w-4 text-yellow-500" />
                 <span>Copy Steam ID</span>
             </DropdownMenuItem>
-            <DropdownMenuItem @click="copyToClipboard(player.eosId)">
+            <DropdownMenuItem @click="copyToClipboard(getPlayerEOSID(player))">
                 <Icon name="lucide:copy" class="mr-2 h-4 w-4 text-yellow-500" />
                 <span>Copy EOS ID</span>
             </DropdownMenuItem>
