@@ -1,6 +1,7 @@
 package workflow_manager
 
 import (
+	"strings"
 	"testing"
 
 	"go.codycody31.dev/squad-aegis/internal/models"
@@ -105,6 +106,64 @@ func TestGetFieldValue(t *testing.T) {
 				t.Errorf("getFieldValue(%q) = %v, expected %v", tt.field, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestNewSandboxedLuaStateDisablesDangerousLibraries(t *testing.T) {
+	wm := &WorkflowManager{}
+	L := wm.newSandboxedLuaState()
+	defer L.Close()
+
+	tests := []struct {
+		name        string
+		script      string
+		wantErrText string
+	}{
+		{
+			name:        "blocks os library access",
+			script:      `return os.execute("echo pwned")`,
+			wantErrText: "attempt to index a non-table object(nil) with key 'execute'",
+		},
+		{
+			name:        "blocks io library access",
+			script:      `return io.open("/etc/passwd", "r")`,
+			wantErrText: "attempt to index a non-table object(nil) with key 'open'",
+		},
+		{
+			name:        "blocks require",
+			script:      `return require("os")`,
+			wantErrText: "attempt to call a non-function object",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := L.DoString(tt.script)
+			if err == nil {
+				t.Fatalf("expected script to fail, but it succeeded")
+			}
+
+			if !strings.Contains(err.Error(), tt.wantErrText) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestNewSandboxedLuaStateKeepsSafeLibraries(t *testing.T) {
+	wm := &WorkflowManager{}
+	L := wm.newSandboxedLuaState()
+	defer L.Close()
+
+	err := L.DoString(`
+		local value = string.upper("safe")
+		local rounded = math.floor(3.9)
+		if value ~= "SAFE" or rounded ~= 3 then
+			error("safe libs unavailable")
+		end
+	`)
+	if err != nil {
+		t.Fatalf("expected safe libraries to be available, got error: %v", err)
 	}
 }
 

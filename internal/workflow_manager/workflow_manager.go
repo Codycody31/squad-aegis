@@ -2950,7 +2950,7 @@ func (wm *WorkflowManager) executeLuaAction(context *models.WorkflowExecutionCon
 
 // executeLuaScript executes a LUA script with access to workflow context
 func (wm *WorkflowManager) executeLuaScript(workflowContext *models.WorkflowExecutionContext, step *models.WorkflowStep, script string) error {
-	L := lua.NewState()
+	L := wm.newSandboxedLuaState()
 	defer L.Close()
 
 	// Set timeout for script execution
@@ -2996,6 +2996,39 @@ func (wm *WorkflowManager) executeLuaScript(workflowContext *models.WorkflowExec
 
 	// Extract results from LUA state
 	return wm.extractLuaResults(L, workflowContext, step)
+}
+
+// newSandboxedLuaState creates a Lua state with only safe standard libraries.
+func (wm *WorkflowManager) newSandboxedLuaState() *lua.LState {
+	L := lua.NewState(lua.Options{SkipOpenLibs: true})
+
+	// Open only non-I/O and non-OS libraries.
+	L.Push(L.NewFunction(lua.OpenBase))
+	L.Push(lua.LString(lua.BaseLibName))
+	L.Call(1, 0)
+
+	L.Push(L.NewFunction(lua.OpenTable))
+	L.Push(lua.LString(lua.TabLibName))
+	L.Call(1, 0)
+
+	L.Push(L.NewFunction(lua.OpenString))
+	L.Push(lua.LString(lua.StringLibName))
+	L.Call(1, 0)
+
+	L.Push(L.NewFunction(lua.OpenMath))
+	L.Push(lua.LString(lua.MathLibName))
+	L.Call(1, 0)
+
+	L.Push(L.NewFunction(lua.OpenCoroutine))
+	L.Push(lua.LString(lua.CoroutineLibName))
+	L.Call(1, 0)
+
+	// Remove dangerous globals even if present through base library.
+	for _, name := range []string{"dofile", "loadfile", "io", "os", "package", "debug", "require", "module"} {
+		L.SetGlobal(name, lua.LNil)
+	}
+
+	return L
 }
 
 // setupLuaEnvironment sets up the LUA environment with workflow context and utilities
