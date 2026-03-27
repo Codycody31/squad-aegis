@@ -24,7 +24,7 @@ type ServerRuleAction struct {
 	ID             uuid.UUID `json:"id"`
 	RuleID         uuid.UUID `json:"rule_id"`
 	ViolationCount int       `json:"violation_count"`
-	ActionType     string    `json:"action_type"` // WARN, KICK, BAN
+	ActionType     string    `json:"action_type"`        // WARN, KICK, BAN
 	Duration       *int      `json:"duration,omitempty"` // Duration in days, 0 for permanent
 	Message        string    `json:"message"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -34,7 +34,9 @@ type ServerRuleAction struct {
 type PlayerRuleViolation struct {
 	ID            uuid.UUID  `json:"id"`
 	ServerID      uuid.UUID  `json:"server_id"`
-	PlayerSteamID int64      `json:"player_steam_id,string"`
+	PlayerID      string     `json:"player_id"`
+	PlayerSteamID *int64     `json:"player_steam_id,string,omitempty"`
+	PlayerEOSID   string     `json:"player_eos_id,omitempty"`
 	RuleID        uuid.UUID  `json:"rule_id"`
 	AdminUserID   *uuid.UUID `json:"admin_user_id,omitempty"` // Can be empty if violation was automatically triggered
 	CreatedAt     time.Time  `json:"created_at"`

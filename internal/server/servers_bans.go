@@ -60,7 +60,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	defer rows.Close()
 
 	bans := []models.ServerBan{}
-	steamIDs := []string{}
+	identifiers := []PlayerIdentifier{}
 	for rows.Next() {
 		var ban models.ServerBan
 		var adminIDStr sql.NullString
@@ -109,9 +109,12 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			ban.EOSID = utils.NormalizeEOSID(eosIDStr.String)
 		}
 
-		// Collect steam IDs for batch lookup
+		// Collect identifiers for batch name lookup
 		if ban.SteamID != "" {
-			steamIDs = append(steamIDs, ban.SteamID)
+			identifiers = append(identifiers, PlayerIdentifier{Value: ban.SteamID, IsSteam: true})
+		}
+		if ban.EOSID != "" {
+			identifiers = append(identifiers, PlayerIdentifier{Value: ban.EOSID, IsSteam: false})
 		}
 
 		// Set rule ID if present
@@ -158,13 +161,23 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	}
 
 	// Batch lookup player names from ClickHouse
-	playerNames := s.lookupPlayerNamesBatch(c.Request.Context(), steamIDs)
+	playerNames := s.lookupPlayerNamesBatchByIdentifiers(c.Request.Context(), identifiers)
 
 	// Assign player names to bans
 	for i := range bans {
-		if name, ok := playerNames[bans[i].SteamID]; ok {
-			bans[i].Name = name
-		} else if bans[i].SteamID != "" {
+		if bans[i].SteamID != "" {
+			if name, ok := playerNames["steam:"+bans[i].SteamID]; ok {
+				bans[i].Name = name
+				continue
+			}
+		}
+		if bans[i].EOSID != "" {
+			if name, ok := playerNames["eos:"+bans[i].EOSID]; ok {
+				bans[i].Name = name
+				continue
+			}
+		}
+		if bans[i].SteamID != "" {
 			bans[i].Name = bans[i].SteamID
 		} else {
 			bans[i].Name = bans[i].EOSID
@@ -324,10 +337,11 @@ func (s *Server) ServerBansAdd(c *gin.Context) {
 		}
 	}
 
-	// Log rule violation to ClickHouse if rule ID is provided (Steam ID only - ClickHouse schema requires UInt64)
-	if request.RuleID != nil && *request.RuleID != "" && request.SteamID != "" {
-		if err := s.logRuleViolation(c.Request.Context(), serverId, request.SteamID, request.RuleID, &user.Id, "BAN"); err != nil {
-			log.Warn().Err(err).Str("steamId", request.SteamID).Str("ruleId", *request.RuleID).Msg("Failed to log rule violation for manual ban")
+	// Log rule violation to ClickHouse if rule ID is provided.
+	if request.RuleID != nil && *request.RuleID != "" {
+		identifiers := utils.NormalizePlayerIdentifiers("", request.SteamID, request.EOSID)
+		if err := s.logRuleViolation(c, serverId, identifiers.PlayerID, identifiers.SteamID, identifiers.EOSID, request.RuleID, &user.Id, "BAN"); err != nil {
+			log.Warn().Err(err).Str("playerId", identifiers.PlayerID).Str("ruleId", *request.RuleID).Msg("Failed to log rule violation for manual ban")
 		}
 	}
 

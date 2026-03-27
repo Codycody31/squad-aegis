@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/valkey-io/valkey-go"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	valkeyClient "go.codycody31.dev/squad-aegis/internal/valkey"
 )
 
@@ -47,8 +49,24 @@ func sanitizeKey(key string) string {
 }
 
 // Key generators for different data types
-func (es *EventStore) playerKey(playerID string) string {
-	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player:%s", es.serverID.String(), playerID)
+func (es *EventStore) playerKey(recordID string) string {
+	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player-record:%s", es.serverID.String(), recordID)
+}
+
+func (es *EventStore) legacyPlayerKey(recordID string) string {
+	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player:%s", es.serverID.String(), recordID)
+}
+
+func (es *EventStore) playerAliasKey(playerID string) string {
+	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player-alias:%s", es.serverID.String(), sanitizeKey(playerID))
+}
+
+func (es *EventStore) playerPattern() string {
+	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player-record:*", es.serverID.String())
+}
+
+func (es *EventStore) legacyPlayerPattern() string {
+	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player:*", es.serverID.String())
 }
 
 func (es *EventStore) sessionKey(sessionKey string) string {
@@ -60,7 +78,7 @@ func (es *EventStore) joinRequestKey(chainID string) string {
 }
 
 func (es *EventStore) disconnectedKey(playerID string) string {
-	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:disconnected:%s", es.serverID.String(), playerID)
+	return fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:disconnected:%s", es.serverID.String(), sanitizeKey(playerID))
 }
 
 func (es *EventStore) roundWinnerKey() string {
@@ -126,15 +144,19 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
-	key := es.playerKey(playerID)
-
-	// Get existing data first to merge
-	existing := &PlayerData{}
-	if existingData, err := es.client.Get(context.Background(), key); err == nil {
-		if err := json.Unmarshal([]byte(existingData), existing); err != nil {
-			log.Error().Err(err).Str("key", key).Msg("failed to unmarshal existing player data")
-		}
+	identifiers := utils.NormalizePlayerIdentifiers(playerID, data.SteamID, data.EOSID)
+	if identifiers.PlayerID == "" {
+		return
 	}
+
+	recordID, existing, exists := es.lookupPlayerRecord(identifiers.StorageIDs()...)
+	if !exists {
+		recordID = identifiers.PlayerID
+		existing = &PlayerData{}
+	}
+	existingIdentifiers := utils.NormalizePlayerIdentifiers("", existing.SteamID, existing.EOSID)
+	resolvedIdentifiers := utils.MergePlayerIdentifiers(existingIdentifiers, identifiers)
+	oldIdentifiers := existingIdentifiers.StorageIDs()
 
 	// Merge data by updating existing player data with new values
 	if data.PlayerController != "" {
@@ -159,6 +181,9 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 		existing.TeamID = data.TeamID
 	}
 
+	existing.SteamID = resolvedIdentifiers.SteamID
+	existing.EOSID = resolvedIdentifiers.EOSID
+
 	// Store merged data with playerTTL expiration
 	mergedData, err := json.Marshal(existing)
 	if err != nil {
@@ -166,32 +191,42 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 		return
 	}
 
+	key := es.playerKey(recordID)
 	if err := es.client.Set(context.Background(), key, string(mergedData), playerTTL); err != nil {
 		log.Error().Err(err).Str("key", key).Msg("failed to store player data in valkey")
+		return
+	}
+	if err := es.client.Del(context.Background(), es.legacyPlayerKey(recordID)); err != nil {
+		log.Error().Err(err).Str("playerID", recordID).Msg("failed to remove legacy player record")
+	}
+
+	if exists {
+		for _, oldIdentifier := range oldIdentifiers {
+			if utils.ContainsIdentifier(resolvedIdentifiers.StorageIDs(), oldIdentifier) {
+				continue
+			}
+			if err := es.client.Del(context.Background(), es.playerAliasKey(oldIdentifier)); err != nil {
+				log.Error().Err(err).Str("playerID", oldIdentifier).Msg("failed to remove stale player alias")
+			}
+		}
+	}
+
+	for _, alias := range resolvedIdentifiers.StorageIDs() {
+		if err := es.client.Set(context.Background(), es.playerAliasKey(alias), recordID, playerTTL); err != nil {
+			log.Error().Err(err).Str("playerID", alias).Msg("failed to store player alias in valkey")
+		}
 	}
 }
 
-// GetPlayerData retrieves persistent player data by playerID
+// GetPlayerData retrieves persistent player data by playerID.
+// No Go mutex needed: each Redis call is individually atomic.
 func (es *EventStore) GetPlayerData(playerID string) (*PlayerData, bool) {
-	es.mu.RLock()
-	defer es.mu.RUnlock()
-
-	key := es.playerKey(playerID)
-	data, err := es.client.Get(context.Background(), key)
-	if err != nil {
-		if err != valkey.Nil {
-			log.Error().Err(err).Str("key", key).Msg("failed to get player data from valkey")
-		}
+	recordID, exists := es.resolvePlayerRecordID(playerID)
+	if !exists {
 		return nil, false
 	}
 
-	var playerData PlayerData
-	if err := json.Unmarshal([]byte(data), &playerData); err != nil {
-		log.Error().Err(err).Str("key", key).Msg("failed to unmarshal player data")
-		return nil, false
-	}
-
-	return &playerData, true
+	return es.getPlayerDataByRecordID(recordID)
 }
 
 // RemovePlayerData removes persistent player data by playerID
@@ -199,8 +234,21 @@ func (es *EventStore) RemovePlayerData(playerID string) error {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
-	key := es.playerKey(playerID)
-	if err := es.client.Del(context.Background(), key); err != nil {
+	recordID, exists := es.resolvePlayerRecordID(playerID)
+	if !exists {
+		return nil
+	}
+
+	existing, ok := es.getPlayerDataByRecordID(recordID)
+	if ok {
+		for _, alias := range utils.NormalizePlayerIdentifiers("", existing.SteamID, existing.EOSID).StorageIDs() {
+			if err := es.client.Del(context.Background(), es.playerAliasKey(alias)); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := es.client.Del(context.Background(), es.playerKey(recordID), es.legacyPlayerKey(recordID)); err != nil {
 		return err
 	}
 
@@ -273,11 +321,9 @@ func (es *EventStore) StoreSessionData(key string, data *SessionData) {
 	}
 }
 
-// GetSessionData retrieves session data by key
+// GetSessionData retrieves session data by key.
+// No Go mutex needed: single atomic Redis GET.
 func (es *EventStore) GetSessionData(key string) (*SessionData, bool) {
-	es.mu.RLock()
-	defer es.mu.RUnlock()
-
 	valkeyKey := es.sessionKey(key)
 	data, err := es.client.Get(context.Background(), valkeyKey)
 	if err != nil {
@@ -445,7 +491,7 @@ func (es *EventStore) ClearNewGameData() {
 
 	// Clear session data
 	sessionPattern := fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:session:*", es.serverID.String())
-	if keys, err := es.client.Keys(context.Background(), sessionPattern); err == nil && len(keys) > 0 {
+	if keys, err := es.client.Scan(context.Background(), sessionPattern); err == nil && len(keys) > 0 {
 		if err := es.client.Del(context.Background(), keys...); err != nil {
 			log.Error().Err(err).Msg("failed to clear session data from valkey")
 		}
@@ -453,39 +499,124 @@ func (es *EventStore) ClearNewGameData() {
 
 	// Clear disconnected data
 	disconnectedPattern := fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:disconnected:*", es.serverID.String())
-	if keys, err := es.client.Keys(context.Background(), disconnectedPattern); err == nil && len(keys) > 0 {
+	if keys, err := es.client.Scan(context.Background(), disconnectedPattern); err == nil && len(keys) > 0 {
 		if err := es.client.Del(context.Background(), keys...); err != nil {
 			log.Error().Err(err).Msg("failed to clear disconnected data from valkey")
 		}
 	}
 }
 
+func (es *EventStore) resolvePlayerRecordID(playerID string) (string, bool) {
+	rawPlayerID := strings.TrimSpace(playerID)
+	playerID = utils.NormalizePlayerID(playerID)
+	if playerID == "" {
+		return "", false
+	}
+
+	recordID, err := es.client.Get(context.Background(), es.playerAliasKey(playerID))
+	if err == nil && recordID != "" {
+		return recordID, true
+	}
+
+	if exists, err := es.client.Exists(context.Background(), es.playerKey(playerID), es.legacyPlayerKey(playerID)); err == nil && exists > 0 {
+		return playerID, true
+	}
+
+	if rawPlayerID != "" && rawPlayerID != playerID {
+		if exists, err := es.client.Exists(context.Background(), es.playerKey(rawPlayerID), es.legacyPlayerKey(rawPlayerID)); err == nil && exists > 0 {
+			return rawPlayerID, true
+		}
+	}
+
+	return "", false
+}
+
+func (es *EventStore) getPlayerDataByRecordID(recordID string) (*PlayerData, bool) {
+	if recordID == "" {
+		return nil, false
+	}
+
+	for _, key := range []string{es.playerKey(recordID), es.legacyPlayerKey(recordID)} {
+		data, err := es.client.Get(context.Background(), key)
+		if err != nil {
+			if err != valkey.Nil {
+				log.Error().Err(err).Str("key", key).Msg("failed to get player data from valkey")
+			}
+			continue
+		}
+
+		var playerData PlayerData
+		if err := json.Unmarshal([]byte(data), &playerData); err != nil {
+			log.Error().Err(err).Str("key", key).Msg("failed to unmarshal player data")
+			return nil, false
+		}
+
+		return &playerData, true
+	}
+
+	return nil, false
+}
+
+func (es *EventStore) lookupPlayerRecord(ids ...string) (string, *PlayerData, bool) {
+	for _, id := range ids {
+		recordID, exists := es.resolvePlayerRecordID(id)
+		if !exists {
+			continue
+		}
+
+		playerData, ok := es.getPlayerDataByRecordID(recordID)
+		if !ok {
+			continue
+		}
+
+		return recordID, playerData, true
+	}
+
+	return "", nil, false
+}
+
+func (es *EventStore) scanPlayerRecordKeys() ([]string, error) {
+	patterns := []string{es.playerPattern(), es.legacyPlayerPattern()}
+	seen := make(map[string]struct{})
+	keys := make([]string, 0)
+
+	for _, pattern := range patterns {
+		matchedKeys, err := es.client.Scan(context.Background(), pattern)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range matchedKeys {
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+	}
+
+	return keys, nil
+}
+
 // CheckTeamkill checks if an action is a teamkill based on victim and attacker data
 func (es *EventStore) CheckTeamkill(victimName string, attackerEOSID string) bool {
-	// Look up victim team ID
-	var victimTeamID string
-	if victimData, exists := es.GetSessionData(victimName); exists {
-		victimTeamID = victimData.TeamID
+	// Look up victim session data once to avoid TOCTOU race
+	victimData, victimExists := es.GetSessionData(victimName)
+	if !victimExists || victimData.TeamID == "" {
+		return false
 	}
 
 	// Look up attacker team ID if we have their EOS ID
-	var attackerTeamID string
-	if attackerEOSID != "" {
-		if attackerData, exists := es.GetPlayerData(attackerEOSID); exists {
-			attackerTeamID = attackerData.TeamID
-		}
+	if attackerEOSID == "" {
+		return false
+	}
+	attackerData, attackerExists := es.GetPlayerData(attackerEOSID)
+	if !attackerExists || attackerData.TeamID == "" {
+		return false
 	}
 
 	// Check for teamkill: same team but different players
-	if victimTeamID != "" && attackerTeamID != "" && victimTeamID == attackerTeamID {
-		// Ensure this isn't self-damage by checking if victim has EOS ID
-		var victimEOSID string
-		if victimData, exists := es.GetSessionData(victimName); exists {
-			victimEOSID = victimData.EOSID
-		}
-
-		// If we have both EOSIDs and they're different, but teams are the same, it's a teamkill
-		if victimEOSID != "" && attackerEOSID != "" && victimEOSID != attackerEOSID {
+	if victimData.TeamID == attackerData.TeamID {
+		if victimData.EOSID != "" && victimData.EOSID != attackerEOSID {
 			return true
 		}
 	}
@@ -506,8 +637,7 @@ func (es *EventStore) GetPlayerInfoByName(name string) (*event_manager.PlayerInf
 	}
 
 	// Check if any player data has this name by searching all player keys
-	playerPattern := fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player:*", es.serverID.String())
-	if keys, err := es.client.Keys(context.Background(), playerPattern); err == nil {
+	if keys, err := es.scanPlayerRecordKeys(); err == nil {
 		for _, key := range keys {
 			if data, err := es.client.Get(context.Background(), key); err == nil {
 				var playerData PlayerData
@@ -543,14 +673,12 @@ func (es *EventStore) GetPlayerInfoByName(name string) (*event_manager.PlayerInf
 	return nil, false
 }
 
-// GetPlayerInfoByEOSID finds a player by their EOS ID and returns PlayerInfo for event manager
-func (es *EventStore) GetPlayerInfoByEOSID(eosID string) (*event_manager.PlayerInfo, bool) {
-	if eosID == "" {
+func (es *EventStore) GetPlayerInfoByIdentifier(playerID string) (*event_manager.PlayerInfo, bool) {
+	if playerID == "" {
 		return nil, false
 	}
 
-	if data, exists := es.GetPlayerData(eosID); exists {
-		// Convert PlayerData to PlayerInfo
+	if data, exists := es.GetPlayerData(playerID); exists {
 		playerInfo := &event_manager.PlayerInfo{
 			PlayerController: data.PlayerController,
 			IP:               data.IP,
@@ -566,6 +694,11 @@ func (es *EventStore) GetPlayerInfoByEOSID(eosID string) (*event_manager.PlayerI
 	return nil, false
 }
 
+// GetPlayerInfoByEOSID finds a player by their EOS ID and returns PlayerInfo for event manager
+func (es *EventStore) GetPlayerInfoByEOSID(eosID string) (*event_manager.PlayerInfo, bool) {
+	return es.GetPlayerInfoByIdentifier(eosID)
+}
+
 // GetPlayerInfoByController finds a player by their controller ID and returns PlayerInfo for event manager
 func (es *EventStore) GetPlayerInfoByController(controllerID string) (*event_manager.PlayerInfo, bool) {
 	if controllerID == "" {
@@ -573,8 +706,7 @@ func (es *EventStore) GetPlayerInfoByController(controllerID string) (*event_man
 	}
 
 	// Check all players for matching controller ID by searching all player keys
-	playerPattern := fmt.Sprintf("squad-aegis:logwatcher:%s:event-store:player:*", es.serverID.String())
-	if keys, err := es.client.Keys(context.Background(), playerPattern); err == nil {
+	if keys, err := es.scanPlayerRecordKeys(); err == nil {
 		for _, key := range keys {
 			if data, err := es.client.Get(context.Background(), key); err == nil {
 				var playerData PlayerData

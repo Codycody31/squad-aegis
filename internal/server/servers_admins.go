@@ -50,7 +50,7 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 		WHERE sa.server_id = $1
 	`, serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to query admins", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 	defer rows.Close()
@@ -62,11 +62,15 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 
 		err := rows.Scan(&admin.Id, &admin.ServerId, &admin.UserId, &admin.SteamId, &admin.EOSId, &admin.ServerRoleId, &admin.ExpiresAt, &admin.Notes, &admin.CreatedAt)
 		if err != nil {
-			responses.BadRequest(c, "Failed to scan admin", &gin.H{"error": err.Error()})
+			responses.InternalServerError(c, err, nil)
 			return
 		}
 
 		admins = append(admins, admin)
+	}
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
 	}
 
 	// Prepare response with additional status information
@@ -132,11 +136,6 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 		return
 	}
 
-	if hasSteamID && hasEOSID {
-		responses.BadRequest(c, "Cannot specify both steam_id and eos_id", &gin.H{"error": "Cannot specify both steam_id and eos_id"})
-		return
-	}
-
 	if request.ServerRoleID == "" {
 		responses.BadRequest(c, "Server role ID is required", &gin.H{"error": "Server role ID is required"})
 		return
@@ -144,10 +143,11 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 
 	var targetUserID uuid.UUID
 	var targetUser *models.User
-	var steamID *string
-	var eosID *string
+	var identifiers utils.PlayerIdentifiers
+	var steamIDArg interface{}
+	var eosIDArg interface{}
+	var userIDArg interface{}
 
-	// Handle existing user case
 	if hasUserID {
 		userUUID, err := uuid.Parse(*request.UserID)
 		if err != nil {
@@ -161,145 +161,121 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 			return
 		}
 		targetUserID = userUUID
-
-		// Check if user already has this specific role for this server (prevent duplicate role assignments)
-		var count int
-		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-			SELECT COUNT(*) FROM server_admins
-			WHERE server_id = $1 AND user_id = $2 AND server_role_id = $3
-		`, serverId, targetUserID, request.ServerRoleID).Scan(&count)
-
+		identifiers = utils.NormalizePlayerIdentifiers("", fmt.Sprintf("%d", targetUser.SteamId), "")
+		steamIDArg, eosIDArg, err = identifiers.DatabaseArgs()
 		if err != nil {
-			responses.BadRequest(c, "Failed to check if user already has this role", &gin.H{"error": err.Error()})
+			responses.BadRequest(c, "Failed to normalize user identifiers", &gin.H{"error": err.Error()})
 			return
 		}
+	} else {
+		requestSteamID := ""
+		if request.SteamID != nil {
+			requestSteamID = strings.TrimSpace(*request.SteamID)
+		}
+		requestEOSID := ""
+		if request.EOSID != nil {
+			requestEOSID = strings.TrimSpace(*request.EOSID)
+		}
+		inputIdentifiers := utils.NormalizePlayerIdentifiers(
+			"",
+			requestSteamID,
+			requestEOSID,
+		)
 
-		if count > 0 {
-			responses.BadRequest(c, "User already has this role for this server", &gin.H{"error": "User already has this role for this server"})
-			return
-		}
-	} else if hasSteamID {
-		normalizedSteamID := utils.NormalizePlayerID(*request.SteamID)
-		if !utils.IsSteamID(normalizedSteamID) {
+		if hasSteamID && inputIdentifiers.SteamID == "" {
 			responses.BadRequest(c, "Invalid steam_id", &gin.H{"error": "steam_id must be a valid Steam ID"})
 			return
 		}
-		steamID = &normalizedSteamID
-
-		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-			SELECT id FROM users WHERE steam_id = $1
-		`, *steamID).Scan(&targetUserID)
-
-		if err == sql.ErrNoRows {
-			// User doesn't exist, we'll store the Steam ID directly in server_admins
-			targetUserID = uuid.Nil
-		} else if err != nil {
-			responses.BadRequest(c, "Failed to check existing user", &gin.H{"error": err.Error()})
-			return
-		} else {
-			// User exists, get their information
-			targetUser, err = core.GetUserById(c.Request.Context(), s.Dependencies.DB, targetUserID, &user.Id)
-			if err != nil {
-				responses.BadRequest(c, "Failed to get user information", &gin.H{"error": err.Error()})
-				return
-			}
-
-			// Check if user already has this specific role for this server (prevent duplicate role assignments)
-			var count int
-			err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-				SELECT COUNT(*) FROM server_admins
-				WHERE server_id = $1 AND user_id = $2 AND server_role_id = $3
-			`, serverId, targetUserID, request.ServerRoleID).Scan(&count)
-
-			if err != nil {
-				responses.BadRequest(c, "Failed to check if user already has this role", &gin.H{"error": err.Error()})
-				return
-			}
-
-			if count > 0 {
-				responses.BadRequest(c, "User already has this role for this server", &gin.H{"error": "User already has this role for this server"})
-				return
-			}
-		}
-
-		// Also check if Steam ID already has this specific role for this server (prevent duplicate role assignments)
-		var count int
-		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-			SELECT COUNT(*) FROM server_admins
-			WHERE server_id = $1 AND steam_id = $2 AND server_role_id = $3
-		`, serverId, *steamID, request.ServerRoleID).Scan(&count)
-
-		if err != nil {
-			responses.BadRequest(c, "Failed to check if Steam ID already has this role", &gin.H{"error": err.Error()})
-			return
-		}
-
-		if count > 0 {
-			responses.BadRequest(c, "Steam ID already has this role for this server", &gin.H{"error": "Steam ID already has this role for this server"})
-			return
-		}
-	} else {
-		normalizedEOSID := utils.NormalizePlayerID(*request.EOSID)
-		if !utils.IsEOSID(normalizedEOSID) {
+		if hasEOSID && inputIdentifiers.EOSID == "" {
 			responses.BadRequest(c, "Invalid eos_id", &gin.H{"error": "eos_id must be a valid EOS ID"})
 			return
 		}
-		eosID = &normalizedEOSID
+
+		identifiers = s.resolveCanonicalPlayerIdentifiers(c, inputIdentifiers.PlayerID, inputIdentifiers.SteamID, inputIdentifiers.EOSID)
+		if identifiers.PlayerID == "" {
+			responses.BadRequest(c, "Either steam_id or eos_id is required", &gin.H{"error": "Either steam_id or eos_id is required"})
+			return
+		}
+		if hasSteamID && hasEOSID && (identifiers.SteamID == "" || identifiers.EOSID == "") {
+			responses.BadRequest(c, "steam_id and eos_id must resolve to the same player", &gin.H{"error": "steam_id and eos_id must resolve to the same player"})
+			return
+		}
+
+		steamIDArg, eosIDArg, err = identifiers.DatabaseArgs()
+		if err != nil {
+			responses.BadRequest(c, "Failed to normalize player identifiers", &gin.H{"error": err.Error()})
+			return
+		}
 
 		targetUserID = uuid.Nil
-
-		var count int
-		err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
-			SELECT COUNT(*) FROM server_admins
-			WHERE server_id = $1 AND eos_id = $2 AND server_role_id = $3
-		`, serverId, *eosID, request.ServerRoleID).Scan(&count)
-
-		if err != nil {
-			responses.BadRequest(c, "Failed to check if EOS ID already has this role", &gin.H{"error": err.Error()})
-			return
-		}
-
-		if count > 0 {
-			responses.BadRequest(c, "EOS ID already has this role for this server", &gin.H{"error": "EOS ID already has this role for this server"})
-			return
+		if steamIDArg != nil {
+			err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+				SELECT id FROM users WHERE steam_id = $1
+			`, steamIDArg).Scan(&targetUserID)
+			if err == nil {
+				targetUser, err = core.GetUserById(c.Request.Context(), s.Dependencies.DB, targetUserID, &user.Id)
+				if err != nil {
+					responses.BadRequest(c, "Failed to get user information", &gin.H{"error": err.Error()})
+					return
+				}
+			} else if err != sql.ErrNoRows {
+				responses.BadRequest(c, "Failed to check existing user", &gin.H{"error": err.Error()})
+				return
+			}
 		}
 	}
-
-	// Insert the admin into the database
-	var adminID string
-	var query string
-	var args []interface{}
 
 	if targetUserID != uuid.Nil {
-		// User exists, use user_id
-		query = `
-			INSERT INTO server_admins (id, server_id, user_id, server_role_id, expires_at, notes, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			RETURNING id
-		`
-		args = []interface{}{uuid.New(), serverId, targetUserID, request.ServerRoleID, request.ExpiresAt, request.Notes, time.Now()}
-	} else {
-		// User doesn't exist, use the direct player identifier
-		var steamIDArg interface{}
-		if steamID != nil {
-			steamIDArg = *steamID
-		}
-		var eosIDArg interface{}
-		if eosID != nil {
-			eosIDArg = *eosID
-		}
-
-		query = `
-			INSERT INTO server_admins (id, server_id, steam_id, eos_id, server_role_id, expires_at, notes, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			RETURNING id
-		`
-		args = []interface{}{uuid.New(), serverId, steamIDArg, eosIDArg, request.ServerRoleID, request.ExpiresAt, request.Notes, time.Now()}
+		userIDArg = targetUserID
 	}
 
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), query, args...).Scan(&adminID)
-	if err != nil {
-		responses.BadRequest(c, "Failed to create admin", &gin.H{"error": err.Error()})
+	var adminID uuid.UUID
+	var existingUserID sql.NullString
+
+	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), `
+		SELECT id, user_id
+		FROM server_admins
+		WHERE server_id = $1
+		  AND server_role_id = $2
+		  AND (
+			($3::uuid IS NOT NULL AND user_id = $3::uuid)
+			OR ($4::bigint IS NOT NULL AND steam_id = $4::bigint)
+			OR ($5::text IS NOT NULL AND eos_id = $5::text)
+		  )
+		LIMIT 1
+	`, serverId, request.ServerRoleID, userIDArg, steamIDArg, eosIDArg).Scan(&adminID, &existingUserID)
+
+	if err == nil {
+		if targetUserID != uuid.Nil && existingUserID.Valid && existingUserID.String != targetUserID.String() {
+			responses.BadRequest(c, "Admin role already belongs to a different user", &gin.H{"error": "Admin role already belongs to a different user"})
+			return
+		}
+
+		_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+			UPDATE server_admins
+			SET user_id = COALESCE($1::uuid, user_id),
+			    steam_id = COALESCE($2::bigint, steam_id),
+			    eos_id = COALESCE(NULLIF($3::text, ''), eos_id),
+			    expires_at = $4,
+			    notes = $5
+			WHERE id = $6
+		`, userIDArg, steamIDArg, identifiers.EOSID, request.ExpiresAt, request.Notes, adminID)
+		if err != nil {
+			responses.InternalServerError(c, err, nil)
+			return
+		}
+	} else if err == sql.ErrNoRows {
+		adminID = uuid.New()
+		_, err = s.Dependencies.DB.ExecContext(c.Request.Context(), `
+			INSERT INTO server_admins (id, server_id, user_id, steam_id, eos_id, server_role_id, expires_at, notes, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`, adminID, serverId, userIDArg, steamIDArg, eosIDArg, request.ServerRoleID, request.ExpiresAt, request.Notes, time.Now())
+		if err != nil {
+			responses.InternalServerError(c, err, nil)
+			return
+		}
+	} else {
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
@@ -313,7 +289,7 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 	// Find the role name from the server roles
 	roles, err := core.GetServerRoles(c.Request.Context(), s.Dependencies.DB, serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to get server roles", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
@@ -346,18 +322,24 @@ func (s *Server) ServerAdminsAdd(c *gin.Context) {
 	if targetUser != nil {
 		auditData["userId"] = targetUser.Id.String()
 		auditData["username"] = targetUser.Username
-	} else if steamID != nil {
-		auditData["steamId"] = *steamID
-		auditData["username"] = fmt.Sprintf("Steam ID: %s", *steamID)
-	} else if eosID != nil {
-		auditData["eosId"] = *eosID
-		auditData["username"] = fmt.Sprintf("EOS ID: %s", *eosID)
+	}
+	if identifiers.SteamID != "" {
+		auditData["steamId"] = identifiers.SteamID
+		if targetUser == nil {
+			auditData["username"] = fmt.Sprintf("Steam ID: %s", identifiers.SteamID)
+		}
+	}
+	if identifiers.EOSID != "" {
+		auditData["eosId"] = identifiers.EOSID
+		if targetUser == nil && identifiers.SteamID == "" {
+			auditData["username"] = fmt.Sprintf("EOS ID: %s", identifiers.EOSID)
+		}
 	}
 
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:admin:create", auditData)
 
 	responses.Success(c, "Admin created successfully", &gin.H{
-		"adminId": adminID,
+		"adminId": adminID.String(),
 	})
 }
 
@@ -413,7 +395,7 @@ func (s *Server) ServerAdminsUpdate(c *gin.Context) {
 		if err == sql.ErrNoRows {
 			responses.NotFound(c, "Admin not found", nil)
 		} else {
-			responses.BadRequest(c, "Failed to get admin", &gin.H{"error": err.Error()})
+			responses.InternalServerError(c, err, nil)
 		}
 		return
 	}
@@ -431,7 +413,7 @@ func (s *Server) ServerAdminsUpdate(c *gin.Context) {
 	`, notes, adminId, serverId)
 
 	if err != nil {
-		responses.BadRequest(c, "Failed to update admin", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
@@ -527,7 +509,7 @@ func (s *Server) ServerAdminsRemove(c *gin.Context) {
 	`, adminId, serverId)
 
 	if err != nil {
-		responses.BadRequest(c, "Failed to delete admin", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
@@ -567,14 +549,14 @@ func (s *Server) ServerAdminsCfg(c *gin.Context) {
 	// Get roles
 	roles, err := core.GetServerRoles(c.Request.Context(), s.Dependencies.DB, serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to get server roles", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 
 	// Get all active role members for config generation (both admin and non-admin roles like whitelist, seeder, VIP)
 	roleMembers, err := core.GetAllActiveServerRoleMembers(c.Request.Context(), s.Dependencies.DB, serverId)
 	if err != nil {
-		responses.BadRequest(c, "Failed to get server role members", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 

@@ -143,7 +143,8 @@ func (c *Client) Exists(ctx context.Context, keys ...string) (int64, error) {
 	return result.AsInt64()
 }
 
-// Keys returns all keys matching a pattern
+// Keys returns all keys matching a pattern.
+// WARNING: O(N) scan of the entire keyspace. Prefer Scan() in production.
 func (c *Client) Keys(ctx context.Context, pattern string) ([]string, error) {
 	cmd := c.client.B().Keys().Pattern(pattern).Build()
 	result := c.client.Do(ctx, cmd)
@@ -153,6 +154,41 @@ func (c *Client) Keys(ctx context.Context, pattern string) ([]string, error) {
 	}
 
 	return result.AsStrSlice()
+}
+
+// maxScanKeys is a safety limit to prevent unbounded memory growth when
+// scanning large keyspaces. Callers that expect more keys should paginate.
+const maxScanKeys = 100_000
+
+// Scan iterates over keys matching a pattern using cursor-based scanning.
+// Preferred over Keys() as it does not block the server for the entire scan.
+// Returns at most maxScanKeys results to prevent unbounded memory usage.
+func (c *Client) Scan(ctx context.Context, pattern string) ([]string, error) {
+	var keys []string
+	var cursor uint64
+	for {
+		cmd := c.client.B().Scan().Cursor(cursor).Match(pattern).Count(100).Build()
+		result := c.client.Do(ctx, cmd)
+		if result.Error() != nil {
+			return nil, result.Error()
+		}
+
+		entry, err := result.AsScanEntry()
+		if err != nil {
+			return nil, err
+		}
+
+		keys = append(keys, entry.Elements...)
+		if len(keys) >= maxScanKeys {
+			keys = keys[:maxScanKeys]
+			break
+		}
+		cursor = entry.Cursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return keys, nil
 }
 
 // Expire sets an expiration on a key

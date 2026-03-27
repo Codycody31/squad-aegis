@@ -30,8 +30,13 @@ func IsEOSID(s string) bool {
 
 // NormalizeEOSID trims surrounding whitespace and lowercases the identifier so
 // comparisons are consistent across UI input, imports, DB storage, and logs.
+// Returns an empty string if the result is not a valid 32-char hex EOS ID.
 func NormalizeEOSID(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
+	s = strings.ToLower(strings.TrimSpace(s))
+	if !IsEOSID(s) {
+		return ""
+	}
+	return s
 }
 
 // NormalizePlayerID trims whitespace and normalizes EOS identifiers to their
@@ -91,10 +96,14 @@ func ParsePlayerID(playerID string) (steamID *int64, eosID *string, normalized s
 	return nil, nil, "", fmt.Errorf("player ID must be a valid Steam ID or EOS ID")
 }
 
-// IsSteamID returns true if the string looks like a Steam ID (numeric, parses to int64).
+// IsSteamID returns true if the string looks like a valid Steam ID 64.
+// Valid Steam IDs are unsigned 64-bit integers starting at 76561197960265728.
 func IsSteamID(s string) bool {
-	_, err := strconv.ParseInt(s, 10, 64)
-	return err == nil
+	val, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return false
+	}
+	return val >= 76561197960265728
 }
 
 // SanitizeBanReason replaces newlines with spaces so ban reasons are safe for

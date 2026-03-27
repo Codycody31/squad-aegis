@@ -170,9 +170,13 @@ func GetLogParsers() []LogParser {
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquad: PostLogin: NewPlayer: BP_PlayerController_C .+PersistentLevel\.([^\s]+) \(IP: ([\d.]+) \| Online IDs:(?: EOS: ([^ )]+))?(?: steam: ([^ )]+))?\)`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface, playerTracker *player_tracker.PlayerTracker) {
 				var playerSuffix string
+				playerID := args[5]
+				if playerID == "" {
+					playerID = args[6]
+				}
 				if playerTracker != nil {
-					if args[5] != "" {
-						if playerInfo, ok := playerTracker.GetPlayerByEOSID(args[5]); ok {
+					if playerID != "" {
+						if playerInfo, ok := playerTracker.GetPlayerByIdentifier(playerID); ok {
 							playerSuffix = playerInfo.PlayerSuffix
 							if playerSuffix == "" {
 								playerSuffix = playerInfo.Name
@@ -199,7 +203,7 @@ func GetLogParsers() []LogParser {
 
 				// Store player data in event store
 				eventStore.StoreJoinRequest(strings.TrimSpace(args[2]), player)
-				eventStore.StorePlayerData(args[6], &PlayerData{
+				eventStore.StorePlayerData(playerID, &PlayerData{
 					PlayerController: args[3],
 					IP:               args[4],
 					SteamID:          args[6],
@@ -208,8 +212,8 @@ func GetLogParsers() []LogParser {
 				})
 
 				// Update player tracker with PlayerController data
-				if playerTracker != nil && args[5] != "" {
-					playerTracker.UpdatePlayerFromLog(args[5], "", args[3], "", "")
+				if playerTracker != nil {
+					playerTracker.UpdatePlayerFromLog(args[5], args[6], "", args[3], "")
 				}
 
 				// Create structured event data
@@ -261,14 +265,21 @@ func GetLogParsers() []LogParser {
 				// Store session data for the victim
 				eventStore.StoreSessionData(args[3], sessionData)
 
-				attacker, exists := eventStore.GetPlayerData(args[6])
+				attackerPlayerID := args[6]
+				if attackerPlayerID == "" {
+					attackerPlayerID = args[7]
+				}
+
+				attacker, exists := eventStore.GetPlayerData(attackerPlayerID)
 				if !exists {
-					eventStore.StorePlayerData(args[6], &PlayerData{
+					eventStore.StorePlayerData(attackerPlayerID, &PlayerData{
+						SteamID:    args[7],
+						EOSID:      args[6],
 						Controller: args[5],
 					})
 				} else {
 					attacker.Controller = args[5]
-					eventStore.StorePlayerData(args[6], attacker)
+					eventStore.StorePlayerData(attackerPlayerID, attacker)
 				}
 
 				// Extra logic before publishing the event (similar to JavaScript)
@@ -304,7 +315,7 @@ func GetLogParsers() []LogParser {
 					}
 
 					// Get attacker by EOS ID first, then by controller, then by suffix if not found
-					attacker, attackerExists := playerTracker.GetPlayerByEOSID(args[6])
+					attacker, attackerExists := playerTracker.GetPlayerByIdentifier(attackerPlayerID)
 					if !attackerExists {
 						attacker, attackerExists = playerTracker.GetPlayerByController(args[8])
 					}
@@ -336,11 +347,11 @@ func GetLogParsers() []LogParser {
 						// Update attacker's playercontroller if missing
 						if attacker.PlayerController == "" && args[8] != "" {
 							// Update the PlayerData in the store
-							if playerData, playerExists := eventStore.GetPlayerData(args[6]); playerExists {
+							if playerData, playerExists := eventStore.GetPlayerData(attackerPlayerID); playerExists {
 								playerData.PlayerController = args[8]
-								eventStore.StorePlayerData(args[6], playerData)
+								eventStore.StorePlayerData(attackerPlayerID, playerData)
 								// Refresh the attacker info from PlayerTracker
-								if updatedAttacker, exists := playerTracker.GetPlayerByEOSID(args[6]); exists {
+								if updatedAttacker, exists := playerTracker.GetPlayerByIdentifier(attackerPlayerID); exists {
 									// Convert player_tracker.PlayerInfo to event_manager.PlayerInfo
 									eventManagerData.Attacker = &event_manager.PlayerInfo{
 										PlayerController: updatedAttacker.PlayerController,
@@ -459,7 +470,11 @@ func GetLogParsers() []LogParser {
 					}
 
 					// Get attacker by EOS ID first, then by controller, then by suffix if not found
-					attacker, exists := playerTracker.GetPlayerByEOSID(args[6])
+					attackerPlayerID := args[6]
+					if attackerPlayerID == "" {
+						attackerPlayerID = args[7]
+					}
+					attacker, exists := playerTracker.GetPlayerByIdentifier(attackerPlayerID)
 					if !exists {
 						attacker, exists = playerTracker.GetPlayerByController(args[5])
 					}
@@ -548,15 +563,10 @@ func GetLogParsers() []LogParser {
 					PlayerSuffix:     args[3], // Update with suffix from join succeeded
 				}
 
-				// Store updated player data using EOS ID as primary key, fallback to Steam ID
-				if player.EOSID != "" {
-					eventStore.StorePlayerData(player.EOSID, playerData)
-				} else if player.SteamID != "" {
-					eventStore.StorePlayerData(player.SteamID, playerData)
-				}
+				eventStore.StorePlayerData(player.EOSID, playerData)
 
 				// Update player tracker with PlayerSuffix data (eosID, steamID, name, playerController, playerSuffix)
-				if playerTracker != nil && player.EOSID != "" {
+				if playerTracker != nil {
 					playerTracker.UpdatePlayerFromLog(player.EOSID, player.SteamID, "", player.PlayerController, args[3])
 				}
 
@@ -582,7 +592,7 @@ func GetLogParsers() []LogParser {
 				}
 				eventStore.StoreSessionData(playerSuffix, sessionData)
 
-				if playerTracker != nil && args[4] != "" {
+				if playerTracker != nil {
 					playerTracker.UpdatePlayerFromLog(args[4], args[5], "", args[6], args[3])
 				}
 
@@ -608,13 +618,20 @@ func GetLogParsers() []LogParser {
 					VictimSteam:  args[8],
 				}
 
-				// Get reviver by EOS ID
-				if reviver, exists := eventStore.GetPlayerInfoByEOSID(args[4]); exists {
+				reviverID := args[4]
+				if reviverID == "" {
+					reviverID = args[5]
+				}
+				victimID := args[7]
+				if victimID == "" {
+					victimID = args[8]
+				}
+
+				if reviver, exists := eventStore.GetPlayerInfoByIdentifier(reviverID); exists {
 					eventManagerData.Reviver = reviver
 				}
 
-				// Get victim by EOS ID
-				if victim, exists := eventStore.GetPlayerInfoByEOSID(args[7]); exists {
+				if victim, exists := eventStore.GetPlayerInfoByIdentifier(victimID); exists {
 					eventManagerData.Victim = victim
 				}
 
@@ -705,7 +722,11 @@ func GetLogParsers() []LogParser {
 					}
 
 					// Get attacker by EOS ID first, then by controller, then by suffix if not found
-					attacker, exists := playerTracker.GetPlayerByEOSID(args[6])
+					attackerPlayerID := args[6]
+					if attackerPlayerID == "" {
+						attackerPlayerID = args[7]
+					}
+					attacker, exists := playerTracker.GetPlayerByIdentifier(attackerPlayerID)
 					if !exists {
 						attacker, exists = playerTracker.GetPlayerByController(args[5])
 					}

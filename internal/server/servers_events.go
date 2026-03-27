@@ -54,27 +54,30 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 
 	// Determine which identifier to filter on
 	useSteamID := steamID != ""
-	var steamIDInt uint64
 	if useSteamID {
-		parsed, parseErr := strconv.ParseUint(steamID, 10, 64)
+		_, parseErr := strconv.ParseUint(steamID, 10, 64)
 		if parseErr != nil {
 			responses.BadRequest(c, "Invalid Steam ID format", &gin.H{"error": "Steam ID must be a valid 64-bit integer"})
 			return
 		}
-		steamIDInt = parsed
 	}
+
+	lookupPlayerID := steamID
+	lookupIsSteamID := useSteamID
+	if !lookupIsSteamID {
+		lookupPlayerID = eosID
+	}
+	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, lookupPlayerID, lookupIsSteamID)
 
 	// Map event type to ClickHouse table and build query
 	var query string
 	var tableName string
+	var queryArgs []interface{}
 
 	switch eventType {
 	case "chat_message":
 		tableName = "server_player_chat_messages"
-		filterCol := "steam_id = ?"
-		if !useSteamID {
-			filterCol = "eos_id = ?"
-		}
+		filterCol, identifierArgs := buildClickHouseIdentifierWhereClause("steam_id", "eos_id", steamIDs, eosIDs, true)
 		query = fmt.Sprintf(`
 			SELECT
 				message_id,
@@ -89,13 +92,12 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 			ORDER BY sent_at DESC
 			LIMIT ?
 		`, tableName, filterCol)
+		queryArgs = append([]interface{}{serverId.String()}, identifierArgs...)
+		queryArgs = append(queryArgs, limit)
 
 	case "player_connected":
 		tableName = "server_player_connected_events"
-		filterCol := "pc.steam = ?"
-		if !useSteamID {
-			filterCol = "pc.eos = ?"
-		}
+		filterCol, identifierArgs := buildClickHouseIdentifierWhereClause("pc.steam", "pc.eos", steamIDs, eosIDs, false)
 		query = fmt.Sprintf(`
 			SELECT
 				pc.id,
@@ -120,6 +122,8 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 			ORDER BY pc.event_time DESC
 			LIMIT ?
 		`, tableName, filterCol)
+		queryArgs = append([]interface{}{serverId.String()}, identifierArgs...)
+		queryArgs = append(queryArgs, limit)
 
 	default:
 		responses.BadRequest(c, "Invalid event type", &gin.H{
@@ -130,23 +134,9 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		return
 	}
 
-	// Build query args based on which identifier is being used
-	var queryArgs []interface{}
-	if useSteamID {
-		if eventType == "player_connected" {
-			// player_connected.steam is a string column
-			queryArgs = []interface{}{serverId.String(), strconv.FormatUint(steamIDInt, 10), limit}
-		} else {
-			// chat_messages.steam_id is UInt64
-			queryArgs = []interface{}{serverId.String(), steamIDInt, limit}
-		}
-	} else {
-		queryArgs = []interface{}{serverId.String(), eosID, limit}
-	}
-
 	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, queryArgs...)
 	if err != nil {
-		responses.BadRequest(c, "Failed to query events", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, err, nil)
 		return
 	}
 	defer rows.Close()

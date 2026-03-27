@@ -398,19 +398,8 @@ func databasePlayerIDArgs(playerID string) (steamID interface{}, eosID interface
 }
 
 func databasePlayerIDArgsFromIdentifiers(steamID string, eosID string) (steamIDArg interface{}, eosIDArg interface{}, err error) {
-	if steamID != "" {
-		parsedSteamID, parseErr := strconv.ParseInt(steamID, 10, 64)
-		if parseErr != nil {
-			return nil, nil, fmt.Errorf("invalid steam ID format: %w", parseErr)
-		}
-		steamIDArg = parsedSteamID
-	}
-
-	if eosID != "" {
-		eosIDArg = eosID
-	}
-
-	return steamIDArg, eosIDArg, nil
+	identifiers := utils.NormalizePlayerIdentifiers("", steamID, eosID)
+	return identifiers.DatabaseArgs()
 }
 
 func resolvePlayerIdentifiers(playerID string, players []*PlayerInfo) (steamID string, eosID string, normalizedPlayerID string, err error) {
@@ -447,6 +436,28 @@ func resolvePlayerIdentifiers(playerID string, players []*PlayerInfo) (steamID s
 	}
 
 	return steamID, eosID, normalizedPlayerID, nil
+}
+
+func (api *rconAPI) resolvePlayerIdentifiers(playerID string) (utils.PlayerIdentifiers, error) {
+	normalizedPlayerID := utils.NormalizePlayerID(playerID)
+	if normalizedPlayerID == "" {
+		return utils.PlayerIdentifiers{}, fmt.Errorf("player ID is required")
+	}
+
+	var players []*PlayerInfo
+	if api.rconManager != nil {
+		serverPlayers, playersErr := NewServerAPI(api.serverID, api.db, api.rconManager).GetPlayers()
+		if playersErr == nil {
+			players = serverPlayers
+		}
+	}
+
+	steamID, eosID, resolvedPlayerID, err := resolvePlayerIdentifiers(normalizedPlayerID, players)
+	if err != nil {
+		return utils.PlayerIdentifiers{}, err
+	}
+
+	return utils.NormalizePlayerIdentifiers(resolvedPlayerID, steamID, eosID), nil
 }
 
 func (api *adminAPI) resolvePlayerIdentifierArgs(playerID string) (steamIDArg interface{}, eosIDArg interface{}, normalizedPlayerID string, steamID string, eosID string, err error) {
@@ -1283,15 +1294,14 @@ func (api *rconAPI) BanWithEvidence(playerID string, reason string, duration tim
 
 // storeBanInDatabase stores the ban information in the database
 func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt *time.Time) (uuid.UUID, error) {
-	// Detect player ID type (Steam ID or EOS ID)
-	var steamIDVal interface{}
-	var eosIDVal interface{}
-	if sid, err := strconv.ParseInt(playerID, 10, 64); err == nil {
-		steamIDVal = sid
-	} else if normalizedEOSID := utils.NormalizeEOSID(playerID); utils.IsEOSID(normalizedEOSID) {
-		eosIDVal = normalizedEOSID
-	} else {
-		return uuid.Nil, fmt.Errorf("invalid player ID format: must be a numeric Steam ID or 32-char hex EOS ID")
+	identifiers, err := api.resolvePlayerIdentifiers(playerID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	steamIDVal, eosIDVal, err := identifiers.DatabaseArgs()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to parse player identifiers: %w", err)
 	}
 
 	// Insert ban into database
@@ -1303,7 +1313,7 @@ func (api *rconAPI) storeBanInDatabase(playerID string, reason string, expiresAt
 		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)
 	`
 
-	_, err := api.db.Exec(query,
+	_, err = api.db.Exec(query,
 		banID,        // id
 		api.serverID, // server_id
 		steamIDVal,   // steam_id (nil if EOS-only)
@@ -1339,16 +1349,23 @@ func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, acti
 		return nil // Don't fail if rule ID invalid
 	}
 
-	steamID, err := strconv.ParseInt(playerID, 10, 64)
+	identifiers, err := api.resolvePlayerIdentifiers(playerID)
 	if err != nil {
-		log.Warn().Err(err).Str("player_id", playerID).Msg("Non-numeric player ID (likely EOS ID), skipping ClickHouse violation log")
-		return nil // ClickHouse schema requires UInt64 for player_steam_id; EOS IDs not supported yet
+		return err
+	}
+
+	steamIDVal, _, err := identifiers.DatabaseArgs()
+	if err != nil {
+		return fmt.Errorf("failed to parse violation identifiers: %w", err)
+	}
+	if steamIDVal != nil {
+		steamIDVal = uint64(steamIDVal.(int64))
 	}
 
 	query := `
 		INSERT INTO squad_aegis.player_rule_violations
-		(violation_id, server_id, player_steam_id, rule_id, admin_user_id, action_type, created_at, ingested_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		(violation_id, server_id, player_id, player_steam_id, player_eos_id, rule_id, admin_user_id, action_type, created_at, ingested_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1357,7 +1374,9 @@ func (api *rconAPI) logPluginRuleViolation(playerID string, ruleID *string, acti
 	err = api.clickhouseClient.Exec(ctx, query,
 		uuid.New(),
 		api.serverID,
-		uint64(steamID),
+		identifiers.PlayerID,
+		steamIDVal,
+		identifiers.EOSID,
 		&ruleUUID,
 		nil, // No admin_user_id for plugin actions
 		actionType,
