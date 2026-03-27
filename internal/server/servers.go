@@ -27,7 +27,7 @@ import (
 
 const (
 	statusUDPProbeTimeout  = 1500 * time.Millisecond
-	statusRCONProbeTimeout = 5 * time.Second
+	statusRCONProbeTimeout = 12 * time.Second
 	statusLogProbeTimeout  = 5 * time.Second
 )
 

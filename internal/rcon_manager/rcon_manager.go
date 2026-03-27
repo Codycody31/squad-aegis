@@ -265,8 +265,8 @@ func (m *RconManager) collectServerInfo(serverID uuid.UUID, conn *ServerConnecti
 	// Execute ShowServerInfo command
 	response, err := m.ExecuteCommandWithOptions(serverID, "ShowServerInfo", CommandOptions{
 		Priority: PriorityLow,
-		Timeout:  10 * time.Second,
-		Retries:  1,
+		Timeout:  12 * time.Second,
+		Retries:  2,
 	})
 
 	if err != nil {
@@ -429,7 +429,7 @@ func (m *RconManager) ExecuteCommand(serverID uuid.UUID, command string) (string
 	return m.ExecuteCommandWithOptions(serverID, command, CommandOptions{
 		Priority: PriorityNormal,
 		Timeout:  DefaultCommandTimeout,
-		Retries:  1,
+		Retries:  defaultRetriesForCommand(command),
 	})
 }
 
@@ -453,7 +453,7 @@ func (m *RconManager) ExecuteCommandWithOptions(serverID uuid.UUID, command stri
 		options.Timeout = DefaultCommandTimeout
 	}
 	if options.Retries < 1 {
-		options.Retries = 1
+		options.Retries = defaultRetriesForCommand(command)
 	}
 	if options.Context == nil {
 		options.Context = context.Background()
@@ -679,7 +679,8 @@ func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection,
 
 		// Handle empty responses more gracefully
 		var err error
-		if response == "" {
+		trimmedResponse := strings.TrimSpace(response)
+		if trimmedResponse == "" {
 			// Some commands legitimately return empty responses
 			// Only consider it an error for certain command types
 			if m.shouldHaveResponse(cmd.Command) {
@@ -690,10 +691,20 @@ func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection,
 					Dur("execTime", time.Since(startTime)).
 					Msg("Command returned empty response")
 			}
+		} else {
+			if validationErr := validateCommandResponse(cmd.Command, trimmedResponse); validationErr != nil {
+				err = validationErr
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Str("command", cmd.Command).
+					Str("response", truncateResponseForLog(trimmedResponse)).
+					Dur("execTime", time.Since(startTime)).
+					Msg("Command returned unexpected response format")
+			}
 		}
 
 		// Check if this was a ShowServerInfo command and process it
-		if strings.EqualFold(strings.TrimSpace(cmd.Command), "ShowServerInfo") && response != "" && err == nil {
+		if strings.EqualFold(normalizeCommandName(cmd.Command), "showserverinfo") && trimmedResponse != "" && err == nil {
 			go m.processShowServerInfoResponse(serverID, response)
 		}
 
@@ -782,6 +793,64 @@ func (m *RconManager) shouldHaveResponse(command string) bool {
 	}
 
 	return true
+}
+
+func defaultRetriesForCommand(command string) int {
+	switch normalizeCommandName(command) {
+	case "showserverinfo", "showcurrentmap", "shownextmap", "listplayers", "listsquads", "listlayers":
+		return 2
+	default:
+		return 1
+	}
+}
+
+func normalizeCommandName(command string) string {
+	fields := strings.Fields(strings.TrimSpace(command))
+	if len(fields) == 0 {
+		return ""
+	}
+
+	return strings.ToLower(fields[0])
+}
+
+func validateCommandResponse(command string, response string) error {
+	switch normalizeCommandName(command) {
+	case "showserverinfo":
+		if !strings.HasPrefix(response, "{") || !strings.HasSuffix(response, "}") {
+			return fmt.Errorf("unexpected ShowServerInfo response format")
+		}
+	case "listplayers":
+		if !strings.Contains(response, "----- Active Players -----") {
+			return fmt.Errorf("unexpected ListPlayers response format")
+		}
+	case "listsquads":
+		if !strings.Contains(response, "----- Active Squads -----") && !strings.Contains(response, "Team ID:") {
+			return fmt.Errorf("unexpected ListSquads response format")
+		}
+	case "showcurrentmap":
+		if !strings.HasPrefix(response, "Current level is ") {
+			return fmt.Errorf("unexpected ShowCurrentMap response format")
+		}
+	case "shownextmap":
+		if !strings.HasPrefix(response, "Next level is ") {
+			return fmt.Errorf("unexpected ShowNextMap response format")
+		}
+	case "listlayers":
+		if !strings.HasPrefix(response, "List of available layers") {
+			return fmt.Errorf("unexpected ListLayers response format")
+		}
+	}
+
+	return nil
+}
+
+func truncateResponseForLog(response string) string {
+	const maxLen = 200
+	if len(response) <= maxLen {
+		return response
+	}
+
+	return response[:maxLen] + "..."
 }
 
 // listenForEvents listens for events from an RCON server
@@ -1004,7 +1073,7 @@ func (m *RconManager) ExecuteCommandWithTimeout(serverID uuid.UUID, command stri
 	return m.ExecuteCommandWithOptions(serverID, command, CommandOptions{
 		Priority: PriorityNormal,
 		Timeout:  timeout,
-		Retries:  1,
+		Retries:  defaultRetriesForCommand(command),
 	})
 }
 
