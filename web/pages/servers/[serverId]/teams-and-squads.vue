@@ -243,18 +243,28 @@ function refreshData() {
     fetchTeamsData();
 }
 
+function getPlayerSelectionKey(player: Player): string {
+    return (
+        player.steam_id ||
+        player.eosId ||
+        player.eos_id ||
+        String(player.playerId)
+    );
+}
+
 // Multi-select functions
 function togglePlayerSelection(player: Player, event: MouseEvent) {
     if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         isSelectionMode.value = true;
-        
-        if (selectedPlayers.value.has(player.steam_id)) {
-            selectedPlayers.value.delete(player.steam_id);
+
+        const playerKey = getPlayerSelectionKey(player);
+        if (selectedPlayers.value.has(playerKey)) {
+            selectedPlayers.value.delete(playerKey);
         } else {
-            selectedPlayers.value.add(player.steam_id);
+            selectedPlayers.value.add(playerKey);
         }
-        
+
         // Exit selection mode if no players selected
         if (selectedPlayers.value.size === 0) {
             isSelectionMode.value = false;
@@ -263,7 +273,7 @@ function togglePlayerSelection(player: Player, event: MouseEvent) {
 }
 
 function isPlayerSelected(player: Player): boolean {
-    return selectedPlayers.value.has(player.steam_id);
+    return selectedPlayers.value.has(getPlayerSelectionKey(player));
 }
 
 function clearSelection() {
@@ -276,14 +286,14 @@ function getSelectedPlayerObjects(): Player[] {
     teams.value.forEach((team) => {
         // Check unassigned players
         team.players.forEach((player) => {
-            if (selectedPlayers.value.has(player.steam_id)) {
+            if (selectedPlayers.value.has(getPlayerSelectionKey(player))) {
                 players.push(player);
             }
         });
         // Check squad players
         team.squads.forEach((squad) => {
             squad.players.forEach((player) => {
-                if (selectedPlayers.value.has(player.steam_id)) {
+                if (selectedPlayers.value.has(getPlayerSelectionKey(player))) {
                     players.push(player);
                 }
             });
@@ -480,7 +490,7 @@ function getSelectedPlayerObjects(): Player[] {
                                                         v-for="player in getSortedSquadPlayers(
                                                             squad,
                                                         )"
-                                                        :key="player.steam_id"
+                                                        :key="getPlayerSelectionKey(player)"
                                                         class="border-b border-gray-800 cursor-pointer hover:bg-muted/50 transition-colors"
                                                         :class="{
                                                             'bg-primary/20': isPlayerSelected(player),
@@ -599,7 +609,7 @@ function getSelectedPlayerObjects(): Player[] {
                                     >
                                         <div
                                             v-for="player in team.players"
-                                            :key="player.steam_id"
+                                            :key="getPlayerSelectionKey(player)"
                                             class="p-2 border border-gray-700 rounded flex items-center justify-between cursor-pointer hover:bg-muted/50 transition-colors"
                                             :class="{
                                                 'bg-primary/20 border-primary': isPlayerSelected(player),

@@ -42,6 +42,10 @@ const emit = defineEmits<{
     (e: "clear-selection"): void;
 }>();
 
+function getPlayerEOSID(player: Player): string {
+    return player.eosId || player.eos_id || "";
+}
+
 // Action dialog state
 const showActionDialog = ref(false);
 const actionType = ref<"kick" | "ban" | "warn" | "move" | null>(null);
@@ -216,7 +220,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/kick`;
                         payload = {
                             steam_id: player.steam_id,
-                            eos_id: player.eosId,
+                            eos_id: getPlayerEOSID(player),
                             reason: actionReason.value,
                         };
                         if (
@@ -231,7 +235,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/ban`;
                         payload = {
                             steam_id: player.steam_id,
-                            eos_id: player.eosId,
+                            eos_id: getPlayerEOSID(player),
                             reason: actionReason.value,
                             duration: actionDuration.value,
                         };
@@ -247,7 +251,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/player/warn`;
                         payload = {
                             steam_id: player.steam_id,
-                            eos_id: player.eosId,
+                            eos_id: getPlayerEOSID(player),
                             message: actionReason.value,
                         };
                         if (
@@ -262,7 +266,7 @@ async function executeBulkAction() {
                         endpoint = `${runtimeConfig.public.backendApi}/servers/${props.serverId}/rcon/move-player`;
                         payload = {
                             steam_id: player.steam_id,
-                            eos_id: player.eosId,
+                            eos_id: getPlayerEOSID(player),
                         };
                         break;
                 }
@@ -480,7 +484,7 @@ async function executeBulkAction() {
                     <div class="col-span-3 max-h-32 overflow-y-auto">
                         <div
                             v-for="player in selectedPlayers"
-                            :key="player.steam_id || player.eos_id || player.name"
+                            :key="player.steam_id || player.eosId || player.eos_id || player.name"
                             class="text-sm py-1"
                         >
                             {{ player.name }}
