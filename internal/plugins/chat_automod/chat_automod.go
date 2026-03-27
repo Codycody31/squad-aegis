@@ -429,7 +429,7 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 	playerID := chatEvent.PreferredPlayerID()
 
 	// Get current violation count (before adding this one)
-	currentCount, err := p.tracker.GetActiveViolationCount(playerID)
+	currentCount, err := p.tracker.GetActiveViolationCount(playerID, chatEvent.SteamID, chatEvent.EosID)
 	if err != nil {
 		p.apis.LogAPI.Error("Failed to get violation count", err, map[string]interface{}{
 			"player_id": playerID,
@@ -497,6 +497,8 @@ func (p *ChatAutoModPlugin) handleViolation(eventID uuid.UUID, chatEvent *event_
 	// Record violation
 	if err := p.tracker.RecordViolation(
 		playerID,
+		chatEvent.SteamID,
+		chatEvent.EosID,
 		eventID.String(),
 		result.Category,
 		action.Action,
@@ -664,6 +666,12 @@ func (p *ChatAutoModPlugin) refreshAdminCache() {
 
 	p.adminCache = make(map[string]bool)
 	for _, admin := range admins {
+		if admin.SteamID != "" {
+			p.adminCache[admin.SteamID] = true
+		}
+		if admin.EOSID != "" {
+			p.adminCache[admin.EOSID] = true
+		}
 		if adminID := admin.PreferredID(); adminID != "" {
 			p.adminCache[adminID] = true
 		}

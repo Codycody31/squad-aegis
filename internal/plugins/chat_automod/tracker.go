@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // Violation represents a single violation record
@@ -21,7 +22,9 @@ type Violation struct {
 // PlayerID may be a SteamID or EOS ID depending on what was available.
 // The JSON field is kept as "steam_id" for backward compatibility with existing stored data.
 type ViolationRecord struct {
-	SteamID    string      `json:"steam_id"`
+	PlayerID   string      `json:"player_id,omitempty"`
+	SteamID    string      `json:"steam_id,omitempty"`
+	EOSID      string      `json:"eos_id,omitempty"`
 	Violations []Violation `json:"violations"`
 }
 
@@ -40,38 +43,116 @@ func NewViolationTracker(dbAPI plugin_manager.DatabaseAPI, expiryDays int) *Viol
 }
 
 // getStorageKey returns the storage key for a player's violations
-func (t *ViolationTracker) getStorageKey(steamID string) string {
-	return fmt.Sprintf("violations:%s", steamID)
+func (t *ViolationTracker) getStorageKey(playerID string) string {
+	return fmt.Sprintf("violations:%s", playerID)
+}
+
+func normalizeViolationIdentifiers(playerID string, steamID string, eosID string) (string, string, string) {
+	playerID = utils.NormalizePlayerID(playerID)
+	steamID = utils.NormalizePlayerID(steamID)
+	eosID = utils.NormalizePlayerID(eosID)
+
+	if !utils.IsSteamID(steamID) {
+		steamID = ""
+	}
+	if !utils.IsEOSID(eosID) {
+		eosID = ""
+	}
+
+	if playerID == "" {
+		if steamID != "" {
+			playerID = steamID
+		} else {
+			playerID = eosID
+		}
+	}
+
+	if steamID == "" && utils.IsSteamID(playerID) {
+		steamID = playerID
+	}
+	if eosID == "" && utils.IsEOSID(playerID) {
+		eosID = playerID
+	}
+
+	if steamID != "" {
+		playerID = steamID
+	} else if eosID != "" {
+		playerID = eosID
+	}
+
+	return playerID, steamID, eosID
+}
+
+func violationStorageIDs(playerID string, steamID string, eosID string) []string {
+	playerID, steamID, eosID = normalizeViolationIdentifiers(playerID, steamID, eosID)
+	candidates := []string{playerID, steamID, eosID}
+	seen := make(map[string]bool, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+	}
+	return result
+}
+
+func newViolationRecord(playerID string, steamID string, eosID string) *ViolationRecord {
+	playerID, steamID, eosID = normalizeViolationIdentifiers(playerID, steamID, eosID)
+	return &ViolationRecord{
+		PlayerID:   playerID,
+		SteamID:    steamID,
+		EOSID:      eosID,
+		Violations: []Violation{},
+	}
+}
+
+func normalizeViolationRecord(record *ViolationRecord) {
+	if record == nil {
+		return
+	}
+	record.PlayerID, record.SteamID, record.EOSID = normalizeViolationIdentifiers(record.PlayerID, record.SteamID, record.EOSID)
+	if record.Violations == nil {
+		record.Violations = []Violation{}
+	}
 }
 
 // GetViolationRecord retrieves the violation record for a player
-func (t *ViolationTracker) GetViolationRecord(steamID string) (*ViolationRecord, error) {
-	key := t.getStorageKey(steamID)
+func (t *ViolationTracker) GetViolationRecord(playerID string, steamID string, eosID string) (*ViolationRecord, error) {
+	for _, storageID := range violationStorageIDs(playerID, steamID, eosID) {
+		data, err := t.dbAPI.GetPluginData(t.getStorageKey(storageID))
+		if err != nil {
+			continue
+		}
 
-	data, err := t.dbAPI.GetPluginData(key)
-	if err != nil {
-		// Key not found - return empty record
-		return &ViolationRecord{
-			SteamID:    steamID,
-			Violations: []Violation{},
-		}, nil
+		var record ViolationRecord
+		if err := json.Unmarshal([]byte(data), &record); err != nil {
+			continue
+		}
+
+		normalizeViolationRecord(&record)
+		if record.PlayerID == "" {
+			record.PlayerID, record.SteamID, record.EOSID = normalizeViolationIdentifiers(storageID, steamID, eosID)
+		}
+
+		_, normalizedSteamID, normalizedEOSID := normalizeViolationIdentifiers(record.PlayerID, steamID, eosID)
+		if record.SteamID == "" {
+			record.SteamID = normalizedSteamID
+		}
+		if record.EOSID == "" {
+			record.EOSID = normalizedEOSID
+		}
+		normalizeViolationRecord(&record)
+		return &record, nil
 	}
 
-	var record ViolationRecord
-	if err := json.Unmarshal([]byte(data), &record); err != nil {
-		// Corrupted data - return empty record
-		return &ViolationRecord{
-			SteamID:    steamID,
-			Violations: []Violation{},
-		}, nil
-	}
-
-	return &record, nil
+	return newViolationRecord(playerID, steamID, eosID), nil
 }
 
 // GetActiveViolationCount returns the count of non-expired violations
-func (t *ViolationTracker) GetActiveViolationCount(steamID string) (int, error) {
-	record, err := t.GetViolationRecord(steamID)
+func (t *ViolationTracker) GetActiveViolationCount(playerID string, steamID string, eosID string) (int, error) {
+	record, err := t.GetViolationRecord(playerID, steamID, eosID)
 	if err != nil {
 		return 0, err
 	}
@@ -99,11 +180,12 @@ func (t *ViolationTracker) countActiveViolations(record *ViolationRecord) int {
 }
 
 // RecordViolation adds a new violation to a player's record
-func (t *ViolationTracker) RecordViolation(steamID string, eventID string, category FilterCategory, actionTaken string, message string) error {
-	record, err := t.GetViolationRecord(steamID)
+func (t *ViolationTracker) RecordViolation(playerID string, steamID string, eosID string, eventID string, category FilterCategory, actionTaken string, message string) error {
+	record, err := t.GetViolationRecord(playerID, steamID, eosID)
 	if err != nil {
 		return fmt.Errorf("failed to get violation record: %w", err)
 	}
+	record.PlayerID, record.SteamID, record.EOSID = normalizeViolationIdentifiers(playerID, steamID, eosID)
 
 	// Add new violation
 	violation := Violation{
@@ -145,29 +227,35 @@ func (t *ViolationTracker) filterActiveViolations(violations []Violation) []Viol
 
 // saveRecord persists the violation record to storage
 func (t *ViolationTracker) saveRecord(record *ViolationRecord) error {
-	key := t.getStorageKey(record.SteamID)
+	normalizeViolationRecord(record)
 
 	data, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("failed to marshal violation record: %w", err)
 	}
 
-	if err := t.dbAPI.SetPluginData(key, string(data)); err != nil {
-		return fmt.Errorf("failed to save violation record: %w", err)
+	for _, storageID := range violationStorageIDs(record.PlayerID, record.SteamID, record.EOSID) {
+		if err := t.dbAPI.SetPluginData(t.getStorageKey(storageID), string(data)); err != nil {
+			return fmt.Errorf("failed to save violation record: %w", err)
+		}
 	}
 
 	return nil
 }
 
 // ClearViolations removes all violations for a player
-func (t *ViolationTracker) ClearViolations(steamID string) error {
-	key := t.getStorageKey(steamID)
-	return t.dbAPI.DeletePluginData(key)
+func (t *ViolationTracker) ClearViolations(playerID string, steamID string, eosID string) error {
+	for _, storageID := range violationStorageIDs(playerID, steamID, eosID) {
+		if err := t.dbAPI.DeletePluginData(t.getStorageKey(storageID)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetRecentViolations returns violations from the last N days
-func (t *ViolationTracker) GetRecentViolations(steamID string, days int) ([]Violation, error) {
-	record, err := t.GetViolationRecord(steamID)
+func (t *ViolationTracker) GetRecentViolations(playerID string, steamID string, eosID string, days int) ([]Violation, error) {
+	record, err := t.GetViolationRecord(playerID, steamID, eosID)
 	if err != nil {
 		return nil, err
 	}

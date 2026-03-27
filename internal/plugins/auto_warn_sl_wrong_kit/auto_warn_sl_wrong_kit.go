@@ -10,6 +10,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // PlayerTracker tracks information about squad leaders with wrong kits
@@ -40,6 +41,70 @@ type AutoWarnSLWrongKitPlugin struct {
 	trackedPlayers map[string]*PlayerTracker
 	updateTicker   *time.Ticker
 	cleanupTicker  *time.Ticker
+}
+
+func normalizePlayerCandidates(playerID string, steamID string, eosID string) []string {
+	candidates := []string{
+		utils.NormalizePlayerID(playerID),
+		utils.NormalizePlayerID(steamID),
+		utils.NormalizePlayerID(eosID),
+	}
+
+	seen := make(map[string]bool, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+	}
+
+	return result
+}
+
+func (p *AutoWarnSLWrongKitPlugin) findTrackedPlayerKeyLocked(playerID string, steamID string, eosID string) (string, *PlayerTracker, bool) {
+	for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+		if tracker := p.trackedPlayers[candidate]; tracker != nil {
+			return candidate, tracker, true
+		}
+	}
+
+	for key, tracker := range p.trackedPlayers {
+		if tracker == nil || tracker.Player == nil {
+			continue
+		}
+		for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+			if tracker.Player.MatchesPlayerID(candidate) {
+				return key, tracker, true
+			}
+		}
+	}
+
+	return "", nil, false
+}
+
+func (p *AutoWarnSLWrongKitPlugin) findTrackedPlayerKeyByTrackerLocked(target *PlayerTracker) (string, bool) {
+	for key, tracker := range p.trackedPlayers {
+		if tracker == target {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func (p *AutoWarnSLWrongKitPlugin) findMatchingPlayer(players []*plugin_manager.PlayerInfo, playerID string, steamID string, eosID string) *plugin_manager.PlayerInfo {
+	for _, player := range players {
+		if player == nil || !player.IsOnline {
+			continue
+		}
+		for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+			if player.MatchesPlayerID(candidate) {
+				return player
+			}
+		}
+	}
+	return nil
 }
 
 // Define returns the plugin definition
@@ -415,7 +480,11 @@ func (p *AutoWarnSLWrongKitPlugin) updateTrackingList() error {
 			continue
 		}
 
-		isTracked := p.trackedPlayers[playerID] != nil
+		trackedKey, tracker, isTracked := p.findTrackedPlayerKeyLocked(playerID, player.SteamID, player.EOSID)
+		if isTracked && trackedKey != playerID {
+			delete(p.trackedPlayers, trackedKey)
+			p.trackedPlayers[playerID] = tracker
+		}
 		isSquadLeader := player.IsSquadLeader
 		hasWrongKit := p.hasWrongKit(player.Role)
 
@@ -448,22 +517,27 @@ func (p *AutoWarnSLWrongKitPlugin) clearDisconnectedPlayers() {
 	}
 
 	// Create lookup map of online players
-	onlineMap := make(map[string]bool)
-	for _, player := range players {
-		if player.IsOnline {
-			if playerID := player.PreferredID(); playerID != "" {
-				onlineMap[playerID] = true
-			}
-		}
-	}
-
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	// Remove tracking for players who are no longer online
-	for playerID := range p.trackedPlayers {
-		if !onlineMap[playerID] {
+	for playerID, tracker := range p.trackedPlayers {
+		var steamID string
+		var eosID string
+		if tracker != nil && tracker.Player != nil {
+			steamID = tracker.Player.SteamID
+			eosID = tracker.Player.EOSID
+		}
+
+		matchingPlayer := p.findMatchingPlayer(players, playerID, steamID, eosID)
+		if matchingPlayer == nil {
 			p.untrackPlayerUnsafe(playerID)
+			continue
+		}
+
+		if newKey := matchingPlayer.PreferredID(); newKey != "" && newKey != playerID {
+			delete(p.trackedPlayers, playerID)
+			p.trackedPlayers[newKey] = tracker
 		}
 	}
 }
@@ -592,7 +666,7 @@ func (p *AutoWarnSLWrongKitPlugin) kickLoop(tracker *PlayerTracker) {
 		}
 
 		p.mu.Lock()
-		stillTracked := p.trackedPlayers[tracker.Player.PreferredID()] != nil
+		trackedKey, stillTracked := p.findTrackedPlayerKeyByTrackerLocked(tracker)
 		kickMessage := p.getStringConfig("kick_message")
 		shouldKick := p.getBoolConfig("should_kick")
 		p.mu.Unlock()
@@ -636,7 +710,9 @@ func (p *AutoWarnSLWrongKitPlugin) kickLoop(tracker *PlayerTracker) {
 
 		// Remove from tracking
 		p.mu.Lock()
-		p.untrackPlayerUnsafe(tracker.Player.PreferredID())
+		if stillTracked {
+			p.untrackPlayerUnsafe(trackedKey)
+		}
 		p.mu.Unlock()
 	}
 }

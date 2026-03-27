@@ -26,6 +26,41 @@ type SwitchTeamsPlugin struct {
 	lastSwitches map[string]time.Time // Map of steamID -> last switch time for cooldown
 }
 
+func normalizePlayerCandidates(playerID string, steamID string, eosID string) []string {
+	candidates := []string{
+		utils.NormalizePlayerID(playerID),
+		utils.NormalizePlayerID(steamID),
+		utils.NormalizePlayerID(eosID),
+	}
+
+	seen := make(map[string]bool, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+	}
+
+	return result
+}
+
+func (p *SwitchTeamsPlugin) resolveLastSwitchKeyLocked(playerID string, steamID string, eosID string) string {
+	for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+		if lastSwitch, exists := p.lastSwitches[candidate]; exists {
+			if playerID != "" && candidate != playerID {
+				p.lastSwitches[playerID] = lastSwitch
+				delete(p.lastSwitches, candidate)
+				return playerID
+			}
+			return candidate
+		}
+	}
+
+	return playerID
+}
+
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
@@ -237,21 +272,6 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 	playerID := event.PreferredPlayerID()
 
-	// Check cooldown
-	if lastSwitch, exists := p.lastSwitches[playerID]; exists {
-		cooldownMinutes := p.getIntConfig("cooldown_minutes")
-		cooldown := time.Duration(cooldownMinutes) * time.Minute
-		timeSinceLastSwitch := time.Since(lastSwitch)
-
-		if timeSinceLastSwitch < cooldown {
-			remainingTime := cooldown - timeSinceLastSwitch
-			playerID := event.PreferredPlayerID()
-			return p.apis.RconAPI.SendWarningToPlayer(playerID,
-				fmt.Sprintf("You must wait %s before using !%s again.",
-					p.formatDuration(remainingTime), p.getStringConfig("command")))
-		}
-	}
-
 	// Get current player team info
 	players, err := p.apis.ServerAPI.GetPlayers()
 	if err != nil {
@@ -268,6 +288,23 @@ func (p *SwitchTeamsPlugin) processSwitchRequest(event *event_manager.RconChatMe
 
 	if currentPlayer == nil {
 		return fmt.Errorf("player not found in server")
+	}
+
+	playerID = currentPlayer.PreferredID()
+	lastSwitchKey := p.resolveLastSwitchKeyLocked(playerID, event.SteamID, event.EosID)
+
+	// Check cooldown
+	if lastSwitch, exists := p.lastSwitches[lastSwitchKey]; exists {
+		cooldownMinutes := p.getIntConfig("cooldown_minutes")
+		cooldown := time.Duration(cooldownMinutes) * time.Minute
+		timeSinceLastSwitch := time.Since(lastSwitch)
+
+		if timeSinceLastSwitch < cooldown {
+			remainingTime := cooldown - timeSinceLastSwitch
+			return p.apis.RconAPI.SendWarningToPlayer(playerID,
+				fmt.Sprintf("You must wait %s before using !%s again.",
+					p.formatDuration(remainingTime), p.getStringConfig("command")))
+		}
 	}
 
 	// Try to switch the player immediately

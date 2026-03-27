@@ -18,6 +18,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // PlayerAttemptData tracks rate limiting data for a player
@@ -52,6 +53,48 @@ type SquadCreationBlockerPlugin struct {
 	knownSquads    map[string]bool               // "teamID-squadID" -> true
 	pollTicker     *time.Ticker
 	pollCancel     context.CancelFunc
+}
+
+func preferredPlayerID(steamID string, eosID string) string {
+	if steamID != "" {
+		return utils.NormalizePlayerID(steamID)
+	}
+	return utils.NormalizePlayerID(eosID)
+}
+
+func normalizePlayerCandidates(playerID string, steamID string, eosID string) []string {
+	candidates := []string{
+		utils.NormalizePlayerID(playerID),
+		utils.NormalizePlayerID(steamID),
+		utils.NormalizePlayerID(eosID),
+	}
+
+	seen := make(map[string]bool, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+	}
+
+	return result
+}
+
+func (p *SquadCreationBlockerPlugin) resolvePlayerAttemptKeyLocked(playerID string, steamID string, eosID string) string {
+	for _, candidate := range normalizePlayerCandidates(playerID, steamID, eosID) {
+		if attemptData, exists := p.playerAttempts[candidate]; exists {
+			if playerID != "" && candidate != playerID {
+				p.playerAttempts[playerID] = attemptData
+				delete(p.playerAttempts, candidate)
+				return playerID
+			}
+			return candidate
+		}
+	}
+
+	return playerID
 }
 
 // Define returns the plugin definition
@@ -408,10 +451,8 @@ func (p *SquadCreationBlockerPlugin) handleSquadCreated(rawEvent *plugin_manager
 	}
 
 	p.mu.Lock()
-	playerID := event.SteamID
-	if playerID == "" {
-		playerID = event.EosID
-	}
+	playerID := preferredPlayerID(event.SteamID, event.EosID)
+	playerID = p.resolvePlayerAttemptKeyLocked(playerID, event.SteamID, event.EosID)
 	squadName := event.SquadName
 	shouldBlock := p.isBlocking || (p.shouldApplyRateLimitLocked() && p.isPlayerInCooldownLocked(playerID))
 	allowDefault := p.getBoolConfig("allow_default_squad_names")
@@ -741,10 +782,11 @@ func (p *SquadCreationBlockerPlugin) pollSquads() {
 			continue
 		}
 
-		creatorSteamID := squad.Leader.PreferredID()
+		creatorPlayerID := preferredPlayerID(squad.Leader.SteamID, squad.Leader.EOSID)
+		creatorPlayerID = p.resolvePlayerAttemptKeyLocked(creatorPlayerID, squad.Leader.SteamID, squad.Leader.EOSID)
 
 		// Check if creator is in cooldown or if we're in blocking period
-		inCooldown := p.isPlayerInCooldownLocked(creatorSteamID)
+		inCooldown := p.isPlayerInCooldownLocked(creatorPlayerID)
 		if inCooldown || p.isBlocking {
 			// Don't disband if it's a default squad name and default names are allowed
 			if allowDefault && p.isDefaultSquadName(squad.Name) {
@@ -768,7 +810,7 @@ func (p *SquadCreationBlockerPlugin) pollSquads() {
 
 			// Process rate limiting
 			p.mu.Unlock()
-			_ = p.processRateLimit(creatorSteamID, squad.Name)
+			_ = p.processRateLimit(creatorPlayerID, squad.Name)
 			p.mu.Lock()
 		}
 	}

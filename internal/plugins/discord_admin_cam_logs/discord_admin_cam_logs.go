@@ -10,6 +10,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // AdminCamSession tracks an admin's camera session
@@ -37,6 +38,54 @@ type DiscordAdminCamLogsPlugin struct {
 
 	// Track admin camera sessions
 	adminsInCam map[string]*AdminCamSession
+}
+
+func normalizePlayerCandidates(playerID string, steamID string, eosID string) []string {
+	candidates := []string{
+		utils.NormalizePlayerID(playerID),
+		utils.NormalizePlayerID(steamID),
+		utils.NormalizePlayerID(eosID),
+	}
+
+	seen := make(map[string]bool, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+	}
+
+	return result
+}
+
+func adminCameraEventKey(steamID string, eosID string) string {
+	if steamID != "" {
+		return utils.NormalizePlayerID(steamID)
+	}
+	return utils.NormalizePlayerID(eosID)
+}
+
+func (p *DiscordAdminCamLogsPlugin) findAdminCamSessionKeyLocked(steamID string, eosID string) (string, *AdminCamSession, bool) {
+	for _, candidate := range normalizePlayerCandidates("", steamID, eosID) {
+		if session := p.adminsInCam[candidate]; session != nil {
+			return candidate, session, true
+		}
+	}
+
+	for key, session := range p.adminsInCam {
+		if session == nil {
+			continue
+		}
+		for _, candidate := range normalizePlayerCandidates("", steamID, eosID) {
+			if utils.MatchPlayerID(candidate, session.SteamID, session.EosID) {
+				return key, session, true
+			}
+		}
+	}
+
+	return "", nil, false
 }
 
 // Define returns the plugin definition
@@ -245,11 +294,25 @@ func (p *DiscordAdminCamLogsPlugin) handleAdminCameraEntry(rawEvent *plugin_mana
 
 	// Track the admin camera session
 	p.mu.Lock()
-	p.adminsInCam[event.EosID] = &AdminCamSession{
-		PlayerName: event.AdminName,
-		SteamID:    event.SteamID,
-		EosID:      event.EosID,
-		StartTime:  time.Now(),
+	sessionKey := adminCameraEventKey(event.SteamID, event.EosID)
+	if existingKey, session, exists := p.findAdminCamSessionKeyLocked(event.SteamID, event.EosID); exists {
+		if existingKey != sessionKey && sessionKey != "" {
+			delete(p.adminsInCam, existingKey)
+			p.adminsInCam[sessionKey] = session
+		}
+		session.PlayerName = event.AdminName
+		session.SteamID = event.SteamID
+		session.EosID = event.EosID
+		if session.StartTime.IsZero() {
+			session.StartTime = time.Now()
+		}
+	} else if sessionKey != "" {
+		p.adminsInCam[sessionKey] = &AdminCamSession{
+			PlayerName: event.AdminName,
+			SteamID:    event.SteamID,
+			EosID:      event.EosID,
+			StartTime:  time.Now(),
+		}
 	}
 	p.mu.Unlock()
 
@@ -275,9 +338,9 @@ func (p *DiscordAdminCamLogsPlugin) handleAdminCameraExit(rawEvent *plugin_manag
 
 	// Get the admin camera session
 	p.mu.Lock()
-	session, exists := p.adminsInCam[event.EosID]
+	sessionKey, session, exists := p.findAdminCamSessionKeyLocked(event.SteamID, event.EosID)
 	if exists {
-		delete(p.adminsInCam, event.EosID)
+		delete(p.adminsInCam, sessionKey)
 	}
 	p.mu.Unlock()
 
