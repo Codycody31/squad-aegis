@@ -85,6 +85,11 @@ func serveFile(f *prefixFS) func(ctx *gin.Context) {
 			ctx.Status(code)
 			return
 		}
+		defer func() {
+			if err := file.Close(); err != nil {
+				log.Error().Err(err).Msgf("cannot close %s", ctx.Request.URL.Path)
+			}
+		}()
 		data, err := io.ReadAll(file)
 		if err != nil {
 			ctx.Status(http.StatusInternalServerError)

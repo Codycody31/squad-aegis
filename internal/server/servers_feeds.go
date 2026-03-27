@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
 // FeedEvent represents a formatted event for the feeds
@@ -24,11 +26,34 @@ type FeedEvent struct {
 	Data      map[string]interface{} `json:"data"`
 }
 
-// WebSocket upgrader with permissive settings for development
+func isAllowedWebSocketOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		// Non-browser clients may omit the Origin header.
+		return true
+	}
+
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	if originURL.Host == r.Host {
+		return true
+	}
+
+	appURL, err := url.Parse(config.Config.App.Url)
+	if err != nil {
+		return false
+	}
+
+	return originURL.Host == appURL.Host
+}
+
+// WebSocket upgrader with origin checks to prevent cross-site WebSocket hijacking.
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow connections from any origin (adjust for production)
-		return true
+		return isAllowedWebSocketOrigin(r)
 	},
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,

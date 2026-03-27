@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"mime"
+	"net/http"
 	"path/filepath"
 	"strings"
 
@@ -31,9 +32,35 @@ var previewableTypes = map[string]bool{
 	"text/plain":      true,
 }
 
+var allowedUploadTypes = map[string]bool{
+	"image/jpeg":      true,
+	"image/jpg":       true,
+	"image/png":       true,
+	"image/gif":       true,
+	"image/webp":      true,
+	"video/mp4":       true,
+	"video/webm":      true,
+	"video/quicktime": true,
+	"application/pdf": true,
+	"text/plain":      true,
+}
+
 // isPreviewableType checks if a content type can be previewed inline
 func isPreviewableType(contentType string) bool {
 	return previewableTypes[strings.ToLower(contentType)]
+}
+
+func normalizeContentType(contentType string) string {
+	if contentType == "" {
+		return ""
+	}
+
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return strings.ToLower(strings.TrimSpace(contentType))
+	}
+
+	return strings.ToLower(mediaType)
 }
 
 // ServerEvidenceFileUpload handles file uploads for ban evidence
@@ -64,35 +91,21 @@ func (s *Server) ServerEvidenceFileUpload(c *gin.Context) {
 	// Validate file size
 	if file.Size > maxFileSize {
 		responses.BadRequest(c, "File too large", &gin.H{
-			"error":      fmt.Sprintf("File size exceeds maximum of %d bytes", maxFileSize),
-			"max_size":   maxFileSize,
+			"error":     fmt.Sprintf("File size exceeds maximum of %d bytes", maxFileSize),
+			"max_size":  maxFileSize,
 			"file_size": file.Size,
 		})
 		return
 	}
 
-	// Validate file type
-	allowedTypes := map[string]bool{
-		"image/jpeg":      true,
-		"image/jpg":       true,
-		"image/png":       true,
-		"image/gif":       true,
-		"image/webp":      true,
-		"video/mp4":       true,
-		"video/webm":      true,
-		"video/quicktime": true,
-		"application/pdf": true,
-		"text/plain":      true,
-	}
-
-	fileType := file.Header.Get("Content-Type")
+	// Validate claimed file type
+	fileType := normalizeContentType(file.Header.Get("Content-Type"))
 	if fileType == "" {
-		// Try to detect from extension
 		ext := filepath.Ext(file.Filename)
-		fileType = mime.TypeByExtension(ext)
+		fileType = normalizeContentType(mime.TypeByExtension(ext))
 	}
 
-	if fileType == "" || !allowedTypes[strings.ToLower(fileType)] {
+	if fileType == "" || !allowedUploadTypes[fileType] {
 		responses.BadRequest(c, "Invalid file type", &gin.H{
 			"error":     "File type not allowed",
 			"file_type": fileType,
@@ -109,7 +122,7 @@ func (s *Server) ServerEvidenceFileUpload(c *gin.Context) {
 	fileExt := filepath.Ext(file.Filename)
 	fileID := uuid.New()
 	fileName := fmt.Sprintf("%s%s", fileID.String(), fileExt)
-	
+
 	// Build storage path: evidence/{serverId}/{fileId}.ext
 	// The "evidence" prefix ensures files are organized under the storage base path
 	storagePath := fmt.Sprintf("evidence/%s/%s", serverId.String(), fileName)
@@ -121,6 +134,29 @@ func (s *Server) ServerEvidenceFileUpload(c *gin.Context) {
 		return
 	}
 	defer src.Close()
+
+	// Sniff actual file content to prevent MIME confusion with client-supplied headers/extensions.
+	buffer := make([]byte, 512)
+	bytesRead, err := src.Read(buffer)
+	if err != nil {
+		responses.BadRequest(c, "Failed to inspect uploaded file", &gin.H{"error": err.Error()})
+		return
+	}
+
+	actualType := normalizeContentType(http.DetectContentType(buffer[:bytesRead]))
+	if !allowedUploadTypes[actualType] {
+		responses.BadRequest(c, "Invalid file type", &gin.H{
+			"error":       "File content type not allowed",
+			"file_type":   fileType,
+			"actual_type": actualType,
+		})
+		return
+	}
+
+	if _, err := src.Seek(0, 0); err != nil {
+		responses.BadRequest(c, "Failed to process uploaded file", &gin.H{"error": err.Error()})
+		return
+	}
 
 	// Save the file using storage backend
 	if err := s.Dependencies.Storage.Save(c.Request.Context(), storagePath, src); err != nil {
@@ -205,17 +241,19 @@ func (s *Server) ServerEvidenceFileDownload(c *gin.Context) {
 
 	// Check if inline preview is requested
 	inline := c.Query("inline") == "true"
+	responseContentType := "application/octet-stream"
+	c.Header("X-Content-Type-Options", "nosniff")
 
 	// Set headers based on inline parameter
 	if inline && isPreviewableType(contentType) {
 		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", fileName))
 		c.Header("Content-Type", contentType)
+		responseContentType = contentType
 	} else {
 		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
 		c.Header("Content-Type", "application/octet-stream")
 	}
 
 	// Stream file to response
-	c.DataFromReader(200, -1, contentType, fileReader, nil)
+	c.DataFromReader(200, -1, responseContentType, fileReader, nil)
 }
-

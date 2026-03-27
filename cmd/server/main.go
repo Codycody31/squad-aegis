@@ -369,6 +369,14 @@ func run(ctx context.Context) error {
 }
 
 func setup(database db.Executor) error {
+	adminUsername := config.Config.Initial.Admin.Username
+	adminPassword := config.Config.Initial.Admin.Password
+
+	if adminUsername == "" || adminPassword == "" {
+		log.Warn().Msg("initial admin credentials are not configured; skipping automatic admin user registration")
+		return nil
+	}
+
 	adminId, err := uuid.NewUUID()
 	if err != nil {
 		return fmt.Errorf("failed to generate admin user id: %v", err)
@@ -377,8 +385,8 @@ func setup(database db.Executor) error {
 	// Create admin user if not exists
 	admin := &models.User{
 		Id:         adminId,
-		Username:   config.Config.Initial.Admin.Username,
-		Password:   config.Config.Initial.Admin.Password,
+		Username:   adminUsername,
+		Password:   adminPassword,
 		SuperAdmin: true,
 	}
 
