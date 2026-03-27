@@ -502,25 +502,29 @@ func (p *SquadLeaderWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager.
 	}
 
 	playerID := event.PreferredPlayerID()
-	return p.sendProgressToPlayer(playerID)
+	return p.sendProgressToPlayer(playerID, event.SteamID, event.EosID)
 }
 
 // handlePlayerConnected tracks when players connect for statistics
 func (p *SquadLeaderWhitelistPlugin) handlePlayerConnected(event *plugin_manager.PluginEvent) error {
-	var playerID string
+	var steamID string
+	var eosID string
 	switch data := event.Data.(type) {
 	case *event_manager.LogPlayerConnectedData:
-		playerID = data.PreferredPlayerID()
+		steamID = data.SteamID
+		eosID = data.EOSID
 	case event_manager.LogPlayerConnectedData:
-		playerID = data.PreferredPlayerID()
+		steamID = data.SteamID
+		eosID = data.EOSID
 	case map[string]interface{}:
-		if steamID, ok := data["steam_id"].(string); ok && steamID != "" {
-			playerID = steamID
-		} else if eosID, ok := data["eos_id"].(string); ok {
-			playerID = eosID
-		}
+		steamID, _ = data["steam_id"].(string)
+		eosID, _ = data["eos_id"].(string)
 	}
 
+	playerID := utils.NormalizePlayerID(steamID)
+	if playerID == "" {
+		playerID = utils.NormalizePlayerID(eosID)
+	}
 	playerID = utils.NormalizePlayerID(playerID)
 	if playerID == "" {
 		return nil
@@ -528,7 +532,7 @@ func (p *SquadLeaderWhitelistPlugin) handlePlayerConnected(event *plugin_manager
 
 	// Update last seen time for the player
 	p.mu.Lock()
-	if record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID); exists {
+	if record, exists := whitelistprogress.FindRecordByIdentifiers(p.playerProgress, steamID, eosID); exists {
 		record.LastSeenAt = time.Now()
 	}
 	p.mu.Unlock()
@@ -569,7 +573,12 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 	if !isLeader {
 		// Player is no longer a squad leader, remove their session
 		p.mu.Lock()
-		delete(p.squadLeaderSession, playerID)
+		sessionKey, _, exists := p.findSquadLeaderSessionLocked(playerID, eventData["steam_id"], eventData["eos_id"])
+		if exists {
+			delete(p.squadLeaderSession, sessionKey)
+		} else {
+			delete(p.squadLeaderSession, playerID)
+		}
 		p.mu.Unlock()
 		return nil
 	}
@@ -578,7 +587,12 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if session, exists := p.squadLeaderSession[playerID]; exists {
+	if sessionKey, session, exists := p.findSquadLeaderSessionLocked(playerID, eventData["steam_id"], eventData["eos_id"]); exists {
+		if sessionKey != playerID {
+			delete(p.squadLeaderSession, sessionKey)
+			p.squadLeaderSession[playerID] = session
+		}
+		session.PlayerID = playerID
 		if steamID, ok := eventData["steam_id"].(string); ok && steamID != "" {
 			session.SteamID = utils.NormalizePlayerID(steamID)
 		}
@@ -605,6 +619,42 @@ func (p *SquadLeaderWhitelistPlugin) handleSquadChange(event *plugin_manager.Plu
 	}
 
 	return nil
+}
+
+func (p *SquadLeaderWhitelistPlugin) findSquadLeaderSessionLocked(playerID string, steamIDValue interface{}, eosIDValue interface{}) (string, *SquadLeaderSession, bool) {
+	steamID, _ := steamIDValue.(string)
+	eosID, _ := eosIDValue.(string)
+
+	candidates := []string{
+		utils.NormalizePlayerID(playerID),
+		utils.NormalizePlayerID(steamID),
+		utils.NormalizePlayerID(eosID),
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if session, exists := p.squadLeaderSession[candidate]; exists && session != nil {
+			return candidate, session, true
+		}
+	}
+
+	for key, session := range p.squadLeaderSession {
+		if session == nil {
+			continue
+		}
+		for _, candidate := range candidates {
+			if candidate == "" {
+				continue
+			}
+			if utils.MatchPlayerID(candidate, session.SteamID, session.EOSID) || candidate == utils.NormalizePlayerID(session.PlayerID) {
+				return key, session, true
+			}
+		}
+	}
+
+	return "", nil, false
 }
 
 // updateSquadLeaderSessions updates the squad leader sessions based on current player state
@@ -929,10 +979,13 @@ func (p *SquadLeaderWhitelistPlugin) decayProgress() error {
 }
 
 // sendProgressToPlayer sends progress information to a specific player
-func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(playerID string) error {
+func (p *SquadLeaderWhitelistPlugin) sendProgressToPlayer(playerID string, steamID string, eosID string) error {
 	p.mu.Lock()
-	record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID)
-	session, hasActiveSession := p.squadLeaderSession[playerID]
+	record, exists := whitelistprogress.FindRecordByIdentifiers(p.playerProgress, steamID, eosID)
+	if !exists {
+		record, exists = whitelistprogress.FindRecord(p.playerProgress, playerID)
+	}
+	_, session, hasActiveSession := p.findSquadLeaderSessionLocked(playerID, steamID, eosID)
 	p.mu.Unlock()
 
 	requiredSeconds := p.requiredWhitelistSeconds()

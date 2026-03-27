@@ -479,25 +479,29 @@ func (p *ServerSeederWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager
 	}
 
 	playerID := event.PreferredPlayerID()
-	return p.sendProgressToPlayer(playerID)
+	return p.sendProgressToPlayer(playerID, event.SteamID, event.EosID)
 }
 
 // handlePlayerConnected tracks when players connect for statistics
 func (p *ServerSeederWhitelistPlugin) handlePlayerConnected(event *plugin_manager.PluginEvent) error {
-	var playerID string
+	var steamID string
+	var eosID string
 	switch data := event.Data.(type) {
 	case *event_manager.LogPlayerConnectedData:
-		playerID = data.PreferredPlayerID()
+		steamID = data.SteamID
+		eosID = data.EOSID
 	case event_manager.LogPlayerConnectedData:
-		playerID = data.PreferredPlayerID()
+		steamID = data.SteamID
+		eosID = data.EOSID
 	case map[string]interface{}:
-		if steamID, ok := data["steam_id"].(string); ok && steamID != "" {
-			playerID = steamID
-		} else if eosID, ok := data["eos_id"].(string); ok {
-			playerID = eosID
-		}
+		steamID, _ = data["steam_id"].(string)
+		eosID, _ = data["eos_id"].(string)
 	}
 
+	playerID := utils.NormalizePlayerID(steamID)
+	if playerID == "" {
+		playerID = utils.NormalizePlayerID(eosID)
+	}
 	playerID = utils.NormalizePlayerID(playerID)
 	if playerID == "" {
 		return nil
@@ -505,7 +509,7 @@ func (p *ServerSeederWhitelistPlugin) handlePlayerConnected(event *plugin_manage
 
 	// Update last seen time for the player
 	p.mu.Lock()
-	if record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID); exists {
+	if record, exists := whitelistprogress.FindRecordByIdentifiers(p.playerProgress, steamID, eosID); exists {
 		record.LastSeenAt = time.Now()
 	}
 	p.mu.Unlock()
@@ -751,9 +755,12 @@ func (p *ServerSeederWhitelistPlugin) decayProgress() error {
 }
 
 // sendProgressToPlayer sends progress information to a specific player
-func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(playerID string) error {
+func (p *ServerSeederWhitelistPlugin) sendProgressToPlayer(playerID string, steamID string, eosID string) error {
 	p.mu.Lock()
-	record, exists := whitelistprogress.FindRecord(p.playerProgress, playerID)
+	record, exists := whitelistprogress.FindRecordByIdentifiers(p.playerProgress, steamID, eosID)
+	if !exists {
+		record, exists = whitelistprogress.FindRecord(p.playerProgress, playerID)
+	}
 	p.mu.Unlock()
 
 	requiredSeconds := p.requiredWhitelistSeconds()

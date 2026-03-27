@@ -109,6 +109,10 @@ func ParseState(raw string) (*State, error) {
 		record.SteamID = normalizeSteamID(record.SteamID)
 		record.EOSID = normalizeEOSID(record.EOSID)
 		applyIdentifierFallbacks(record)
+		normalizedPlayerID = record.PlayerID
+		if normalizedPlayerID == "" {
+			continue
+		}
 		if record.QualifiedSeconds < 0 {
 			record.QualifiedSeconds = 0
 		}
@@ -138,21 +142,23 @@ func FindRecord(players map[string]*PlayerRecord, playerID string) (*PlayerRecor
 		return nil, false
 	}
 
-	if record, exists := players[playerID]; exists && record != nil {
-		return record, true
-	}
-
 	steamID, eosID := splitPlayerID(playerID)
-	for _, record := range players {
-		if record == nil {
-			continue
-		}
-		if recordMatches(record, steamID, eosID) {
-			return record, true
-		}
+	return FindRecordByIdentifiers(players, steamID, eosID)
+}
+
+func FindRecordByIdentifiers(players map[string]*PlayerRecord, steamID string, eosID string) (*PlayerRecord, bool) {
+	steamID = normalizeSteamID(steamID)
+	eosID = normalizeEOSID(eosID)
+	if steamID == "" && eosID == "" {
+		return nil, false
 	}
 
-	return nil, false
+	_, record := findRecordByIdentifiers(players, steamID, eosID)
+	if record == nil {
+		return nil, false
+	}
+
+	return record, true
 }
 
 func EnsureRecord(players map[string]*PlayerRecord, steamID string, eosID string, now time.Time) *PlayerRecord {
@@ -178,19 +184,18 @@ func EnsureRecord(players map[string]*PlayerRecord, steamID string, eosID string
 		return record
 	}
 
+	if steamID != "" {
+		record.SteamID = steamID
+	}
+	if eosID != "" {
+		record.EOSID = eosID
+	}
 	if record.PlayerID == "" {
 		if recordKey != "" {
 			record.PlayerID = recordKey
 		} else {
 			record.PlayerID = canonicalPlayerID
 		}
-	}
-
-	if steamID != "" {
-		record.SteamID = steamID
-	}
-	if eosID != "" {
-		record.EOSID = eosID
 	}
 	applyIdentifierFallbacks(record)
 
@@ -245,8 +250,11 @@ func applyIdentifierFallbacks(record *PlayerRecord) {
 		return
 	}
 
-	if record.PlayerID == "" {
-		record.PlayerID = chooseCanonicalPlayerID(record.SteamID, record.EOSID)
+	canonicalPlayerID := chooseCanonicalPlayerID(record.SteamID, record.EOSID)
+	if canonicalPlayerID != "" {
+		record.PlayerID = canonicalPlayerID
+	} else {
+		record.PlayerID = utils.NormalizePlayerID(record.PlayerID)
 	}
 
 	if record.SteamID == "" && utils.IsSteamID(record.PlayerID) {

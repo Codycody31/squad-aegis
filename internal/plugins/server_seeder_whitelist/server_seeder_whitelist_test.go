@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,6 +141,45 @@ func TestUpdateConfigRemovesManagedRoleWhenThresholdIncreases(t *testing.T) {
 	}
 }
 
+func TestSendProgressToPlayerResolvesLegacyEOSRecordAcrossIdentifiers(t *testing.T) {
+	rcon := &fakeRconAPI{}
+	plugin := &ServerSeederWhitelistPlugin{
+		playerProgress: make(map[string]*PlayerProgressRecord),
+	}
+
+	err := plugin.Initialize(map[string]interface{}{
+		"hours_to_whitelist": 6,
+	}, &plugin_manager.PluginAPIs{
+		DatabaseAPI: &fakeDatabaseAPI{data: map[string]string{}},
+		RconAPI:     rcon,
+		LogAPI:      fakeLogAPI{},
+	})
+	if err != nil {
+		t.Fatalf("initialize plugin: %v", err)
+	}
+
+	plugin.playerProgress["abcdef0123456789abcdef0123456789"] = &PlayerProgressRecord{
+		PlayerID:         "abcdef0123456789abcdef0123456789",
+		EOSID:            "abcdef0123456789abcdef0123456789",
+		QualifiedSeconds: int64(time.Hour / time.Second),
+		LifetimeSeconds:  int64(2 * time.Hour / time.Second),
+		LastEarnedAt:     time.Now(),
+		LastSeenAt:       time.Now(),
+	}
+
+	err = plugin.sendProgressToPlayer("76561198000000021", "76561198000000021", "ABCDEF0123456789ABCDEF0123456789")
+	if err != nil {
+		t.Fatalf("send progress: %v", err)
+	}
+
+	if len(rcon.warnings) != 1 {
+		t.Fatalf("warning count = %d, want 1", len(rcon.warnings))
+	}
+	if strings.Contains(rcon.warnings[0].message, "No seeding progress found") {
+		t.Fatalf("expected cross-identifier lookup to find progress, got %q", rcon.warnings[0].message)
+	}
+}
+
 type fakeDatabaseAPI struct {
 	data map[string]string
 }
@@ -221,6 +261,12 @@ func (f *fakeAdminAPI) ListTemporaryAdmins() ([]*plugin_manager.TemporaryAdminIn
 
 type fakeRconAPI struct {
 	commands []string
+	warnings []warningCall
+}
+
+type warningCall struct {
+	playerID string
+	message  string
 }
 
 func (f *fakeRconAPI) SendCommand(command string) (string, error) {
@@ -233,6 +279,10 @@ func (f *fakeRconAPI) Broadcast(message string) error {
 }
 
 func (f *fakeRconAPI) SendWarningToPlayer(playerID string, message string) error {
+	f.warnings = append(f.warnings, warningCall{
+		playerID: playerID,
+		message:  message,
+	})
 	return nil
 }
 
