@@ -29,6 +29,7 @@
 
 ### Misc
 
+- chore: small updates ([7ce2a0e](https://github.com/Codycody31/squad-aegis/commit/7ce2a0e931c54859e174e0fe38fd990321e01f80))
 - fix(migrations): comment breaking query... ([72155dc](https://github.com/Codycody31/squad-aegis/commit/72155dc3321394ccde2d07649a453a79a60c9a04))
 
 ## [0.8.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.0) - 2026-02-13
