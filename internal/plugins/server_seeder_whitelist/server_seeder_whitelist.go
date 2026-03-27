@@ -922,7 +922,15 @@ func (p *ServerSeederWhitelistPlugin) loadPlayerProgress() error {
 
 	p.playerProgress = migratedProgress
 
-	if err := p.savePlayerProgress(); err != nil {
+	migratedData, err := p.marshalPlayerProgressLocked()
+	if err != nil {
+		p.apis.LogAPI.Warn("Failed to marshal migrated seeder player progress", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil
+	}
+
+	if err := p.apis.DatabaseAPI.SetPluginData("player_progress", string(migratedData)); err != nil {
 		p.apis.LogAPI.Warn("Failed to persist migrated seeder player progress", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -934,7 +942,7 @@ func (p *ServerSeederWhitelistPlugin) loadPlayerProgress() error {
 // savePlayerProgress saves player progress to database
 func (p *ServerSeederWhitelistPlugin) savePlayerProgress() error {
 	p.mu.Lock()
-	data, err := whitelistprogress.MarshalPlayers(p.playerProgress)
+	data, err := p.marshalPlayerProgressLocked()
 	p.mu.Unlock()
 
 	if err != nil {
@@ -942,6 +950,11 @@ func (p *ServerSeederWhitelistPlugin) savePlayerProgress() error {
 	}
 
 	return p.apis.DatabaseAPI.SetPluginData("player_progress", string(data))
+}
+
+// marshalPlayerProgressLocked serializes player progress while p.mu is held.
+func (p *ServerSeederWhitelistPlugin) marshalPlayerProgressLocked() ([]byte, error) {
+	return whitelistprogress.MarshalPlayers(p.playerProgress)
 }
 
 // Helper methods for config access
