@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.9.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.0) - 2026-03-27
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31, @Insidious Fiddler, @wish131400
+
+### 🐛 Bug Fixes
+
+- fix(players): support EOS-only Epic players in live server views [[#195](https://github.com/Codycody31/squad-aegis/pull/195)]
+- fix: support Steam and EOS identifiers in whitelist progress and admin lookups [[#193](https://github.com/Codycody31/squad-aegis/pull/193)]
+- fix(permissions): add dedicated UI permission for map changes [[#192](https://github.com/Codycody31/squad-aegis/pull/192)]
+- fix(player-profile): collapse duplicate-looking combat burst hits [[#191](https://github.com/Codycody31/squad-aegis/pull/191)]
+- fix: server metric charts [[#190](https://github.com/Codycody31/squad-aegis/pull/190)]
+- fix: add missing ban evidence metadata [[#189](https://github.com/Codycody31/squad-aegis/pull/189)]
+- fix(server): validate server settings log source type [[#175](https://github.com/Codycody31/squad-aegis/pull/175)]
+- fix(ui): normalize optional log fields for server settings [[#176](https://github.com/Codycody31/squad-aegis/pull/176)]
+
+### 📈 Enhancement
+
+- refactor: add pagination/search to server admins endpoint [[#194](https://github.com/Codycody31/squad-aegis/pull/194)]
+- refactor: server log configuration and overhaul Bans.cfg ban sync/import [[#169](https://github.com/Codycody31/squad-aegis/pull/169)]
+- refactor(settings.vue): show proper server status for components (rcon/game port, log source, etc) [[#181](https://github.com/Codycody31/squad-aegis/pull/181)]
+- refactor(dashboard.vue): add proper status tracking displayment for game/rcon ports & other components [[#180](https://github.com/Codycody31/squad-aegis/pull/180)]
+- refactor(server): rebuild server online status detection with separated game/rcon port and log status checks [[#178](https://github.com/Codycody31/squad-aegis/pull/178)]
+- refactor(logwatcher): add log watcher server connection status func [[#179](https://github.com/Codycody31/squad-aegis/pull/179)]
+- refactor: Add player suffix tracking for player_connected event [[#168](https://github.com/Codycody31/squad-aegis/pull/168)]
+
+### Misc
+
+- chore: small updates ([7ce2a0e](https://github.com/Codycody31/squad-aegis/commit/7ce2a0e931c54859e174e0fe38fd990321e01f80))
+- fix(migrations): comment breaking query... ([72155dc](https://github.com/Codycody31/squad-aegis/commit/72155dc3321394ccde2d07649a453a79a60c9a04))
+
 ## [0.8.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.8.0) - 2026-02-13
 
 ### ❤️ Thanks to all contributors! ❤️
