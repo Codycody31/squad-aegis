@@ -6,6 +6,16 @@
 
 @Codycody31, @Insidious Fiddler, @wish131400
 
+### 📈 Enhancement
+
+- refactor: add pagination/search to server admins endpoint [[#194](https://github.com/Codycody31/squad-aegis/pull/194)]
+- refactor: server log configuration and overhaul Bans.cfg ban sync/import [[#169](https://github.com/Codycody31/squad-aegis/pull/169)]
+- refactor(settings.vue): show proper server status for components (rcon/game port, log source, etc) [[#181](https://github.com/Codycody31/squad-aegis/pull/181)]
+- refactor(dashboard.vue): add proper status tracking displayment for game/rcon ports & other components [[#180](https://github.com/Codycody31/squad-aegis/pull/180)]
+- refactor(server): rebuild server online status detection with separated game/rcon port and log status checks [[#178](https://github.com/Codycody31/squad-aegis/pull/178)]
+- refactor(logwatcher): add log watcher server connection status func [[#179](https://github.com/Codycody31/squad-aegis/pull/179)]
+- refactor: Add player suffix tracking for player_connected event [[#168](https://github.com/Codycody31/squad-aegis/pull/168)]
+
 ### 🐛 Bug Fixes
 
 - fix: support Steam and EOS identifiers in whitelist progress and admin lookups [[#193](https://github.com/Codycody31/squad-aegis/pull/193)]
@@ -15,15 +25,6 @@
 - fix: add missing ban evidence metadata [[#189](https://github.com/Codycody31/squad-aegis/pull/189)]
 - fix(server): validate server settings log source type [[#175](https://github.com/Codycody31/squad-aegis/pull/175)]
 - fix(ui): normalize optional log fields for server settings [[#176](https://github.com/Codycody31/squad-aegis/pull/176)]
-
-### 📈 Enhancement
-
-- refactor: server log configuration and overhaul Bans.cfg ban sync/import [[#169](https://github.com/Codycody31/squad-aegis/pull/169)]
-- refactor(settings.vue): show proper server status for components (rcon/game port, log source, etc) [[#181](https://github.com/Codycody31/squad-aegis/pull/181)]
-- refactor(dashboard.vue): add proper status tracking displayment for game/rcon ports & other components [[#180](https://github.com/Codycody31/squad-aegis/pull/180)]
-- refactor(server): rebuild server online status detection with separated game/rcon port and log status checks [[#178](https://github.com/Codycody31/squad-aegis/pull/178)]
-- refactor(logwatcher): add log watcher server connection status func [[#179](https://github.com/Codycody31/squad-aegis/pull/179)]
-- refactor: Add player suffix tracking for player_connected event [[#168](https://github.com/Codycody31/squad-aegis/pull/168)]
 
 ### Misc
 
