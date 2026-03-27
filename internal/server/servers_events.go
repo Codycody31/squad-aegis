@@ -10,7 +10,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
-	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
 // ServerEventsSearch handles searching for events in ClickHouse for evidence
@@ -33,9 +32,14 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 
 	// Get query parameters — accept either steam_id or eos_id
 	steamID := c.Query("steam_id")
-	eosID := utils.NormalizeEOSID(c.Query("eos_id"))
+	eosID, eosIDProvided, eosIDValid := normalizeOptionalEOSID(c.Query("eos_id"))
 	eventType := c.Query("event_type")
 	limitStr := c.DefaultQuery("limit", "50")
+
+	if eosIDProvided && !eosIDValid {
+		responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
+		return
+	}
 
 	if steamID == "" && eosID == "" {
 		responses.BadRequest(c, "steam_id or eos_id is required", nil)

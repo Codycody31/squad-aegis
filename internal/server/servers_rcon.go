@@ -924,8 +924,13 @@ func (s *Server) ServerRconPlayerEscalationSuggestion(c *gin.Context) {
 	}
 
 	steamId := c.Query("steam_id")
-	eosId := utils.NormalizeEOSID(c.Query("eos_id"))
+	eosId, eosIDProvided, eosIDValid := normalizeOptionalEOSID(c.Query("eos_id"))
 	ruleIdStr := c.Query("rule_id")
+
+	if eosIDProvided && !eosIDValid {
+		responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
+		return
+	}
 
 	if steamId == "" && eosId == "" {
 		responses.BadRequest(c, "Player identifier is required", &gin.H{"error": "steam_id or eos_id parameter is required"})
@@ -943,11 +948,6 @@ func (s *Server) ServerRconPlayerEscalationSuggestion(c *gin.Context) {
 		}
 		hasSteamId = true
 	}
-	if eosId != "" && !utils.IsEOSID(eosId) {
-		responses.BadRequest(c, "Invalid EOS ID format", &gin.H{"error": "EOS ID must be a 32-character hex string"})
-		return
-	}
-
 	lookupPlayerID := steamId
 	lookupIsSteamID := true
 	if !hasSteamId {
