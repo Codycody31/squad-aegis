@@ -98,4 +98,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/SquadGO/squad-rcon-go/v2 v2.0.5 => github.com/codycody31/squad-rcon-go/v2 v2.0.0-20250926194427-83529202149a
+replace github.com/SquadGO/squad-rcon-go/v2 v2.0.5 => ./third_party/squad-rcon-go
