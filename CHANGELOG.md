@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.1) - 2026-03-28
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### 🐛 Bug Fixes
+
+- fix(admins): cast steam id search to text and preserve exact ids in API response [[#201](https://github.com/Codycody31/squad-aegis/pull/201)]
+- fix(rcon): allow empty responses for fire-and-forget commands [[#200](https://github.com/Codycody31/squad-aegis/pull/200)]
+- fix(rcon): stop idle connection timeout cascades on empty servers [[#198](https://github.com/Codycody31/squad-aegis/pull/198)]
+
 ## [0.9.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.0) - 2026-03-27
 
 ### ❤️ Thanks to all contributors! ❤️
