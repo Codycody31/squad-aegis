@@ -1,6 +1,13 @@
 package rcon_manager
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+)
 
 func TestValidateCommandResponseRejectsMismatchedPayloads(t *testing.T) {
 	tests := []struct {
@@ -73,5 +80,131 @@ func TestDefaultRetriesForCommand(t *testing.T) {
 
 	if retries := defaultRetriesForCommand("AdminKick 1 testing"); retries != 1 {
 		t.Fatalf("expected AdminKick retries to remain 1, got %d", retries)
+	}
+}
+
+func TestExecuteCommandWithOptionsCreatesFreshAttemptContext(t *testing.T) {
+	managerCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverID := uuid.New()
+	conn := &ServerConnection{
+		CommandChan: make(chan RconCommand, 2),
+	}
+
+	manager := &RconManager{
+		connections: map[uuid.UUID]*ServerConnection{
+			serverID: conn,
+		},
+		ctx: managerCtx,
+	}
+
+	received := make(chan RconCommand, 2)
+	go func() {
+		for i := 0; i < 2; i++ {
+			received <- <-conn.CommandChan
+		}
+	}()
+
+	_, err := manager.ExecuteCommandWithOptions(serverID, "ListPlayers", CommandOptions{
+		Timeout:  20 * time.Millisecond,
+		Retries:  2,
+		Context:  context.Background(),
+		Priority: PriorityNormal,
+	})
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "command execution timeout") {
+		t.Fatalf("expected execution timeout, got %v", err)
+	}
+
+	timeout := time.After(200 * time.Millisecond)
+	for i := 0; i < 2; i++ {
+		select {
+		case <-received:
+		case <-timeout:
+			t.Fatalf("expected 2 command attempts to reach the queue, got %d", i)
+		}
+	}
+}
+
+func TestExecuteCommandWithOptionsDoesNotCloseLateResponseChannel(t *testing.T) {
+	managerCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverID := uuid.New()
+	conn := &ServerConnection{
+		CommandChan: make(chan RconCommand, 1),
+	}
+
+	manager := &RconManager{
+		connections: map[uuid.UUID]*ServerConnection{
+			serverID: conn,
+		},
+		ctx: managerCtx,
+	}
+
+	captured := make(chan RconCommand, 1)
+	go func() {
+		captured <- <-conn.CommandChan
+	}()
+
+	_, err := manager.ExecuteCommandWithOptions(serverID, "ListSquads", CommandOptions{
+		Timeout:  20 * time.Millisecond,
+		Retries:  1,
+		Context:  context.Background(),
+		Priority: PriorityNormal,
+	})
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+
+	cmd := <-captured
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("late response send panicked: %v", r)
+		}
+	}()
+
+	cmd.Response <- CommandResponse{Response: "late", Error: nil}
+}
+
+func TestExecuteCommandWithOptionsDoesNotRetryNonRetryableErrors(t *testing.T) {
+	managerCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverID := uuid.New()
+	conn := &ServerConnection{
+		CommandChan: make(chan RconCommand, 2),
+	}
+
+	manager := &RconManager{
+		connections: map[uuid.UUID]*ServerConnection{
+			serverID: conn,
+		},
+		ctx: managerCtx,
+	}
+
+	go func() {
+		cmd := <-conn.CommandChan
+		cmd.Response <- CommandResponse{Error: context.Canceled}
+	}()
+
+	_, err := manager.ExecuteCommandWithOptions(serverID, "ListPlayers", CommandOptions{
+		Timeout:  50 * time.Millisecond,
+		Retries:  2,
+		Context:  context.Background(),
+		Priority: PriorityNormal,
+	})
+	if err == nil {
+		t.Fatal("expected non-retryable error")
+	}
+
+	select {
+	case <-conn.CommandChan:
+		t.Fatal("expected non-retryable error to stop retries")
+	case <-time.After(100 * time.Millisecond):
 	}
 }

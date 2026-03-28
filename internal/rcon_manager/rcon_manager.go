@@ -381,7 +381,7 @@ func (m *RconManager) monitorConnection(serverID uuid.UUID, conn *ServerConnecti
 			conn.mu.Unlock()
 
 			// Collect server info periodically
-			if needsServerInfo && conn.isHealthy {
+			if needsServerInfo {
 				go m.collectServerInfo(serverID, conn)
 			}
 
@@ -473,44 +473,43 @@ func (m *RconManager) ExecuteCommandWithOptions(serverID uuid.UUID, command stri
 	conn.LastUsed = time.Now()
 	conn.mu.Unlock()
 
-	// Create command context with timeout
-	ctx, cancel := context.WithTimeout(options.Context, options.Timeout)
-	defer cancel()
-
-	responseChan := make(chan CommandResponse, 1)
-	defer close(responseChan)
-
-	rconCmd := RconCommand{
-		Command:  command,
-		Response: responseChan,
-		Priority: options.Priority,
-		Timeout:  options.Timeout,
-		Retries:  options.Retries,
-		ctx:      ctx,
-	}
-
 	// Attempt to send command with retries
 	var lastErr error
+	lastPhase := ""
+
+attemptLoop:
 	for attempt := 0; attempt < options.Retries; attempt++ {
 		if attempt > 0 {
 			log.Debug().
 				Str("serverID", serverID.String()).
 				Str("command", command).
 				Int("attempt", attempt+1).
+				Int("queue_len", len(conn.CommandChan)).
 				Msg("Retrying command execution")
+		}
+
+		attemptCtx, cancel := context.WithTimeout(options.Context, options.Timeout)
+		responseChan := make(chan CommandResponse, 1)
+		rconCmd := RconCommand{
+			Command:  command,
+			Response: responseChan,
+			Priority: options.Priority,
+			Timeout:  options.Timeout,
+			Retries:  options.Retries,
+			ctx:      attemptCtx,
 		}
 
 		// Send command to processor
 		select {
 		case conn.CommandChan <- rconCmd:
 			// Command queued successfully
-		case <-ctx.Done():
-			lastErr = ctx.Err()
-			if lastErr == context.DeadlineExceeded {
-				lastErr = errors.New("command queue timeout")
-			}
-			continue
+		case <-attemptCtx.Done():
+			lastPhase = "queue"
+			lastErr = normalizeAttemptError(lastPhase, attemptCtx.Err())
+			cancel()
+			continue attemptLoop
 		case <-m.ctx.Done():
+			cancel()
 			return "", errors.New("rcon manager shutting down")
 		}
 
@@ -518,21 +517,25 @@ func (m *RconManager) ExecuteCommandWithOptions(serverID uuid.UUID, command stri
 		select {
 		case response := <-responseChan:
 			if response.Error != nil {
+				lastPhase = phaseForCommandError(response.Error)
 				lastErr = response.Error
 				// Don't retry on certain errors
 				if isNonRetryableError(response.Error) {
-					break
+					cancel()
+					break attemptLoop
 				}
-				continue
+				cancel()
+				continue attemptLoop
 			}
+			cancel()
 			return response.Response, nil
-		case <-ctx.Done():
-			lastErr = ctx.Err()
-			if lastErr == context.DeadlineExceeded {
-				lastErr = errors.New("command execution timeout")
-			}
-			continue
+		case <-attemptCtx.Done():
+			lastPhase = "execution"
+			lastErr = normalizeAttemptError(lastPhase, attemptCtx.Err())
+			cancel()
+			continue attemptLoop
 		case <-m.ctx.Done():
+			cancel()
 			return "", errors.New("rcon manager shutting down")
 		}
 	}
@@ -540,11 +543,36 @@ func (m *RconManager) ExecuteCommandWithOptions(serverID uuid.UUID, command stri
 	log.Error().
 		Str("serverID", serverID.String()).
 		Str("command", command).
+		Str("phase", lastPhase).
+		Int("queue_len", len(conn.CommandChan)).
 		Err(lastErr).
 		Int("attempts", options.Retries).
 		Msg("Command execution failed after all retries")
 
 	return "", fmt.Errorf("command failed after %d attempts: %w", options.Retries, lastErr)
+}
+
+func normalizeAttemptError(phase string, err error) error {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) && phase == "queue":
+		return errors.New("command queue timeout")
+	case errors.Is(err, context.DeadlineExceeded):
+		return errors.New("command execution timeout")
+	default:
+		return err
+	}
+}
+
+func phaseForCommandError(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(strings.ToLower(err.Error()), "command timeout") {
+		return "execution"
+	}
+
+	return "response"
 }
 
 // isNonRetryableError determines if an error should not be retried
@@ -559,6 +587,8 @@ func isNonRetryableError(err error) bool {
 		"permission denied",
 		"authentication failed",
 		"server not connected",
+		"context canceled",
+		"context cancelled",
 		"rcon manager shutting down",
 	}
 
@@ -583,12 +613,23 @@ func (m *RconManager) processCommands(serverID uuid.UUID, conn *ServerConnection
 				Str("serverID", serverID.String()).
 				Interface("panic", r).
 				Msg("Command processor panic recovered")
+
+			if m.ctx.Err() == nil {
+				go m.processCommands(serverID, conn)
+			}
 		}
 	}()
 
 	for {
 		select {
-		case cmd := <-conn.CommandChan:
+		case cmd, ok := <-conn.CommandChan:
+			if !ok {
+				log.Debug().
+					Str("serverID", serverID.String()).
+					Msg("Stopping command processor because command channel closed")
+				return
+			}
+
 			m.processCommand(serverID, conn, cmd)
 
 		case <-m.ctx.Done():
@@ -662,18 +703,6 @@ func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection,
 			}
 		}()
 
-		// Check if connection is still healthy before executing
-		if !conn.isHealthy {
-			select {
-			case responseChan <- CommandResponse{
-				Response: "",
-				Error:    errors.New("connection is unhealthy"),
-			}:
-			default:
-			}
-			return
-		}
-
 		// Execute the command
 		response := conn.Rcon.Execute(cmd.Command)
 
@@ -706,6 +735,12 @@ func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection,
 		// Check if this was a ShowServerInfo command and process it
 		if strings.EqualFold(normalizeCommandName(cmd.Command), "showserverinfo") && trimmedResponse != "" && err == nil {
 			go m.processShowServerInfoResponse(serverID, response)
+		}
+
+		if err == nil {
+			conn.mu.Lock()
+			conn.isHealthy = true
+			conn.mu.Unlock()
 		}
 
 		select {
@@ -866,6 +901,19 @@ func truncateResponseForLog(response string) string {
 
 // listenForEvents listens for events from an RCON server
 func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
+	updateHealth := func(healthy bool) {
+		m.mu.RLock()
+		conn, exists := m.connections[serverID]
+		m.mu.RUnlock()
+		if !exists {
+			return
+		}
+
+		conn.mu.Lock()
+		conn.isHealthy = healthy
+		conn.mu.Unlock()
+	}
+
 	// Helper function to update LastUsed and broadcast event
 	updateAndBroadcast := func(eventType string, data interface{}) {
 		m.mu.RLock()
@@ -890,6 +938,14 @@ func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
 	}
 
 	// Setup event listeners
+	sr.Emitter.On("connected", func(data interface{}) {
+		updateHealth(true)
+	})
+
+	sr.Emitter.On("reconnecting", func(data interface{}) {
+		updateHealth(false)
+	})
+
 	sr.Emitter.On("CHAT_MESSAGE", func(data interface{}) {
 		updateAndBroadcast("CHAT_MESSAGE", data)
 	})
@@ -920,6 +976,7 @@ func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
 
 	// Listen for connection events
 	sr.Emitter.On("close", func(data interface{}) {
+		updateHealth(false)
 		log.Warn().
 			Str("serverID", serverID.String()).
 			Interface("data", data).
@@ -929,6 +986,7 @@ func (m *RconManager) listenForEvents(serverID uuid.UUID, sr *rcon.Rcon) {
 	})
 
 	sr.Emitter.On("error", func(data interface{}) {
+		updateHealth(false)
 		log.Error().
 			Str("serverID", serverID.String()).
 			Interface("data", data).

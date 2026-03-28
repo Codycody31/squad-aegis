@@ -1,0 +1,4 @@
+github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
+github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
+github.com/iamalone98/eventEmitter v1.0.1 h1:LSe8w7xDTQHfcwZ6Xe/3Epp8d1FjZvfouDCK4ef+VRk=
+github.com/iamalone98/eventEmitter v1.0.1/go.mod h1:2CWQB7S5/lM3CDHnhwPVYLqZip8bmcke/t/I40eEI8o=
