@@ -137,6 +137,11 @@ func (r *Rcon) Close() {
 }
 
 func (r *Rcon) Execute(command string) string {
+	return r.ExecuteExpectingResponse(command, true)
+}
+
+// ExecuteExpectingResponse runs a command and optionally treats a missing reply as non-fatal.
+func (r *Rcon) ExecuteExpectingResponse(command string, expectResponse bool) string {
 	// Check context first to avoid unnecessary operations if closing
 	select {
 	case <-r.ctx.Done():
@@ -167,7 +172,9 @@ func (r *Rcon) Execute(command string) string {
 	case v := <-r.executeChan:
 		return v
 	case <-time.After(executeWaitTimeout):
-		r.Emitter.Emit(rconEvents.ERROR, fmt.Errorf("[RCON] Command timeout waiting for response: %s", command))
+		if expectResponse {
+			r.Emitter.Emit(rconEvents.ERROR, fmt.Errorf("[RCON] Command timeout waiting for response: %s", command))
+		}
 		return ""
 	case <-r.ctx.Done():
 		return ""

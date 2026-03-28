@@ -703,8 +703,10 @@ func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection,
 			}
 		}()
 
+		expectResponse := m.shouldExpectResponse(cmd.Command)
+
 		// Execute the command
-		response := conn.Rcon.Execute(cmd.Command)
+		response := conn.Rcon.ExecuteExpectingResponse(cmd.Command, expectResponse)
 
 		// Handle empty responses more gracefully
 		var err error
@@ -712,7 +714,7 @@ func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection,
 		if trimmedResponse == "" {
 			// Some commands legitimately return empty responses
 			// Only consider it an error for certain command types
-			if m.shouldHaveResponse(cmd.Command) {
+			if expectResponse {
 				err = errors.New("empty response received")
 				log.Debug().
 					Str("serverID", serverID.String()).
@@ -806,28 +808,22 @@ func (m *RconManager) processCommand(serverID uuid.UUID, conn *ServerConnection,
 	}
 }
 
-// shouldHaveResponse determines if a command should return a non-empty response
-func (m *RconManager) shouldHaveResponse(command string) bool {
-	// Commands that typically return empty responses
-	emptyResponseCommands := []string{
-		"AdminWarn",
-		"AdminKick",
-		"AdminBan",
-		"AdminBroadcast",
-		"AdminForceTeamChange",
-		"AdminEndMatch",
-		"AdminSetMaxNumPlayers",
-		"AdminSlomo",
+// shouldExpectResponse determines if a command requires a non-empty response to be considered successful.
+func (m *RconManager) shouldExpectResponse(command string) bool {
+	switch normalizeCommandName(command) {
+	case "showserverinfo",
+		"listplayers",
+		"listsquads",
+		"showcurrentmap",
+		"shownextmap",
+		"listlayers",
+		"listcommands",
+		"showcommandinfo",
+		"adminlistdisconnectedplayers":
+		return true
+	default:
+		return false
 	}
-
-	commandLower := strings.ToLower(command)
-	for _, emptyCmd := range emptyResponseCommands {
-		if strings.HasPrefix(commandLower, strings.ToLower(emptyCmd)) {
-			return false
-		}
-	}
-
-	return true
 }
 
 func defaultRetriesForCommand(command string) int {
