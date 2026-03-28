@@ -94,7 +94,7 @@ func TestExecuteSerializesConcurrentCalls(t *testing.T) {
 	}
 }
 
-func TestExecuteTimeoutEmitsError(t *testing.T) {
+func TestExecuteTimeoutEmitsErrorWhenResponseIsRequired(t *testing.T) {
 	originalTimeout := executeWaitTimeout
 	executeWaitTimeout = 20 * time.Millisecond
 	defer func() {
@@ -129,7 +129,7 @@ func TestExecuteTimeoutEmitsError(t *testing.T) {
 		}
 	})
 
-	if response := r.Execute("ListPlayers"); response != "" {
+	if response := r.ExecuteExpectingResponse("ListPlayers", true); response != "" {
 		t.Fatalf("expected empty response on timeout, got %q", response)
 	}
 
@@ -143,5 +143,51 @@ func TestExecuteTimeoutEmitsError(t *testing.T) {
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("expected Execute timeout to emit an error event")
+	}
+}
+
+func TestExecuteTimeoutDoesNotEmitErrorWhenResponseIsOptional(t *testing.T) {
+	originalTimeout := executeWaitTimeout
+	executeWaitTimeout = 20 * time.Millisecond
+	defer func() {
+		executeWaitTimeout = originalTimeout
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conn := &fakeConn{
+		writeFunc: func(p []byte) (int, error) {
+			return len(p), nil
+		},
+	}
+
+	r := &Rcon{
+		Emitter:     eventEmitter.NewEventEmitter(),
+		connected:   true,
+		client:      conn,
+		executeChan: make(chan string),
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+
+	errCh := make(chan error, 1)
+	r.Emitter.On(rconEvents.ERROR, func(data interface{}) {
+		if err, ok := data.(error); ok {
+			select {
+			case errCh <- err:
+			default:
+			}
+		}
+	})
+
+	if response := r.ExecuteExpectingResponse("AdminKick 123 test", false); response != "" {
+		t.Fatalf("expected empty response on timeout, got %q", response)
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("expected no timeout error event, got %v", err)
+	case <-time.After(100 * time.Millisecond):
 	}
 }

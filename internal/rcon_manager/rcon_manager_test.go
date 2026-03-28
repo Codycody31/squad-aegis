@@ -83,6 +83,31 @@ func TestDefaultRetriesForCommand(t *testing.T) {
 	}
 }
 
+func TestShouldExpectResponseUsesAllowList(t *testing.T) {
+	manager := &RconManager{}
+
+	tests := []struct {
+		command string
+		expect  bool
+	}{
+		{command: "ShowServerInfo", expect: true},
+		{command: "ListPlayers", expect: true},
+		{command: "ListSquads", expect: true},
+		{command: "ListCommands 1", expect: true},
+		{command: "ShowCommandInfo ListPlayers", expect: true},
+		{command: "AdminListDisconnectedPlayers", expect: true},
+		{command: "AdminKick 1 test", expect: false},
+		{command: "AdminWarn 1 test", expect: false},
+		{command: "AdminChangeLayer Gorodok_AAS_v1", expect: false},
+	}
+
+	for _, tt := range tests {
+		if got := manager.shouldExpectResponse(tt.command); got != tt.expect {
+			t.Fatalf("expected shouldExpectResponse(%q)=%t, got %t", tt.command, tt.expect, got)
+		}
+	}
+}
+
 func TestExecuteCommandWithOptionsCreatesFreshAttemptContext(t *testing.T) {
 	managerCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
