@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix(rcon): allow empty responses for fire-and-forget commands [[#200](https://github.com/Codycody31/squad-aegis/pull/200)]
 - fix(rcon): stop idle connection timeout cascades on empty servers [[#198](https://github.com/Codycody31/squad-aegis/pull/198)]
 
 ## [0.9.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.0) - 2026-03-27
