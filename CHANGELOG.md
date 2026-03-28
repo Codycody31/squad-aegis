@@ -8,6 +8,7 @@
 
 ### 🐛 Bug Fixes
 
+- fix(admins): cast steam id search to text and preserve exact ids in API response [[#201](https://github.com/Codycody31/squad-aegis/pull/201)]
 - fix(rcon): allow empty responses for fire-and-forget commands [[#200](https://github.com/Codycody31/squad-aegis/pull/200)]
 - fix(rcon): stop idle connection timeout cascades on empty servers [[#198](https://github.com/Codycody31/squad-aegis/pull/198)]
 
