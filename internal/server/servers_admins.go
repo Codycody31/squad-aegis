@@ -17,6 +17,47 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
 
+type serverAdminListItem struct {
+	models.ServerAdmin
+	IsActive  bool `json:"is_active"`
+	IsExpired bool `json:"is_expired"`
+}
+
+func buildServerAdminListWhereClause(serverID uuid.UUID, searchQuery string) (string, []interface{}) {
+	whereClause := `WHERE sa.server_id = $1`
+	queryArgs := []interface{}{serverID}
+
+	searchQuery = strings.TrimSpace(searchQuery)
+	if searchQuery == "" {
+		return whereClause, queryArgs
+	}
+
+	searchPattern := "%" + searchQuery + "%"
+	searchPlaceholder := len(queryArgs) + 1
+	whereClause += fmt.Sprintf(`
+			AND (
+				COALESCE(u.name, '') ILIKE $%d OR
+				COALESCE(u.username, '') ILIKE $%d OR
+				COALESCE(sa.steam_id::text, '') ILIKE $%d OR
+				COALESCE(u.steam_id::text, '') ILIKE $%d OR
+				COALESCE(sa.eos_id, '') ILIKE $%d OR
+				COALESCE(sa.notes, '') ILIKE $%d OR
+				COALESCE(sr.name, '') ILIKE $%d
+			)
+		`, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder)
+	queryArgs = append(queryArgs, searchPattern)
+
+	return whereClause, queryArgs
+}
+
+func newServerAdminListItem(admin models.ServerAdmin) serverAdminListItem {
+	return serverAdminListItem{
+		ServerAdmin: admin,
+		IsActive:    admin.IsActive(),
+		IsExpired:   admin.IsExpired(),
+	}
+}
+
 // ServerAdminsList handles listing all admins for a server
 func (s *Server) ServerAdminsList(c *gin.Context) {
 	user := s.getUserFromSession(c)
@@ -55,27 +96,10 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 		limit = 200
 	}
 
-	whereClause := `WHERE sa.server_id = $1`
-	queryArgs := []interface{}{serverId}
-
-	if searchQuery != "" {
-		searchPattern := "%" + searchQuery + "%"
-		searchPlaceholder := len(queryArgs) + 1
-		whereClause += fmt.Sprintf(`
-			AND (
-				COALESCE(u.name, '') ILIKE $%d OR
-				COALESCE(u.username, '') ILIKE $%d OR
-				COALESCE(sa.steam_id, '') ILIKE $%d OR
-				COALESCE(sa.eos_id, '') ILIKE $%d OR
-				COALESCE(sa.notes, '') ILIKE $%d OR
-				COALESCE(sr.name, '') ILIKE $%d
-			)
-		`, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder, searchPlaceholder)
-		queryArgs = append(queryArgs, searchPattern)
-	}
+	whereClause, queryArgs := buildServerAdminListWhereClause(serverId, searchQuery)
 
 	countQuery := `
-		SELECT COUNT(*)
+			SELECT COUNT(*)
 		FROM server_admins sa
 		LEFT JOIN users u ON sa.user_id = u.id
 		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
@@ -139,22 +163,9 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 	}
 
 	// Prepare response with additional status information
-	adminResponses := []gin.H{}
+	adminResponses := make([]serverAdminListItem, 0, len(admins))
 	for _, admin := range admins {
-		adminResponse := gin.H{
-			"id":             admin.Id,
-			"server_id":      admin.ServerId,
-			"user_id":        admin.UserId,
-			"steam_id":       admin.SteamId,
-			"eos_id":         admin.EOSId,
-			"server_role_id": admin.ServerRoleId,
-			"expires_at":     admin.ExpiresAt,
-			"notes":          admin.Notes,
-			"created_at":     admin.CreatedAt,
-			"is_active":      admin.IsActive(),
-			"is_expired":     admin.IsExpired(),
-		}
-		adminResponses = append(adminResponses, adminResponse)
+		adminResponses = append(adminResponses, newServerAdminListItem(admin))
 	}
 
 	totalPages := 0
