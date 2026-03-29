@@ -53,8 +53,12 @@ const props = defineProps<{
 const router = useRouter();
 const isOpen = ref(false);
 
+function getPlayerRouteId(player: TopPlayerStats | PlayerSearchResult): string {
+  return player.steam_id || player.eos_id || player.epic_id || "";
+}
+
 function viewPlayer(player: TopPlayerStats | PlayerSearchResult) {
-  const playerId = player.steam_id || player.eos_id;
+  const playerId = getPlayerRouteId(player);
   if (playerId) {
     router.push(`/players/${playerId}`);
   }
@@ -154,7 +158,7 @@ function formatDate(dateString: string | null): string {
                     <TableBody>
                       <TableRow
                         v-for="(player, index) in stats.top_players"
-                        :key="player.steam_id || player.eos_id || player.epic_id"
+                        :key="getPlayerRouteId(player)"
                         class="cursor-pointer hover:bg-muted/50"
                         @click="viewPlayer(player)"
                       >
@@ -177,7 +181,7 @@ function formatDate(dateString: string | null): string {
                 <div class="md:hidden space-y-2">
                   <div
                     v-for="(player, index) in stats.top_players"
-                    :key="player.steam_id || player.eos_id || player.epic_id"
+                    :key="getPlayerRouteId(player)"
                     class="border rounded-lg p-3 cursor-pointer hover:bg-muted/30"
                     @click="viewPlayer(player)"
                   >
@@ -215,7 +219,7 @@ function formatDate(dateString: string | null): string {
                     <TableBody>
                       <TableRow
                         v-for="(player, index) in stats.top_teamkillers"
-                        :key="player.steam_id || player.eos_id || player.epic_id"
+                        :key="getPlayerRouteId(player)"
                         class="cursor-pointer hover:bg-muted/50"
                         @click="viewPlayer(player)"
                       >
@@ -230,7 +234,7 @@ function formatDate(dateString: string | null): string {
                 <div class="md:hidden space-y-2">
                   <div
                     v-for="(player, index) in stats.top_teamkillers"
-                    :key="player.steam_id || player.eos_id || player.epic_id"
+                    :key="getPlayerRouteId(player)"
                     class="border rounded-lg p-3 cursor-pointer hover:bg-muted/30"
                     @click="viewPlayer(player)"
                   >
@@ -263,7 +267,7 @@ function formatDate(dateString: string | null): string {
                     <TableBody>
                       <TableRow
                         v-for="(player, index) in stats.top_medics"
-                        :key="player.steam_id || player.eos_id || player.epic_id"
+                        :key="getPlayerRouteId(player)"
                         class="cursor-pointer hover:bg-muted/50"
                         @click="viewPlayer(player)"
                       >
@@ -283,7 +287,7 @@ function formatDate(dateString: string | null): string {
                 <div class="md:hidden space-y-2">
                   <div
                     v-for="(player, index) in stats.top_medics"
-                    :key="player.steam_id || player.eos_id || player.epic_id"
+                    :key="getPlayerRouteId(player)"
                     class="border rounded-lg p-3 cursor-pointer hover:bg-muted/30"
                     @click="viewPlayer(player)"
                   >
@@ -316,7 +320,7 @@ function formatDate(dateString: string | null): string {
                     <TableBody>
                       <TableRow
                         v-for="player in stats.most_recent_players"
-                        :key="player.steam_id || player.eos_id || player.epic_id"
+                        :key="getPlayerRouteId(player)"
                         class="cursor-pointer hover:bg-muted/50"
                         @click="viewPlayer(player)"
                       >
@@ -333,7 +337,7 @@ function formatDate(dateString: string | null): string {
                 <div class="md:hidden space-y-2">
                   <div
                     v-for="player in stats.most_recent_players"
-                    :key="player.steam_id || player.eos_id || player.epic_id"
+                    :key="getPlayerRouteId(player)"
                     class="border rounded-lg p-3 cursor-pointer hover:bg-muted/30"
                     @click="viewPlayer(player)"
                   >

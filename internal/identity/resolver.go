@@ -244,16 +244,25 @@ func (r *Resolver) fetchAllIdentifierPairs(ctx context.Context) ([]IdentifierPai
 			SELECT victim_steam as steam, victim_eos as eos, '' as epic, victim_name as name, event_time
 			FROM squad_aegis.server_player_revived_events
 			WHERE victim_steam != '' OR victim_eos != ''
+		),
+		normalized_identifier_pairs AS (
+			SELECT
+				COALESCE(steam, '') as steam,
+				COALESCE(eos, '') as eos,
+				COALESCE(epic, '') as epic,
+				name,
+				event_time
+			FROM all_identifier_pairs
 		)
 		SELECT
-			COALESCE(steam, '') as steam,
-			COALESCE(eos, '') as eos,
-			COALESCE(epic, '') as epic,
+			steam,
+			eos,
+			epic,
 			argMax(name, if(name != '', event_time, toDateTime64('1970-01-01', 3, 'UTC'))) as name,
 			min(event_time) as first_seen,
 			max(event_time) as last_seen,
 			count() as session_count
-		FROM all_identifier_pairs
+		FROM normalized_identifier_pairs
 		WHERE steam != '' OR eos != '' OR epic != ''
 		GROUP BY steam, eos, epic
 	`

@@ -28,8 +28,12 @@ const props = defineProps<{
 
 const router = useRouter();
 
+function getPlayerRouteId(player: PlayerSearchResult): string {
+  return player.steam_id || player.eos_id || player.epic_id || "";
+}
+
 function viewPlayer(player: PlayerSearchResult) {
-  const playerId = player.steam_id || player.eos_id;
+  const playerId = getPlayerRouteId(player);
   if (playerId) {
     router.push(`/players/${playerId}`);
   }
@@ -98,7 +102,7 @@ function getTimeAgo(dateString: string | null): string {
           <TableBody>
             <TableRow
               v-for="player in players"
-              :key="player.steam_id || player.eos_id || player.epic_id"
+              :key="getPlayerRouteId(player)"
               class="cursor-pointer hover:bg-muted/50"
               @click="viewPlayer(player)"
             >
@@ -138,7 +142,7 @@ function getTimeAgo(dateString: string | null): string {
       <div v-else-if="players.length > 0" class="md:hidden space-y-3">
         <div
           v-for="player in players"
-          :key="player.steam_id || player.eos_id || player.epic_id"
+          :key="getPlayerRouteId(player)"
           class="border rounded-lg p-3 hover:bg-muted/30 transition-colors cursor-pointer"
           @click="viewPlayer(player)"
         >
