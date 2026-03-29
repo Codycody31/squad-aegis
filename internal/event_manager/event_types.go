@@ -129,6 +129,7 @@ type LogPlayerConnectedData struct {
 	PlayerSuffix     string `json:"player_suffix,omitempty"`
 	SteamID          string `json:"steam_id,omitempty"`
 	EOSID            string `json:"eos_id,omitempty"`
+	EpicID           string `json:"epic_id,omitempty"`
 }
 
 func (d LogPlayerConnectedData) GetEventType() EventType { return EventTypeLogPlayerConnected }
@@ -242,6 +243,7 @@ type LogPlayerPossessData struct {
 	PossessClassname string `json:"possess_classname"`
 	PlayerEOS        string `json:"player_eos,omitempty"`
 	PlayerSteam      string `json:"player_steam,omitempty"`
+	PlayerEpic       string `json:"player_epic,omitempty"`
 }
 
 func (d LogPlayerPossessData) GetEventType() EventType { return EventTypeLogPlayerPossess }
@@ -254,6 +256,7 @@ type LogJoinSucceededData struct {
 	IPAddress    string `json:"ip_address,omitempty"`
 	SteamID      string `json:"steam_id,omitempty"`
 	EOSID        string `json:"eos_id,omitempty"`
+	EpicID       string `json:"epic_id,omitempty"`
 }
 
 func (d LogJoinSucceededData) GetEventType() EventType { return EventTypeLogJoinSucceeded }
@@ -313,6 +316,7 @@ type LogPlayerDisconnectedData struct {
 	TeamID           string `json:"team_id,omitempty"`
 	SteamID          string `json:"steam_id,omitempty"`
 	EOSID            string `json:"eos_id,omitempty"`
+	EpicID           string `json:"epic_id,omitempty"`
 }
 
 func (d LogPlayerDisconnectedData) GetEventType() EventType { return EventTypeLogPlayerDisconnected }

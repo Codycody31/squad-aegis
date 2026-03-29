@@ -3,6 +3,7 @@
 export interface PlayerProfile {
   steam_id: string;
   eos_id: string;
+  epic_id?: string;
   player_name: string;
   last_seen: string | null;
   first_seen: string | null;
@@ -26,6 +27,7 @@ export interface PlayerProfile {
   canonical_id?: string;
   all_steam_ids?: string[];
   all_eos_ids?: string[];
+  all_epic_ids?: string[];
   all_names?: string[];
   identity_status?: "resolved" | "pending";
 }

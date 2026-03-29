@@ -21,6 +21,7 @@ import {
 interface TopPlayerStats {
   steam_id: string;
   eos_id: string;
+  epic_id?: string;
   player_name: string;
   kills: number;
   deaths: number;
@@ -32,6 +33,7 @@ interface TopPlayerStats {
 interface PlayerSearchResult {
   steam_id: string;
   eos_id: string;
+  epic_id?: string;
   player_name: string;
   last_seen: string | null;
 }
@@ -152,7 +154,7 @@ function formatDate(dateString: string | null): string {
                     <TableBody>
                       <TableRow
                         v-for="(player, index) in stats.top_players"
-                        :key="player.steam_id || player.eos_id"
+                        :key="player.steam_id || player.eos_id || player.epic_id"
                         class="cursor-pointer hover:bg-muted/50"
                         @click="viewPlayer(player)"
                       >
@@ -175,7 +177,7 @@ function formatDate(dateString: string | null): string {
                 <div class="md:hidden space-y-2">
                   <div
                     v-for="(player, index) in stats.top_players"
-                    :key="player.steam_id || player.eos_id"
+                    :key="player.steam_id || player.eos_id || player.epic_id"
                     class="border rounded-lg p-3 cursor-pointer hover:bg-muted/30"
                     @click="viewPlayer(player)"
                   >
@@ -213,7 +215,7 @@ function formatDate(dateString: string | null): string {
                     <TableBody>
                       <TableRow
                         v-for="(player, index) in stats.top_teamkillers"
-                        :key="player.steam_id || player.eos_id"
+                        :key="player.steam_id || player.eos_id || player.epic_id"
                         class="cursor-pointer hover:bg-muted/50"
                         @click="viewPlayer(player)"
                       >
@@ -228,7 +230,7 @@ function formatDate(dateString: string | null): string {
                 <div class="md:hidden space-y-2">
                   <div
                     v-for="(player, index) in stats.top_teamkillers"
-                    :key="player.steam_id || player.eos_id"
+                    :key="player.steam_id || player.eos_id || player.epic_id"
                     class="border rounded-lg p-3 cursor-pointer hover:bg-muted/30"
                     @click="viewPlayer(player)"
                   >
@@ -261,7 +263,7 @@ function formatDate(dateString: string | null): string {
                     <TableBody>
                       <TableRow
                         v-for="(player, index) in stats.top_medics"
-                        :key="player.steam_id || player.eos_id"
+                        :key="player.steam_id || player.eos_id || player.epic_id"
                         class="cursor-pointer hover:bg-muted/50"
                         @click="viewPlayer(player)"
                       >
@@ -281,7 +283,7 @@ function formatDate(dateString: string | null): string {
                 <div class="md:hidden space-y-2">
                   <div
                     v-for="(player, index) in stats.top_medics"
-                    :key="player.steam_id || player.eos_id"
+                    :key="player.steam_id || player.eos_id || player.epic_id"
                     class="border rounded-lg p-3 cursor-pointer hover:bg-muted/30"
                     @click="viewPlayer(player)"
                   >
@@ -314,7 +316,7 @@ function formatDate(dateString: string | null): string {
                     <TableBody>
                       <TableRow
                         v-for="player in stats.most_recent_players"
-                        :key="player.steam_id || player.eos_id"
+                        :key="player.steam_id || player.eos_id || player.epic_id"
                         class="cursor-pointer hover:bg-muted/50"
                         @click="viewPlayer(player)"
                       >
@@ -331,7 +333,7 @@ function formatDate(dateString: string | null): string {
                 <div class="md:hidden space-y-2">
                   <div
                     v-for="player in stats.most_recent_players"
-                    :key="player.steam_id || player.eos_id"
+                    :key="player.steam_id || player.eos_id || player.epic_id"
                     class="border rounded-lg p-3 cursor-pointer hover:bg-muted/30"
                     @click="viewPlayer(player)"
                   >

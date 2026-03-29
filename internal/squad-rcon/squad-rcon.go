@@ -18,8 +18,8 @@ var (
 	ErrNoNextMap = errors.New("next level is not defined")
 	ErrNoMap     = errors.New("failed to get map")
 
-	listPlayersOnlineRegexp       = regexp.MustCompile(`^ID: ([0-9]+) \| Online IDs:(?: EOS: ([^\s|]+))?(?: steam: ([^\s|]+))? \| Name: (.+) \| Team ID: ([0-9]+) \| Squad ID: ([0-9]+|N/A) \| Is Leader: (True|False) \| Role: (.*)$`)
-	listPlayersDisconnectedRegexp = regexp.MustCompile(`^ID: (\d{1,}) \| Online IDs:(?: EOS: ([^\s|]+))?(?: steam: ([^\s|]+))? \| Since Disconnect: (\d{1,})m.(\d{2})s \| Name: (.*?)$`)
+	listPlayersOnlineRegexp       = regexp.MustCompile(`^ID: ([0-9]+) \| Online IDs:(.*?) \| Name: (.+) \| Team ID: ([0-9]+) \| Squad ID: ([0-9]+|N/A) \| Is Leader: (True|False) \| Role: (.*)$`)
+	listPlayersDisconnectedRegexp = regexp.MustCompile(`^ID: (\d{1,}) \| Online IDs:(.*?) \| Since Disconnect: (\d{1,})m.(\d{2})s \| Name: (.*?)$`)
 	listSquadsTeamRegexp          = regexp.MustCompile(`^Team ID:\s*(\d+)\s+\((.+)\)$`)
 	listSquadsEntryRegexp         = regexp.MustCompile(`^ID:\s*(\d+)\s+\|\s+Name:\s*(.*?)\s+\|\s+Size:\s*(\d+)(?:/\d+)?\s+\|\s+Locked:\s*(True|False)(?:\s+\|.*)?$`)
 )
@@ -34,6 +34,7 @@ type SquadRcon struct {
 type Player struct {
 	Id              int    `json:"playerId"`
 	EosId           string `json:"eosId"`
+	EpicId          string `json:"epicId"`
 	SteamId         string `json:"steam_id"`
 	Name            string `json:"name"`
 	TeamId          int    `json:"teamId"`
@@ -377,33 +378,37 @@ func parsePlayersResponse(response string) PlayersData {
 
 		if len(matchOnline) > 0 {
 			playerId, _ := strconv.Atoi(matchOnline[1])
-			teamId, _ := strconv.Atoi(matchOnline[5])
+			onlineIDs := utils.ParseOnlineIDs(matchOnline[2])
+			teamId, _ := strconv.Atoi(matchOnline[4])
 			squadId := 0
-			if matchOnline[6] != "N/A" {
-				squadId, _ = strconv.Atoi(matchOnline[6])
+			if matchOnline[5] != "N/A" {
+				squadId, _ = strconv.Atoi(matchOnline[5])
 			}
 
 			player := Player{
 				Id:            playerId,
-				EosId:         utils.NormalizeEOSID(matchOnline[2]),
-				SteamId:       normalizeParsedSteamID(matchOnline[3]),
-				Name:          matchOnline[4],
+				EosId:         onlineIDs.EOSID,
+				EpicId:        onlineIDs.EpicID,
+				SteamId:       normalizeParsedSteamID(onlineIDs.SteamID),
+				Name:          matchOnline[3],
 				TeamId:        teamId,
 				SquadId:       squadId,
-				IsSquadLeader: matchOnline[7] == "True",
-				Role:          matchOnline[8],
+				IsSquadLeader: matchOnline[6] == "True",
+				Role:          matchOnline[7],
 			}
 
 			onlinePlayers = append(onlinePlayers, player)
 		} else if len(matchDisconnected) > 0 {
 			playerId, _ := strconv.Atoi(matchDisconnected[1])
+			onlineIDs := utils.ParseOnlineIDs(matchDisconnected[2])
 
 			player := Player{
 				Id:              playerId,
-				EosId:           utils.NormalizeEOSID(matchDisconnected[2]),
-				SteamId:         normalizeParsedSteamID(matchDisconnected[3]),
-				SinceDisconnect: matchDisconnected[4] + "m" + matchDisconnected[5] + "s",
-				Name:            matchDisconnected[6],
+				EosId:           onlineIDs.EOSID,
+				EpicId:          onlineIDs.EpicID,
+				SteamId:         normalizeParsedSteamID(onlineIDs.SteamID),
+				SinceDisconnect: matchDisconnected[3] + "m" + matchDisconnected[4] + "s",
+				Name:            matchDisconnected[5],
 			}
 
 			disconnectedPlayers = append(disconnectedPlayers, player)

@@ -171,6 +171,9 @@ func (es *EventStore) StorePlayerData(playerID string, data *PlayerData) {
 	if data.EOSID != "" {
 		existing.EOSID = data.EOSID
 	}
+	if data.EpicID != "" {
+		existing.EpicID = data.EpicID
+	}
 	if data.PlayerSuffix != "" {
 		existing.PlayerSuffix = data.PlayerSuffix
 	}
@@ -653,6 +656,7 @@ func (es *EventStore) GetPlayerInfoByName(name string) (*event_manager.PlayerInf
 							IP:               playerData.IP,
 							SteamID:          playerData.SteamID,
 							EOSID:            playerData.EOSID,
+							EpicID:           playerData.EpicID,
 							PlayerSuffix:     playerData.PlayerSuffix,
 							Controller:       playerData.Controller,
 							TeamID:           playerData.TeamID,
@@ -688,6 +692,7 @@ func (es *EventStore) GetPlayerInfoByIdentifier(playerID string) (*event_manager
 			IP:               data.IP,
 			SteamID:          data.SteamID,
 			EOSID:            data.EOSID,
+			EpicID:           data.EpicID,
 			PlayerSuffix:     data.PlayerSuffix,
 			Controller:       data.Controller,
 			TeamID:           data.TeamID,
@@ -722,6 +727,7 @@ func (es *EventStore) GetPlayerInfoByController(controllerID string) (*event_man
 							IP:               playerData.IP,
 							SteamID:          playerData.SteamID,
 							EOSID:            playerData.EOSID,
+							EpicID:           playerData.EpicID,
 							PlayerSuffix:     playerData.PlayerSuffix,
 							Controller:       playerData.Controller,
 							TeamID:           playerData.TeamID,

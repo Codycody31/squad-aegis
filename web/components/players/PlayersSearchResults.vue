@@ -14,6 +14,7 @@ import {
 interface PlayerSearchResult {
   steam_id: string;
   eos_id: string;
+  epic_id?: string;
   player_name: string;
   last_seen: string | null;
   first_seen: string | null;
@@ -97,7 +98,7 @@ function getTimeAgo(dateString: string | null): string {
           <TableBody>
             <TableRow
               v-for="player in players"
-              :key="player.steam_id || player.eos_id"
+              :key="player.steam_id || player.eos_id || player.epic_id"
               class="cursor-pointer hover:bg-muted/50"
               @click="viewPlayer(player)"
             >
@@ -106,7 +107,7 @@ function getTimeAgo(dateString: string | null): string {
               </TableCell>
               <TableCell>
                 <code class="text-xs bg-muted px-2 py-1 rounded">
-                  {{ player.steam_id || player.eos_id || "N/A" }}
+                  {{ player.steam_id || player.eos_id || player.epic_id || "N/A" }}
                 </code>
               </TableCell>
               <TableCell>
@@ -137,7 +138,7 @@ function getTimeAgo(dateString: string | null): string {
       <div v-else-if="players.length > 0" class="md:hidden space-y-3">
         <div
           v-for="player in players"
-          :key="player.steam_id || player.eos_id"
+          :key="player.steam_id || player.eos_id || player.epic_id"
           class="border rounded-lg p-3 hover:bg-muted/30 transition-colors cursor-pointer"
           @click="viewPlayer(player)"
         >
@@ -150,7 +151,7 @@ function getTimeAgo(dateString: string | null): string {
                 <div>
                   <span class="text-xs text-muted-foreground">ID: </span>
                   <code class="text-xs bg-muted px-1.5 py-0.5 rounded">
-                    {{ player.steam_id || player.eos_id || "N/A" }}
+                    {{ player.steam_id || player.eos_id || player.epic_id || "N/A" }}
                   </code>
                 </div>
                 <div v-if="player.last_seen">

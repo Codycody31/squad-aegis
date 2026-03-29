@@ -16,9 +16,11 @@ type PlayerIdentity struct {
 	CanonicalID    string
 	PrimarySteamID string
 	PrimaryEOSID   string
+	PrimaryEpicID  string
 	PrimaryName    string
 	AllSteamIDs    []string
 	AllEOSIDs      []string
+	AllEpicIDs     []string
 	AllNames       []string
 	TotalSessions  uint64
 	FirstSeen      time.Time
@@ -29,6 +31,7 @@ type PlayerIdentity struct {
 type IdentifierPair struct {
 	Steam      string
 	EOS        string
+	Epic       string
 	Name       string
 	FirstSeen  time.Time
 	LastSeen   time.Time
@@ -138,9 +141,18 @@ func (r *Resolver) ComputeIdentities(ctx context.Context) error {
 		if pair.EOS != "" {
 			uf.Add("eos:" + pair.EOS)
 		}
-		// Link steam and eos if both present in the same pair
+		if pair.Epic != "" {
+			uf.Add("epic:" + pair.Epic)
+		}
+		// Link all identifiers observed in the same record.
 		if pair.Steam != "" && pair.EOS != "" {
 			uf.Union("steam:"+pair.Steam, "eos:"+pair.EOS)
+		}
+		if pair.Steam != "" && pair.Epic != "" {
+			uf.Union("steam:"+pair.Steam, "epic:"+pair.Epic)
+		}
+		if pair.EOS != "" && pair.Epic != "" {
+			uf.Union("eos:"+pair.EOS, "epic:"+pair.Epic)
 		}
 	}
 	log.Info().Int("elements", len(uf.parent)).Msg("Built Union-Find structure")
@@ -168,80 +180,82 @@ func (r *Resolver) ComputeIdentities(ctx context.Context) error {
 	return nil
 }
 
-// fetchAllIdentifierPairs fetches all unique steam/eos/name combinations from ALL event tables
+// fetchAllIdentifierPairs fetches all unique steam/eos/epic/name combinations
+// from player event tables.
 func (r *Resolver) fetchAllIdentifierPairs(ctx context.Context) ([]IdentifierPair, error) {
 	query := `
 		WITH all_identifier_pairs AS (
 			-- Join succeeded (primary source with names)
-			SELECT steam, eos, player_suffix as name, event_time
+			SELECT steam, eos, epic, player_suffix as name, event_time
 			FROM squad_aegis.server_join_succeeded_events
-			WHERE steam != '' OR eos != ''
+			WHERE steam != '' OR eos != '' OR epic != ''
 			UNION ALL
 			-- Connected events
-			SELECT steam, eos, '' as name, event_time
+			SELECT steam, eos, epic, '' as name, event_time
 			FROM squad_aegis.server_player_connected_events
-			WHERE steam != '' OR eos != ''
+			WHERE steam != '' OR eos != '' OR epic != ''
 			UNION ALL
 			-- Disconnected events
-			SELECT steam, eos, player_suffix as name, event_time
+			SELECT steam, eos, epic, player_suffix as name, event_time
 			FROM squad_aegis.server_player_disconnected_events
-			WHERE steam != '' OR eos != ''
+			WHERE steam != '' OR eos != '' OR epic != ''
 			UNION ALL
 			-- Possess events
-			SELECT player_steam as steam, player_eos as eos, player_suffix as name, event_time
+			SELECT player_steam as steam, player_eos as eos, player_epic as epic, player_suffix as name, event_time
 			FROM squad_aegis.server_player_possess_events
-			WHERE player_steam != '' OR player_eos != ''
+			WHERE player_steam != '' OR player_eos != '' OR player_epic != ''
 			UNION ALL
 			-- Died events (attacker)
-			SELECT attacker_steam as steam, attacker_eos as eos, attacker_name as name, event_time
+			SELECT attacker_steam as steam, attacker_eos as eos, '' as epic, attacker_name as name, event_time
 			FROM squad_aegis.server_player_died_events
 			WHERE attacker_steam != '' OR attacker_eos != ''
 			UNION ALL
 			-- Died events (victim)
-			SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
+			SELECT victim_steam as steam, victim_eos as eos, '' as epic, victim_name as name, event_time
 			FROM squad_aegis.server_player_died_events
 			WHERE victim_steam != '' OR victim_eos != ''
 			UNION ALL
 			-- Wounded events (attacker)
-			SELECT attacker_steam as steam, attacker_eos as eos, attacker_name as name, event_time
+			SELECT attacker_steam as steam, attacker_eos as eos, '' as epic, attacker_name as name, event_time
 			FROM squad_aegis.server_player_wounded_events
 			WHERE attacker_steam != '' OR attacker_eos != ''
 			UNION ALL
 			-- Wounded events (victim)
-			SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
+			SELECT victim_steam as steam, victim_eos as eos, '' as epic, victim_name as name, event_time
 			FROM squad_aegis.server_player_wounded_events
 			WHERE victim_steam != '' OR victim_eos != ''
 			UNION ALL
 			-- Damaged events (attacker)
-			SELECT attacker_steam as steam, attacker_eos as eos, attacker_name as name, event_time
+			SELECT attacker_steam as steam, attacker_eos as eos, '' as epic, attacker_name as name, event_time
 			FROM squad_aegis.server_player_damaged_events
 			WHERE attacker_steam != '' OR attacker_eos != ''
 			UNION ALL
 			-- Damaged events (victim)
-			SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
+			SELECT victim_steam as steam, victim_eos as eos, '' as epic, victim_name as name, event_time
 			FROM squad_aegis.server_player_damaged_events
 			WHERE victim_steam != '' OR victim_eos != ''
 			UNION ALL
 			-- Revived events (reviver)
-			SELECT reviver_steam as steam, reviver_eos as eos, reviver_name as name, event_time
+			SELECT reviver_steam as steam, reviver_eos as eos, '' as epic, reviver_name as name, event_time
 			FROM squad_aegis.server_player_revived_events
 			WHERE reviver_steam != '' OR reviver_eos != ''
 			UNION ALL
 			-- Revived events (victim)
-			SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
+			SELECT victim_steam as steam, victim_eos as eos, '' as epic, victim_name as name, event_time
 			FROM squad_aegis.server_player_revived_events
 			WHERE victim_steam != '' OR victim_eos != ''
 		)
 		SELECT
 			COALESCE(steam, '') as steam,
 			COALESCE(eos, '') as eos,
+			COALESCE(epic, '') as epic,
 			argMax(name, if(name != '', event_time, toDateTime64('1970-01-01', 3, 'UTC'))) as name,
 			min(event_time) as first_seen,
 			max(event_time) as last_seen,
 			count() as session_count
 		FROM all_identifier_pairs
-		WHERE steam != '' OR eos != ''
-		GROUP BY steam, eos
+		WHERE steam != '' OR eos != '' OR epic != ''
+		GROUP BY steam, eos, epic
 	`
 
 	rows, err := r.clickhouse.Query(ctx, query)
@@ -253,7 +267,7 @@ func (r *Resolver) fetchAllIdentifierPairs(ctx context.Context) ([]IdentifierPai
 	var pairs []IdentifierPair
 	for rows.Next() {
 		var p IdentifierPair
-		if err := rows.Scan(&p.Steam, &p.EOS, &p.Name, &p.FirstSeen, &p.LastSeen, &p.SessionCnt); err != nil {
+		if err := rows.Scan(&p.Steam, &p.EOS, &p.Epic, &p.Name, &p.FirstSeen, &p.LastSeen, &p.SessionCnt); err != nil {
 			log.Error().Err(err).Msg("Failed to scan identifier pair")
 			continue
 		}
@@ -278,6 +292,7 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 	// Create lookup maps for efficient access
 	steamToData := make(map[string][]IdentifierPair)
 	eosToData := make(map[string][]IdentifierPair)
+	epicToData := make(map[string][]IdentifierPair)
 
 	for _, p := range pairs {
 		if p.Steam != "" {
@@ -285,6 +300,9 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 		}
 		if p.EOS != "" {
 			eosToData[p.EOS] = append(eosToData[p.EOS], p)
+		}
+		if p.Epic != "" {
+			epicToData[p.Epic] = append(epicToData[p.Epic], p)
 		}
 	}
 
@@ -296,38 +314,23 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 		// Collect all steam IDs, EOS IDs from this group
 		steamSet := make(map[string]struct{})
 		eosSet := make(map[string]struct{})
+		epicSet := make(map[string]struct{})
 		nameSet := make(map[string]struct{})
+		seenPairs := make(map[string]struct{})
 		var totalSessions uint64
 		var firstSeen, lastSeen time.Time
 		var latestName string
 		var latestNameTime time.Time
 
 		for _, member := range members {
-			if len(member) > 6 && member[:6] == "steam:" {
-				steamID := member[6:]
-				steamSet[steamID] = struct{}{}
-				// Get data for this steam ID
-				for _, p := range steamToData[steamID] {
-					if p.Name != "" {
-						nameSet[p.Name] = struct{}{}
-						if p.LastSeen.After(latestNameTime) {
-							latestNameTime = p.LastSeen
-							latestName = p.Name
-						}
+			consumePairs := func(memberPairs []IdentifierPair) {
+				for _, p := range memberPairs {
+					pairKey := p.Steam + "|" + p.EOS + "|" + p.Epic
+					if _, seen := seenPairs[pairKey]; seen {
+						continue
 					}
-					totalSessions += p.SessionCnt
-					if firstSeen.IsZero() || p.FirstSeen.Before(firstSeen) {
-						firstSeen = p.FirstSeen
-					}
-					if p.LastSeen.After(lastSeen) {
-						lastSeen = p.LastSeen
-					}
-				}
-			} else if len(member) > 4 && member[:4] == "eos:" {
-				eosID := member[4:]
-				eosSet[eosID] = struct{}{}
-				// Get data for this EOS ID
-				for _, p := range eosToData[eosID] {
+					seenPairs[pairKey] = struct{}{}
+
 					if p.Name != "" {
 						nameSet[p.Name] = struct{}{}
 						if p.LastSeen.After(latestNameTime) {
@@ -344,11 +347,26 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 					}
 				}
 			}
+
+			if len(member) > 6 && member[:6] == "steam:" {
+				steamID := member[6:]
+				steamSet[steamID] = struct{}{}
+				consumePairs(steamToData[steamID])
+			} else if len(member) > 4 && member[:4] == "eos:" {
+				eosID := member[4:]
+				eosSet[eosID] = struct{}{}
+				consumePairs(eosToData[eosID])
+			} else if len(member) > 5 && member[:5] == "epic:" {
+				epicID := member[5:]
+				epicSet[epicID] = struct{}{}
+				consumePairs(epicToData[epicID])
+			}
 		}
 
 		// Convert sets to sorted slices
 		identity.AllSteamIDs = setToSortedSlice(steamSet)
 		identity.AllEOSIDs = setToSortedSlice(eosSet)
+		identity.AllEpicIDs = setToSortedSlice(epicSet)
 		identity.AllNames = setToSortedSlice(nameSet)
 
 		// Set primary identifiers (prefer non-empty, use first sorted)
@@ -357,6 +375,9 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 		}
 		if len(identity.AllEOSIDs) > 0 {
 			identity.PrimaryEOSID = identity.AllEOSIDs[0]
+		}
+		if len(identity.AllEpicIDs) > 0 {
+			identity.PrimaryEpicID = identity.AllEpicIDs[0]
 		}
 		identity.PrimaryName = latestName
 		if identity.PrimaryName == "" && len(identity.AllNames) > 0 {
@@ -368,7 +389,7 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 		identity.LastSeen = lastSeen
 
 		// Generate canonical ID from all linked identifiers
-		identity.CanonicalID = generateCanonicalID(identity.AllSteamIDs, identity.AllEOSIDs)
+		identity.CanonicalID = generateCanonicalID(identity.AllSteamIDs, identity.AllEOSIDs, identity.AllEpicIDs)
 
 		identities = append(identities, identity)
 	}
@@ -414,6 +435,9 @@ func (r *Resolver) writeIdentities(ctx context.Context, identities []PlayerIdent
 		for _, eosID := range identity.AllEOSIDs {
 			lookups = append(lookups, LookupEntry{"eos", eosID, identity.CanonicalID})
 		}
+		for _, epicID := range identity.AllEpicIDs {
+			lookups = append(lookups, LookupEntry{"epic", epicID, identity.CanonicalID})
+		}
 		for _, name := range identity.AllNames {
 			lookups = append(lookups, LookupEntry{"name", name, identity.CanonicalID})
 		}
@@ -449,24 +473,26 @@ func (r *Resolver) insertIdentityBatch(ctx context.Context, batch []PlayerIdenti
 	// Build batch insert query
 	query := `
 		INSERT INTO squad_aegis.player_identities (
-			canonical_id, primary_steam_id, primary_eos_id, primary_name,
-			all_steam_ids, all_eos_ids, all_names,
+			canonical_id, primary_steam_id, primary_eos_id, primary_epic_id, primary_name,
+			all_steam_ids, all_eos_ids, all_epic_ids, all_names,
 			total_sessions, first_seen, last_seen
 		) VALUES `
 
-	args := make([]interface{}, 0, len(batch)*10)
+	args := make([]interface{}, 0, len(batch)*12)
 	for i, identity := range batch {
 		if i > 0 {
 			query += ", "
 		}
-		query += "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+		query += "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 		args = append(args,
 			identity.CanonicalID,
 			identity.PrimarySteamID,
 			identity.PrimaryEOSID,
+			identity.PrimaryEpicID,
 			identity.PrimaryName,
 			identity.AllSteamIDs,
 			identity.AllEOSIDs,
+			identity.AllEpicIDs,
 			identity.AllNames,
 			identity.TotalSessions,
 			identity.FirstSeen,
@@ -513,14 +539,17 @@ func setToSortedSlice(set map[string]struct{}) []string {
 }
 
 // generateCanonicalID creates a stable canonical ID from all linked identifiers
-func generateCanonicalID(steamIDs, eosIDs []string) string {
+func generateCanonicalID(steamIDs, eosIDs, epicIDs []string) string {
 	// Combine all IDs into a sorted, stable string
-	all := make([]string, 0, len(steamIDs)+len(eosIDs))
+	all := make([]string, 0, len(steamIDs)+len(eosIDs)+len(epicIDs))
 	for _, s := range steamIDs {
 		all = append(all, "s:"+s)
 	}
 	for _, e := range eosIDs {
 		all = append(all, "e:"+e)
+	}
+	for _, epic := range epicIDs {
+		all = append(all, "p:"+epic)
 	}
 	sort.Strings(all)
 
