@@ -82,9 +82,9 @@ func TestParseNextMapResponseParsesNextMapVariants(t *testing.T) {
 
 func TestParsePlayersResponseToleratesEpicIdentifiers(t *testing.T) {
 	response := `ID: 1 | Online IDs: EOS: ABCDEF0123456789ABCDEF0123456789 steam: 76561198000000000 | Name: Steam User | Team ID: 1 | Squad ID: 2 | Is Leader: False | Role: Rifleman
-ID: 2 | Online IDs: EOS: fedcba9876543210fedcba9876543210 steam: INVALID | Name: Epic Placeholder | Team ID: 1 | Squad ID: 3 | Is Leader: True | Role: TL_SL
-ID: 3 | Online IDs: EOS: 00112233445566778899AABBCCDDEEFF | Name: Epic EOS Only | Team ID: 2 | Squad ID: N/A | Is Leader: False | Role: Rifleman
-ID: 4 | Online IDs: EOS: AABBCCDDEEFF00112233445566778899 steam: INVALID | Since Disconnect: 05m 12s | Name: Left Epic`
+ID: 2 | Online IDs: EOS: fedcba9876543210fedcba9876543210 epic: 8899aabbccddeeff0011223344556677 steam: INVALID | Name: Epic Placeholder | Team ID: 1 | Squad ID: 3 | Is Leader: True | Role: TL_SL
+ID: 3 | Online IDs: EOS: 00112233445566778899AABBCCDDEEFF epic: e91067b2c8bb461ebf0cdf3a01ee5b0b | Name: Epic EOS Only | Team ID: 2 | Squad ID: N/A | Is Leader: False | Role: Rifleman
+ID: 4 | Online IDs: EOS: AABBCCDDEEFF00112233445566778899 epic: 11223344556677889900aabbccddeeff steam: INVALID | Since Disconnect: 05m 12s | Name: Left Epic`
 
 	players := parsePlayersResponse(response)
 
@@ -107,6 +107,9 @@ ID: 4 | Online IDs: EOS: AABBCCDDEEFF00112233445566778899 steam: INVALID | Since
 	if epicWithInvalidSteam.SteamId != "" {
 		t.Fatalf("epic placeholder steam ID = %q, want empty string", epicWithInvalidSteam.SteamId)
 	}
+	if epicWithInvalidSteam.EpicId != "8899aabbccddeeff0011223344556677" {
+		t.Fatalf("epic placeholder epic ID = %q, want normalized Epic ID", epicWithInvalidSteam.EpicId)
+	}
 	if !epicWithInvalidSteam.IsSquadLeader {
 		t.Fatalf("expected epic placeholder player to remain squad leader")
 	}
@@ -121,6 +124,9 @@ ID: 4 | Online IDs: EOS: AABBCCDDEEFF00112233445566778899 steam: INVALID | Since
 	if epicEOSOnly.EosId != "00112233445566778899aabbccddeeff" {
 		t.Fatalf("epic EOS-only EOS ID = %q, want normalized EOS ID", epicEOSOnly.EosId)
 	}
+	if epicEOSOnly.EpicId != "e91067b2c8bb461ebf0cdf3a01ee5b0b" {
+		t.Fatalf("epic EOS-only epic ID = %q, want normalized Epic ID", epicEOSOnly.EpicId)
+	}
 	if epicEOSOnly.SquadId != 0 {
 		t.Fatalf("epic EOS-only squad ID = %d, want 0 for N/A", epicEOSOnly.SquadId)
 	}
@@ -131,6 +137,9 @@ ID: 4 | Online IDs: EOS: AABBCCDDEEFF00112233445566778899 steam: INVALID | Since
 	}
 	if disconnectedEpic.EosId != "aabbccddeeff00112233445566778899" {
 		t.Fatalf("disconnected epic EOS ID = %q, want normalized EOS ID", disconnectedEpic.EosId)
+	}
+	if disconnectedEpic.EpicId != "11223344556677889900aabbccddeeff" {
+		t.Fatalf("disconnected epic epic ID = %q, want normalized Epic ID", disconnectedEpic.EpicId)
 	}
 	if disconnectedEpic.SinceDisconnect != "05m12s" {
 		t.Fatalf("disconnected epic time = %q, want %q", disconnectedEpic.SinceDisconnect, "05m12s")

@@ -6,6 +6,7 @@ type PlayerData struct {
 	IP               string `json:"ip"`
 	SteamID          string `json:"steam"`
 	EOSID            string `json:"eos"`
+	EpicID           string `json:"epic,omitempty"`
 	PlayerSuffix     string `json:"playerSuffix,omitempty"`
 	Controller       string `json:"controller,omitempty"`
 	TeamID           string `json:"teamID,omitempty"`
@@ -33,6 +34,7 @@ type JoinRequestData struct {
 	IP               string `json:"ip"`
 	SteamID          string `json:"steam"`
 	EOSID            string `json:"eos"`
+	EpicID           string `json:"epic,omitempty"`
 }
 
 // ToPlayerData converts JoinRequestData to PlayerData
@@ -42,6 +44,7 @@ func (j *JoinRequestData) ToPlayerData() *PlayerData {
 		IP:               j.IP,
 		SteamID:          j.SteamID,
 		EOSID:            j.EOSID,
+		EpicID:           j.EpicID,
 	}
 }
 

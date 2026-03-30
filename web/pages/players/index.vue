@@ -22,6 +22,7 @@ const stats = ref<PlayerStatsSummary | null>(null);
 interface PlayerSearchResult {
   steam_id: string;
   eos_id: string;
+  epic_id?: string;
   player_name: string;
   last_seen: string | null;
   first_seen: string | null;
@@ -30,6 +31,7 @@ interface PlayerSearchResult {
 interface TopPlayerStats {
   steam_id: string;
   eos_id: string;
+  epic_id?: string;
   player_name: string;
   kills: number;
   deaths: number;
