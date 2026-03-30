@@ -234,34 +234,47 @@ const templateFormSchema = toTypedSchema(
 const adminFormSchema = toTypedSchema(
     z
         .object({
-            adminType: z.enum(["user", "steam_id"], {
+            adminType: z.enum(["user", "steam_id", "eos_id"], {
                 required_error: "Please select admin type",
             }),
             user_id: z.string().optional(),
-            steam_id: z
-                .string()
-                .optional()
-                .refine((val) => !val || /^\d{17}$/.test(val), {
-                    message: "Steam ID must be exactly 17 digits",
-                }),
+            steam_id: z.string().optional(),
+            eos_id: z.string().optional(),
             server_role_id: z.string().min(1, "Role is required"),
             expires_at: z.string().optional(),
             notes: z.string().optional(),
         })
-        .refine(
-            (data) => {
-                if (data.adminType === "user") {
-                    return data.user_id && data.user_id.length > 0;
-                } else if (data.adminType === "steam_id") {
-                    return data.steam_id && data.steam_id.length === 17;
+        .superRefine((data, ctx) => {
+            if (data.adminType === "user") {
+                if (!data.user_id || data.user_id.length === 0) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: "Please select a user",
+                        path: ["user_id"],
+                    });
                 }
-                return false;
-            },
-            {
-                message: "Please select a user or enter a valid Steam ID",
-                path: ["user_id"],
-            },
-        ),
+                return;
+            }
+
+            if (data.adminType === "steam_id") {
+                if (!data.steam_id || data.steam_id.length !== 17) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: "Please enter a valid Steam ID",
+                        path: ["steam_id"],
+                    });
+                }
+                return;
+            }
+
+            if (!data.eos_id || !/^[a-fA-F0-9]{32}$/.test(data.eos_id)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: "Please enter a valid EOS ID",
+                    path: ["eos_id"],
+                });
+            }
+        }),
 );
 
 // Edit admin form schema (only for notes)
@@ -304,6 +317,7 @@ const adminForm = useForm({
         adminType: "user",
         user_id: "",
         steam_id: "",
+        eos_id: "",
         server_role_id: "",
         expires_at: "",
         notes: "",
@@ -793,7 +807,15 @@ async function updateRole(values: any) {
 
 // Function to add an admin
 async function addAdmin(values: any) {
-    const { adminType, user_id, steam_id, server_role_id, expires_at, notes } =
+    const {
+        adminType,
+        user_id,
+        steam_id,
+        eos_id,
+        server_role_id,
+        expires_at,
+        notes,
+    } =
         values;
 
     addAdminLoading.value = true;
@@ -811,6 +833,8 @@ async function addAdmin(values: any) {
             requestBody.user_id = user_id;
         } else if (adminType === "steam_id") {
             requestBody.steam_id = steam_id;
+        } else if (adminType === "eos_id") {
+            requestBody.eos_id = eos_id;
         }
 
         // Add expires_at if provided
@@ -1912,6 +1936,7 @@ onMounted(() => {
                                         adminType: 'user',
                                         user_id: '',
                                         steam_id: '',
+                                        eos_id: '',
                                         server_role_id: '',
                                         expires_at: '',
                                         notes: '',
@@ -1953,12 +1978,13 @@ onMounted(() => {
                                                                 <SelectContent>
                                                                     <SelectGroup>
                                                                         <SelectItem value="user">Existing User</SelectItem>
-                                                                        <SelectItem value="steam_id">Steam ID Only</SelectItem>
+                                                                        <SelectItem value="steam_id">Steam ID</SelectItem>
+                                                                        <SelectItem value="eos_id">EOS ID</SelectItem>
                                                                     </SelectGroup>
                                                                 </SelectContent>
                                                             </Select>
                                                             <FormDescription>
-                                                                Choose whether to assign an existing user or add an admin by Steam ID only.
+                                                                Choose whether to assign an existing user or add an admin by Steam or EOS ID.
                                                             </FormDescription>
                                                             <FormMessage />
                                                         </FormItem>
@@ -2006,6 +2032,25 @@ onMounted(() => {
                                                             </FormControl>
                                                             <FormDescription>
                                                                 Enter the 17-digit Steam ID of the player you want to make an admin.
+                                                            </FormDescription>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    </FormField>
+
+                                                    <FormField
+                                                        name="eos_id"
+                                                        v-slot="{ componentField }"
+                                                    >
+                                                        <FormItem v-if="selectedAdminType === 'eos_id'">
+                                                            <FormLabel>EOS ID</FormLabel>
+                                                            <FormControl>
+                                                                <Input
+                                                                    placeholder="0123456789abcdef0123456789abcdef"
+                                                                    v-bind="componentField"
+                                                                />
+                                                            </FormControl>
+                                                            <FormDescription>
+                                                                Enter the 32-character EOS ID of the player you want to assign this role to.
                                                             </FormDescription>
                                                             <FormMessage />
                                                         </FormItem>
