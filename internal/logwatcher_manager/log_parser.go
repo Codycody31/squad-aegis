@@ -30,6 +30,10 @@ type LogParsingMetrics struct {
 	lastMinuteMatchingLines []time.Time
 }
 
+func hasOnlineIdentifier(ids utils.OnlineIDs) bool {
+	return ids.EOSID != "" || ids.SteamID != "" || ids.EpicID != ""
+}
+
 // ProcessLogForEvents detects events based on regex and publishes them
 func ProcessLogForEvents(logLine string, serverID uuid.UUID, parsers []LogParser, eventManager *event_manager.EventManager, eventStore EventStoreInterface, playerTracker *player_tracker.PlayerTracker) {
 	ProcessLogForEventsWithMetrics(logLine, serverID, parsers, eventManager, eventStore, playerTracker, nil)
@@ -405,6 +409,9 @@ func GetLogParsers() []LogParser {
 			regex: regexp.MustCompile(`^\[([0-9.:-]+)]\[([ 0-9]*)]LogSquadTrace: \[DedicatedServer](?:ASQSoldier::)?Die\(\): Player:(.+) KillingDamage=(?:-)*([0-9.]+) from ([A-Za-z0-9_]+) \(Online IDs:(.*?)\s*\| Contoller ID: ([\w\d]+)\) caused by ([A-Za-z0-9_-]+)_C`),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface, playerTracker *player_tracker.PlayerTracker) {
 				onlineIDs := utils.ParseOnlineIDs(args[6])
+				if !hasOnlineIdentifier(onlineIDs) {
+					return
+				}
 
 				// Get existing session data for this victim
 				victimName := args[3]
@@ -679,6 +686,9 @@ func GetLogParsers() []LogParser {
 			),
 			onMatch: func(args []string, serverID uuid.UUID, eventManager *event_manager.EventManager, eventStore EventStoreInterface, playerTracker *player_tracker.PlayerTracker) {
 				onlineIDs := utils.ParseOnlineIDs(args[6])
+				if !hasOnlineIdentifier(onlineIDs) {
+					return
+				}
 
 				// Get existing session data for this victim
 				victimName := args[3]
