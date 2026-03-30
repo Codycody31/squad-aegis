@@ -247,7 +247,9 @@ function getPlayerSelectionKey(player: Player): string {
     return (
         player.steam_id ||
         player.eosId ||
+        player.epicId ||
         player.eos_id ||
+        player.epic_id ||
         String(player.playerId)
     );
 }

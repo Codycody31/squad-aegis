@@ -147,6 +147,14 @@ async function loadPlayerProfile() {
   player.value = null;
   await fetchPlayerProfile();
 
+  const resolvedPlayerId =
+    player.value?.steam_id || player.value?.eos_id || player.value?.epic_id;
+  const routePlayerId = route.params.playerId as string;
+  if (resolvedPlayerId && resolvedPlayerId !== routePlayerId) {
+    await router.replace(`/players/${resolvedPlayerId}`);
+    return;
+  }
+
   if (player.value && player.value.steam_id) {
     await fetchCBLData(player.value.steam_id);
   }

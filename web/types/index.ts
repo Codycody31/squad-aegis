@@ -70,6 +70,8 @@ export interface Player {
   playerId: number;
   eosId: string;
   eos_id?: string;
+  epicId?: string;
+  epic_id?: string;
   steam_id: string;
   name: string;
   teamId: number;

@@ -8,6 +8,7 @@ type PlayerInfo struct {
 	IP               string `json:"ip,omitempty"`
 	SteamID          string `json:"steam,omitempty"`
 	EOSID            string `json:"eos,omitempty"`
+	EpicID           string `json:"epic,omitempty"`
 	PlayerSuffix     string `json:"playerSuffix,omitempty"`
 	Controller       string `json:"controller,omitempty"`
 	TeamID           string `json:"teamID,omitempty"`

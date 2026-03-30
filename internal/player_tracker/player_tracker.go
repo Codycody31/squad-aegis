@@ -21,6 +21,7 @@ import (
 // PlayerInfo represents comprehensive player information
 type PlayerInfo struct {
 	EOSID            string    `json:"eos_id"`
+	EpicID           string    `json:"epic_id,omitempty"`
 	SteamID          string    `json:"steam_id"`
 	Name             string    `json:"name"`
 	PlayerController string    `json:"player_controller"`
@@ -32,6 +33,81 @@ type PlayerInfo struct {
 	IsConnected      bool      `json:"is_connected"`
 	LastUpdated      time.Time `json:"last_updated"`
 	Role             string    `json:"role"` // e.g., "SquadLeader", "TeamLeader"
+}
+
+type trackerIdentifiers struct {
+	PlayerID string
+	SteamID  string
+	EOSID    string
+	EpicID   string
+}
+
+func normalizeTrackerIdentifiers(steamID, eosID, epicID string) trackerIdentifiers {
+	steamID = utils.NormalizePlayerID(steamID)
+	eosID = utils.NormalizeEOSID(eosID)
+	epicID = utils.NormalizeEOSID(epicID)
+
+	if !utils.IsSteamID(steamID) {
+		steamID = ""
+	}
+	if !utils.IsEOSID(eosID) {
+		eosID = ""
+	}
+	if !utils.IsEOSID(epicID) {
+		epicID = ""
+	}
+
+	playerID := ""
+	if steamID != "" {
+		playerID = steamID
+	} else if eosID != "" {
+		playerID = eosID
+	} else {
+		playerID = epicID
+	}
+
+	return trackerIdentifiers{
+		PlayerID: playerID,
+		SteamID:  steamID,
+		EOSID:    eosID,
+		EpicID:   epicID,
+	}
+}
+
+func mergeTrackerIdentifiers(existing, incoming trackerIdentifiers) trackerIdentifiers {
+	steamID := incoming.SteamID
+	if steamID == "" {
+		steamID = existing.SteamID
+	}
+
+	eosID := incoming.EOSID
+	if eosID == "" {
+		eosID = existing.EOSID
+	}
+
+	epicID := incoming.EpicID
+	if epicID == "" {
+		epicID = existing.EpicID
+	}
+
+	return normalizeTrackerIdentifiers(steamID, eosID, epicID)
+}
+
+func (ids trackerIdentifiers) StorageIDs() []string {
+	candidates := []string{ids.PlayerID, ids.SteamID, ids.EOSID, ids.EpicID}
+	seen := make(map[string]struct{}, len(candidates))
+	result := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		result = append(result, candidate)
+	}
+	return result
 }
 
 // TeamInfo represents team information
@@ -229,7 +305,6 @@ func (pt *PlayerTracker) unmarshalSquad(data string) (*SquadInfo, error) {
 	return &squad, nil
 }
 
-
 func (pt *PlayerTracker) playerRecordIDFromKey(key string) string {
 	return strings.TrimPrefix(key, fmt.Sprintf("squad-aegis:player-tracker:%s:player-record:", pt.serverID.String()))
 }
@@ -303,8 +378,8 @@ func (pt *PlayerTracker) GetPlayerByIdentifier(playerID string) (*PlayerInfo, bo
 	return pt.getPlayerByRecordID(recordID)
 }
 
-func (pt *PlayerTracker) findExistingPlayer(existingPlayers map[string]*PlayerInfo, steamID string, eosID string) (*PlayerInfo, bool) {
-	identifiers := utils.NormalizePlayerIdentifiers("", steamID, eosID)
+func (pt *PlayerTracker) findExistingPlayer(existingPlayers map[string]*PlayerInfo, steamID string, eosID string, epicID string) (*PlayerInfo, bool) {
+	identifiers := normalizeTrackerIdentifiers(steamID, eosID, epicID)
 	for _, candidate := range identifiers.StorageIDs() {
 		if player, exists := existingPlayers[candidate]; exists {
 			return player, true
@@ -451,13 +526,16 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 
 				// Check if player already exists and preserve custom data
 				var playerInfo *PlayerInfo
-				if existingPlayer, exists := pt.findExistingPlayer(existingPlayers, player.SteamId, player.EosId); exists {
+				if existingPlayer, exists := pt.findExistingPlayer(existingPlayers, player.SteamId, player.EosId, player.EpicId); exists {
 					// Preserve existing player data but update team/squad info
 					playerInfo = existingPlayer
 					playerInfo.TeamID = teamIDStr
 					playerInfo.TeamName = team.Name
 					playerInfo.SquadID = squadIDStr
 					playerInfo.SquadName = squad.Name
+					if player.EpicId != "" {
+						playerInfo.EpicID = player.EpicId
+					}
 					playerInfo.IsConnected = true
 					playerInfo.LastUpdated = time.Now()
 					playerInfo.Role = player.Role
@@ -474,6 +552,7 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 					// Create new player
 					playerInfo = &PlayerInfo{
 						EOSID:       player.EosId,
+						EpicID:      player.EpicId,
 						SteamID:     player.SteamId,
 						Name:        player.Name,
 						TeamID:      teamIDStr,
@@ -492,7 +571,7 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 					continue
 				}
 
-				for _, playerID := range utils.NormalizePlayerIdentifiers("", playerInfo.SteamID, playerInfo.EOSID).StorageIDs() {
+				for _, playerID := range normalizeTrackerIdentifiers(playerInfo.SteamID, playerInfo.EOSID, playerInfo.EpicID).StorageIDs() {
 					currentConnectedPlayers[playerID] = true
 				}
 			}
@@ -505,13 +584,16 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 
 			// Check if player already exists and preserve custom data
 			var playerInfo *PlayerInfo
-			if existingPlayer, exists := pt.findExistingPlayer(existingPlayers, player.SteamId, player.EosId); exists {
+			if existingPlayer, exists := pt.findExistingPlayer(existingPlayers, player.SteamId, player.EosId, player.EpicId); exists {
 				// Preserve existing player data but update team info
 				playerInfo = existingPlayer
 				playerInfo.TeamID = teamIDStr
 				playerInfo.TeamName = team.Name
 				playerInfo.SquadID = "" // Unassigned
 				playerInfo.SquadName = ""
+				if player.EpicId != "" {
+					playerInfo.EpicID = player.EpicId
+				}
 				playerInfo.IsConnected = true
 				playerInfo.LastUpdated = time.Now()
 				playerInfo.Role = player.Role
@@ -528,6 +610,7 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 				// Create new player
 				playerInfo = &PlayerInfo{
 					EOSID:       player.EosId,
+					EpicID:      player.EpicId,
 					SteamID:     player.SteamId,
 					Name:        player.Name,
 					TeamID:      teamIDStr,
@@ -546,7 +629,7 @@ func (pt *PlayerTracker) updateFromSquadRconDataWithLock(teams []squadRcon.Team)
 				continue
 			}
 
-			for _, playerID := range utils.NormalizePlayerIdentifiers("", playerInfo.SteamID, playerInfo.EOSID).StorageIDs() {
+			for _, playerID := range normalizeTrackerIdentifiers(playerInfo.SteamID, playerInfo.EOSID, playerInfo.EpicID).StorageIDs() {
 				currentConnectedPlayers[playerID] = true
 			}
 		}
@@ -762,13 +845,16 @@ func (pt *PlayerTracker) updateFromSquadRconData(teams []squadRcon.Team) error {
 
 				// Check if player already exists and preserve custom data
 				var playerInfo *PlayerInfo
-				if existingPlayer, exists := existingPlayers[player.EosId]; exists {
+				if existingPlayer, exists := pt.findExistingPlayer(existingPlayers, player.SteamId, player.EosId, player.EpicId); exists {
 					// Preserve existing player data but update team/squad info
 					playerInfo = existingPlayer
 					playerInfo.TeamID = teamIDStr
 					playerInfo.TeamName = team.Name
 					playerInfo.SquadID = squadIDStr
 					playerInfo.SquadName = squad.Name
+					if player.EpicId != "" {
+						playerInfo.EpicID = player.EpicId
+					}
 					playerInfo.IsConnected = true
 					playerInfo.LastUpdated = time.Now()
 					playerInfo.Role = player.Role
@@ -785,6 +871,7 @@ func (pt *PlayerTracker) updateFromSquadRconData(teams []squadRcon.Team) error {
 					// Create new player
 					playerInfo = &PlayerInfo{
 						EOSID:       player.EosId,
+						EpicID:      player.EpicId,
 						SteamID:     player.SteamId,
 						Name:        player.Name,
 						TeamID:      teamIDStr,
@@ -803,7 +890,9 @@ func (pt *PlayerTracker) updateFromSquadRconData(teams []squadRcon.Team) error {
 					continue
 				}
 
-				currentConnectedPlayers[player.EosId] = true
+				for _, playerID := range normalizeTrackerIdentifiers(playerInfo.SteamID, playerInfo.EOSID, playerInfo.EpicID).StorageIDs() {
+					currentConnectedPlayers[playerID] = true
+				}
 			}
 		}
 
@@ -814,13 +903,16 @@ func (pt *PlayerTracker) updateFromSquadRconData(teams []squadRcon.Team) error {
 
 			// Check if player already exists and preserve custom data
 			var playerInfo *PlayerInfo
-			if existingPlayer, exists := existingPlayers[player.EosId]; exists {
+			if existingPlayer, exists := pt.findExistingPlayer(existingPlayers, player.SteamId, player.EosId, player.EpicId); exists {
 				// Preserve existing player data but update team info
 				playerInfo = existingPlayer
 				playerInfo.TeamID = teamIDStr
 				playerInfo.TeamName = team.Name
 				playerInfo.SquadID = "" // Unassigned
 				playerInfo.SquadName = ""
+				if player.EpicId != "" {
+					playerInfo.EpicID = player.EpicId
+				}
 				playerInfo.IsConnected = true
 				playerInfo.LastUpdated = time.Now()
 				playerInfo.Role = player.Role
@@ -837,6 +929,7 @@ func (pt *PlayerTracker) updateFromSquadRconData(teams []squadRcon.Team) error {
 				// Create new player
 				playerInfo = &PlayerInfo{
 					EOSID:       player.EosId,
+					EpicID:      player.EpicId,
 					SteamID:     player.SteamId,
 					Name:        player.Name,
 					TeamID:      teamIDStr,
@@ -855,7 +948,9 @@ func (pt *PlayerTracker) updateFromSquadRconData(teams []squadRcon.Team) error {
 				continue
 			}
 
-			currentConnectedPlayers[player.EosId] = true
+			for _, playerID := range normalizeTrackerIdentifiers(playerInfo.SteamID, playerInfo.EOSID, playerInfo.EpicID).StorageIDs() {
+				currentConnectedPlayers[playerID] = true
+			}
 		}
 	}
 
@@ -906,9 +1001,9 @@ func (pt *PlayerTracker) clearTeamsAndSquadsData() error {
 }
 
 func (pt *PlayerTracker) storePlayer(player *PlayerInfo) error {
-	identifiers := utils.NormalizePlayerIdentifiers("", player.SteamID, player.EOSID)
+	identifiers := normalizeTrackerIdentifiers(player.SteamID, player.EOSID, player.EpicID)
 	if identifiers.PlayerID == "" {
-		return fmt.Errorf("player requires a Steam ID or EOS ID")
+		return fmt.Errorf("player requires a Steam ID, EOS ID, or Epic ID")
 	}
 
 	recordID, existingPlayer, exists := pt.lookupPlayerRecord(identifiers.StorageIDs()...)
@@ -916,8 +1011,8 @@ func (pt *PlayerTracker) storePlayer(player *PlayerInfo) error {
 	if !exists {
 		recordID = identifiers.PlayerID
 	} else {
-		existingIdentifiers := utils.NormalizePlayerIdentifiers("", existingPlayer.SteamID, existingPlayer.EOSID)
-		resolvedIdentifiers = utils.MergePlayerIdentifiers(existingIdentifiers, identifiers)
+		existingIdentifiers := normalizeTrackerIdentifiers(existingPlayer.SteamID, existingPlayer.EOSID, existingPlayer.EpicID)
+		resolvedIdentifiers = mergeTrackerIdentifiers(existingIdentifiers, identifiers)
 		oldIdentifiers := existingIdentifiers.StorageIDs()
 		newIdentifiers := resolvedIdentifiers.StorageIDs()
 		for _, oldIdentifier := range oldIdentifiers {
@@ -948,6 +1043,7 @@ func (pt *PlayerTracker) storePlayer(player *PlayerInfo) error {
 
 	player.SteamID = resolvedIdentifiers.SteamID
 	player.EOSID = resolvedIdentifiers.EOSID
+	player.EpicID = resolvedIdentifiers.EpicID
 
 	playerData, err := pt.marshalPlayer(player)
 	if err != nil {
@@ -1033,7 +1129,7 @@ func (pt *PlayerTracker) cleanupDisconnectedPlayers(currentConnectedPlayers map[
 		}
 
 		connected := false
-		for _, playerID := range utils.NormalizePlayerIdentifiers("", player.SteamID, player.EOSID).StorageIDs() {
+		for _, playerID := range normalizeTrackerIdentifiers(player.SteamID, player.EOSID, player.EpicID).StorageIDs() {
 			if currentConnectedPlayers[playerID] {
 				connected = true
 				break
@@ -1124,7 +1220,7 @@ func (pt *PlayerTracker) getAllPlayersLocked() map[string]*PlayerInfo {
 			continue
 		}
 
-		playerID := utils.NormalizePlayerIdentifiers("", player.SteamID, player.EOSID).PlayerID
+		playerID := normalizeTrackerIdentifiers(player.SteamID, player.EOSID, player.EpicID).PlayerID
 		if playerID == "" {
 			playerID = pt.playerRecordIDFromKey(key)
 		}
@@ -1304,10 +1400,13 @@ func (pt *PlayerTracker) ForceRefresh() error {
 }
 
 // UpdatePlayerFromLog updates player information based on log events
-func (pt *PlayerTracker) UpdatePlayerFromLog(eosID, steamID, name, playerController, playerSuffix string) {
+func (pt *PlayerTracker) UpdatePlayerFromLog(eosID, steamID, epicID, name, playerController, playerSuffix string) {
 	player, exists := pt.GetPlayerByIdentifier(eosID)
 	if !exists {
 		player, exists = pt.GetPlayerByIdentifier(steamID)
+	}
+	if !exists {
+		player, exists = pt.GetPlayerByIdentifier(epicID)
 	}
 
 	if !exists {
@@ -1321,6 +1420,10 @@ func (pt *PlayerTracker) UpdatePlayerFromLog(eosID, steamID, name, playerControl
 	}
 	if steamID != "" && player.SteamID != steamID {
 		player.SteamID = steamID
+		updated = true
+	}
+	if epicID != "" && player.EpicID != epicID {
+		player.EpicID = epicID
 		updated = true
 	}
 	if name != "" && player.Name != name {
@@ -1344,7 +1447,7 @@ func (pt *PlayerTracker) UpdatePlayerFromLog(eosID, steamID, name, playerControl
 	player.LastUpdated = time.Now()
 
 	if err := pt.storePlayer(player); err != nil {
-		log.Error().Err(err).Str("eosID", eosID).Str("steamID", steamID).Msg("Failed to store player from log update")
+		log.Error().Err(err).Str("eosID", eosID).Str("steamID", steamID).Str("epicID", epicID).Msg("Failed to store player from log update")
 	}
 }
 
