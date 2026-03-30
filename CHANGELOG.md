@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.2](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.2) - 2026-03-30
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### 🐛 Bug Fixes
+
+- fix(players): support Epic-authenticated players in search and team views [[#202](https://github.com/Codycody31/squad-aegis/pull/202)]
+
 ## [0.9.1](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.1) - 2026-03-28
 
 ### ❤️ Thanks to all contributors! ❤️
