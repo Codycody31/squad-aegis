@@ -18,6 +18,11 @@ import * as z from "zod";
 import type { User } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { toast } from "~/components/ui/toast";
+import {
+  passwordLengthMessage,
+  passwordPolicyMessage,
+  satisfiesPasswordPolicy,
+} from "~/utils/passwordPolicy";
 
 const authStore = useAuthStore();
 
@@ -39,11 +44,8 @@ const passwordFormSchema = toTypedSchema(
     currentPassword: z.string().min(1, "Current password is required"),
     newPassword: z
       .string()
-      .min(8, "Password must be at least 8 characters")
-      .regex(
-        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/,
-        "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character"
-      ),
+      .min(8, passwordLengthMessage)
+      .refine(satisfiesPasswordPolicy, passwordPolicyMessage),
     confirmPassword: z.string().min(1, "Please confirm your password"),
   }).refine((data) => data.newPassword === data.confirmPassword, {
     message: "Passwords do not match",
@@ -199,6 +201,8 @@ async function changePassword(values: any) {
   }
 }
 
+const onPasswordSubmit = passwordForm.handleSubmit(changePassword);
+
 // Load user data on mount
 onMounted(() => {
   fetchUserData();
@@ -279,62 +283,56 @@ onMounted(() => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Form
-            v-slot="{ handleSubmit }"
-            as="div"
-            :validation-schema="passwordFormSchema"
-          >
-            <form @submit="handleSubmit($event, changePassword)" class="space-y-4">
-              <FormField name="currentPassword" v-slot="{ componentField }">
-                <FormItem>
-                  <FormLabel>Current Password</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="password"
-                      placeholder="Your current password"
-                      v-bind="componentField"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+          <form @submit="onPasswordSubmit" class="space-y-4">
+            <FormField name="currentPassword" v-slot="{ componentField }">
+              <FormItem>
+                <FormLabel>Current Password</FormLabel>
+                <FormControl>
+                  <Input
+                    type="password"
+                    placeholder="Your current password"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
 
-              <FormField name="newPassword" v-slot="{ componentField }">
-                <FormItem>
-                  <FormLabel>New Password</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="password"
-                      placeholder="Your new password"
-                      v-bind="componentField"
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    Password must be at least 8 characters and include uppercase, lowercase, number, and special character.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+            <FormField name="newPassword" v-slot="{ componentField }">
+              <FormItem>
+                <FormLabel>New Password</FormLabel>
+                <FormControl>
+                  <Input
+                    type="password"
+                    placeholder="Your new password"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+                <FormDescription>
+                  Password must be at least 8 characters and include uppercase, lowercase, number, and special character.
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            </FormField>
 
-              <FormField name="confirmPassword" v-slot="{ componentField }">
-                <FormItem>
-                  <FormLabel>Confirm New Password</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="password"
-                      placeholder="Confirm your new password"
-                      v-bind="componentField"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+            <FormField name="confirmPassword" v-slot="{ componentField }">
+              <FormItem>
+                <FormLabel>Confirm New Password</FormLabel>
+                <FormControl>
+                  <Input
+                    type="password"
+                    placeholder="Confirm your new password"
+                    v-bind="componentField"
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            </FormField>
 
-              <Button type="submit" :disabled="loading.password">
-                {{ loading.password ? "Changing Password..." : "Change Password" }}
-              </Button>
-            </form>
-          </Form>
+            <Button type="submit" :disabled="loading.password">
+              {{ loading.password ? "Changing Password..." : "Change Password" }}
+            </Button>
+          </form>
         </CardContent>
       </Card>
 

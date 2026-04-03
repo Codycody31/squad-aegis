@@ -196,6 +196,11 @@ func (s *Server) UpdateUserPassword(c *gin.Context) {
 		return
 	}
 
+	if err := core.ValidatePasswordPolicy(req.NewPassword); err != nil {
+		responses.BadRequest(c, err.Error(), nil)
+		return
+	}
+
 	tx, err := s.Dependencies.DB.BeginTx(c.Copy(), nil)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
