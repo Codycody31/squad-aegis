@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -30,7 +31,7 @@ func (s *Server) getMOTDConfig(c *gin.Context) {
 		return
 	}
 
-	// Check if FTP/SFTP credentials are available
+	// Check if local or remote upload access is available
 	hasCredentials, credentialSource := s.checkMOTDCredentials(c.Request.Context(), serverID, config)
 
 	responses.Success(c, "MOTD config retrieved", &gin.H{
@@ -230,7 +231,7 @@ func (s *Server) uploadMOTD(c *gin.Context) {
 	defer uploader.Close()
 
 	// Upload
-	if err := uploader.Upload(c.Request.Context(), content); err != nil {
+	if err := uploadMOTDContent(c.Request.Context(), uploader, content); err != nil {
 		s.updateMOTDUploadError(c.Request.Context(), config.ID, err.Error())
 		responses.InternalServerError(c, fmt.Errorf("failed to upload: %w", err), nil)
 		return
@@ -244,7 +245,7 @@ func (s *Server) uploadMOTD(c *gin.Context) {
 	})
 }
 
-// testMOTDConnection tests the FTP/SFTP connection
+// testMOTDConnection tests local or remote MOTD upload access.
 func (s *Server) testMOTDConnection(c *gin.Context) {
 	serverID, err := uuid.Parse(c.Param("serverId"))
 	if err != nil {
@@ -284,7 +285,7 @@ func (s *Server) testMOTDConnection(c *gin.Context) {
 
 	responses.Success(c, "Connection successful", &gin.H{
 		"success": true,
-		"message": fmt.Sprintf("Successfully connected to %s://%s:%d", uploadConfig.Protocol, uploadConfig.Host, uploadConfig.Port),
+		"message": buildMOTDConnectionMessage(uploadConfig),
 	})
 }
 
@@ -458,32 +459,40 @@ func (s *Server) fetchServerRulesHierarchy(ctx context.Context, serverID uuid.UU
 func (s *Server) getUploadConfig(ctx context.Context, serverID uuid.UUID, config *models.ServerMOTDConfig) (file_upload.UploadConfig, error) {
 	var uploadConfig file_upload.UploadConfig
 
+	server, err := core.GetServerById(ctx, s.Dependencies.DB, serverID, nil)
+	if err != nil {
+		return uploadConfig, fmt.Errorf("failed to get server: %w", err)
+	}
+	if server.SquadGamePath == nil || *server.SquadGamePath == "" {
+		return uploadConfig, fmt.Errorf("server does not have a SquadGame base path configured")
+	}
+
 	if config.UseLogCredentials {
-		// Get server's log credentials
-		server, err := core.GetServerById(ctx, s.Dependencies.DB, serverID, nil)
-		if err != nil {
-			return uploadConfig, fmt.Errorf("failed to get server: %w", err)
-		}
-
-		if server.LogSourceType == nil || (*server.LogSourceType != "sftp" && *server.LogSourceType != "ftp") {
-			return uploadConfig, fmt.Errorf("server does not have FTP/SFTP log configuration")
-		}
-		if server.SquadGamePath == nil || *server.SquadGamePath == "" {
-			return uploadConfig, fmt.Errorf("server does not have a SquadGame base path configured")
-		}
-
-		if server.LogHost == nil || server.LogPort == nil || server.LogUsername == nil || server.LogPassword == nil {
-			return uploadConfig, fmt.Errorf("server log credentials are incomplete")
+		if server.LogSourceType == nil || *server.LogSourceType == "" {
+			return uploadConfig, fmt.Errorf("server does not have local/FTP/SFTP file access configured")
 		}
 
 		motdPath := buildMotdPath(*server.SquadGamePath, *server.LogSourceType)
-		uploadConfig = file_upload.UploadConfig{
-			Protocol: *server.LogSourceType,
-			Host:     *server.LogHost,
-			Port:     *server.LogPort,
-			Username: *server.LogUsername,
-			Password: *server.LogPassword,
-			FilePath: motdPath,
+		switch *server.LogSourceType {
+		case "local":
+			uploadConfig = file_upload.UploadConfig{
+				Protocol: "local",
+				FilePath: motdPath,
+			}
+		case "sftp", "ftp":
+			if server.LogHost == nil || server.LogPort == nil || server.LogUsername == nil || server.LogPassword == nil {
+				return uploadConfig, fmt.Errorf("server log credentials are incomplete")
+			}
+			uploadConfig = file_upload.UploadConfig{
+				Protocol: *server.LogSourceType,
+				Host:     *server.LogHost,
+				Port:     *server.LogPort,
+				Username: *server.LogUsername,
+				Password: *server.LogPassword,
+				FilePath: motdPath,
+			}
+		default:
+			return uploadConfig, fmt.Errorf("server log source type %q is not supported for MOTD upload", *server.LogSourceType)
 		}
 	} else {
 		// Use custom credentials
@@ -492,14 +501,6 @@ func (s *Server) getUploadConfig(ctx context.Context, serverID uuid.UUID, config
 			*config.UploadProtocol == "" || *config.UploadHost == "" ||
 			*config.UploadUsername == "" || *config.UploadPassword == "" {
 			return uploadConfig, fmt.Errorf("custom upload credentials are incomplete")
-		}
-
-		server, err := core.GetServerById(ctx, s.Dependencies.DB, serverID, nil)
-		if err != nil {
-			return uploadConfig, fmt.Errorf("failed to get server: %w", err)
-		}
-		if server.SquadGamePath == nil || *server.SquadGamePath == "" {
-			return uploadConfig, fmt.Errorf("server does not have a SquadGame base path configured")
 		}
 		motdPath := buildMotdPath(*server.SquadGamePath, *config.UploadProtocol)
 
@@ -517,15 +518,26 @@ func (s *Server) getUploadConfig(ctx context.Context, serverID uuid.UUID, config
 }
 
 func (s *Server) checkMOTDCredentials(ctx context.Context, serverID uuid.UUID, config *models.ServerMOTDConfig) (bool, string) {
+	server, err := core.GetServerById(ctx, s.Dependencies.DB, serverID, nil)
+	if err != nil {
+		return false, ""
+	}
+	if server.SquadGamePath == nil || *server.SquadGamePath == "" {
+		return false, ""
+	}
+
 	if config.UseLogCredentials {
-		server, err := core.GetServerById(ctx, s.Dependencies.DB, serverID, nil)
-		if err != nil {
+		if server.LogSourceType == nil {
 			return false, ""
 		}
 
-		if server.LogSourceType != nil && (*server.LogSourceType == "sftp" || *server.LogSourceType == "ftp") &&
-			server.LogHost != nil && server.LogPort != nil && server.LogUsername != nil && server.LogPassword != nil {
+		switch *server.LogSourceType {
+		case "local":
 			return true, "log_credentials"
+		case "sftp", "ftp":
+			if server.LogHost != nil && server.LogPort != nil && server.LogUsername != nil && server.LogPassword != nil {
+				return true, "log_credentials"
+			}
 		}
 		return false, ""
 	}
@@ -580,12 +592,41 @@ func (s *Server) triggerMOTDUpload(ctx context.Context, serverID uuid.UUID) {
 	}
 	defer uploader.Close()
 
-	if err := uploader.Upload(ctx, content); err != nil {
+	if err := uploadMOTDContent(ctx, uploader, content); err != nil {
 		s.updateMOTDUploadError(ctx, config.ID, err.Error())
 		return
 	}
 
 	s.updateMOTDUploadSuccess(ctx, config.ID, content)
+}
+
+func uploadMOTDContent(ctx context.Context, uploader file_upload.Uploader, content string) error {
+	atomicUploader, ok := uploader.(interface {
+		UploadAtomically(context.Context, string) error
+	})
+	if ok {
+		if err := atomicUploader.UploadAtomically(ctx, content); err != nil {
+			if errors.Is(err, file_upload.ErrAtomicReplaceUnsupported) {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return errors.Join(err, ctxErr)
+				}
+				if fallbackErr := uploader.Upload(ctx, content); fallbackErr != nil {
+					return errors.Join(err, fmt.Errorf("fallback upload failed: %w", fallbackErr))
+				}
+				return nil
+			}
+			return err
+		}
+		return nil
+	}
+	return uploader.Upload(ctx, content)
+}
+
+func buildMOTDConnectionMessage(uploadConfig file_upload.UploadConfig) string {
+	if uploadConfig.Protocol == "local" {
+		return fmt.Sprintf("Successfully verified local file access to %s", uploadConfig.FilePath)
+	}
+	return fmt.Sprintf("Successfully connected to %s://%s:%d", uploadConfig.Protocol, uploadConfig.Host, uploadConfig.Port)
 }
 
 // TriggerMOTDUploadIfEnabled is exported for use by rules bulk update.
