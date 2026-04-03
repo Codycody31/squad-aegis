@@ -2,6 +2,7 @@ package file_upload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,10 @@ var windowsDriveAbsPathPattern = regexp.MustCompile(`^[a-zA-Z]:/`)
 // MaxReadBytes is the maximum number of bytes allowed when reading a remote file
 // to prevent unbounded memory allocation from maliciously large files.
 const MaxReadBytes = 10 * 1024 * 1024 // 10 MB
+
+// ErrAtomicReplaceUnsupported indicates the target supports upload writes but
+// not the rename sequence needed to promote a staged file atomically.
+var ErrAtomicReplaceUnsupported = errors.New("atomic replace unsupported")
 
 // validateFilePath rejects paths that contain traversal sequences or are not absolute.
 func validateFilePath(p string) error {
@@ -337,7 +342,7 @@ func (u *SFTPUploader) UploadAtomically(ctx context.Context, content string) err
 			backupPath := stagedRemotePath(u.config.FilePath, "bak")
 			if backupErr := u.sftpClient.Rename(u.config.FilePath, backupPath); backupErr != nil {
 				_ = u.sftpClient.Remove(tempPath)
-				return fmt.Errorf("failed to replace remote file: posix-rename: %v; rename: %v; backup current: %v", err, renameErr, backupErr)
+				return fmt.Errorf("%w: failed to replace remote file: posix-rename: %v; rename: %v; backup current: %v", ErrAtomicReplaceUnsupported, err, renameErr, backupErr)
 			}
 			if promoteErr := u.sftpClient.Rename(tempPath, u.config.FilePath); promoteErr != nil {
 				restoreErr := u.sftpClient.Rename(backupPath, u.config.FilePath)
@@ -493,7 +498,7 @@ func (u *FTPUploader) UploadAtomically(ctx context.Context, content string) erro
 		backupPath := stagedRemotePath(u.config.FilePath, "bak")
 		if backupErr := u.conn.Rename(u.config.FilePath, backupPath); backupErr != nil {
 			_ = u.conn.Delete(tempPath)
-			return fmt.Errorf("failed to replace remote file: rename temp into place: %v; backup current: %v", err, backupErr)
+			return fmt.Errorf("%w: failed to replace remote file: rename temp into place: %v; backup current: %v", ErrAtomicReplaceUnsupported, err, backupErr)
 		}
 		if promoteErr := u.conn.Rename(tempPath, u.config.FilePath); promoteErr != nil {
 			restoreErr := u.conn.Rename(backupPath, u.config.FilePath)

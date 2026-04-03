@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -604,7 +605,19 @@ func uploadMOTDContent(ctx context.Context, uploader file_upload.Uploader, conte
 		UploadAtomically(context.Context, string) error
 	})
 	if ok {
-		return atomicUploader.UploadAtomically(ctx, content)
+		if err := atomicUploader.UploadAtomically(ctx, content); err != nil {
+			if errors.Is(err, file_upload.ErrAtomicReplaceUnsupported) {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return errors.Join(err, ctxErr)
+				}
+				if fallbackErr := uploader.Upload(ctx, content); fallbackErr != nil {
+					return errors.Join(err, fmt.Errorf("fallback upload failed: %w", fallbackErr))
+				}
+				return nil
+			}
+			return err
+		}
+		return nil
 	}
 	return uploader.Upload(ctx, content)
 }
