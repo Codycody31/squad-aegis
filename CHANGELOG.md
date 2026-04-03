@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.3](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.3) - 2026-04-03
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31
+
+### Misc
+
+- chore(password): implement password policy validation and update password form [[#204](https://github.com/Codycody31/squad-aegis/pull/204)]
+
 ## [0.9.2](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.2) - 2026-03-30
 
 ### ❤️ Thanks to all contributors! ❤️
