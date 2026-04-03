@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -56,7 +57,7 @@ func isAbsoluteRemotePath(p string) bool {
 
 // UploadConfig holds configuration for file upload
 type UploadConfig struct {
-	Protocol string // "sftp" or "ftp"
+	Protocol string // "local", "sftp", or "ftp"
 	Host     string
 	Port     int
 	Username string
@@ -85,6 +86,8 @@ func NewUploader(config UploadConfig) (Uploader, error) {
 		return nil, err
 	}
 	switch config.Protocol {
+	case "local":
+		return NewLocalUploader(config)
 	case "sftp":
 		return NewSFTPUploader(config)
 	case "ftp":
@@ -92,6 +95,150 @@ func NewUploader(config UploadConfig) (Uploader, error) {
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", config.Protocol)
 	}
+}
+
+// LocalUploader implements file upload via the local filesystem.
+type LocalUploader struct {
+	config UploadConfig
+}
+
+// NewLocalUploader creates a new local uploader.
+func NewLocalUploader(config UploadConfig) (*LocalUploader, error) {
+	return &LocalUploader{config: config}, nil
+}
+
+// Upload writes content to the target file using atomic replacement.
+func (u *LocalUploader) Upload(ctx context.Context, content string) error {
+	return u.UploadAtomically(ctx, content)
+}
+
+// UploadAtomically writes content to a temp file and renames it into place.
+func (u *LocalUploader) UploadAtomically(ctx context.Context, content string) error {
+	return writeLocalFileAtomically(ctx, u.config.FilePath, []byte(content), 0644)
+}
+
+// Read reads the content of the local file.
+func (u *LocalUploader) Read(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	file, err := os.Open(u.config.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open local file: %v", err)
+	}
+	defer file.Close()
+
+	var buf strings.Builder
+	limited := io.LimitReader(file, MaxReadBytes+1)
+	if _, err := io.Copy(&buf, limited); err != nil {
+		return "", fmt.Errorf("failed to read local file: %v", err)
+	}
+	if buf.Len() > MaxReadBytes {
+		return "", fmt.Errorf("local file exceeds maximum allowed size (%d bytes)", MaxReadBytes)
+	}
+
+	return buf.String(), nil
+}
+
+// TestConnection verifies the parent directory exists and is writable.
+func (u *LocalUploader) TestConnection(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	parentDir := filepath.Dir(filepath.Clean(u.config.FilePath))
+	info, err := os.Stat(parentDir)
+	if err != nil {
+		return fmt.Errorf("local path test failed: %v", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("local path test failed: parent path is not a directory")
+	}
+
+	testFile, err := os.CreateTemp(parentDir, "."+filepath.Base(u.config.FilePath)+".aegis-test-*")
+	if err != nil {
+		return fmt.Errorf("local path test failed: %v", err)
+	}
+	testPath := testFile.Name()
+	if err := testFile.Close(); err != nil {
+		_ = os.Remove(testPath)
+		return fmt.Errorf("local path test failed: %v", err)
+	}
+	if err := os.Remove(testPath); err != nil {
+		return fmt.Errorf("local path test failed: %v", err)
+	}
+
+	return nil
+}
+
+// Close closes the local uploader.
+func (u *LocalUploader) Close() error {
+	return nil
+}
+
+func writeLocalFileAtomically(ctx context.Context, filePath string, content []byte, mode os.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	tempFile, err := os.CreateTemp(filepath.Dir(filePath), "."+filepath.Base(filePath)+".aegis-tmp-*")
+	if err != nil {
+		return err
+	}
+
+	tempPath := tempFile.Name()
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err := tempFile.Chmod(mode); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if _, err := tempFile.Write(content); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tempPath, filePath); err == nil {
+		cleanupTemp = false
+		return nil
+	}
+
+	backupPath := filepath.Join(
+		filepath.Dir(filePath),
+		fmt.Sprintf(".%s.aegis-bak-%d", filepath.Base(filePath), time.Now().UnixNano()),
+	)
+	if err := os.Rename(filePath, backupPath); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tempPath, filePath); err != nil {
+		restoreErr := os.Rename(backupPath, filePath)
+		if restoreErr != nil {
+			return fmt.Errorf("failed to replace file and failed to restore original: replace: %w; restore: %v", err, restoreErr)
+		}
+		return err
+	}
+
+	cleanupTemp = false
+	_ = os.Remove(backupPath)
+	return nil
 }
 
 // SFTPUploader implements file upload via SFTP
