@@ -29,6 +29,8 @@ const (
 	pluginPublicKeyFile     = plugin_signing.ManifestPublicKeyFile
 )
 
+var nativePluginDefinitionLoader = loadNativePluginDefinition
+
 func nativePluginsEnabled() bool {
 	return config.Config != nil && config.Config.Plugins.NativeEnabled
 }
@@ -432,15 +434,34 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 	pm.nativeMu.Unlock()
 
 	for _, pkg := range loadedPackages {
-		if pkg.InstallState != PluginInstallStateReady {
+		if pkg.InstallState != PluginInstallStateReady && pkg.InstallState != PluginInstallStatePendingRestart {
 			continue
+		}
+
+		shouldPersistReadyState := false
+		if pkg.InstallState == PluginInstallStatePendingRestart {
+			pkg.InstallState = PluginInstallStateReady
+			pkg.LastError = ""
+			pkg.UpdatedAt = time.Now()
+			shouldPersistReadyState = true
 		}
 
 		if err := pm.loadNativePluginPackage(pkg); err != nil {
 			pkg.InstallState = PluginInstallStateError
 			pkg.LastError = err.Error()
+			pkg.UpdatedAt = time.Now()
 			if saveErr := pm.savePluginPackageToDatabase(pkg); saveErr != nil {
 				log.Error().Err(saveErr).Str("plugin_id", pkg.PluginID).Msg("Failed to persist native plugin load error")
+			}
+			pm.setNativePackage(pkg)
+			continue
+		}
+
+		if shouldPersistReadyState || pkg.LastError != "" {
+			pkg.LastError = ""
+			pkg.UpdatedAt = time.Now()
+			if saveErr := pm.savePluginPackageToDatabase(pkg); saveErr != nil {
+				log.Error().Err(saveErr).Str("plugin_id", pkg.PluginID).Msg("Failed to persist native plugin package activation")
 			}
 			pm.setNativePackage(pkg)
 		}
@@ -594,12 +615,25 @@ func (pm *PluginManager) maskAndEnrichPluginInstance(instance *PluginInstance) *
 	}
 
 	if pkg := pm.getNativePackage(instance.PluginID); pkg != nil {
-		maskedInstance.PluginName = pkg.Name
+		if pkg.Name != "" {
+			maskedInstance.PluginName = pkg.Name
+		}
 		maskedInstance.Source = pkg.Source
 		maskedInstance.Official = pkg.Official
 		maskedInstance.Distribution = pkg.Distribution
 		maskedInstance.InstallState = pkg.InstallState
 		maskedInstance.MinHostAPIVersion = pkg.MinHostAPIVersion
+		if maskedInstance.LastError == "" {
+			maskedInstance.LastError = pkg.LastError
+		}
+	}
+	if maskedInstance.PluginName == "" {
+		maskedInstance.PluginName = instance.PluginID
+	}
+	if maskedInstance.Config != nil {
+		// The config schema is unavailable when the plugin definition cannot be loaded,
+		// so avoid returning raw persisted values that may contain secrets.
+		maskedInstance.Config = map[string]interface{}{}
 	}
 
 	return &maskedInstance
@@ -766,7 +800,11 @@ func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, plugi
 		return fmt.Errorf("plugin package %s not found", pluginID)
 	}
 
-	if pm.hasPluginInstances(pluginID) {
+	hasInstances, err := pm.hasPluginInstances(ctx, pluginID)
+	if err != nil {
+		return err
+	}
+	if hasInstances {
 		return fmt.Errorf("plugin %s still has configured server instances", pluginID)
 	}
 
@@ -785,23 +823,44 @@ func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, plugi
 	return nil
 }
 
-func (pm *PluginManager) hasPluginInstances(pluginID string) bool {
+func (pm *PluginManager) hasPluginInstances(ctx context.Context, pluginID string) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if pm.db != nil {
+		var exists bool
+		err := pm.db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM plugin_instances
+				WHERE plugin_id = $1
+			)
+		`, pluginID).Scan(&exists)
+		if err != nil {
+			return false, fmt.Errorf("failed to check configured plugin instances for %s: %w", pluginID, err)
+		}
+		if exists {
+			return true, nil
+		}
+	}
+
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
 	for _, serverPlugins := range pm.plugins {
 		for _, instance := range serverPlugins {
 			if instance.PluginID == pluginID {
-				return true
+				return true, nil
 			}
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 func (pm *PluginManager) loadNativePluginPackage(pkg *InstalledPluginPackage) error {
-	definition, err := loadNativePluginDefinition(pkg.RuntimePath)
+	definition, err := nativePluginDefinitionLoader(pkg.RuntimePath)
 	if err != nil {
 		return err
 	}

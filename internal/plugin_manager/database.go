@@ -54,81 +54,142 @@ func (pm *PluginManager) loadPluginsFromDatabase() error {
 			continue
 		}
 
-		// Get plugin definition to set plugin name
-		definition, err := pm.registry.GetPlugin(instance.PluginID)
-		if err != nil {
+		if err := pm.hydratePluginInstanceFromDatabase(&instance); err != nil {
 			log.Error().
 				Str("instanceID", instance.ID.String()).
 				Str("pluginID", instance.PluginID).
 				Err(err).
-				Msg("Failed to get plugin definition")
+				Msg("Failed to hydrate plugin instance from database")
 			continue
 		}
+	}
 
-		enrichedDefinition := pm.enrichPluginDefinition(*definition)
-
-		// Set plugin metadata from definition
-		instance.PluginName = enrichedDefinition.Name
-		instance.Source = enrichedDefinition.Source
-		instance.Official = enrichedDefinition.Official
-		instance.Distribution = enrichedDefinition.Distribution
-		instance.InstallState = enrichedDefinition.InstallState
-		instance.MinHostAPIVersion = enrichedDefinition.MinHostAPIVersion
-
-		// Create plugin instance
-		plugin, err := pm.registry.CreatePluginInstance(instance.PluginID)
-		if err != nil {
-			log.Error().
-				Str("instanceID", instance.ID.String()).
-				Str("pluginID", instance.PluginID).
-				Err(err).
-				Msg("Failed to create plugin instance")
-			continue
-		}
-
-		// Set up instance
-		ctx, cancel := context.WithCancel(pm.ctx)
-		instance.Plugin = plugin
-		instance.Context = ctx
-		instance.Cancel = cancel
-		instance.Status = PluginStatusStopped
-
-		// Initialize server plugins map if needed
-		if pm.plugins[instance.ServerID] == nil {
-			pm.plugins[instance.ServerID] = make(map[uuid.UUID]*PluginInstance)
-		}
-
-		// Store instance
-		pm.plugins[instance.ServerID][instance.ID] = &instance
-
-		// Only initialize plugin if enabled
-		if instance.Enabled {
-			// Initialize plugin
-			if err := pm.initializePluginInstance(&instance); err != nil {
-				log.Error().
-					Str("instanceID", instance.ID.String()).
-					Str("pluginID", instance.PluginID).
-					Err(err).
-					Msg("Failed to initialize plugin instance")
-
-				instance.Status = PluginStatusError
-				instance.LastError = err.Error()
-				continue
-			}
-		} else {
-			// Set status for disabled plugins
-			instance.Status = PluginStatusDisabled
-		}
-
-		log.Info().
-			Str("serverID", instance.ServerID.String()).
-			Str("instanceID", instance.ID.String()).
-			Str("pluginID", instance.PluginID).
-			Str("notes", instance.Notes).
-			Msg("Loaded plugin instance from database")
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to iterate plugin instances: %w", err)
 	}
 
 	return nil
+}
+
+func (pm *PluginManager) hydratePluginInstanceFromDatabase(instance *PluginInstance) error {
+	definition, err := pm.registry.GetPlugin(instance.PluginID)
+	if err != nil {
+		pm.markPluginInstanceUnavailable(instance, err)
+		pm.storeLoadedPluginInstance(instance)
+
+		log.Warn().
+			Str("serverID", instance.ServerID.String()).
+			Str("instanceID", instance.ID.String()).
+			Str("pluginID", instance.PluginID).
+			Msg("Loaded persisted plugin instance without an available plugin definition")
+		return nil
+	}
+
+	pm.applyPluginDefinitionMetadata(instance, pm.enrichPluginDefinition(*definition))
+
+	if err := pm.ensurePluginInstanceRuntime(instance); err != nil {
+		pm.markPluginInstanceUnavailable(instance, err)
+		pm.storeLoadedPluginInstance(instance)
+
+		log.Warn().
+			Str("serverID", instance.ServerID.String()).
+			Str("instanceID", instance.ID.String()).
+			Str("pluginID", instance.PluginID).
+			Err(err).
+			Msg("Loaded persisted plugin instance without an available runtime")
+		return nil
+	}
+
+	instance.Status = PluginStatusStopped
+	pm.storeLoadedPluginInstance(instance)
+
+	if instance.Enabled {
+		if err := pm.initializePluginInstance(instance); err != nil {
+			log.Error().
+				Str("instanceID", instance.ID.String()).
+				Str("pluginID", instance.PluginID).
+				Err(err).
+				Msg("Failed to initialize plugin instance")
+
+			instance.Status = PluginStatusError
+			instance.LastError = err.Error()
+			return nil
+		}
+	} else {
+		instance.Status = PluginStatusDisabled
+	}
+
+	log.Info().
+		Str("serverID", instance.ServerID.String()).
+		Str("instanceID", instance.ID.String()).
+		Str("pluginID", instance.PluginID).
+		Str("notes", instance.Notes).
+		Msg("Loaded plugin instance from database")
+
+	return nil
+}
+
+func (pm *PluginManager) applyPluginDefinitionMetadata(instance *PluginInstance, definition PluginDefinition) {
+	instance.PluginName = definition.Name
+	instance.Source = definition.Source
+	instance.Official = definition.Official
+	instance.Distribution = definition.Distribution
+	instance.InstallState = definition.InstallState
+	instance.MinHostAPIVersion = definition.MinHostAPIVersion
+}
+
+func (pm *PluginManager) markPluginInstanceUnavailable(instance *PluginInstance, cause error) {
+	pm.ensurePluginInstanceContext(instance)
+
+	if pkg := pm.getNativePackage(instance.PluginID); pkg != nil {
+		if pkg.Name != "" {
+			instance.PluginName = pkg.Name
+		}
+		instance.Source = pkg.Source
+		instance.Official = pkg.Official
+		instance.Distribution = pkg.Distribution
+		instance.InstallState = pkg.InstallState
+		instance.MinHostAPIVersion = pkg.MinHostAPIVersion
+		if pkg.LastError != "" {
+			instance.LastError = pkg.LastError
+		}
+	}
+
+	if instance.PluginName == "" {
+		instance.PluginName = instance.PluginID
+	}
+	if instance.LastError == "" {
+		instance.LastError = fmt.Sprintf("plugin definition unavailable: %v", cause)
+	}
+	if instance.Enabled {
+		instance.Status = PluginStatusError
+		return
+	}
+
+	instance.Status = PluginStatusDisabled
+}
+
+func (pm *PluginManager) ensurePluginInstanceContext(instance *PluginInstance) {
+	if instance.Context != nil && instance.Cancel != nil {
+		return
+	}
+
+	baseCtx := pm.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+
+	ctx, cancel := context.WithCancel(baseCtx)
+	instance.Context = ctx
+	instance.Cancel = cancel
+}
+
+func (pm *PluginManager) storeLoadedPluginInstance(instance *PluginInstance) {
+	if pm.plugins[instance.ServerID] == nil {
+		pm.plugins[instance.ServerID] = make(map[uuid.UUID]*PluginInstance)
+	}
+
+	pm.plugins[instance.ServerID][instance.ID] = instance
 }
 
 func (pm *PluginManager) savePluginInstanceToDatabase(instance *PluginInstance) error {

@@ -736,7 +736,36 @@ func (pm *PluginManager) getPluginInstanceUnsafe(serverID, instanceID uuid.UUID)
 	return instance, nil
 }
 
+func (pm *PluginManager) ensurePluginInstanceRuntime(instance *PluginInstance) error {
+	if instance.Plugin != nil {
+		pm.ensurePluginInstanceContext(instance)
+		return nil
+	}
+
+	definition, err := pm.registry.GetPlugin(instance.PluginID)
+	if err != nil {
+		return fmt.Errorf("plugin definition unavailable: %w", err)
+	}
+
+	pm.applyPluginDefinitionMetadata(instance, pm.enrichPluginDefinition(*definition))
+
+	plugin, err := pm.registry.CreatePluginInstance(instance.PluginID)
+	if err != nil {
+		return fmt.Errorf("failed to create plugin instance: %w", err)
+	}
+
+	pm.ensurePluginInstanceContext(instance)
+	instance.Plugin = plugin
+	return nil
+}
+
 func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) error {
+	if err := pm.ensurePluginInstanceRuntime(instance); err != nil {
+		instance.Status = PluginStatusError
+		instance.LastError = err.Error()
+		return err
+	}
+
 	instance.Status = PluginStatusStarting
 
 	// Create plugin APIs
@@ -767,6 +796,10 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 	if instance.Status != PluginStatusRunning {
 		return nil // Not running, nothing to do
+	}
+	if instance.Plugin == nil {
+		instance.Status = PluginStatusStopped
+		return nil
 	}
 
 	instance.Status = PluginStatusStopping
