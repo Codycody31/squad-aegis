@@ -60,4 +60,10 @@ type Struct struct {
 			UseSSL          bool   `default:"true"`
 		}
 	}
+	Plugins struct {
+		NativeEnabled       bool   `default:"true"`
+		RuntimeDir          string `default:""`
+		AllowUnsafeSideload bool   `default:"false"`
+		MaxUploadSize       int64  `default:"52428800"`
+	}
 }

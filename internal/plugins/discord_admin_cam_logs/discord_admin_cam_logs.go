@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -28,7 +27,7 @@ type DiscordAdminCamLogsPlugin struct {
 	apis   *plugin_manager.PluginAPIs
 
 	// Discord connector
-	discordAPI discord.DiscordAPI
+	discordAPI plugin_manager.DiscordAPI
 
 	// State management
 	mu     sync.Mutex
@@ -166,18 +165,10 @@ func (p *DiscordAdminCamLogsPlugin) Initialize(config map[string]interface{}, ap
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
 
-	// Get Discord connector
-	discordConnector, err := apis.ConnectorAPI.GetConnector("discord")
-	if err != nil {
-		return fmt.Errorf("failed to get Discord connector: %w", err)
+	if apis.DiscordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
 	}
-
-	// Type assertion
-	var ok bool
-	p.discordAPI, ok = discordConnector.(discord.DiscordAPI)
-	if !ok {
-		return fmt.Errorf("invalid Discord connector type")
-	}
+	p.discordAPI = apis.DiscordAPI
 
 	p.status = plugin_manager.PluginStatusStopped
 
@@ -377,10 +368,10 @@ func (p *DiscordAdminCamLogsPlugin) sendAdminCameraEntryEmbed(event *event_manag
 		steamIDValue = "N/A"
 	}
 
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title: "Admin Entered Admin Camera",
 		Color: p.getIntConfig("color"),
-		Fields: []*discord.DiscordEmbedField{
+		Fields: []*plugin_manager.DiscordEmbedField{
 			{
 				Name:   "Admin's Name",
 				Value:  event.AdminName,
@@ -421,7 +412,7 @@ func (p *DiscordAdminCamLogsPlugin) sendAdminCameraExitEmbed(event *event_manage
 		return fmt.Errorf("channel_id not configured")
 	}
 
-	fields := []*discord.DiscordEmbedField{
+	fields := []*plugin_manager.DiscordEmbedField{
 		{
 			Name:   "Admin's Name",
 			Value:  event.AdminName,
@@ -444,13 +435,13 @@ func (p *DiscordAdminCamLogsPlugin) sendAdminCameraExitEmbed(event *event_manage
 
 	// Add duration field if we tracked the session
 	if duration > 0 {
-		fields = append(fields, &discord.DiscordEmbedField{
+		fields = append(fields, &plugin_manager.DiscordEmbedField{
 			Name:  "Time in Admin Camera",
 			Value: fmt.Sprintf("%.1f mins", duration.Minutes()),
 		})
 	}
 
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title:     "Admin Left Admin Camera",
 		Color:     p.getIntConfig("color"),
 		Fields:    fields,

@@ -30,7 +30,24 @@ func (r *pluginRegistry) RegisterPlugin(definition PluginDefinition) error {
 		return fmt.Errorf("plugin %s must have a CreateInstance function", definition.ID)
 	}
 
-	if _, exists := r.plugins[definition.ID]; exists {
+	if definition.Source == "" {
+		definition.Source = PluginSourceBundled
+	}
+	if definition.Source == PluginSourceBundled {
+		if definition.Distribution == "" {
+			definition.Distribution = PluginDistributionBundled
+		}
+		definition.Official = true
+		if definition.InstallState == "" {
+			definition.InstallState = PluginInstallStateReady
+		}
+	}
+	if definition.Source == PluginSourceNative && definition.InstallState == "" {
+		definition.InstallState = PluginInstallStateReady
+	}
+
+	existing, exists := r.plugins[definition.ID]
+	if exists && !(existing.Source == PluginSourceNative && definition.Source == PluginSourceNative) {
 		return fmt.Errorf("plugin %s is already registered", definition.ID)
 	}
 

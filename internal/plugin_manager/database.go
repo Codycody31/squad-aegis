@@ -65,8 +65,15 @@ func (pm *PluginManager) loadPluginsFromDatabase() error {
 			continue
 		}
 
-		// Set plugin name from definition
-		instance.PluginName = definition.Name
+		enrichedDefinition := pm.enrichPluginDefinition(*definition)
+
+		// Set plugin metadata from definition
+		instance.PluginName = enrichedDefinition.Name
+		instance.Source = enrichedDefinition.Source
+		instance.Official = enrichedDefinition.Official
+		instance.Distribution = enrichedDefinition.Distribution
+		instance.InstallState = enrichedDefinition.InstallState
+		instance.MinHostAPIVersion = enrichedDefinition.MinHostAPIVersion
 
 		// Create plugin instance
 		plugin, err := pm.registry.CreatePluginInstance(instance.PluginID)

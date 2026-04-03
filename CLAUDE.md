@@ -65,7 +65,7 @@ The plugin system allows extending server functionality:
 
 - **plugin_manager/**: Plugin lifecycle management, interfaces, and APIs
   - `Plugin` interface: `GetDefinition()`, `Initialize()`, `Start()`, `Stop()`, `HandleEvent()`
-  - `PluginAPIs`: Provides `ServerAPI`, `RconAPI`, `DatabaseAPI`, `AdminAPI`, `EventAPI`, `ConnectorAPI`, `LogAPI`
+  - `PluginAPIs`: Provides `ServerAPI`, `RconAPI`, `DatabaseAPI`, `RuleAPI`, `AdminAPI`, `EventAPI`, `DiscordAPI`, `LogAPI`
 - **plugins/**: Individual plugin implementations (one directory per plugin)
 - **connectors/**: Global service connectors (e.g., Discord integration in `connectors/discord/`)
 - **plugin_registry/**: Registers all available plugins and connectors

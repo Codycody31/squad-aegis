@@ -182,6 +182,27 @@ const getStatusIcon = (status: string) => {
     }
 };
 
+const getPluginMetadata = (plugin: any) => {
+    return (
+        availablePlugins.value.find((p) => p.id === plugin.plugin_id) || plugin
+    );
+};
+
+const getPluginSourceLabel = (plugin: any) => {
+    const metadata = getPluginMetadata(plugin);
+    if (metadata.source === "bundled") {
+        return "Bundled";
+    }
+    return "Sideload Native";
+};
+
+const formatInstallState = (state: string) => {
+    if (!state) {
+        return "";
+    }
+    return state.replaceAll("_", " ");
+};
+
 // Load plugins for this server
 const loadPlugins = async () => {
     try {
@@ -284,7 +305,7 @@ const togglePlugin = async (plugin: any, newState: boolean) => {
 // Delete plugin instance
 const deletePlugin = async (plugin: any) => {
     if (
-        !confirm(`Are you sure you want to delete the plugin "${plugin.name}"?`)
+        !confirm(`Are you sure you want to delete the plugin "${plugin.plugin_name}"?`)
     ) {
         return;
     }
@@ -1487,19 +1508,35 @@ onMounted(async () => {
                                 class="hover:bg-muted/50"
                             >
                                 <TableCell>
-                                    <div class="flex flex-col">
+                                    <div class="flex flex-col gap-2">
                                         <span class="font-medium">{{
                                             plugin.plugin_name
                                         }}</span>
+                                        <div class="flex flex-wrap gap-2">
+                                            <Badge variant="outline">
+                                                {{ getPluginSourceLabel(plugin) }}
+                                            </Badge>
+                                            <Badge
+                                                v-if="getPluginMetadata(plugin).official"
+                                                variant="default"
+                                            >
+                                                Official
+                                            </Badge>
+                                            <Badge
+                                                v-if="plugin.install_state && plugin.install_state !== 'ready'"
+                                                variant="secondary"
+                                                class="capitalize"
+                                            >
+                                                {{ formatInstallState(plugin.install_state) }}
+                                            </Badge>
+                                        </div>
                                     </div>
                                 </TableCell>
                                 <TableCell class="font-medium">
                                     <span class="text-sm text-muted-foreground">
                                         {{
-                                            availablePlugins.find(
-                                                (p) =>
-                                                    p.id === plugin.plugin_id,
-                                            )?.description
+                                            getPluginMetadata(plugin).description ||
+                                            "Plugin metadata is unavailable until the package is ready."
                                         }}
                                     </span>
                                 </TableCell>
@@ -1649,7 +1686,7 @@ onMounted(async () => {
             <DialogContent class="sm:max-w-2xl max-h-[90vh] flex flex-col">
                 <DialogHeader>
                     <DialogTitle
-                        >Configure {{ currentPlugin?.name }}</DialogTitle
+                        >Configure {{ currentPlugin?.plugin_name }}</DialogTitle
                     >
                     <DialogDescription>
                         Update the configuration for this plugin instance.

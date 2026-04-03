@@ -401,6 +401,9 @@ func NewRouter(server *Server) *gin.Engine {
 			pluginsGroup.Use(server.AuthSession)
 
 			pluginsGroup.GET("/available", server.PluginListAvailable)
+			pluginsGroup.GET("/installed", server.AuthIsSuperAdmin(), server.PluginListInstalled)
+			pluginsGroup.POST("/upload", server.AuthIsSuperAdmin(), server.PluginUpload)
+			pluginsGroup.DELETE("/installed/:pluginId", server.AuthIsSuperAdmin(), server.PluginInstalledDelete)
 		}
 
 		connectorsGroup := apiGroup.Group("/connectors")

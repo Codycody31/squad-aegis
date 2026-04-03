@@ -25,82 +25,12 @@ type DiscordConfig struct {
 	GuildID string `json:"guild_id"`
 }
 
-// DiscordAPI provides Discord functionality to plugins
-type DiscordAPI interface {
-	// SendMessage sends a message to a Discord channel
-	SendMessage(channelID, content string) (string, error)
-
-	// SendEmbed sends an embed message to a Discord channel
-	SendEmbed(channelID string, embed *DiscordEmbed) (string, error)
-
-	// GetGuildID returns the configured guild ID
-	GetGuildID() string
-
-	// GetChannelMembers returns members of a specific channel (if voice channel)
-	GetChannelMembers(channelID string) ([]*DiscordMember, error)
-
-	// GetGuildMembers returns all members of the guild
-	GetGuildMembers() ([]*DiscordMember, error)
-
-	// HasRole checks if a user has a specific role
-	HasRole(userID, roleID string) (bool, error)
-
-	// AddRole adds a role to a user
-	AddRole(userID, roleID string) error
-
-	// RemoveRole removes a role from a user
-	RemoveRole(userID, roleID string) error
-
-	// SetStatus sets the bot's custom status message
-	SetStatus(status string) error
-
-	// SetActivity sets the bot's activity (e.g., playing, watching)
-	SetActivity(activity string, activityType int) error
-
-	// UpdateMessage updates the content of an existing message
-	UpdateMessage(channelID, messageID, content string) error
-
-	// DeleteMessage deletes a message from a channel
-	DeleteMessage(channelID, messageID string) error
-
-	// GetMessage retrieves a message from a channel
-	GetMessage(channelID, messageID string) (*DiscordMessage, error)
-}
-
-// DiscordEmbed represents a Discord embed message
-type DiscordEmbed struct {
-	Title       string                 `json:"title,omitempty"`
-	Description string                 `json:"description,omitempty"`
-	Color       int                    `json:"color,omitempty"`
-	Fields      []*DiscordEmbedField   `json:"fields,omitempty"`
-	Footer      *DiscordEmbedFooter    `json:"footer,omitempty"`
-	Thumbnail   *DiscordEmbedThumbnail `json:"thumbnail,omitempty"`
-	Image       *DiscordEmbedImage     `json:"image,omitempty"`
-	Timestamp   *time.Time             `json:"timestamp,omitempty"`
-}
-
-// DiscordEmbedField represents an embed field
-type DiscordEmbedField struct {
-	Name   string `json:"name"`
-	Value  string `json:"value"`
-	Inline bool   `json:"inline,omitempty"`
-}
-
-// DiscordEmbedFooter represents an embed footer
-type DiscordEmbedFooter struct {
-	Text    string `json:"text"`
-	IconURL string `json:"icon_url,omitempty"`
-}
-
-// DiscordEmbedThumbnail represents an embed thumbnail
-type DiscordEmbedThumbnail struct {
-	URL string `json:"url"`
-}
-
-// DiscordEmbedImage represents an embed image
-type DiscordEmbedImage struct {
-	URL string `json:"url"`
-}
+type DiscordAPI = plugin_manager.DiscordAPI
+type DiscordEmbed = plugin_manager.DiscordEmbed
+type DiscordEmbedField = plugin_manager.DiscordEmbedField
+type DiscordEmbedFooter = plugin_manager.DiscordEmbedFooter
+type DiscordEmbedThumbnail = plugin_manager.DiscordEmbedThumbnail
+type DiscordEmbedImage = plugin_manager.DiscordEmbedImage
 
 // DiscordMember represents a Discord guild member
 type DiscordMember struct {
@@ -148,7 +78,7 @@ func Define() plugin_manager.ConnectorDefinition {
 			},
 		},
 
-		APIInterface: (*DiscordAPI)(nil),
+		APIInterface: (*plugin_manager.DiscordAPI)(nil),
 
 		CreateInstance: func() plugin_manager.Connector {
 			return &DiscordConnector{}

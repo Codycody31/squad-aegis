@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -21,7 +20,7 @@ type DiscordRoundEndedPlugin struct {
 	apis   *plugin_manager.PluginAPIs
 
 	// Discord connector
-	discordAPI discord.DiscordAPI
+	discordAPI plugin_manager.DiscordAPI
 
 	// State management
 	mu     sync.Mutex
@@ -106,18 +105,10 @@ func (p *DiscordRoundEndedPlugin) Initialize(config map[string]interface{}, apis
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
 
-	// Get Discord connector
-	discordConnector, err := apis.ConnectorAPI.GetConnector("discord")
-	if err != nil {
-		return fmt.Errorf("failed to get Discord connector: %w", err)
+	if apis.DiscordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
 	}
-
-	// Type assertion
-	var ok bool
-	p.discordAPI, ok = discordConnector.(discord.DiscordAPI)
-	if !ok {
-		return fmt.Errorf("invalid Discord connector type")
-	}
+	p.discordAPI = apis.DiscordAPI
 
 	p.status = plugin_manager.PluginStatusStopped
 
@@ -258,7 +249,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData
 
 	// Check if this was a draw (no winner)
 	if event.Winner == "" {
-		embed := &discord.DiscordEmbed{
+		embed := &plugin_manager.DiscordEmbed{
 			Title:       "Round Ended",
 			Description: "This match ended in a Draw",
 			Color:       p.getIntConfig("color"),
@@ -282,7 +273,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData
 		description = "Round ended"
 	}
 
-	fields := []*discord.DiscordEmbedField{
+	fields := []*plugin_manager.DiscordEmbedField{
 		{
 			Name:  "Winner",
 			Value: event.Winner,
@@ -297,7 +288,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData
 				if subfaction, ok := winnerData["subfaction"].(string); ok && subfaction != "" {
 					if faction, ok := winnerData["faction"].(string); ok && faction != "" {
 						if tickets, ok := winnerData["tickets"].(string); ok && tickets != "" {
-							fields = append(fields, &discord.DiscordEmbedField{
+							fields = append(fields, &plugin_manager.DiscordEmbedField{
 								Name:  fmt.Sprintf("Team %s Won", team),
 								Value: fmt.Sprintf("%s\n%s\nwon with %s tickets.", subfaction, faction, tickets),
 							})
@@ -316,7 +307,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData
 				if subfaction, ok := loserData["subfaction"].(string); ok && subfaction != "" {
 					if faction, ok := loserData["faction"].(string); ok && faction != "" {
 						if tickets, ok := loserData["tickets"].(string); ok && tickets != "" {
-							fields = append(fields, &discord.DiscordEmbedField{
+							fields = append(fields, &plugin_manager.DiscordEmbedField{
 								Name:  fmt.Sprintf("Team %s Lost", team),
 								Value: fmt.Sprintf("%s\n%s\nlost with %s tickets.", subfaction, faction, tickets),
 							})
@@ -337,7 +328,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData
 						if winnerTickets, err1 := strconv.Atoi(winnerTicketsStr); err1 == nil {
 							if loserTickets, err2 := strconv.Atoi(loserTicketsStr); err2 == nil {
 								ticketDiff := winnerTickets - loserTickets
-								fields = append(fields, &discord.DiscordEmbedField{
+								fields = append(fields, &plugin_manager.DiscordEmbedField{
 									Name:  "Ticket Difference",
 									Value: fmt.Sprintf("%d", ticketDiff),
 								})
@@ -349,7 +340,7 @@ func (p *DiscordRoundEndedPlugin) sendRoundEndedEmbed(event *roundEndedEventData
 		}
 	}
 
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title:       "Round Ended",
 		Description: description,
 		Color:       p.getIntConfig("color"),

@@ -7,10 +7,9 @@ RUN rm -rfv node_modules .nuxt .output dist .vite
 RUN pnpm install --frozen-lockfile
 RUN pnpm run generate
 
-# Build Go statically
 FROM --platform=$BUILDPLATFORM golang:1.24 AS go-build
 ARG TARGETOS TARGETARCH
-ENV CGO_ENABLED=0 \
+ENV CGO_ENABLED=1 \
     GOOS=$TARGETOS \
     GOARCH=$TARGETARCH \
     TAGS="embed netgo"
@@ -21,14 +20,18 @@ COPY --from=nuxt-build /app/web/.output /app/web/.output
 COPY --from=nuxt-build /app/web/web_embed.go /app/web/web_embed.go
 
 RUN go mod tidy && go mod vendor && \
-    go build -tags "${TAGS}" -ldflags="-s -w -extldflags '-static'" -o /out/squad-aegis ./cmd/server
+    go build -tags "${TAGS}" -ldflags="-s -w" -o /out/squad-aegis ./cmd/server
 
-# minimal runtime
-FROM scratch
-COPY --from=go-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=go-build /out/squad-aegis /squad-aegis
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libc6 && rm -rf /var/lib/apt/lists/* && \
+    useradd --system --uid 10001 --create-home --home-dir /var/lib/squad-aegis squad-aegis && \
+    mkdir -p /etc/squad-aegis/storage /etc/squad-aegis/plugins && \
+    chown -R squad-aegis:squad-aegis /etc/squad-aegis /var/lib/squad-aegis
+COPY --from=go-build /out/squad-aegis /usr/local/bin/squad-aegis
 ENV APP_IN_CONTAINER=true
 ENV STORAGE_LOCAL_PATH=/etc/squad-aegis/storage
+ENV PLUGINS_RUNTIME_DIR=/etc/squad-aegis/plugins
 VOLUME /etc/squad-aegis
 EXPOSE 3113
-ENTRYPOINT ["/squad-aegis"]
+USER squad-aegis
+ENTRYPOINT ["/usr/local/bin/squad-aegis"]

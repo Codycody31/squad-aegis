@@ -2,7 +2,7 @@ package plugin_manager
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,6 +10,115 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
+
+type PluginSource string
+
+const (
+	PluginSourceBundled PluginSource = "bundled"
+	PluginSourceNative  PluginSource = "native"
+)
+
+type PluginDistribution string
+
+const (
+	PluginDistributionBundled  PluginDistribution = "bundled"
+	PluginDistributionSideload PluginDistribution = "sideload"
+)
+
+type PluginInstallState string
+
+const (
+	PluginInstallStateReady          PluginInstallState = "ready"
+	PluginInstallStateNotInstalled   PluginInstallState = "not_installed"
+	PluginInstallStatePendingRestart PluginInstallState = "pending_restart"
+	PluginInstallStateError          PluginInstallState = "error"
+)
+
+const NativePluginHostAPIVersion = 1
+
+const (
+	NativePluginCapabilityEntrypointGetAegisPlugin = "entrypoint.get_aegis_plugin"
+	NativePluginCapabilityAPIRCON                  = "api.rcon"
+	NativePluginCapabilityAPIServer                = "api.server"
+	NativePluginCapabilityAPIDatabase              = "api.database"
+	NativePluginCapabilityAPIRule                  = "api.rule"
+	NativePluginCapabilityAPIAdmin                 = "api.admin"
+	NativePluginCapabilityAPIDiscord               = "api.discord"
+	NativePluginCapabilityAPIEvent                 = "api.event"
+	NativePluginCapabilityAPILog                   = "api.log"
+	NativePluginCapabilityEventsRCON               = "events.rcon"
+	NativePluginCapabilityEventsLog                = "events.log"
+	NativePluginCapabilityEventsSystem             = "events.system"
+	NativePluginCapabilityEventsConnector          = "events.connector"
+	NativePluginCapabilityEventsPlugin             = "events.plugin"
+)
+
+var nativePluginHostCapabilities = []string{
+	NativePluginCapabilityEntrypointGetAegisPlugin,
+	NativePluginCapabilityAPIRCON,
+	NativePluginCapabilityAPIServer,
+	NativePluginCapabilityAPIDatabase,
+	NativePluginCapabilityAPIRule,
+	NativePluginCapabilityAPIAdmin,
+	NativePluginCapabilityAPIDiscord,
+	NativePluginCapabilityAPIEvent,
+	NativePluginCapabilityAPILog,
+	NativePluginCapabilityEventsRCON,
+	NativePluginCapabilityEventsLog,
+	NativePluginCapabilityEventsSystem,
+	NativePluginCapabilityEventsConnector,
+	NativePluginCapabilityEventsPlugin,
+}
+
+func NativePluginHostCapabilities() []string {
+	capabilities := make([]string, len(nativePluginHostCapabilities))
+	copy(capabilities, nativePluginHostCapabilities)
+	return capabilities
+}
+
+type PluginPackageTarget struct {
+	MinHostAPIVersion    int      `json:"min_host_api_version"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
+	TargetOS             string   `json:"target_os"`
+	TargetArch           string   `json:"target_arch"`
+	SHA256               string   `json:"sha256,omitempty"`
+	LibraryPath          string   `json:"library_path"`
+}
+
+type PluginPackageManifest struct {
+	PluginID    string                `json:"plugin_id"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	Version     string                `json:"version"`
+	Official    bool                  `json:"official"`
+	License     string                `json:"license,omitempty"`
+	EntrySymbol string                `json:"entry_symbol"`
+	Targets     []PluginPackageTarget `json:"targets"`
+}
+
+type InstalledPluginPackage struct {
+	PluginID             string                `json:"plugin_id"`
+	Name                 string                `json:"name"`
+	Description          string                `json:"description"`
+	Version              string                `json:"version"`
+	Source               PluginSource          `json:"source"`
+	Distribution         PluginDistribution    `json:"distribution"`
+	Official             bool                  `json:"official"`
+	InstallState         PluginInstallState    `json:"install_state"`
+	RuntimePath          string                `json:"runtime_path,omitempty"`
+	Manifest             PluginPackageManifest `json:"manifest"`
+	ManifestJSON         json.RawMessage       `json:"-"`
+	SignatureVerified    bool                  `json:"signature_verified"`
+	Unsafe               bool                  `json:"unsafe"`
+	Checksum             string                `json:"checksum"`
+	MinHostAPIVersion    int                   `json:"min_host_api_version"`
+	RequiredCapabilities []string              `json:"required_capabilities,omitempty"`
+	TargetOS             string                `json:"target_os"`
+	TargetArch           string                `json:"target_arch"`
+	LastError            string                `json:"last_error,omitempty"`
+	CreatedAt            time.Time             `json:"created_at"`
+	UpdatedAt            time.Time             `json:"updated_at"`
+}
 
 // Plugin represents a server-specific plugin instance
 type Plugin interface {
@@ -56,6 +165,17 @@ type PluginDefinition struct {
 	Description            string                          `json:"description"`
 	Version                string                          `json:"version"`
 	Author                 string                          `json:"author"`
+	Source                 PluginSource                    `json:"source"`
+	Official               bool                            `json:"official"`
+	InstallState           PluginInstallState              `json:"install_state"`
+	Distribution           PluginDistribution              `json:"distribution"`
+	MinHostAPIVersion      int                             `json:"min_host_api_version,omitempty"`
+	RequiredCapabilities   []string                        `json:"required_capabilities,omitempty"`
+	TargetOS               string                          `json:"target_os,omitempty"`
+	TargetArch             string                          `json:"target_arch,omitempty"`
+	RuntimePath            string                          `json:"runtime_path,omitempty"`
+	SignatureVerified      bool                            `json:"signature_verified"`
+	Unsafe                 bool                            `json:"unsafe"`
 	AllowMultipleInstances bool                            `json:"allow_multiple_instances"`
 	RequiredConnectors     []string                        `json:"required_connectors"`
 	ConfigSchema           plug_config_schema.ConfigSchema `json:"config_schema"`
@@ -148,21 +268,26 @@ type CommandExecutionStatus struct {
 
 // PluginInstance represents an active plugin instance
 type PluginInstance struct {
-	ID         uuid.UUID              `json:"id"`
-	ServerID   uuid.UUID              `json:"server_id"`
-	PluginID   string                 `json:"plugin_id"`
-	PluginName string                 `json:"plugin_name"`
-	Notes      string                 `json:"notes"`
-	Config     map[string]interface{} `json:"config"`
-	Status     PluginStatus           `json:"status"`
-	Enabled    bool                   `json:"enabled"`
-	LogLevel   string                 `json:"log_level"` // debug, info, warn, error
-	Plugin     Plugin                 `json:"-"`
-	Context    context.Context        `json:"-"`
-	Cancel     context.CancelFunc     `json:"-"`
-	LastError  string                 `json:"last_error,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
-	UpdatedAt  time.Time              `json:"updated_at"`
+	ID                uuid.UUID              `json:"id"`
+	ServerID          uuid.UUID              `json:"server_id"`
+	PluginID          string                 `json:"plugin_id"`
+	PluginName        string                 `json:"plugin_name"`
+	Source            PluginSource           `json:"source,omitempty"`
+	Official          bool                   `json:"official,omitempty"`
+	Distribution      PluginDistribution     `json:"distribution,omitempty"`
+	InstallState      PluginInstallState     `json:"install_state,omitempty"`
+	MinHostAPIVersion int                    `json:"min_host_api_version,omitempty"`
+	Notes             string                 `json:"notes"`
+	Config            map[string]interface{} `json:"config"`
+	Status            PluginStatus           `json:"status"`
+	Enabled           bool                   `json:"enabled"`
+	LogLevel          string                 `json:"log_level"` // debug, info, warn, error
+	Plugin            Plugin                 `json:"-"`
+	Context           context.Context        `json:"-"`
+	Cancel            context.CancelFunc     `json:"-"`
+	LastError         string                 `json:"last_error,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
 }
 
 // Connector represents a global service connector (Discord, Slack, etc.)
@@ -235,8 +360,11 @@ type PluginAPIs struct {
 	// Server information
 	ServerAPI ServerAPI
 
-	// Database access (limited)
+	// Plugin-scoped key/value storage
 	DatabaseAPI DatabaseAPI
+
+	// Server rule access
+	RuleAPI RuleAPI
 
 	// RCON access (limited)
 	RconAPI RconAPI
@@ -247,8 +375,8 @@ type PluginAPIs struct {
 	// Event system access
 	EventAPI EventAPI
 
-	// Connector access
-	ConnectorAPI ConnectorAPI
+	// Discord messaging access when the Discord connector is available
+	DiscordAPI DiscordAPI
 
 	// Logging
 	LogAPI LogAPI
@@ -272,11 +400,8 @@ type ServerAPI interface {
 	GetSquads() ([]*SquadInfo, error)
 }
 
-// DatabaseAPI provides limited database access to plugins
+// DatabaseAPI provides plugin-scoped key/value storage
 type DatabaseAPI interface {
-	// ExecuteQuery executes a read-only query (SELECT only)
-	ExecuteQuery(query string, args ...interface{}) (*sql.Rows, error)
-
 	// GetPluginData retrieves plugin-specific data
 	GetPluginData(key string) (string, error)
 
@@ -285,6 +410,16 @@ type DatabaseAPI interface {
 
 	// DeletePluginData removes plugin-specific data
 	DeletePluginData(key string) error
+}
+
+// RuleAPI provides read-only access to server rules and their configured actions.
+type RuleAPI interface {
+	// ListServerRules returns rules for the current server scoped to the provided parent rule.
+	// Pass nil to fetch top-level rules.
+	ListServerRules(parentRuleID *string) ([]*RuleInfo, error)
+
+	// ListServerRuleActions returns escalation actions for a rule on the current server.
+	ListServerRuleActions(ruleID string) ([]*RuleActionInfo, error)
 }
 
 // RconAPI provides limited RCON access to plugins
@@ -391,13 +526,13 @@ type EventAPI interface {
 	SubscribeToEvents(eventTypes []string, handler func(*PluginEvent)) error
 }
 
-// ConnectorAPI provides access to global connectors
-type ConnectorAPI interface {
-	// GetConnector returns a connector API by ID
-	GetConnector(connectorID string) (interface{}, error)
+// DiscordAPI provides limited Discord messaging functionality to plugins.
+type DiscordAPI interface {
+	// SendMessage sends a plain text message to a Discord channel.
+	SendMessage(channelID, content string) (string, error)
 
-	// ListConnectors returns available connector IDs
-	ListConnectors() []string
+	// SendEmbed sends an embed message to a Discord channel.
+	SendEmbed(channelID string, embed *DiscordEmbed) (string, error)
 }
 
 // LogAPI provides logging functionality to plugins
@@ -416,6 +551,60 @@ type LogAPI interface {
 }
 
 // Data structures for API responses
+
+// RuleInfo contains the rule fields plugins are allowed to inspect.
+type RuleInfo struct {
+	ID           string `json:"id"`
+	ParentID     string `json:"parent_id,omitempty"`
+	DisplayOrder int    `json:"display_order"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+}
+
+// RuleActionInfo contains server-configured escalation actions for a rule.
+type RuleActionInfo struct {
+	ID             string `json:"id"`
+	RuleID         string `json:"rule_id"`
+	ViolationCount int    `json:"violation_count"`
+	ActionType     string `json:"action_type"`
+	Duration       *int   `json:"duration,omitempty"`
+	Message        string `json:"message,omitempty"`
+}
+
+// DiscordEmbed represents a Discord embed message.
+type DiscordEmbed struct {
+	Title       string                 `json:"title,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Color       int                    `json:"color,omitempty"`
+	Fields      []*DiscordEmbedField   `json:"fields,omitempty"`
+	Footer      *DiscordEmbedFooter    `json:"footer,omitempty"`
+	Thumbnail   *DiscordEmbedThumbnail `json:"thumbnail,omitempty"`
+	Image       *DiscordEmbedImage     `json:"image,omitempty"`
+	Timestamp   *time.Time             `json:"timestamp,omitempty"`
+}
+
+// DiscordEmbedField represents an embed field.
+type DiscordEmbedField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+// DiscordEmbedFooter represents an embed footer.
+type DiscordEmbedFooter struct {
+	Text    string `json:"text"`
+	IconURL string `json:"icon_url,omitempty"`
+}
+
+// DiscordEmbedThumbnail represents an embed thumbnail.
+type DiscordEmbedThumbnail struct {
+	URL string `json:"url"`
+}
+
+// DiscordEmbedImage represents an embed image.
+type DiscordEmbedImage struct {
+	URL string `json:"url"`
+}
 
 // ServerInfo contains basic server information
 type ServerInfo struct {

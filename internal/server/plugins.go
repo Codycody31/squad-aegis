@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
 // PluginListAvailable returns all available plugin definitions
@@ -22,6 +23,84 @@ func (s *Server) PluginListAvailable(c *gin.Context) {
 
 	plugins := s.Dependencies.PluginManager.ListAvailablePlugins()
 	responses.Success(c, "Available plugins fetched successfully", &gin.H{"plugins": plugins})
+}
+
+// PluginListInstalled returns all globally installed plugin packages.
+func (s *Server) PluginListInstalled(c *gin.Context) {
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+
+	packages := s.Dependencies.PluginManager.ListInstalledPluginPackages()
+	responses.Success(c, "Installed plugins fetched successfully", &gin.H{"plugins": packages})
+}
+
+// PluginUpload installs a plugin package uploaded by a super admin.
+func (s *Server) PluginUpload(c *gin.Context) {
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+
+	file, err := c.FormFile("bundle")
+	if err != nil {
+		responses.BadRequest(c, "No plugin bundle provided", &gin.H{"error": err.Error()})
+		return
+	}
+
+	maxUploadSize := config.Config.Plugins.MaxUploadSize
+	if maxUploadSize <= 0 {
+		maxUploadSize = 50 * 1024 * 1024
+	}
+	if file.Size > maxUploadSize {
+		responses.BadRequest(c, "Plugin bundle is too large", &gin.H{
+			"file_size": file.Size,
+			"max_size":  maxUploadSize,
+		})
+		return
+	}
+
+	openedFile, err := file.Open()
+	if err != nil {
+		responses.BadRequest(c, "Failed to open plugin bundle", &gin.H{"error": err.Error()})
+		return
+	}
+	defer openedFile.Close()
+
+	pkg, err := s.Dependencies.PluginManager.InstallPluginPackageFromBundle(c.Request.Context(), openedFile, file.Size, file.Filename)
+	if err != nil {
+		responses.BadRequest(c, "Failed to install uploaded plugin bundle", &gin.H{"error": err.Error()})
+		return
+	}
+
+	message := "Plugin uploaded successfully"
+	if pkg.InstallState == plugin_manager.PluginInstallStatePendingRestart {
+		message = "Plugin uploaded successfully and will activate after restart"
+	}
+
+	responses.Success(c, message, &gin.H{"plugin": pkg})
+}
+
+// PluginInstalledDelete removes an installed native plugin package.
+func (s *Server) PluginInstalledDelete(c *gin.Context) {
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+
+	pluginID := c.Param("pluginId")
+	if pluginID == "" {
+		responses.BadRequest(c, "Plugin ID is required", &gin.H{})
+		return
+	}
+
+	if err := s.Dependencies.PluginManager.DeleteInstalledPluginPackage(c.Request.Context(), pluginID); err != nil {
+		responses.BadRequest(c, "Failed to delete installed plugin", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Plugin deleted successfully", nil)
 }
 
 // ConnectorListAvailable returns all available connector definitions

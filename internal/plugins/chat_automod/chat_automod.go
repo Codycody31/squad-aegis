@@ -596,42 +596,33 @@ func (p *ChatAutoModPlugin) getServerRuleActions() ([]EscalationAction, error) {
 		return nil, fmt.Errorf("rule_id not configured")
 	}
 
-	query := `
-		SELECT violation_count, action_type, duration, message
-		FROM server_rule_actions
-		WHERE rule_id = $1
-		ORDER BY violation_count ASC
-	`
-
-	rows, err := p.apis.DatabaseAPI.ExecuteQuery(query, ruleID)
+	actions, err := p.apis.RuleAPI.ListServerRuleActions(ruleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query server rule actions: %w", err)
 	}
-	defer rows.Close()
 
-	var actions []EscalationAction
-	for rows.Next() {
-		var action EscalationAction
-		var duration *int
-		var message *string
-
-		if err := rows.Scan(&action.ViolationCount, &action.Action, &duration, &message); err != nil {
-			return nil, fmt.Errorf("failed to scan rule action: %w", err)
+	result := make([]EscalationAction, 0, len(actions))
+	for _, ruleAction := range actions {
+		if ruleAction == nil {
+			continue
 		}
 
-		if duration != nil {
-			action.BanDurationDays = *duration
+		action := EscalationAction{
+			ViolationCount: ruleAction.ViolationCount,
+			Action:         ruleAction.ActionType,
+			Message:        "Server rule violation",
 		}
-		if message != nil {
-			action.Message = *message
-		} else {
-			action.Message = "Server rule violation"
+		if ruleAction.Duration != nil {
+			action.BanDurationDays = *ruleAction.Duration
+		}
+		if ruleAction.Message != "" {
+			action.Message = ruleAction.Message
 		}
 
-		actions = append(actions, action)
+		result = append(result, action)
 	}
 
-	return actions, nil
+	return result, nil
 }
 
 // isPlayerAdmin checks if a player is a server admin (cached).

@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -19,7 +18,7 @@ type DiscordTeamkillPlugin struct {
 	apis   *plugin_manager.PluginAPIs
 
 	// Discord connector
-	discordAPI discord.DiscordAPI
+	discordAPI plugin_manager.DiscordAPI
 
 	// State management
 	mu     sync.Mutex
@@ -111,18 +110,10 @@ func (p *DiscordTeamkillPlugin) Initialize(config map[string]interface{}, apis *
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
 
-	// Get Discord connector
-	discordConnector, err := apis.ConnectorAPI.GetConnector("discord")
-	if err != nil {
-		return fmt.Errorf("failed to get Discord connector: %w", err)
+	if apis.DiscordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
 	}
-
-	// Type assertion
-	var ok bool
-	p.discordAPI, ok = discordConnector.(discord.DiscordAPI)
-	if !ok {
-		return fmt.Errorf("invalid Discord connector type")
-	}
+	p.discordAPI = apis.DiscordAPI
 
 	p.status = plugin_manager.PluginStatusStopped
 
@@ -270,7 +261,7 @@ func (p *DiscordTeamkillPlugin) sendTeamkillEmbed(event *event_manager.LogPlayer
 		victimEOSID = "Unknown"
 	}
 
-	fields := []*discord.DiscordEmbedField{
+	fields := []*plugin_manager.DiscordEmbedField{
 		{
 			Name:   "Attacker's Name",
 			Value:  attackerName,
@@ -309,7 +300,7 @@ func (p *DiscordTeamkillPlugin) sendTeamkillEmbed(event *event_manager.LogPlayer
 
 	// Add Community Ban List link if not disabled
 	if !p.getBoolConfig("disable_cbl") && attackerSteamID != "Unknown" {
-		fields = append(fields, &discord.DiscordEmbedField{
+		fields = append(fields, &plugin_manager.DiscordEmbedField{
 			Name:  "Community Ban List",
 			Value: fmt.Sprintf("[Attacker's Bans](https://communitybanlist.com/search/%s)", attackerSteamID),
 		})
@@ -317,7 +308,7 @@ func (p *DiscordTeamkillPlugin) sendTeamkillEmbed(event *event_manager.LogPlayer
 
 	title := fmt.Sprintf("Teamkill: %s", attackerName)
 
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title:     title,
 		Color:     p.getIntConfig("color"),
 		Fields:    fields,

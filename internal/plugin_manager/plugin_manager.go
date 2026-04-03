@@ -36,6 +36,11 @@ type PluginManager struct {
 	connectorRegistry ConnectorRegistry
 	connectorMu       sync.RWMutex
 
+	// Native plugin packages
+	nativePackages      map[string]*InstalledPluginPackage
+	loadedNativePlugins map[string]string
+	nativeMu            sync.RWMutex
+
 	// Event subscription
 	eventSubscriber *event_manager.EventSubscriber
 
@@ -48,16 +53,18 @@ func NewPluginManager(ctx context.Context, db *sql.DB, eventManager *event_manag
 	ctx, cancel := context.WithCancel(ctx)
 
 	pm := &PluginManager{
-		plugins:           make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
-		registry:          NewPluginRegistry(),
-		connectors:        make(map[string]*ConnectorInstance),
-		connectorRegistry: NewConnectorRegistry(),
-		db:                db,
-		eventManager:      eventManager,
-		rconManager:       rconManager,
-		clickhouseClient:  clickhouseClient,
-		ctx:               ctx,
-		cancel:            cancel,
+		plugins:             make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
+		registry:            NewPluginRegistry(),
+		connectors:          make(map[string]*ConnectorInstance),
+		connectorRegistry:   NewConnectorRegistry(),
+		nativePackages:      make(map[string]*InstalledPluginPackage),
+		loadedNativePlugins: make(map[string]string),
+		db:                  db,
+		eventManager:        eventManager,
+		rconManager:         rconManager,
+		clickhouseClient:    clickhouseClient,
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 
 	// Subscribe to events for plugin distribution
@@ -74,6 +81,10 @@ func (pm *PluginManager) SetBanSyncFunc(fn func(ctx context.Context, serverID uu
 // Start starts the plugin manager
 func (pm *PluginManager) Start() error {
 	log.Info().Msg("Starting plugin manager")
+
+	if err := pm.loadInstalledPluginPackages(); err != nil {
+		return fmt.Errorf("failed to load installed plugin packages: %w", err)
+	}
 
 	// Start connectors first
 	if err := pm.startConnectors(); err != nil {
@@ -194,17 +205,21 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 	if err != nil {
 		return nil, fmt.Errorf("plugin not found: %w", err)
 	}
+	enrichedDefinition := pm.enrichPluginDefinition(*definition)
+	if enrichedDefinition.Source == PluginSourceNative && enrichedDefinition.InstallState != PluginInstallStateReady {
+		return nil, fmt.Errorf("plugin %s is not ready to be enabled (state=%s)", pluginID, enrichedDefinition.InstallState)
+	}
 
 	// Validate config for creation (ensures sensitive required fields are provided)
-	if err := definition.ConfigSchema.ValidateForCreation(config); err != nil {
+	if err := enrichedDefinition.ConfigSchema.ValidateForCreation(config); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	// Fill defaults
-	config = definition.ConfigSchema.FillDefaults(config)
+	config = enrichedDefinition.ConfigSchema.FillDefaults(config)
 
 	// Check if multiple instances are allowed
-	if !definition.AllowMultipleInstances {
+	if !enrichedDefinition.AllowMultipleInstances {
 		if serverPlugins, exists := pm.plugins[serverID]; exists {
 			for _, instance := range serverPlugins {
 				if instance.PluginID == pluginID {
@@ -215,7 +230,7 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 	}
 
 	// Validate required connectors
-	for _, connectorID := range definition.RequiredConnectors {
+	for _, connectorID := range enrichedDefinition.RequiredConnectors {
 		if _, exists := pm.connectors[connectorID]; !exists {
 			return nil, fmt.Errorf("required connector %s is not available", connectorID)
 		}
@@ -235,19 +250,25 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 	ctx, cancel := context.WithCancel(pm.ctx)
 
 	instance := &PluginInstance{
-		ID:        instanceID,
-		ServerID:  serverID,
-		PluginID:  pluginID,
-		Notes:     notes,
-		Config:    config,
-		Status:    PluginStatusStopped,
-		Enabled:   true,
-		LogLevel:  "info", // Default log level
-		Plugin:    plugin,
-		Context:   ctx,
-		Cancel:    cancel,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:                instanceID,
+		ServerID:          serverID,
+		PluginID:          pluginID,
+		PluginName:        enrichedDefinition.Name,
+		Source:            enrichedDefinition.Source,
+		Official:          enrichedDefinition.Official,
+		Distribution:      enrichedDefinition.Distribution,
+		InstallState:      enrichedDefinition.InstallState,
+		MinHostAPIVersion: enrichedDefinition.MinHostAPIVersion,
+		Notes:             notes,
+		Config:            config,
+		Status:            PluginStatusStopped,
+		Enabled:           true,
+		LogLevel:          "info", // Default log level
+		Plugin:            plugin,
+		Context:           ctx,
+		Cancel:            cancel,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
 	}
 
 	// Initialize server plugins map if needed
@@ -294,13 +315,7 @@ func (pm *PluginManager) GetPluginInstances(serverID uuid.UUID) []*PluginInstanc
 
 	instances := make([]*PluginInstance, 0, len(serverPlugins))
 	for _, instance := range serverPlugins {
-		// Create a copy with masked sensitive fields
-		maskedInstance := *instance
-		if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
-			maskedInstance.PluginName = definition.Name
-			maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
-		}
-		instances = append(instances, &maskedInstance)
+		instances = append(instances, pm.maskAndEnrichPluginInstance(instance))
 	}
 
 	// Sort by created_at for stable ordering
@@ -326,14 +341,7 @@ func (pm *PluginManager) GetPluginInstance(serverID, instanceID uuid.UUID) (*Plu
 		return nil, fmt.Errorf("plugin instance %s not found", instanceID.String())
 	}
 
-	// Create a copy with masked sensitive fields
-	maskedInstance := *instance
-	if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
-		maskedInstance.PluginName = definition.Name
-		maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
-	}
-
-	return &maskedInstance, nil
+	return pm.maskAndEnrichPluginInstance(instance), nil
 }
 
 // DeletePluginInstance removes and stops a plugin instance
@@ -556,41 +564,47 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 
 // TODO: RestartPluginInstance stops, wipes, and reinitializes a plugin instance
 
-// GetConnectorAPI returns a connector's API for use by plugins
-func (pm *PluginManager) GetConnectorAPI(connectorID string) (interface{}, error) {
+// getDiscordAPI returns the Discord connector API for use by plugins when available.
+func (pm *PluginManager) getDiscordAPI() DiscordAPI {
 	pm.connectorMu.RLock()
 	defer pm.connectorMu.RUnlock()
 
-	instance, exists := pm.connectors[connectorID]
+	instance, exists := pm.connectors["discord"]
 	if !exists {
-		return nil, fmt.Errorf("connector %s not found", connectorID)
+		return nil
 	}
 
 	if instance.Status != ConnectorStatusRunning {
-		return nil, fmt.Errorf("connector %s is not running", connectorID)
+		return nil
 	}
 
-	return instance.Connector.GetAPI(), nil
-}
-
-// ListAvailableConnectors returns a list of running connector IDs
-func (pm *PluginManager) ListAvailableConnectors() []string {
-	pm.connectorMu.RLock()
-	defer pm.connectorMu.RUnlock()
-
-	connectors := make([]string, 0, len(pm.connectors))
-	for connectorID, instance := range pm.connectors {
-		if instance.Status == ConnectorStatusRunning {
-			connectors = append(connectors, connectorID)
-		}
+	api, ok := instance.Connector.GetAPI().(DiscordAPI)
+	if !ok {
+		log.Error().Msg("Discord connector API does not implement the plugin DiscordAPI interface")
+		return nil
 	}
 
-	return connectors
+	return api
 }
 
 // ListAvailablePlugins returns all available plugin definitions
 func (pm *PluginManager) ListAvailablePlugins() []PluginDefinition {
-	return pm.registry.ListPlugins()
+	definitions := pm.registry.ListPlugins()
+	available := make([]PluginDefinition, 0, len(definitions))
+
+	for _, definition := range definitions {
+		enriched := pm.enrichPluginDefinition(definition)
+		if enriched.Source == PluginSourceNative && enriched.InstallState != PluginInstallStateReady {
+			continue
+		}
+		available = append(available, enriched)
+	}
+
+	sort.Slice(available, func(i, j int) bool {
+		return available[i].Name < available[j].Name
+	})
+
+	return available
 }
 
 // ListAvailableConnectorDefinitions returns all available connector definitions
@@ -794,13 +808,14 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 
 func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string) *PluginAPIs {
 	return &PluginAPIs{
-		ServerAPI:    NewServerAPI(serverID, pm.db, pm.rconManager),
-		DatabaseAPI:  NewDatabaseAPI(instanceID, pm.db),
-		RconAPI:      NewRconAPI(serverID, pm.db, pm.rconManager, pm.clickhouseClient, pm.banSyncFunc),
-		AdminAPI:     NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
-		EventAPI:     NewEventAPI(serverID, instanceID, pluginName, pm.eventManager),
-		ConnectorAPI: NewConnectorAPI(pm),
-		LogAPI:       NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager),
+		ServerAPI:   NewServerAPI(serverID, pm.db, pm.rconManager),
+		DatabaseAPI: NewDatabaseAPI(instanceID, pm.db),
+		RuleAPI:     NewRuleAPI(serverID, pm.db),
+		RconAPI:     NewRconAPI(serverID, pm.db, pm.rconManager, pm.clickhouseClient, pm.banSyncFunc),
+		AdminAPI:    NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
+		EventAPI:    NewEventAPI(serverID, instanceID, pluginName, pm.eventManager),
+		DiscordAPI:  pm.getDiscordAPI(),
+		LogAPI:      NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager),
 	}
 }
 

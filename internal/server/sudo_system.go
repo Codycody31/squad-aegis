@@ -22,10 +22,10 @@ type SystemHealthResponse struct {
 
 // SystemServiceHealth represents health status of a system service
 type SystemServiceHealth struct {
-	Status       string  `json:"status"` // healthy, degraded, unhealthy
-	Latency      int64   `json:"latency"` // in milliseconds
-	Message      string  `json:"message"`
-	Details      gin.H   `json:"details,omitempty"`
+	Status  string `json:"status"`  // healthy, degraded, unhealthy
+	Latency int64  `json:"latency"` // in milliseconds
+	Message string `json:"message"`
+	Details gin.H  `json:"details,omitempty"`
 }
 
 // SystemConfigResponse represents sanitized configuration
@@ -35,6 +35,7 @@ type SystemConfigResponse struct {
 	ClickHouse gin.H `json:"clickhouse"`
 	Valkey     gin.H `json:"valkey"`
 	Storage    gin.H `json:"storage"`
+	Plugins    gin.H `json:"plugins"`
 	Log        gin.H `json:"log"`
 }
 
@@ -133,11 +134,17 @@ func (s *Server) GetSystemConfig(c *gin.Context) {
 				"use_ssl":           cfg.Storage.S3.UseSSL,
 			},
 		},
+		Plugins: gin.H{
+			"native_enabled":        cfg.Plugins.NativeEnabled,
+			"runtime_dir":           cfg.Plugins.RuntimeDir,
+			"allow_unsafe_sideload": cfg.Plugins.AllowUnsafeSideload,
+			"max_upload_size":       cfg.Plugins.MaxUploadSize,
+		},
 		Log: gin.H{
-			"level":             cfg.Log.Level,
-			"show_gin":          cfg.Log.ShowGin,
-			"show_plugin_logs":  cfg.Log.ShowPluginLogs,
-			"file":              cfg.Log.File,
+			"level":            cfg.Log.Level,
+			"show_gin":         cfg.Log.ShowGin,
+			"show_plugin_logs": cfg.Log.ShowPluginLogs,
+			"file":             cfg.Log.File,
 		},
 	}
 
@@ -147,7 +154,7 @@ func (s *Server) GetSystemConfig(c *gin.Context) {
 // checkPostgreSQLHealth checks PostgreSQL database health
 func checkPostgreSQLHealth(ctx context.Context, db *sql.DB) SystemServiceHealth {
 	start := time.Now()
-	
+
 	err := db.PingContext(ctx)
 	latency := time.Since(start).Milliseconds()
 
@@ -162,7 +169,7 @@ func checkPostgreSQLHealth(ctx context.Context, db *sql.DB) SystemServiceHealth 
 	// Get database stats
 	var dbSize string
 	var tableCount int
-	
+
 	db.QueryRowContext(ctx, `
 		SELECT pg_size_pretty(pg_database_size(current_database()))
 	`).Scan(&dbSize)
@@ -176,11 +183,11 @@ func checkPostgreSQLHealth(ctx context.Context, db *sql.DB) SystemServiceHealth 
 	stats := db.Stats()
 
 	details := gin.H{
-		"database_size": dbSize,
-		"table_count":   tableCount,
+		"database_size":    dbSize,
+		"table_count":      tableCount,
 		"open_connections": stats.OpenConnections,
-		"in_use":        stats.InUse,
-		"idle":          stats.Idle,
+		"in_use":           stats.InUse,
+		"idle":             stats.Idle,
 	}
 
 	status := "healthy"
@@ -236,7 +243,7 @@ func checkClickHouseHealth(ctx context.Context, ch interface{}) SystemServiceHea
 
 	// Get database stats
 	var totalRows, totalBytes uint64
-	
+
 	rows, err := client.Query(ctx, `
 		SELECT 
 			SUM(rows) as total_rows,
@@ -364,4 +371,3 @@ func maskString(s string) string {
 	}
 	return s[:4] + "***" + s[len(s)-4:]
 }
-

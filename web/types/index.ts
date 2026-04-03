@@ -258,6 +258,49 @@ export interface PostgreSQLStats {
   tables: DatabaseTableStats[];
 }
 
+export interface PluginPackageManifest {
+  plugin_id: string;
+  name: string;
+  description: string;
+  version: string;
+  official: boolean;
+  license?: string;
+  entry_symbol: string;
+  targets: PluginPackageTarget[];
+}
+
+export interface PluginPackageTarget {
+  min_host_api_version: number;
+  required_capabilities?: string[];
+  target_os: string;
+  target_arch: string;
+  sha256?: string;
+  library_path: string;
+}
+
+export interface PluginPackage {
+  plugin_id: string;
+  name: string;
+  description: string;
+  version: string;
+  source: "bundled" | "native";
+  distribution: "bundled" | "sideload";
+  official: boolean;
+  install_state: "ready" | "not_installed" | "pending_restart" | "error";
+  runtime_path?: string;
+  manifest: PluginPackageManifest;
+  signature_verified: boolean;
+  unsafe: boolean;
+  checksum: string;
+  min_host_api_version: number;
+  required_capabilities?: string[];
+  target_os: string;
+  target_arch: string;
+  last_error?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface ClickHouseTableStats {
   table_name: string;
   total_rows: number;

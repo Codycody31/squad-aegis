@@ -1,7 +1,6 @@
 package squad_leader_whitelist
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -193,10 +192,6 @@ func TestSendProgressToPlayerFindsProgressAndSessionAcrossIdentifiers(t *testing
 
 type fakeDatabaseAPI struct {
 	data map[string]string
-}
-
-func (f *fakeDatabaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Rows, error) {
-	return nil, errors.New("not implemented")
 }
 
 func (f *fakeDatabaseAPI) GetPluginData(key string) (string, error) {
