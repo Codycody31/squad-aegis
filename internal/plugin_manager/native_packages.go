@@ -160,6 +160,34 @@ func sanitizeVersionSegment(value string) string {
 	return sanitizeRuntimeSegment(strings.TrimPrefix(strings.TrimSpace(value), "v"))
 }
 
+func validateRuntimeStorageSegment(fieldName, value string, sanitize func(string) string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	sanitized := sanitize(trimmed)
+
+	if sanitized == "" {
+		return "", fmt.Errorf("plugin manifest %s %q collapses to an empty runtime path segment", fieldName, value)
+	}
+	if sanitized != trimmed {
+		return "", fmt.Errorf("plugin manifest %s %q is ambiguous after runtime sanitization; stored path segment would be %q", fieldName, value, sanitized)
+	}
+
+	return sanitized, nil
+}
+
+func pluginRuntimeSegments(pluginID, version string) (string, string, error) {
+	pluginSegment, err := validateRuntimeStorageSegment("plugin_id", pluginID, sanitizeRuntimeSegment)
+	if err != nil {
+		return "", "", err
+	}
+
+	versionSegment, err := validateRuntimeStorageSegment("version", version, sanitizeVersionSegment)
+	if err != nil {
+		return "", "", err
+	}
+
+	return pluginSegment, versionSegment, nil
+}
+
 func clonePluginPackageTargets(targets []PluginPackageTarget) []PluginPackageTarget {
 	if len(targets) == 0 {
 		return nil
@@ -802,10 +830,15 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		return nil, fmt.Errorf("unsigned sideloads are disabled")
 	}
 
-	pluginDir := filepath.Join(pluginRuntimeDir(), sanitizeRuntimeSegment(manifest.PluginID), sanitizeVersionSegment(manifest.Version))
+	pluginIDSegment, versionSegment, err := pluginRuntimeSegments(manifest.PluginID, manifest.Version)
+	if err != nil {
+		return nil, err
+	}
+
+	pluginDir := filepath.Join(pluginRuntimeDir(), pluginIDSegment, versionSegment)
 	runtimePath := filepath.Join(pluginDir, sanitizeRuntimeSegment(filepath.Base(libraryName)))
 	if filepath.Ext(runtimePath) != ".so" {
-		runtimePath = filepath.Join(pluginDir, sanitizeRuntimeSegment(manifest.PluginID)+".so")
+		runtimePath = filepath.Join(pluginDir, pluginIDSegment+".so")
 	}
 
 	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
@@ -1070,6 +1103,9 @@ func validatePluginManifest(manifest PluginPackageManifest) error {
 	}
 	if manifest.Version == "" {
 		return fmt.Errorf("plugin manifest is missing version")
+	}
+	if _, _, err := pluginRuntimeSegments(manifest.PluginID, manifest.Version); err != nil {
+		return err
 	}
 	if manifest.EntrySymbol == "" {
 		manifest.EntrySymbol = nativePluginEntrySymbol

@@ -382,6 +382,35 @@ func TestValidatePluginManifestRejectsDuplicateTargets(t *testing.T) {
 	}
 }
 
+func TestValidatePluginManifestRejectsPluginIDThatChangesUnderRuntimeSanitization(t *testing.T) {
+	t.Parallel()
+
+	manifest := testManifest("foo/bar")
+
+	err := validatePluginManifest(manifest)
+	if err == nil {
+		t.Fatal("validatePluginManifest() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), `plugin_id "foo/bar"`) {
+		t.Fatalf("validatePluginManifest() error = %q, want plugin_id sanitization rejection", err)
+	}
+}
+
+func TestValidatePluginManifestRejectsVersionThatChangesUnderRuntimeSanitization(t *testing.T) {
+	t.Parallel()
+
+	manifest := testManifest("com.example.version-prefix")
+	manifest.Version = "v1.0.0"
+
+	err := validatePluginManifest(manifest)
+	if err == nil {
+		t.Fatal("validatePluginManifest() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), `version "v1.0.0"`) {
+		t.Fatalf("validatePluginManifest() error = %q, want version sanitization rejection", err)
+	}
+}
+
 func TestPluginRuntimeDirUsesLocalDefaultOutsideContainer(t *testing.T) {
 	setPluginTestConfig(t, func(cfg *config.Struct) {
 		cfg.App.InContainer = false
