@@ -6,6 +6,10 @@
 
 @Codycody31
 
+### 🐛 Bug Fixes
+
+- feat(file_upload): add local file upload support and enhance MOTD upload functionality [[#205](https://github.com/Codycody31/squad-aegis/pull/205)]
+
 ### Misc
 
 - chore(password): implement password policy validation and update password form [[#204](https://github.com/Codycody31/squad-aegis/pull/204)]
