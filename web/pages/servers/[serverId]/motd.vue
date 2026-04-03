@@ -8,20 +8,20 @@
         </div>
 
         <!-- Credentials Warning -->
-        <Card v-if="!hasCredentials" class="mb-4 border-yellow-500">
+        <Card v-if="!hasUploadAccess" class="mb-4 border-yellow-500">
             <CardHeader>
                 <CardTitle class="text-yellow-600 flex items-center gap-2">
                     <Icon name="lucide:alert-triangle" class="h-5 w-5" />
-                    FTP/SFTP Not Configured
+                    Upload Access Not Configured
                 </CardTitle>
             </CardHeader>
             <CardContent>
                 <p class="text-sm text-muted-foreground mb-2">
-                    Upload functionality requires FTP or SFTP credentials. You can either:
+                    Upload functionality requires local file access or FTP/SFTP settings. You can either:
                 </p>
                 <ul class="list-disc list-inside text-sm text-muted-foreground mb-4">
-                    <li>Configure FTP/SFTP credentials in <RouterLink :to="`/servers/${serverId}/settings`" class="text-primary hover:underline">Server Settings</RouterLink> (Log Configuration section)</li>
-                    <li>Set custom upload credentials below</li>
+                    <li>Configure local file access or FTP/SFTP settings in <RouterLink :to="`/servers/${serverId}/settings`" class="text-primary hover:underline">Server Settings</RouterLink> (Log &amp; File Access section)</li>
+                    <li>Set custom FTP/SFTP upload credentials below</li>
                 </ul>
                 <p class="text-sm text-muted-foreground">
                     You can still preview and copy the generated MOTD content manually.
@@ -116,7 +116,7 @@
                     <div class="space-y-0.5">
                         <label class="text-sm font-medium">Enable Upload</label>
                         <p class="text-xs text-muted-foreground">
-                            Allow uploading MOTD to the game server via FTP/SFTP
+                            Allow uploading MOTD to the game server via local file access, FTP, or SFTP
                         </p>
                     </div>
                     <Switch
@@ -140,9 +140,9 @@
 
                 <div v-if="config.upload_enabled" class="flex items-center justify-between">
                     <div class="space-y-0.5">
-                        <label class="text-sm font-medium">Use Log Credentials</label>
+                        <label class="text-sm font-medium">Use Server File Access</label>
                         <p class="text-xs text-muted-foreground">
-                            Use the FTP/SFTP credentials from server log configuration
+                            Use the local/FTP/SFTP settings from Server Settings
                         </p>
                     </div>
                     <Switch
@@ -155,6 +155,9 @@
                 <template v-if="config.upload_enabled && !config.use_log_credentials">
                     <div class="border-t pt-4 mt-4">
                         <h4 class="text-sm font-medium mb-4">Custom Upload Credentials</h4>
+                        <p class="text-xs text-muted-foreground mb-4">
+                            Custom upload targets currently support FTP and SFTP only.
+                        </p>
 
                         <div class="grid grid-cols-4 items-center gap-4 mb-4">
                             <label class="text-right text-sm">Protocol</label>
@@ -270,7 +273,7 @@
                 >
                     <Icon v-if="isTestingConnection" name="lucide:loader-2" class="h-4 w-4 mr-2 animate-spin" />
                     <Icon v-else name="lucide:plug" class="h-4 w-4 mr-2" />
-                    Test Connection
+                    Test Access
                 </Button>
             </div>
             <div class="flex gap-2">
@@ -285,7 +288,7 @@
                 </Button>
                 <Button
                     @click="uploadMOTD"
-                    :disabled="!config.upload_enabled || !hasCredentials || isUploading"
+                    :disabled="!config.upload_enabled || !hasUploadAccess || isUploading"
                 >
                     <Icon v-if="isUploading" name="lucide:loader-2" class="h-4 w-4 mr-2 animate-spin" />
                     <Icon v-else name="lucide:upload" class="h-4 w-4 mr-2" />
@@ -297,7 +300,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { useToast } from "~/components/ui/toast";
 import { Button } from "~/components/ui/button";
@@ -358,8 +361,7 @@ const config = ref<MOTDConfig>({
     last_generated_content: null,
 });
 
-const hasCredentials = ref(false);
-const credentialSource = ref("");
+const hasUploadAccess = ref(false);
 const isDirty = ref(false);
 const isSaving = ref(false);
 const isUploading = ref(false);
@@ -387,8 +389,7 @@ const fetchConfig = async () => {
 
         if (data.code === 200) {
             config.value = { ...config.value, ...data.data.config };
-            hasCredentials.value = data.data.has_credentials;
-            credentialSource.value = data.data.credential_source;
+            hasUploadAccess.value = data.data.has_credentials;
             isDirty.value = false;
         }
     } catch (error) {
@@ -431,8 +432,7 @@ const saveConfig = async () => {
                 title: "Success",
                 description: "MOTD configuration saved",
             });
-            config.value = { ...config.value, ...data.data.config };
-            isDirty.value = false;
+            await fetchConfig();
         } else {
             toast({
                 title: "Error",
@@ -509,20 +509,20 @@ const testConnection = async () => {
 
         if (data.code === 200 && data.data.success) {
             toast({
-                title: "Connection Successful",
+                title: "Access Successful",
                 description: data.data.message,
             });
         } else {
             toast({
-                title: "Connection Failed",
-                description: data.data?.error || data.message || "Could not connect",
+                title: "Access Failed",
+                description: data.data?.error || data.message || "Could not verify upload access",
                 variant: "destructive",
             });
         }
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to test connection",
+            description: "Failed to test upload access",
             variant: "destructive",
         });
     } finally {
