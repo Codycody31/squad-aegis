@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,10 +24,12 @@ import (
 )
 
 const (
-	nativePluginEntrySymbol = "GetAegisPlugin"
-	pluginManifestFile      = "manifest.json"
-	pluginSignatureFile     = plugin_signing.ManifestSignatureFile
-	pluginPublicKeyFile     = plugin_signing.ManifestPublicKeyFile
+	nativePluginEntrySymbol     = "GetAegisPlugin"
+	pluginManifestFile          = "manifest.json"
+	pluginSignatureFile         = plugin_signing.ManifestSignatureFile
+	pluginPublicKeyFile         = plugin_signing.ManifestPublicKeyFile
+	defaultPluginMaxUploadSize  = 50 * 1024 * 1024
+	pluginArchiveMetadataBudget = 1 * 1024 * 1024
 )
 
 var nativePluginDefinitionLoader = loadNativePluginDefinition
@@ -57,10 +60,79 @@ func allowUnsafeSideload() bool {
 
 func pluginMaxUploadSize() int64 {
 	if config.Config == nil || config.Config.Plugins.MaxUploadSize <= 0 {
-		return 50 * 1024 * 1024
+		return defaultPluginMaxUploadSize
 	}
 
 	return config.Config.Plugins.MaxUploadSize
+}
+
+func pluginMaxArchiveUncompressedSize() int64 {
+	maxUploadSize := pluginMaxUploadSize()
+	if maxUploadSize > math.MaxInt64-pluginArchiveMetadataBudget {
+		return math.MaxInt64
+	}
+
+	return maxUploadSize + pluginArchiveMetadataBudget
+}
+
+type pluginArchiveReadBudget struct {
+	entryLimit int64
+	totalLimit int64
+	remaining  int64
+}
+
+func newPluginArchiveReadBudget() pluginArchiveReadBudget {
+	totalLimit := pluginMaxArchiveUncompressedSize()
+	return pluginArchiveReadBudget{
+		entryLimit: pluginMaxUploadSize(),
+		totalLimit: totalLimit,
+		remaining:  totalLimit,
+	}
+}
+
+func (b *pluginArchiveReadBudget) read(file *zip.File) ([]byte, error) {
+	if file == nil {
+		return nil, nil
+	}
+
+	if file.UncompressedSize64 > uint64(b.entryLimit) {
+		return nil, fmt.Errorf("plugin archive entry %s exceeds uncompressed size limit of %d bytes", file.Name, b.entryLimit)
+	}
+	if file.UncompressedSize64 > uint64(b.remaining) {
+		return nil, fmt.Errorf("plugin archive exceeds total uncompressed size limit of %d bytes", b.totalLimit)
+	}
+
+	rc, err := file.Open()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open archive entry %s: %w", file.Name, err)
+	}
+
+	readLimit := b.entryLimit
+	totalLimited := false
+	if b.remaining < readLimit {
+		readLimit = b.remaining
+		totalLimited = true
+	}
+
+	limited := &io.LimitedReader{R: rc, N: readLimit + 1}
+	data, readErr := io.ReadAll(limited)
+	closeErr := rc.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("failed to read archive entry %s: %w", file.Name, readErr)
+	}
+	if int64(len(data)) > readLimit {
+		if totalLimited {
+			return nil, fmt.Errorf("plugin archive exceeds total uncompressed size limit of %d bytes", b.totalLimit)
+		}
+		return nil, fmt.Errorf("plugin archive entry %s exceeds uncompressed size limit of %d bytes", file.Name, b.entryLimit)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("failed to close archive entry %s: %w", file.Name, closeErr)
+	}
+
+	b.remaining -= int64(len(data))
+
+	return data, nil
 }
 
 func sanitizeRuntimeSegment(value string) string {
@@ -354,10 +426,6 @@ func (pm *PluginManager) removeNativePackage(pluginID string) {
 func (pm *PluginManager) loadInstalledPluginPackages() error {
 	if !nativePluginsEnabled() {
 		return nil
-	}
-
-	if err := os.MkdirAll(pluginRuntimeDir(), 0o755); err != nil {
-		return fmt.Errorf("failed to create plugin runtime directory: %w", err)
 	}
 
 	rows, err := pm.db.Query(`
@@ -915,7 +983,10 @@ func readPluginBundle(archive io.ReaderAt, size int64) (PluginPackageManifest, P
 	var manifestBytes []byte
 	var signatureBytes []byte
 	var publicKeyBytes []byte
-	libraries := make(map[string][]byte)
+	libraries := make(map[string]*zip.File)
+	var manifestFile *zip.File
+	var signatureFile *zip.File
+	var publicKeyFile *zip.File
 
 	for _, file := range reader.File {
 		name := filepath.Clean(strings.TrimPrefix(file.Name, "/"))
@@ -926,39 +997,50 @@ func readPluginBundle(archive io.ReaderAt, size int64) (PluginPackageManifest, P
 			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive contains an unsupported symlink: %s", file.Name)
 		}
 
-		rc, err := file.Open()
-		if err != nil {
-			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("failed to open archive entry %s: %w", file.Name, err)
-		}
-
-		data, readErr := io.ReadAll(rc)
-		closeErr := rc.Close()
-		if readErr != nil {
-			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("failed to read archive entry %s: %w", file.Name, readErr)
-		}
-		if closeErr != nil {
-			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("failed to close archive entry %s: %w", file.Name, closeErr)
-		}
-
 		switch filepath.Base(name) {
 		case pluginManifestFile:
-			manifestBytes = data
-			if err := json.Unmarshal(data, &manifest); err != nil {
-				return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("invalid plugin manifest: %w", err)
-			}
+			manifestFile = file
 		case pluginSignatureFile:
-			signatureBytes = data
+			signatureFile = file
 		case pluginPublicKeyFile:
-			publicKeyBytes = data
+			publicKeyFile = file
 		default:
 			if strings.HasSuffix(name, ".so") {
-				libraries[name] = data
+				libraries[name] = file
 			}
 		}
 	}
 
-	if len(manifestBytes) == 0 {
+	if manifestFile == nil {
 		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive is missing %s", pluginManifestFile)
+	}
+
+	budget := newPluginArchiveReadBudget()
+
+	manifestBytes, err = budget.read(manifestFile)
+	if err != nil {
+		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("invalid plugin manifest: %w", err)
+	}
+
+	selectedTarget, err := selectedManifestTarget(manifest)
+	if err != nil {
+		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
+	}
+
+	if signatureFile != nil {
+		signatureBytes, err = budget.read(signatureFile)
+		if err != nil {
+			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
+		}
+	}
+	if publicKeyFile != nil {
+		publicKeyBytes, err = budget.read(publicKeyFile)
+		if err != nil {
+			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
+		}
 	}
 
 	hasSignature := len(bytes.TrimSpace(signatureBytes)) > 0
@@ -967,12 +1049,11 @@ func readPluginBundle(archive io.ReaderAt, size int64) (PluginPackageManifest, P
 		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive must include %s and %s together", pluginSignatureFile, pluginPublicKeyFile)
 	}
 
-	selectedTarget, err := selectedManifestTarget(manifest)
+	libraryName, libraryFile, err := selectManifestLibrary(manifest, selectedTarget, libraries)
 	if err != nil {
 		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
 	}
-
-	libraryName, libraryBytes, err := selectManifestLibrary(manifest, selectedTarget, libraries)
+	libraryBytes, err := budget.read(libraryFile)
 	if err != nil {
 		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
 	}
@@ -1060,20 +1141,20 @@ func validatePluginCompatibility(target PluginPackageTarget) error {
 	return nil
 }
 
-func selectManifestLibrary(manifest PluginPackageManifest, target PluginPackageTarget, libraries map[string][]byte) (string, []byte, error) {
+func selectManifestLibrary(manifest PluginPackageManifest, target PluginPackageTarget, libraries map[string]*zip.File) (string, *zip.File, error) {
 	libraryPath := strings.TrimSpace(target.LibraryPath)
 	if libraryPath != "" {
 		declaredPath := filepath.Clean(strings.TrimPrefix(libraryPath, "/"))
-		libraryBytes := libraries[declaredPath]
-		if len(libraryBytes) == 0 {
+		libraryFile := libraries[declaredPath]
+		if libraryFile == nil {
 			return "", nil, fmt.Errorf("plugin archive is missing declared library %s", libraryPath)
 		}
-		return declaredPath, libraryBytes, nil
+		return declaredPath, libraryFile, nil
 	}
 
 	if len(libraries) == 1 {
-		for name, data := range libraries {
-			return name, data, nil
+		for name, file := range libraries {
+			return name, file, nil
 		}
 	}
 

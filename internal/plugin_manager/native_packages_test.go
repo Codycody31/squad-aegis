@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql/driver"
 	"encoding/json"
 	"os"
 	"runtime"
@@ -556,6 +557,47 @@ func TestReadPluginBundleRejectsSignatureWithoutPublicKey(t *testing.T) {
 	}
 }
 
+func TestReadPluginBundleRejectsOversizedUncompressedLibrary(t *testing.T) {
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.MaxUploadSize = 1024
+	})
+
+	manifest := testManifest("com.example.oversized-library")
+	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), bytes.Repeat([]byte("a"), 1025), nil, nil)
+
+	_, _, _, _, _, _, _, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
+	if err == nil {
+		t.Fatal("readPluginBundle() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "exceeds uncompressed size limit") {
+		t.Fatalf("readPluginBundle() error = %q, want uncompressed size limit", err)
+	}
+}
+
+func TestReadPluginBundleRejectsExcessTotalUncompressedSize(t *testing.T) {
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.MaxUploadSize = 700 * 1024
+	})
+
+	manifest := testManifest("com.example.total-limit")
+	archive := buildPluginArchive(
+		t,
+		manifest,
+		primaryManifestLibraryPath(manifest),
+		bytes.Repeat([]byte("a"), 700*1024),
+		bytes.Repeat([]byte("b"), 600*1024),
+		bytes.Repeat([]byte("c"), 500*1024),
+	)
+
+	_, _, _, _, _, _, _, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
+	if err == nil {
+		t.Fatal("readPluginBundle() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "total uncompressed size limit") {
+		t.Fatalf("readPluginBundle() error = %q, want total uncompressed size limit", err)
+	}
+}
+
 func TestValidatePluginCompatibilityRejectsWrongArchitecture(t *testing.T) {
 	t.Parallel()
 	requireLinuxNativePlugins(t)
@@ -655,6 +697,42 @@ func TestInstallPluginBundleRejectsUnsignedSideloadByDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsigned sideloads are disabled") {
 		t.Fatalf("installPluginBundle() error = %q, want unsigned sideload rejection", err)
+	}
+}
+
+func TestLoadInstalledPluginPackagesDoesNotRequireCreatingRuntimeDir(t *testing.T) {
+	runtimeFile, err := os.CreateTemp(t.TempDir(), "plugin-runtime-file-*")
+	if err != nil {
+		t.Fatalf("os.CreateTemp() error = %v", err)
+	}
+	runtimePath := runtimeFile.Name() + "/plugins"
+	if err := runtimeFile.Close(); err != nil {
+		t.Fatalf("runtimeFile.Close() error = %v", err)
+	}
+
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = runtimePath
+	})
+
+	db := openTestSQLDB(t, &testSQLDriver{
+		queryContext: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
+			return &testSQLRows{}, nil
+		},
+	})
+
+	pm := &PluginManager{
+		db:                  db,
+		registry:            NewPluginRegistry(),
+		nativePackages:      make(map[string]*InstalledPluginPackage),
+		loadedNativePlugins: make(map[string]string),
+	}
+
+	if err := pm.loadInstalledPluginPackages(); err != nil {
+		t.Fatalf("loadInstalledPluginPackages() error = %v", err)
+	}
+	if len(pm.ListInstalledPluginPackages()) != 0 {
+		t.Fatalf("len(ListInstalledPluginPackages()) = %d, want 0", len(pm.ListInstalledPluginPackages()))
 	}
 }
 
