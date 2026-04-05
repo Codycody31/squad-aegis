@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	pluginapi "go.codycody31.dev/squad-aegis/pkg/pluginapi"
 )
+
+const helloExampleConnectorID = "com.squad-aegis.connectors.examples.hello"
 
 type helloPlugin struct {
 	mu     sync.Mutex
@@ -48,6 +51,7 @@ func definition() pluginapi.PluginDefinition {
 		Events: []pluginapi.EventType{
 			pluginapi.EventTypeRconChatMessage,
 		},
+		OptionalConnectors: []string{helloExampleConnectorID},
 		CreateInstance: func() pluginapi.Plugin {
 			return &helloPlugin{}
 		},
@@ -119,7 +123,22 @@ func (p *helloPlugin) HandleEvent(event *pluginapi.PluginEvent) error {
 		return fmt.Errorf("chat event did not include a usable player identifier")
 	}
 
-	if err := p.apis.RconAPI.SendWarningToPlayer(playerID, response); err != nil {
+	out := response
+	if p.apis.ConnectorAPI != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		connResp, err := p.apis.ConnectorAPI.Call(ctx, helloExampleConnectorID, &pluginapi.ConnectorInvokeRequest{
+			V:    pluginapi.ConnectorWireProtocolV1,
+			Data: map[string]interface{}{"action": "ping"},
+		})
+		cancel()
+		if err == nil && connResp != nil && connResp.OK && connResp.Data != nil {
+			if s, ok := connResp.Data["message"].(string); ok && strings.TrimSpace(s) != "" {
+				out = response + " (" + s + ")"
+			}
+		}
+	}
+
+	if err := p.apis.RconAPI.SendWarningToPlayer(playerID, out); err != nil {
 		return fmt.Errorf("failed to respond to player: %w", err)
 	}
 

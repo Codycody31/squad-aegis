@@ -2,7 +2,9 @@ package discord
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,7 +56,9 @@ type DiscordMessage struct {
 // Define returns the connector definition
 func Define() plugin_manager.ConnectorDefinition {
 	return plugin_manager.ConnectorDefinition{
-		ID:          "discord",
+		ID:          "com.squad-aegis.connectors.discord",
+		LegacyIDs:   []string{"discord"},
+		Source:      plugin_manager.PluginSourceBundled,
 		Name:        "Discord",
 		Description: "Discord bot connector for sending messages and managing Discord integration",
 		Version:     "1.0.0",
@@ -229,6 +233,163 @@ func (c *DiscordConnector) GetAPI() interface{} {
 	return &discordAPI{connector: c}
 }
 
+// Invoke handles JSON connector requests (actions: send_message, send_embed).
+func (c *DiscordConnector) Invoke(ctx context.Context, req *plugin_manager.ConnectorInvokeRequest) (*plugin_manager.ConnectorInvokeResponse, error) {
+	_ = ctx
+	out := &plugin_manager.ConnectorInvokeResponse{V: plugin_manager.ConnectorWireProtocolV1}
+	if req == nil || req.Data == nil {
+		out.OK = false
+		out.Error = "missing data"
+		return out, nil
+	}
+	rawAction, ok := req.Data["action"].(string)
+	if !ok || rawAction == "" {
+		out.OK = false
+		out.Error = `data.action is required`
+		return out, nil
+	}
+	action := strings.ToLower(strings.TrimSpace(rawAction))
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.status != plugin_manager.ConnectorStatusRunning {
+		out.OK = false
+		out.Error = "Discord connector is not running"
+		return out, nil
+	}
+
+	switch action {
+	case "send_message":
+		ch, _ := req.Data["channel_id"].(string)
+		content, _ := req.Data["content"].(string)
+		if ch == "" || content == "" {
+			out.OK = false
+			out.Error = "send_message requires channel_id and content"
+			return out, nil
+		}
+		msgID, err := c.sendMessageLocked(ch, content)
+		if err != nil {
+			out.OK = false
+			out.Error = err.Error()
+			return out, nil
+		}
+		out.OK = true
+		out.Data = map[string]interface{}{"message_id": msgID}
+		return out, nil
+	case "send_embed":
+		ch, _ := req.Data["channel_id"].(string)
+		if ch == "" {
+			out.OK = false
+			out.Error = "send_embed requires channel_id"
+			return out, nil
+		}
+		embed, err := parseEmbedFromData(req.Data["embed"])
+		if err != nil {
+			out.OK = false
+			out.Error = err.Error()
+			return out, nil
+		}
+		msgID, err := c.sendEmbedLocked(ch, embed)
+		if err != nil {
+			out.OK = false
+			out.Error = err.Error()
+			return out, nil
+		}
+		out.OK = true
+		out.Data = map[string]interface{}{"message_id": msgID}
+		return out, nil
+	default:
+		out.OK = false
+		out.Error = fmt.Sprintf("unknown action %q", rawAction)
+		return out, nil
+	}
+}
+
+func parseEmbedFromData(v interface{}) (*DiscordEmbed, error) {
+	if v == nil {
+		return nil, fmt.Errorf("send_embed requires embed")
+	}
+	switch t := v.(type) {
+	case *DiscordEmbed:
+		return t, nil
+	case map[string]interface{}:
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return nil, fmt.Errorf("invalid embed: %w", err)
+		}
+		var e DiscordEmbed
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid embed: %w", err)
+		}
+		return &e, nil
+	default:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid embed: %w", err)
+		}
+		var e DiscordEmbed
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid embed: %w", err)
+		}
+		return &e, nil
+	}
+}
+
+func (c *DiscordConnector) sendMessageLocked(channelID, content string) (string, error) {
+	msg, err := c.session.ChannelMessageSend(channelID, content)
+	if err != nil {
+		return "", fmt.Errorf("failed to send Discord message: %w", err)
+	}
+	return msg.ID, nil
+}
+
+func discordEmbedToGo(embed *DiscordEmbed) *discordgo.MessageEmbed {
+	discordEmbed := &discordgo.MessageEmbed{
+		Title:       embed.Title,
+		Description: embed.Description,
+		Color:       embed.Color,
+	}
+	if embed.Fields != nil {
+		discordEmbed.Fields = make([]*discordgo.MessageEmbedField, len(embed.Fields))
+		for i, field := range embed.Fields {
+			discordEmbed.Fields[i] = &discordgo.MessageEmbedField{
+				Name:   field.Name,
+				Value:  field.Value,
+				Inline: field.Inline,
+			}
+		}
+	}
+	if embed.Footer != nil {
+		discordEmbed.Footer = &discordgo.MessageEmbedFooter{
+			Text:    embed.Footer.Text,
+			IconURL: embed.Footer.IconURL,
+		}
+	}
+	if embed.Thumbnail != nil {
+		discordEmbed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+			URL: embed.Thumbnail.URL,
+		}
+	}
+	if embed.Image != nil {
+		discordEmbed.Image = &discordgo.MessageEmbedImage{
+			URL: embed.Image.URL,
+		}
+	}
+	if embed.Timestamp != nil {
+		discordEmbed.Timestamp = embed.Timestamp.Format(time.RFC3339)
+	}
+	return discordEmbed
+}
+
+func (c *DiscordConnector) sendEmbedLocked(channelID string, embed *DiscordEmbed) (string, error) {
+	msg, err := c.session.ChannelMessageSendEmbed(channelID, discordEmbedToGo(embed))
+	if err != nil {
+		return "", fmt.Errorf("failed to send Discord embed: %w", err)
+	}
+	return msg.ID, nil
+}
+
 // discordAPI implements DiscordAPI interface
 type discordAPI struct {
 	connector *DiscordConnector
@@ -242,12 +403,7 @@ func (api *discordAPI) SendMessage(channelID, content string) (string, error) {
 		return "", fmt.Errorf("Discord connector is not running")
 	}
 
-	msg, err := api.connector.session.ChannelMessageSend(channelID, content)
-	if err != nil {
-		return "", fmt.Errorf("failed to send Discord message: %w", err)
-	}
-
-	return msg.ID, nil
+	return api.connector.sendMessageLocked(channelID, content)
 }
 
 func (api *discordAPI) SendEmbed(channelID string, embed *DiscordEmbed) (string, error) {
@@ -258,58 +414,7 @@ func (api *discordAPI) SendEmbed(channelID string, embed *DiscordEmbed) (string,
 		return "", fmt.Errorf("Discord connector is not running")
 	}
 
-	// Convert our embed to discordgo embed
-	discordEmbed := &discordgo.MessageEmbed{
-		Title:       embed.Title,
-		Description: embed.Description,
-		Color:       embed.Color,
-	}
-
-	// Convert fields
-	if embed.Fields != nil {
-		discordEmbed.Fields = make([]*discordgo.MessageEmbedField, len(embed.Fields))
-		for i, field := range embed.Fields {
-			discordEmbed.Fields[i] = &discordgo.MessageEmbedField{
-				Name:   field.Name,
-				Value:  field.Value,
-				Inline: field.Inline,
-			}
-		}
-	}
-
-	// Convert footer
-	if embed.Footer != nil {
-		discordEmbed.Footer = &discordgo.MessageEmbedFooter{
-			Text:    embed.Footer.Text,
-			IconURL: embed.Footer.IconURL,
-		}
-	}
-
-	// Convert thumbnail
-	if embed.Thumbnail != nil {
-		discordEmbed.Thumbnail = &discordgo.MessageEmbedThumbnail{
-			URL: embed.Thumbnail.URL,
-		}
-	}
-
-	// Convert image
-	if embed.Image != nil {
-		discordEmbed.Image = &discordgo.MessageEmbedImage{
-			URL: embed.Image.URL,
-		}
-	}
-
-	// Convert timestamp
-	if embed.Timestamp != nil {
-		discordEmbed.Timestamp = embed.Timestamp.Format(time.RFC3339)
-	}
-
-	msg, err := api.connector.session.ChannelMessageSendEmbed(channelID, discordEmbed)
-	if err != nil {
-		return "", fmt.Errorf("failed to send Discord embed: %w", err)
-	}
-
-	return msg.ID, nil
+	return api.connector.sendEmbedLocked(channelID, embed)
 }
 
 func (api *discordAPI) GetGuildID() string {

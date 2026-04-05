@@ -3,16 +3,17 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLUGIN_ID="${PLUGIN_ID:-com.squad-aegis.plugins.examples.hello}"
-PLUGIN_NAME="${PLUGIN_NAME:-Hello Example}"
-PLUGIN_DESCRIPTION="${PLUGIN_DESCRIPTION:-Replies to players who type !hello in chat.}"
-PLUGIN_VERSION="${PLUGIN_VERSION:-0.1.0}"
-PLUGIN_AUTHOR="${PLUGIN_AUTHOR:-Squad Aegis}"
+CONNECTOR_ID="${CONNECTOR_ID:-com.squad-aegis.connectors.examples.hello}"
+CONNECTOR_NAME="${CONNECTOR_NAME:-Hello connector example}"
+CONNECTOR_DESCRIPTION="${CONNECTOR_DESCRIPTION:-Responds to JSON invoke action ping.}"
+CONNECTOR_VERSION="${CONNECTOR_VERSION:-0.1.0}"
+CONNECTOR_AUTHOR="${CONNECTOR_AUTHOR:-Squad Aegis}"
 MIN_HOST_API_VERSION="${MIN_HOST_API_VERSION:-1}"
-REQUIRED_CAPABILITIES="${REQUIRED_CAPABILITIES:-api.rcon,api.connector,events.rcon}"
+# Native connectors may use an empty capability set per target if none are needed.
+REQUIRED_CAPABILITIES="${REQUIRED_CAPABILITIES:-}"
 TARGETS="${TARGETS:-linux/$(go env GOARCH)}"
-OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist/native-plugin-hello}"
-LIBRARY_NAME="${LIBRARY_NAME:-hello-example.so}"
+OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist/native-connector-hello}"
+LIBRARY_NAME="${LIBRARY_NAME:-hello-connector.so}"
 
 rm -rf "${OUTPUT_DIR}/bin"
 mkdir -p "${OUTPUT_DIR}/bin"
@@ -45,7 +46,7 @@ for RAW_TARGET_SPEC in "${TARGET_SPECS[@]}"; do
     exit 1
   fi
   if [[ "${TARGET_OS}" != "linux" ]]; then
-    echo "Native plugins currently must target linux. TARGETS entry ${TARGET_SPEC} is not supported." >&2
+    echo "Native connectors currently must target linux. TARGETS entry ${TARGET_SPEC} is not supported." >&2
     exit 1
   fi
 
@@ -53,11 +54,11 @@ for RAW_TARGET_SPEC in "${TARGET_SPECS[@]}"; do
   LIBRARY_PATH="${OUTPUT_DIR}/${LIBRARY_RELATIVE_PATH}"
   mkdir -p "$(dirname "${LIBRARY_PATH}")"
 
-  echo "Building native plugin shared object for ${TARGET_OS}/${TARGET_ARCH}..."
+  echo "Building native connector shared object for ${TARGET_OS}/${TARGET_ARCH}..."
   (
     cd "${ROOT_DIR}"
     env GOCACHE=/tmp/go-build-cache GOOS="${TARGET_OS}" GOARCH="${TARGET_ARCH}" \
-      go build -buildmode=plugin -o "${LIBRARY_PATH}" ./examples/native-plugin-hello
+      go build -buildmode=plugin -o "${LIBRARY_PATH}" ./examples/native-connector-hello
   )
 
   if command -v sha256sum >/dev/null 2>&1; then
@@ -65,7 +66,7 @@ for RAW_TARGET_SPEC in "${TARGET_SPECS[@]}"; do
   elif command -v shasum >/dev/null 2>&1; then
     SHA256="$(shasum -a 256 "${LIBRARY_PATH}" | awk '{print $1}')"
   else
-    echo "Could not find sha256sum or shasum to compute the plugin checksum." >&2
+    echo "Could not find sha256sum or shasum to compute the connector checksum." >&2
     exit 1
   fi
 
@@ -87,20 +88,21 @@ EOF
 done
 
 if [[ ${#TARGET_LABELS[@]} -eq 1 ]]; then
-  ZIP_PATH="${OUTPUT_DIR}/hello-example-${TARGET_LABELS[0]}.zip"
+  ZIP_PATH="${OUTPUT_DIR}/hello-connector-${TARGET_LABELS[0]}.zip"
 else
-  ZIP_PATH="${OUTPUT_DIR}/hello-example-multi-target.zip"
+  ZIP_PATH="${OUTPUT_DIR}/hello-connector-multi-target.zip"
 fi
+
 
 cat > "${MANIFEST_PATH}" <<EOF
 {
-  "plugin_id": "${PLUGIN_ID}",
-  "name": "${PLUGIN_NAME}",
-  "description": "${PLUGIN_DESCRIPTION}",
-  "version": "${PLUGIN_VERSION}",
+  "connector_id": "${CONNECTOR_ID}",
+  "name": "${CONNECTOR_NAME}",
+  "description": "${CONNECTOR_DESCRIPTION}",
+  "version": "${CONNECTOR_VERSION}",
   "official": false,
   "license": "",
-  "entry_symbol": "GetAegisPlugin",
+  "entry_symbol": "GetAegisConnector",
   "targets": [
 $(printf '%b\n' "${TARGET_JSON}")
   ]
@@ -113,9 +115,9 @@ rm -f "${ZIP_PATH}"
   zip -q -r "${ZIP_PATH}" manifest.json bin
 )
 
-echo "Created unsigned native plugin bundle:"
+echo "Created unsigned native connector bundle:"
 echo "  ${ZIP_PATH}"
 echo
 echo "For local testing, enable unsafe sideloads before uploading this bundle:"
-echo "  plugins.allow_unsafe_sideload: true"
+echo "  connectors.allow_unsafe_sideload / plugins.allow_unsafe_sideload: true"
 echo "or the equivalent environment/config override in your local setup."

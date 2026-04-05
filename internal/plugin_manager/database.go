@@ -439,18 +439,19 @@ func (pm *PluginManager) saveConnectorToDatabase(instance *ConnectorInstance) er
 
 // CreateConnectorInstance creates and starts a new connector instance
 func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[string]interface{}) (*ConnectorInstance, error) {
+	definition, err := pm.connectorRegistry.GetConnector(connectorID)
+	if err != nil {
+		return nil, fmt.Errorf("connector definition not found: %w", err)
+	}
+
+	storageKey := definition.ConnectorInstanceStorageKey()
+
 	pm.connectorMu.Lock()
 	defer pm.connectorMu.Unlock()
 
 	// Check if connector already exists
-	if _, exists := pm.connectors[connectorID]; exists {
-		return nil, fmt.Errorf("connector %s already exists", connectorID)
-	}
-
-	// Get connector definition to validate config
-	definition, err := pm.connectorRegistry.GetConnector(connectorID)
-	if err != nil {
-		return nil, fmt.Errorf("connector definition not found: %w", err)
+	if _, exists := pm.connectors[storageKey]; exists {
+		return nil, fmt.Errorf("connector %s already exists", storageKey)
 	}
 
 	// Validate config for creation (ensures sensitive required fields are provided)
@@ -471,7 +472,7 @@ func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[
 	ctx, cancel := context.WithCancel(pm.ctx)
 
 	instance := &ConnectorInstance{
-		ID:        connectorID,
+		ID:        storageKey,
 		Config:    config,
 		Status:    ConnectorStatusStopped,
 		Enabled:   true,
@@ -483,24 +484,24 @@ func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[
 	}
 
 	// Store instance
-	pm.connectors[connectorID] = instance
+	pm.connectors[storageKey] = instance
 
 	// Save to database
 	if err := pm.saveConnectorToDatabase(instance); err != nil {
-		delete(pm.connectors, connectorID)
+		delete(pm.connectors, storageKey)
 		cancel()
 		return nil, fmt.Errorf("failed to save connector to database: %w", err)
 	}
 
 	// Initialize and start connector
 	if err := pm.initializeConnectorInstance(instance); err != nil {
-		delete(pm.connectors, connectorID)
+		delete(pm.connectors, storageKey)
 		cancel()
 		return nil, fmt.Errorf("failed to initialize connector instance: %w", err)
 	}
 
 	log.Info().
-		Str("connectorID", connectorID).
+		Str("connectorID", storageKey).
 		Msg("Created connector instance")
 
 	return instance, nil
@@ -508,56 +509,59 @@ func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[
 
 // UpdateConnectorConfig updates a connector's configuration
 func (pm *PluginManager) UpdateConnectorConfig(connectorID string, config map[string]interface{}) error {
-	pm.connectorMu.Lock()
-	defer pm.connectorMu.Unlock()
-
-	instance, exists := pm.connectors[connectorID]
-	if !exists {
+	storageKey, ok := pm.ResolveConnectorInstanceKey(connectorID)
+	if !ok {
 		return fmt.Errorf("connector %s not found", connectorID)
 	}
 
-	// Get connector definition to validate config
-	definition, err := pm.connectorRegistry.GetConnector(connectorID)
-	if err != nil {
-		return fmt.Errorf("connector definition not found: %w", err)
-	}
+	pm.connectorMu.Lock()
+	err := func() error {
+		defer pm.connectorMu.Unlock()
 
-	// Merge new config with existing, handling sensitive fields properly
-	mergedConfig := definition.ConfigSchema.MergeConfigUpdates(instance.Config, config)
-
-	// Validate the merged config
-	if err := definition.ConfigSchema.Validate(mergedConfig); err != nil {
-		return fmt.Errorf("config validation failed: %w", err)
-	}
-
-	// Update connector config
-	if err := instance.Connector.UpdateConfig(mergedConfig); err != nil {
-		return fmt.Errorf("failed to update connector config: %w", err)
-	}
-
-	// Restart the connector if needed (some connectors stop themselves during UpdateConfig)
-	if instance.Connector.GetStatus() != ConnectorStatusRunning {
-		if err := instance.Connector.Start(instance.Context); err != nil {
-			return fmt.Errorf("failed to restart connector after config update: %w", err)
+		instance, exists := pm.connectors[storageKey]
+		if !exists {
+			return fmt.Errorf("connector %s not found", connectorID)
 		}
+
+		definition, err := pm.connectorRegistry.GetConnector(connectorID)
+		if err != nil {
+			return fmt.Errorf("connector definition not found: %w", err)
+		}
+
+		mergedConfig := definition.ConfigSchema.MergeConfigUpdates(instance.Config, config)
+
+		if err := definition.ConfigSchema.Validate(mergedConfig); err != nil {
+			return fmt.Errorf("config validation failed: %w", err)
+		}
+
+		if err := instance.Connector.UpdateConfig(mergedConfig); err != nil {
+			return fmt.Errorf("failed to update connector config: %w", err)
+		}
+
+		if instance.Connector.GetStatus() != ConnectorStatusRunning {
+			if err := instance.Connector.Start(instance.Context); err != nil {
+				return fmt.Errorf("failed to restart connector after config update: %w", err)
+			}
+		}
+
+		instance.Config = mergedConfig
+		instance.UpdatedAt = time.Now()
+
+		if err := pm.saveConnectorToDatabase(instance); err != nil {
+			return fmt.Errorf("failed to update connector in database: %w", err)
+		}
+
+		return nil
+	}()
+	if err != nil {
+		return err
 	}
 
-	// Update instance record
-	instance.Config = mergedConfig
-	instance.UpdatedAt = time.Now()
-
-	// Save to database
-	if err := pm.saveConnectorToDatabase(instance); err != nil {
-		return fmt.Errorf("failed to update connector in database: %w", err)
-	}
-
-	// Restart dependent plugins after connector update
-	if err := pm.restartDependentPlugins(connectorID); err != nil {
+	if err := pm.restartDependentPlugins(storageKey); err != nil {
 		log.Error().
-			Str("connectorID", connectorID).
+			Str("connectorID", storageKey).
 			Err(err).
 			Msg("Failed to restart dependent plugins after connector update")
-		// Don't return error as the connector update was successful
 	}
 
 	return nil
@@ -565,10 +569,15 @@ func (pm *PluginManager) UpdateConnectorConfig(connectorID string, config map[st
 
 // DeleteConnectorInstance removes and stops a connector instance
 func (pm *PluginManager) DeleteConnectorInstance(connectorID string) error {
+	storageKey, ok := pm.ResolveConnectorInstanceKey(connectorID)
+	if !ok {
+		return fmt.Errorf("connector %s not found", connectorID)
+	}
+
 	pm.connectorMu.Lock()
 	defer pm.connectorMu.Unlock()
 
-	instance, exists := pm.connectors[connectorID]
+	instance, exists := pm.connectors[storageKey]
 	if !exists {
 		return fmt.Errorf("connector %s not found", connectorID)
 	}
@@ -576,25 +585,25 @@ func (pm *PluginManager) DeleteConnectorInstance(connectorID string) error {
 	// Stop connector
 	if err := pm.stopConnectorInstance(instance); err != nil {
 		log.Error().
-			Str("connectorID", connectorID).
+			Str("connectorID", storageKey).
 			Err(err).
 			Msg("Failed to stop connector instance during deletion")
 	}
 
 	// Remove from database
-	_, err := pm.db.Exec("DELETE FROM connectors WHERE id = $1", connectorID)
+	_, err := pm.db.Exec("DELETE FROM connectors WHERE id = $1", storageKey)
 	if err != nil {
 		log.Error().
-			Str("connectorID", connectorID).
+			Str("connectorID", storageKey).
 			Err(err).
 			Msg("Failed to delete connector from database")
 	}
 
 	// Remove from memory
-	delete(pm.connectors, connectorID)
+	delete(pm.connectors, storageKey)
 
 	log.Info().
-		Str("connectorID", connectorID).
+		Str("connectorID", storageKey).
 		Msg("Deleted connector instance")
 
 	return nil

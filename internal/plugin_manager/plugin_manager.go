@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,10 @@ type PluginManager struct {
 	loadedNativePlugins map[string]string
 	nativeMu            sync.RWMutex
 
+	// Native connector packages
+	nativeConnectorPackages map[string]*InstalledConnectorPackage
+	loadedNativeConnectors  map[string]string
+
 	// Event subscription
 	eventSubscriber *event_manager.EventSubscriber
 
@@ -53,18 +58,20 @@ func NewPluginManager(ctx context.Context, db *sql.DB, eventManager *event_manag
 	ctx, cancel := context.WithCancel(ctx)
 
 	pm := &PluginManager{
-		plugins:             make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
-		registry:            NewPluginRegistry(),
-		connectors:          make(map[string]*ConnectorInstance),
-		connectorRegistry:   NewConnectorRegistry(),
-		nativePackages:      make(map[string]*InstalledPluginPackage),
-		loadedNativePlugins: make(map[string]string),
-		db:                  db,
-		eventManager:        eventManager,
-		rconManager:         rconManager,
-		clickhouseClient:    clickhouseClient,
-		ctx:                 ctx,
-		cancel:              cancel,
+		plugins:                 make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
+		registry:                NewPluginRegistry(),
+		connectors:              make(map[string]*ConnectorInstance),
+		connectorRegistry:       NewConnectorRegistry(),
+		nativePackages:          make(map[string]*InstalledPluginPackage),
+		loadedNativePlugins:     make(map[string]string),
+		nativeConnectorPackages: make(map[string]*InstalledConnectorPackage),
+		loadedNativeConnectors:  make(map[string]string),
+		db:                      db,
+		eventManager:            eventManager,
+		rconManager:             rconManager,
+		clickhouseClient:        clickhouseClient,
+		ctx:                     ctx,
+		cancel:                  cancel,
 	}
 
 	// Subscribe to events for plugin distribution
@@ -84,6 +91,10 @@ func (pm *PluginManager) Start() error {
 
 	if err := pm.loadInstalledPluginPackages(); err != nil {
 		return fmt.Errorf("failed to load installed plugin packages: %w", err)
+	}
+
+	if err := pm.loadInstalledConnectorPackages(); err != nil {
+		return fmt.Errorf("failed to load installed connector packages: %w", err)
 	}
 
 	// Start connectors first
@@ -231,10 +242,14 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 
 	// Validate required connectors
 	for _, connectorID := range enrichedDefinition.RequiredConnectors {
-		if _, exists := pm.connectors[connectorID]; !exists {
+		storageKey, ok := pm.ResolveConnectorInstanceKey(connectorID)
+		if !ok {
 			return nil, fmt.Errorf("required connector %s is not available", connectorID)
 		}
-		if pm.connectors[connectorID].Status != ConnectorStatusRunning {
+		pm.connectorMu.RLock()
+		co := pm.connectors[storageKey]
+		pm.connectorMu.RUnlock()
+		if co == nil || co.Status != ConnectorStatusRunning {
 			return nil, fmt.Errorf("required connector %s is not running", connectorID)
 		}
 	}
@@ -566,11 +581,16 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 
 // getDiscordAPI returns the Discord connector API for use by plugins when available.
 func (pm *PluginManager) getDiscordAPI() DiscordAPI {
+	storageKey, ok := pm.ResolveConnectorInstanceKey("com.squad-aegis.connectors.discord")
+	if !ok {
+		return nil
+	}
+
 	pm.connectorMu.RLock()
 	defer pm.connectorMu.RUnlock()
 
-	instance, exists := pm.connectors["discord"]
-	if !exists {
+	instance := pm.connectors[storageKey]
+	if instance == nil {
 		return nil
 	}
 
@@ -609,7 +629,12 @@ func (pm *PluginManager) ListAvailablePlugins() []PluginDefinition {
 
 // ListAvailableConnectorDefinitions returns all available connector definitions
 func (pm *PluginManager) ListAvailableConnectorDefinitions() []ConnectorDefinition {
-	return pm.connectorRegistry.ListConnectors()
+	defs := pm.connectorRegistry.ListConnectors()
+	out := make([]ConnectorDefinition, 0, len(defs))
+	for _, d := range defs {
+		out = append(out, pm.enrichConnectorDefinition(d))
+	}
+	return out
 }
 
 // GetConnectors returns all connector instances
@@ -628,6 +653,33 @@ func (pm *PluginManager) GetConnectors() []*ConnectorInstance {
 	}
 
 	return connectors
+}
+
+// pluginDependsOnConnectorRef returns true if the plugin lists connectorRef as a required or optional connector instance.
+func (pm *PluginManager) pluginDependsOnConnectorRef(definition *PluginDefinition, connectorRef string) bool {
+	if definition == nil {
+		return false
+	}
+	updatedKey, okUpdated := pm.ResolveConnectorInstanceKey(connectorRef)
+	if !okUpdated {
+		updatedKey = strings.TrimSpace(connectorRef)
+	}
+	if updatedKey == "" {
+		return false
+	}
+	refs := make([]string, 0, len(definition.RequiredConnectors)+len(definition.OptionalConnectors))
+	refs = append(refs, definition.RequiredConnectors...)
+	refs = append(refs, definition.OptionalConnectors...)
+	for _, c := range refs {
+		reqKey, okReq := pm.ResolveConnectorInstanceKey(c)
+		if !okReq {
+			reqKey = strings.TrimSpace(c)
+		}
+		if reqKey != "" && reqKey == updatedKey {
+			return true
+		}
+	}
+	return false
 }
 
 // restartDependentPlugins restarts all plugins that depend on a specific connector
@@ -652,14 +704,7 @@ func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
 				continue
 			}
 
-			// Check if this plugin depends on the updated connector
-			dependsOnConnector := false
-			for _, requiredConnector := range definition.RequiredConnectors {
-				if requiredConnector == connectorID {
-					dependsOnConnector = true
-					break
-				}
-			}
+			dependsOnConnector := pm.pluginDependsOnConnectorRef(definition, connectorID)
 
 			if !dependsOnConnector {
 				continue // Skip plugins that don't depend on this connector
@@ -846,7 +891,7 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 }
 
 func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string) *PluginAPIs {
-	return &PluginAPIs{
+	apis := &PluginAPIs{
 		ServerAPI:   NewServerAPI(serverID, pm.db, pm.rconManager),
 		DatabaseAPI: NewDatabaseAPI(instanceID, pm.db),
 		RuleAPI:     NewRuleAPI(serverID, pm.db),
@@ -856,6 +901,10 @@ func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, plugin
 		DiscordAPI:  pm.getDiscordAPI(),
 		LogAPI:      NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager),
 	}
+	if pm.shouldExposeConnectorAPI(pluginID) {
+		apis.ConnectorAPI = newConnectorAPI(pm)
+	}
+	return apis
 }
 
 // Event distribution loop

@@ -14,6 +14,7 @@ func TestMissingRequiredCapabilitiesSupportsScopedPluginAPIs(t *testing.T) {
 	if missing := missingRequiredCapabilities([]string{
 		NativePluginCapabilityAPIRule,
 		NativePluginCapabilityAPIDiscord,
+		NativePluginCapabilityAPIConnector,
 		NativePluginCapabilityAPIRCON,
 	}); len(missing) != 0 {
 		t.Fatalf("missingRequiredCapabilities() = %v, want no missing capabilities", missing)
@@ -29,9 +30,10 @@ func TestNativePluginHostCapabilitiesIncludesScopedPluginAPIs(t *testing.T) {
 
 	capabilities := NativePluginHostCapabilities()
 	want := map[string]bool{
-		NativePluginCapabilityAPIDatabase: true,
-		NativePluginCapabilityAPIRule:     true,
-		NativePluginCapabilityAPIDiscord:  true,
+		NativePluginCapabilityAPIDatabase:  true,
+		NativePluginCapabilityAPIRule:      true,
+		NativePluginCapabilityAPIDiscord:   true,
+		NativePluginCapabilityAPIConnector: true,
 	}
 
 	for _, capability := range capabilities {

@@ -202,6 +202,84 @@ func (s *Server) ConnectorDelete(c *gin.Context) {
 	responses.Success(c, "Connector deleted successfully", nil)
 }
 
+// ConnectorPackageListInstalled lists globally installed native connector packages.
+func (s *Server) ConnectorPackageListInstalled(c *gin.Context) {
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+
+	packages := s.Dependencies.PluginManager.ListInstalledConnectorPackages()
+	responses.Success(c, "Installed connector packages fetched successfully", &gin.H{"connectors": packages})
+}
+
+// ConnectorPackageUpload installs a native connector package (zip) uploaded by a super admin.
+func (s *Server) ConnectorPackageUpload(c *gin.Context) {
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+
+	file, err := c.FormFile("bundle")
+	if err != nil {
+		responses.BadRequest(c, "No connector bundle provided", &gin.H{"error": err.Error()})
+		return
+	}
+
+	maxUploadSize := config.Config.Plugins.MaxUploadSize
+	if maxUploadSize <= 0 {
+		maxUploadSize = 50 * 1024 * 1024
+	}
+	if file.Size > maxUploadSize {
+		responses.BadRequest(c, "Connector bundle is too large", &gin.H{
+			"file_size": file.Size,
+			"max_size":  maxUploadSize,
+		})
+		return
+	}
+
+	openedFile, err := file.Open()
+	if err != nil {
+		responses.BadRequest(c, "Failed to open connector bundle", &gin.H{"error": err.Error()})
+		return
+	}
+	defer openedFile.Close()
+
+	pkg, err := s.Dependencies.PluginManager.InstallConnectorPackageFromBundle(c.Request.Context(), openedFile, file.Size, file.Filename)
+	if err != nil {
+		responses.BadRequest(c, "Failed to install uploaded connector bundle", &gin.H{"error": err.Error()})
+		return
+	}
+
+	message := "Connector package uploaded successfully"
+	if pkg.InstallState == plugin_manager.PluginInstallStatePendingRestart {
+		message = "Connector package uploaded successfully and will activate after restart"
+	}
+
+	responses.Success(c, message, &gin.H{"connector": pkg})
+}
+
+// ConnectorPackageInstalledDelete removes an installed native connector package.
+func (s *Server) ConnectorPackageInstalledDelete(c *gin.Context) {
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+
+	connectorID := c.Param("connectorId")
+	if connectorID == "" {
+		responses.BadRequest(c, "Connector ID is required", &gin.H{})
+		return
+	}
+
+	if err := s.Dependencies.PluginManager.DeleteInstalledConnectorPackage(c.Request.Context(), connectorID); err != nil {
+		responses.BadRequest(c, "Failed to delete installed connector package", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Connector package deleted successfully", nil)
+}
+
 // ServerPluginList returns all plugin instances for a server
 func (s *Server) ServerPluginList(c *gin.Context) {
 	if s.Dependencies.PluginManager == nil {

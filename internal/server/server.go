@@ -412,6 +412,9 @@ func NewRouter(server *Server) *gin.Engine {
 			connectorsGroup.Use(server.AuthIsSuperAdmin())
 
 			connectorsGroup.GET("/available", server.ConnectorListAvailable)
+			connectorsGroup.GET("/packages/installed", server.ConnectorPackageListInstalled)
+			connectorsGroup.POST("/packages/upload", server.ConnectorPackageUpload)
+			connectorsGroup.DELETE("/packages/installed/:connectorId", server.ConnectorPackageInstalledDelete)
 			connectorsGroup.GET("", server.ConnectorList)
 			connectorsGroup.POST("", server.ConnectorCreate)
 			connectorsGroup.PUT("/:connectorId", server.ConnectorUpdate)

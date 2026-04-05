@@ -3,6 +3,7 @@ package plugin_manager
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,6 +37,12 @@ const (
 
 const NativePluginHostAPIVersion = 1
 
+// NativeConnectorHostAPIVersion is the wire/API version for native connector packages (manifest min_host_api_version).
+const NativeConnectorHostAPIVersion = 1
+
+// ConnectorWireProtocolV1 is the JSON envelope version for ConnectorAPI.Invoke (field "v").
+const ConnectorWireProtocolV1 = "1"
+
 const (
 	NativePluginCapabilityEntrypointGetAegisPlugin = "entrypoint.get_aegis_plugin"
 	NativePluginCapabilityAPIRCON                  = "api.rcon"
@@ -44,6 +51,7 @@ const (
 	NativePluginCapabilityAPIRule                  = "api.rule"
 	NativePluginCapabilityAPIAdmin                 = "api.admin"
 	NativePluginCapabilityAPIDiscord               = "api.discord"
+	NativePluginCapabilityAPIConnector             = "api.connector"
 	NativePluginCapabilityAPIEvent                 = "api.event"
 	NativePluginCapabilityAPILog                   = "api.log"
 	NativePluginCapabilityEventsRCON               = "events.rcon"
@@ -61,6 +69,7 @@ var nativePluginHostCapabilities = []string{
 	NativePluginCapabilityAPIRule,
 	NativePluginCapabilityAPIAdmin,
 	NativePluginCapabilityAPIDiscord,
+	NativePluginCapabilityAPIConnector,
 	NativePluginCapabilityAPIEvent,
 	NativePluginCapabilityAPILog,
 	NativePluginCapabilityEventsRCON,
@@ -178,6 +187,7 @@ type PluginDefinition struct {
 	Unsafe                 bool                            `json:"unsafe"`
 	AllowMultipleInstances bool                            `json:"allow_multiple_instances"`
 	RequiredConnectors     []string                        `json:"required_connectors"`
+	OptionalConnectors     []string                        `json:"optional_connectors,omitempty"`
 	ConfigSchema           plug_config_schema.ConfigSchema `json:"config_schema"`
 	Events                 []event_manager.EventType       `json:"event_handlers"`
 	LongRunning            bool                            `json:"long_running"`
@@ -290,6 +300,30 @@ type PluginInstance struct {
 	UpdatedAt         time.Time              `json:"updated_at"`
 }
 
+// ConnectorInvokeRequest is the versioned JSON envelope plugins send to connectors via ConnectorAPI.
+type ConnectorInvokeRequest struct {
+	V    string                 `json:"v"`
+	Data map[string]interface{} `json:"data"`
+}
+
+// ConnectorInvokeResponse is returned from ConnectorAPI.Call and InvokableConnector.Invoke.
+type ConnectorInvokeResponse struct {
+	V     string                 `json:"v"`
+	OK    bool                   `json:"ok"`
+	Data  map[string]interface{} `json:"data,omitempty"`
+	Error string                 `json:"error,omitempty"`
+}
+
+// InvokableConnector is implemented by connectors that support JSON invoke (ConnectorAPI).
+type InvokableConnector interface {
+	Invoke(ctx context.Context, req *ConnectorInvokeRequest) (*ConnectorInvokeResponse, error)
+}
+
+// ConnectorAPI lets plugins call connectors by ID with a versioned JSON envelope.
+type ConnectorAPI interface {
+	Call(ctx context.Context, connectorID string, req *ConnectorInvokeRequest) (*ConnectorInvokeResponse, error)
+}
+
 // Connector represents a global service connector (Discord, Slack, etc.)
 type Connector interface {
 	// GetDefinition returns the connector definition
@@ -319,14 +353,39 @@ type Connector interface {
 
 // ConnectorDefinition defines the metadata and capabilities of a connector
 type ConnectorDefinition struct {
-	ID             string                          `json:"id"`
-	Name           string                          `json:"name"`
-	Description    string                          `json:"description"`
-	Version        string                          `json:"version"`
-	Author         string                          `json:"author"`
-	ConfigSchema   plug_config_schema.ConfigSchema `json:"config_schema"`
-	APIInterface   interface{}                     `json:"-"`
-	CreateInstance func() Connector                `json:"-"`
+	ID           string                          `json:"id"`
+	LegacyIDs    []string                        `json:"legacy_ids,omitempty"`
+	InstanceKey  string                          `json:"instance_key,omitempty"`
+	Source       PluginSource                    `json:"source"`
+	Name         string                          `json:"name"`
+	Description  string                          `json:"description"`
+	Version      string                          `json:"version"`
+	Author       string                          `json:"author"`
+	ConfigSchema plug_config_schema.ConfigSchema `json:"config_schema"`
+	APIInterface interface{}                     `json:"-"`
+	// MinHostAPIVersion is required for native connector packages (see NativeConnectorHostAPIVersion).
+	MinHostAPIVersion    int                `json:"min_host_api_version,omitempty"`
+	RequiredCapabilities []string           `json:"required_capabilities,omitempty"`
+	TargetOS             string             `json:"target_os,omitempty"`
+	TargetArch           string             `json:"target_arch,omitempty"`
+	RuntimePath          string             `json:"runtime_path,omitempty"`
+	SignatureVerified    bool               `json:"signature_verified,omitempty"`
+	Unsafe               bool               `json:"unsafe,omitempty"`
+	InstallState         PluginInstallState `json:"install_state,omitempty"`
+	Distribution         PluginDistribution `json:"distribution,omitempty"`
+	Official             bool               `json:"official,omitempty"`
+	CreateInstance       func() Connector   `json:"-"`
+}
+
+// ConnectorInstanceStorageKey returns the primary key used in the connectors table and pm.connectors.
+func (d ConnectorDefinition) ConnectorInstanceStorageKey() string {
+	if strings.TrimSpace(d.InstanceKey) != "" {
+		return strings.TrimSpace(d.InstanceKey)
+	}
+	if len(d.LegacyIDs) > 0 && strings.TrimSpace(d.LegacyIDs[0]) != "" {
+		return strings.TrimSpace(d.LegacyIDs[0])
+	}
+	return d.ID
 }
 
 // ConnectorStatus represents the current status of a connector
@@ -377,6 +436,9 @@ type PluginAPIs struct {
 
 	// Discord messaging access when the Discord connector is available
 	DiscordAPI DiscordAPI
+
+	// ConnectorAPI provides JSON invoke into connectors when exposed for this plugin instance.
+	ConnectorAPI ConnectorAPI
 
 	// Logging
 	LogAPI LogAPI
@@ -724,6 +786,9 @@ type PluginRegistry interface {
 type ConnectorRegistry interface {
 	// RegisterConnector registers a new connector definition
 	RegisterConnector(definition ConnectorDefinition) error
+
+	// UnregisterConnector removes a connector definition by canonical ID and its aliases
+	UnregisterConnector(canonicalID string)
 
 	// GetConnector returns a connector definition by ID
 	GetConnector(connectorID string) (*ConnectorDefinition, error)

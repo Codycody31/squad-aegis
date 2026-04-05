@@ -9,6 +9,9 @@ import (
 const NativePluginEntrySymbol = "GetAegisPlugin"
 const NativePluginHostAPIVersion = plugin_manager.NativePluginHostAPIVersion
 
+// ConnectorWireProtocolV1 is the JSON "v" field for ConnectorAPI.Call requests.
+const ConnectorWireProtocolV1 = plugin_manager.ConnectorWireProtocolV1
+
 const (
 	NativePluginCapabilityEntrypointGetAegisPlugin = plugin_manager.NativePluginCapabilityEntrypointGetAegisPlugin
 	NativePluginCapabilityAPIRCON                  = plugin_manager.NativePluginCapabilityAPIRCON
@@ -17,6 +20,7 @@ const (
 	NativePluginCapabilityAPIRule                  = plugin_manager.NativePluginCapabilityAPIRule
 	NativePluginCapabilityAPIAdmin                 = plugin_manager.NativePluginCapabilityAPIAdmin
 	NativePluginCapabilityAPIDiscord               = plugin_manager.NativePluginCapabilityAPIDiscord
+	NativePluginCapabilityAPIConnector             = plugin_manager.NativePluginCapabilityAPIConnector
 	NativePluginCapabilityAPIEvent                 = plugin_manager.NativePluginCapabilityAPIEvent
 	NativePluginCapabilityAPILog                   = plugin_manager.NativePluginCapabilityAPILog
 	NativePluginCapabilityEventsRCON               = plugin_manager.NativePluginCapabilityEventsRCON
@@ -54,6 +58,9 @@ type RconAPI = plugin_manager.RconAPI
 type AdminAPI = plugin_manager.AdminAPI
 type EventAPI = plugin_manager.EventAPI
 type DiscordAPI = plugin_manager.DiscordAPI
+type ConnectorAPI = plugin_manager.ConnectorAPI
+type ConnectorInvokeRequest = plugin_manager.ConnectorInvokeRequest
+type ConnectorInvokeResponse = plugin_manager.ConnectorInvokeResponse
 type LogAPI = plugin_manager.LogAPI
 
 type ServerInfo = plugin_manager.ServerInfo
