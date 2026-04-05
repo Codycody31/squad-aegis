@@ -202,7 +202,7 @@ func (s *Server) ConnectorDelete(c *gin.Context) {
 	responses.Success(c, "Connector deleted successfully", nil)
 }
 
-// ConnectorPackageListInstalled lists globally installed sideloaded connector packages (native .so or WASM).
+// ConnectorPackageListInstalled lists globally installed sideloaded connector packages (native .so).
 func (s *Server) ConnectorPackageListInstalled(c *gin.Context) {
 	if s.Dependencies.PluginManager == nil {
 		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
@@ -213,7 +213,7 @@ func (s *Server) ConnectorPackageListInstalled(c *gin.Context) {
 	responses.Success(c, "Installed connector packages fetched successfully", &gin.H{"connectors": packages})
 }
 
-// ConnectorPackageUpload installs a sideloaded connector package (zip: manifest + .so or WASM) uploaded by a super admin.
+// ConnectorPackageUpload installs a sideloaded connector package (zip: manifest + .so) uploaded by a super admin.
 func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 	if s.Dependencies.PluginManager == nil {
 		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)

@@ -46,13 +46,9 @@ func (r *pluginRegistry) RegisterPlugin(definition PluginDefinition) error {
 	if definition.Source == PluginSourceNative && definition.InstallState == "" {
 		definition.InstallState = PluginInstallStateReady
 	}
-	if definition.Source == PluginSourceWasm && definition.InstallState == "" {
-		definition.InstallState = PluginInstallStateReady
-	}
 
 	existing, exists := r.plugins[definition.ID]
-	if exists && !((existing.Source == PluginSourceNative && definition.Source == PluginSourceNative) ||
-		(existing.Source == PluginSourceWasm && definition.Source == PluginSourceWasm)) {
+	if exists && !(existing.Source == PluginSourceNative && definition.Source == PluginSourceNative) {
 		return fmt.Errorf("plugin %s is already registered", definition.ID)
 	}
 
@@ -176,8 +172,7 @@ func (r *connectorRegistry) RegisterConnector(definition ConnectorDefinition) er
 
 	if existing, exists := r.connectors[canonical]; exists {
 		sameNative := existing.Source == PluginSourceNative && definition.Source == PluginSourceNative
-		sameWasm := existing.Source == PluginSourceWasm && definition.Source == PluginSourceWasm
-		if !(sameNative || sameWasm) {
+		if !sameNative {
 			return fmt.Errorf("connector %s is already registered", canonical)
 		}
 		r.removeConnectorAliasesLocked(canonical)
@@ -196,9 +191,6 @@ func (r *connectorRegistry) RegisterConnector(definition ConnectorDefinition) er
 		}
 	}
 	if definition.Source == PluginSourceNative && definition.InstallState == "" {
-		definition.InstallState = PluginInstallStateReady
-	}
-	if definition.Source == PluginSourceWasm && definition.InstallState == "" {
 		definition.InstallState = PluginInstallStateReady
 	}
 

@@ -29,7 +29,7 @@ func (pm *PluginManager) shouldExposeConnectorAPI(pluginID string) bool {
 		return false
 	}
 	enriched := pm.enrichPluginDefinition(*definition)
-	if enriched.Source != PluginSourceNative && enriched.Source != PluginSourceWasm {
+	if enriched.Source != PluginSourceNative {
 		return true
 	}
 	for _, capability := range enriched.RequiredCapabilities {

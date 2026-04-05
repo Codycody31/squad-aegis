@@ -26,7 +26,6 @@ require (
 	github.com/pkg/sftp v1.13.9
 	github.com/rs/zerolog v1.33.0
 	github.com/samber/oops v1.19.0
-	github.com/tetratelabs/wazero v1.8.2
 	github.com/uptrace/go-clickhouse v0.3.1
 	github.com/valkey-io/valkey-go v1.0.64
 	github.com/yuin/gopher-lua v1.1.1

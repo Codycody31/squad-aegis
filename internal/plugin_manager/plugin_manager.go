@@ -217,7 +217,7 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 		return nil, fmt.Errorf("plugin not found: %w", err)
 	}
 	enrichedDefinition := pm.enrichPluginDefinition(*definition)
-	if (enrichedDefinition.Source == PluginSourceNative || enrichedDefinition.Source == PluginSourceWasm) &&
+	if enrichedDefinition.Source == PluginSourceNative &&
 		enrichedDefinition.InstallState != PluginInstallStateReady {
 		return nil, fmt.Errorf("plugin %s is not ready to be enabled (state=%s)", pluginID, enrichedDefinition.InstallState)
 	}
@@ -615,7 +615,7 @@ func (pm *PluginManager) ListAvailablePlugins() []PluginDefinition {
 
 	for _, definition := range definitions {
 		enriched := pm.enrichPluginDefinition(definition)
-		if (enriched.Source == PluginSourceNative || enriched.Source == PluginSourceWasm) &&
+		if enriched.Source == PluginSourceNative &&
 			enriched.InstallState != PluginInstallStateReady {
 			continue
 		}
@@ -796,7 +796,7 @@ func (pm *PluginManager) ensurePluginInstanceRuntime(instance *PluginInstance) e
 
 	enrichedDefinition := pm.enrichPluginDefinition(*definition)
 	pm.applyPluginDefinitionMetadata(instance, enrichedDefinition)
-	if (enrichedDefinition.Source == PluginSourceNative || enrichedDefinition.Source == PluginSourceWasm) &&
+	if enrichedDefinition.Source == PluginSourceNative &&
 		enrichedDefinition.InstallState != PluginInstallStateReady &&
 		enrichedDefinition.InstallState != PluginInstallStatePendingRestart {
 		return fmt.Errorf("plugin %s is not ready to be enabled (state=%s)", instance.PluginID, enrichedDefinition.InstallState)
