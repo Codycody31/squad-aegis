@@ -449,6 +449,35 @@ func (pm *PluginManager) removeNativePackage(pluginID string) {
 	defer pm.nativeMu.Unlock()
 
 	delete(pm.nativePackages, pluginID)
+	delete(pm.loadedNativePlugins, pluginID)
+}
+
+func (pm *PluginManager) unregisterNativePlugin(pluginID string) {
+	if pm.registry != nil {
+		if definition, err := pm.registry.GetPlugin(pluginID); err == nil && definition.Source == PluginSourceNative {
+			pm.registry.UnregisterPlugin(pluginID)
+		}
+	}
+
+	pm.nativeMu.Lock()
+	defer pm.nativeMu.Unlock()
+
+	delete(pm.loadedNativePlugins, pluginID)
+}
+
+func (pm *PluginManager) resetNativeRuntimeState() {
+	if pm.registry != nil {
+		for _, definition := range pm.registry.ListPlugins() {
+			if definition.Source == PluginSourceNative {
+				pm.registry.UnregisterPlugin(definition.ID)
+			}
+		}
+	}
+
+	pm.nativeMu.Lock()
+	defer pm.nativeMu.Unlock()
+
+	pm.loadedNativePlugins = make(map[string]string)
 }
 
 func (pm *PluginManager) loadInstalledPluginPackages() error {
@@ -524,6 +553,8 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 
 		loadedPackages[pkg.PluginID] = &pkg
 	}
+
+	pm.resetNativeRuntimeState()
 
 	pm.nativeMu.Lock()
 	pm.nativePackages = loadedPackages
@@ -680,12 +711,13 @@ func (pm *PluginManager) enrichPluginDefinition(definition PluginDefinition) Plu
 				definition.Description = pkg.Description
 			}
 		} else {
-			if definition.InstallState == "" {
-				definition.InstallState = PluginInstallStateNotInstalled
-			}
+			definition.InstallState = PluginInstallStateNotInstalled
 			if definition.Distribution == "" {
 				definition.Distribution = PluginDistributionSideload
 			}
+			definition.RuntimePath = ""
+			definition.SignatureVerified = false
+			definition.Unsafe = false
 		}
 	}
 
@@ -913,6 +945,7 @@ func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, plugi
 		return err
 	}
 
+	pm.unregisterNativePlugin(pluginID)
 	pm.removeNativePackage(pluginID)
 
 	if pkg.RuntimePath != "" {

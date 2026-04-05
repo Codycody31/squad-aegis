@@ -707,6 +707,9 @@ type PluginRegistry interface {
 	// RegisterPlugin registers a new plugin definition
 	RegisterPlugin(definition PluginDefinition) error
 
+	// UnregisterPlugin removes a plugin definition by ID
+	UnregisterPlugin(pluginID string)
+
 	// GetPlugin returns a plugin definition by ID
 	GetPlugin(pluginID string) (*PluginDefinition, error)
 

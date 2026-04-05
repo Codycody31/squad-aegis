@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"os"
 	"runtime"
 	"strings"
@@ -517,6 +518,69 @@ func TestDeleteInstalledPluginPackageRejectsConfiguredInstances(t *testing.T) {
 	}
 }
 
+func TestDeleteInstalledPluginPackageUnregistersNativeRuntime(t *testing.T) {
+	t.Parallel()
+
+	db := openTestSQLDB(t, &testSQLDriver{
+		queryContext: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
+			if !strings.Contains(query, "SELECT EXISTS") {
+				return nil, fmt.Errorf("unexpected query: %s", query)
+			}
+
+			return &testSQLRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{false}},
+			}, nil
+		},
+		execContext: func(query string, _ []driver.NamedValue) (driver.Result, error) {
+			if !strings.Contains(query, "DELETE FROM plugin_packages") {
+				return nil, fmt.Errorf("unexpected exec: %s", query)
+			}
+
+			return driver.RowsAffected(1), nil
+		},
+	})
+
+	registry := NewPluginRegistry()
+	if err := registry.RegisterPlugin(PluginDefinition{
+		ID:             "com.example.plugin",
+		Name:           "Native Plugin",
+		Source:         PluginSourceNative,
+		InstallState:   PluginInstallStateReady,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("registry.RegisterPlugin() error = %v", err)
+	}
+
+	pm := &PluginManager{
+		db:       db,
+		registry: registry,
+		nativePackages: map[string]*InstalledPluginPackage{
+			"com.example.plugin": {
+				PluginID:     "com.example.plugin",
+				Source:       PluginSourceNative,
+				InstallState: PluginInstallStateReady,
+			},
+		},
+		loadedNativePlugins: map[string]string{
+			"com.example.plugin": "1.0.0",
+		},
+	}
+
+	if err := pm.DeleteInstalledPluginPackage(context.Background(), "com.example.plugin"); err != nil {
+		t.Fatalf("DeleteInstalledPluginPackage() error = %v", err)
+	}
+	if pkg := pm.getNativePackage("com.example.plugin"); pkg != nil {
+		t.Fatalf("getNativePackage() = %#v, want nil", pkg)
+	}
+	if _, ok := pm.getLoadedNativePluginVersion("com.example.plugin"); ok {
+		t.Fatal("getLoadedNativePluginVersion() ok = true, want false")
+	}
+	if _, err := pm.registry.GetPlugin("com.example.plugin"); err == nil {
+		t.Fatal("registry.GetPlugin() error = nil, want plugin to be unregistered")
+	}
+}
+
 func TestReadPluginBundleRejectsUnsafePath(t *testing.T) {
 	t.Parallel()
 
@@ -762,6 +826,70 @@ func TestLoadInstalledPluginPackagesDoesNotRequireCreatingRuntimeDir(t *testing.
 	}
 	if len(pm.ListInstalledPluginPackages()) != 0 {
 		t.Fatalf("len(ListInstalledPluginPackages()) = %d, want 0", len(pm.ListInstalledPluginPackages()))
+	}
+}
+
+func TestLoadInstalledPluginPackagesClearsStaleNativeRuntimeState(t *testing.T) {
+	t.Parallel()
+
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = t.TempDir()
+	})
+
+	db := openTestSQLDB(t, &testSQLDriver{
+		queryContext: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
+			if !strings.Contains(query, "FROM plugin_packages") {
+				return nil, fmt.Errorf("unexpected query: %s", query)
+			}
+
+			return &testSQLRows{
+				columns: []string{
+					"plugin_id", "name", "description", "version", "source", "distribution", "official", "install_state",
+					"runtime_path", "manifest_json", "signature_verified", "unsafe", "checksum", "min_host_api_version",
+					"required_capabilities", "target_os", "target_arch", "last_error", "created_at", "updated_at",
+				},
+			}, nil
+		},
+	})
+
+	registry := NewPluginRegistry()
+	if err := registry.RegisterPlugin(PluginDefinition{
+		ID:             "com.example.plugin",
+		Name:           "Native Plugin",
+		Source:         PluginSourceNative,
+		InstallState:   PluginInstallStateReady,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("registry.RegisterPlugin() error = %v", err)
+	}
+
+	pm := &PluginManager{
+		db:       db,
+		registry: registry,
+		nativePackages: map[string]*InstalledPluginPackage{
+			"com.example.plugin": {
+				PluginID:     "com.example.plugin",
+				Source:       PluginSourceNative,
+				InstallState: PluginInstallStateReady,
+			},
+		},
+		loadedNativePlugins: map[string]string{
+			"com.example.plugin": "1.0.0",
+		},
+	}
+
+	if err := pm.loadInstalledPluginPackages(); err != nil {
+		t.Fatalf("loadInstalledPluginPackages() error = %v", err)
+	}
+	if pkg := pm.getNativePackage("com.example.plugin"); pkg != nil {
+		t.Fatalf("getNativePackage() = %#v, want nil", pkg)
+	}
+	if _, ok := pm.getLoadedNativePluginVersion("com.example.plugin"); ok {
+		t.Fatal("getLoadedNativePluginVersion() ok = true, want false")
+	}
+	if _, err := pm.registry.GetPlugin("com.example.plugin"); err == nil {
+		t.Fatal("registry.GetPlugin() error = nil, want stale native runtime to be cleared")
 	}
 }
 

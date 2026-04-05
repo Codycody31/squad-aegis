@@ -55,6 +55,13 @@ func (r *pluginRegistry) RegisterPlugin(definition PluginDefinition) error {
 	return nil
 }
 
+func (r *pluginRegistry) UnregisterPlugin(pluginID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	delete(r.plugins, pluginID)
+}
+
 func (r *pluginRegistry) GetPlugin(pluginID string) (*PluginDefinition, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

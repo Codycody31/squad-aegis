@@ -747,7 +747,13 @@ func (pm *PluginManager) ensurePluginInstanceRuntime(instance *PluginInstance) e
 		return fmt.Errorf("plugin definition unavailable: %w", err)
 	}
 
-	pm.applyPluginDefinitionMetadata(instance, pm.enrichPluginDefinition(*definition))
+	enrichedDefinition := pm.enrichPluginDefinition(*definition)
+	pm.applyPluginDefinitionMetadata(instance, enrichedDefinition)
+	if enrichedDefinition.Source == PluginSourceNative &&
+		enrichedDefinition.InstallState != PluginInstallStateReady &&
+		enrichedDefinition.InstallState != PluginInstallStatePendingRestart {
+		return fmt.Errorf("plugin %s is not ready to be enabled (state=%s)", instance.PluginID, enrichedDefinition.InstallState)
+	}
 
 	plugin, err := pm.registry.CreatePluginInstance(instance.PluginID)
 	if err != nil {
