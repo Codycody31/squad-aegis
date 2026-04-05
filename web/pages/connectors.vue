@@ -111,7 +111,6 @@ const getPackageStateVariant = (state: string) => {
 
 const getConnectorSourceLabel = (pkg: ConnectorPackage) => {
   if (pkg.source === "bundled") return "Bundled";
-  if (pkg.source === "wasm") return "Sideload WASM";
   return "Sideload Native";
 };
 
@@ -591,17 +590,15 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Sideloaded connector packages (.so or WASM, same idea as sudo plugin packages) -->
+    <!-- Sideloaded connector packages (.so) -->
     <Card class="mb-4 sm:mb-6">
       <CardHeader class="pb-2 sm:pb-3">
         <CardTitle class="text-base sm:text-lg">Sideloaded connector packages</CardTitle>
         <CardDescription class="text-xs sm:text-sm">
           Upload a signed <code class="rounded bg-muted px-1 text-xs">.zip</code> with
           <code class="rounded bg-muted px-1 text-xs">manifest.json</code> and either a Linux
-          <code class="rounded bg-muted px-1 text-xs">.so</code> (entry
-          <code class="rounded bg-muted px-1 text-xs">GetAegisConnector</code>) or a WASM
-          <code class="rounded bg-muted px-1 text-xs">.wasm</code> package (<code class="rounded bg-muted px-1 text-xs">kind: wasm</code>,
-          wasm/wasm target). Then add a connector instance above if the connector needs config.
+          <code class="rounded bg-muted px-1 text-xs">.so</code> package with entry
+          <code class="rounded bg-muted px-1 text-xs">GetAegisConnector</code>. Then add a connector instance above if the connector needs config.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
@@ -669,7 +666,7 @@ onMounted(async () => {
                 </TableCell>
                 <TableCell class="text-right">
                   <Button
-                    v-if="pkg.source === 'native' || pkg.source === 'wasm'"
+                    v-if="pkg.source === 'native'"
                     size="sm"
                     variant="destructive"
                     @click="deleteConnectorPackage(pkg)"

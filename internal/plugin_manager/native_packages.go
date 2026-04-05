@@ -453,17 +453,21 @@ func (pm *PluginManager) removeNativePackage(pluginID string) {
 }
 
 func (pm *PluginManager) unregisterNativePlugin(pluginID string) {
+	pm.unregisterNativePluginDefinition(pluginID)
+
+	pm.nativeMu.Lock()
+	defer pm.nativeMu.Unlock()
+
+	delete(pm.loadedNativePlugins, pluginID)
+}
+
+func (pm *PluginManager) unregisterNativePluginDefinition(pluginID string) {
 	if pm.registry != nil {
 		if definition, err := pm.registry.GetPlugin(pluginID); err == nil &&
 			definition.Source == PluginSourceNative {
 			pm.registry.UnregisterPlugin(pluginID)
 		}
 	}
-
-	pm.nativeMu.Lock()
-	defer pm.nativeMu.Unlock()
-
-	delete(pm.loadedNativePlugins, pluginID)
 }
 
 func (pm *PluginManager) resetNativeRuntimeState() {
@@ -950,8 +954,19 @@ func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, plugi
 		return err
 	}
 
-	pm.unregisterNativePlugin(pluginID)
-	pm.removeNativePackage(pluginID)
+	if _, loaded := pm.getLoadedNativePluginVersion(pluginID); loaded {
+		pm.unregisterNativePluginDefinition(pluginID)
+		pkg.InstallState = PluginInstallStatePendingRestart
+		pkg.LastError = "Restart Aegis to finish removing the plugin package"
+		pkg.UpdatedAt = time.Now()
+		// Force a replacement upload to be re-persisted even if the bytes match the
+		// just-deleted package, because the DB row is already gone.
+		pkg.Checksum = ""
+		pm.setNativePackage(pkg)
+	} else {
+		pm.unregisterNativePlugin(pluginID)
+		pm.removeNativePackage(pluginID)
+	}
 
 	if pkg.RuntimePath != "" {
 		if err := os.Remove(pkg.RuntimePath); err != nil && !os.IsNotExist(err) {

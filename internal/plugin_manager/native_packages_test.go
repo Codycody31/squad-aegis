@@ -518,7 +518,7 @@ func TestDeleteInstalledPluginPackageRejectsConfiguredInstances(t *testing.T) {
 	}
 }
 
-func TestDeleteInstalledPluginPackageUnregistersNativeRuntime(t *testing.T) {
+func TestDeleteInstalledPluginPackageUnregistersUnloadedNativeRuntime(t *testing.T) {
 	t.Parallel()
 
 	db := openTestSQLDB(t, &testSQLDriver{
@@ -562,9 +562,7 @@ func TestDeleteInstalledPluginPackageUnregistersNativeRuntime(t *testing.T) {
 				InstallState: PluginInstallStateReady,
 			},
 		},
-		loadedNativePlugins: map[string]string{
-			"com.example.plugin": "1.0.0",
-		},
+		loadedNativePlugins: make(map[string]string),
 	}
 
 	if err := pm.DeleteInstalledPluginPackage(context.Background(), "com.example.plugin"); err != nil {
@@ -578,6 +576,167 @@ func TestDeleteInstalledPluginPackageUnregistersNativeRuntime(t *testing.T) {
 	}
 	if _, err := pm.registry.GetPlugin("com.example.plugin"); err == nil {
 		t.Fatal("registry.GetPlugin() error = nil, want plugin to be unregistered")
+	}
+}
+
+func TestDeleteInstalledPluginPackageKeepsLoadedPackagePendingRestart(t *testing.T) {
+	t.Parallel()
+
+	db := openTestSQLDB(t, &testSQLDriver{
+		queryContext: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
+			if !strings.Contains(query, "SELECT EXISTS") {
+				return nil, fmt.Errorf("unexpected query: %s", query)
+			}
+
+			return &testSQLRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{false}},
+			}, nil
+		},
+		execContext: func(query string, _ []driver.NamedValue) (driver.Result, error) {
+			if !strings.Contains(query, "DELETE FROM plugin_packages") {
+				return nil, fmt.Errorf("unexpected exec: %s", query)
+			}
+
+			return driver.RowsAffected(1), nil
+		},
+	})
+
+	registry := NewPluginRegistry()
+	if err := registry.RegisterPlugin(PluginDefinition{
+		ID:             "com.example.plugin",
+		Name:           "Native Plugin",
+		Source:         PluginSourceNative,
+		InstallState:   PluginInstallStateReady,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("registry.RegisterPlugin() error = %v", err)
+	}
+
+	pm := &PluginManager{
+		db:       db,
+		registry: registry,
+		nativePackages: map[string]*InstalledPluginPackage{
+			"com.example.plugin": {
+				PluginID:     "com.example.plugin",
+				Source:       PluginSourceNative,
+				Distribution: PluginDistributionSideload,
+				InstallState: PluginInstallStateReady,
+				Checksum:     "checksum",
+			},
+		},
+		loadedNativePlugins: map[string]string{
+			"com.example.plugin": "1.0.0",
+		},
+	}
+
+	if err := pm.DeleteInstalledPluginPackage(context.Background(), "com.example.plugin"); err != nil {
+		t.Fatalf("DeleteInstalledPluginPackage() error = %v", err)
+	}
+
+	pkg := pm.getNativePackage("com.example.plugin")
+	if pkg == nil {
+		t.Fatal("getNativePackage() = nil, want pending-restart tombstone")
+	}
+	if got, want := pkg.InstallState, PluginInstallStatePendingRestart; got != want {
+		t.Fatalf("pkg.InstallState = %q, want %q", got, want)
+	}
+	if got, want := pkg.LastError, "Restart Aegis to finish removing the plugin package"; got != want {
+		t.Fatalf("pkg.LastError = %q, want %q", got, want)
+	}
+	if got := pkg.Checksum; got != "" {
+		t.Fatalf("pkg.Checksum = %q, want empty string", got)
+	}
+	if loadedVersion, ok := pm.getLoadedNativePluginVersion("com.example.plugin"); !ok || loadedVersion != "1.0.0" {
+		t.Fatalf("getLoadedNativePluginVersion() = (%q, %t), want (1.0.0, true)", loadedVersion, ok)
+	}
+	if _, err := pm.registry.GetPlugin("com.example.plugin"); err == nil {
+		t.Fatal("registry.GetPlugin() error = nil, want plugin definition to be unregistered")
+	}
+}
+
+func TestInstallPluginBundlePersistsReplacementAfterDeletingLoadedPackage(t *testing.T) {
+	requireLinuxNativePlugins(t)
+
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = t.TempDir()
+		cfg.Plugins.AllowUnsafeSideload = true
+	})
+
+	var insertCalls int
+	db := openTestSQLDB(t, &testSQLDriver{
+		queryContext: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
+			if !strings.Contains(query, "SELECT EXISTS") {
+				return nil, fmt.Errorf("unexpected query: %s", query)
+			}
+
+			return &testSQLRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{false}},
+			}, nil
+		},
+		execContext: func(query string, args []driver.NamedValue) (driver.Result, error) {
+			switch {
+			case strings.Contains(query, "DELETE FROM plugin_packages"):
+				return driver.RowsAffected(1), nil
+			case strings.Contains(query, "INSERT INTO plugin_packages"):
+				insertCalls++
+				if got, want := fmt.Sprint(args[7].Value), string(PluginInstallStatePendingRestart); got != want {
+					t.Fatalf("persisted install state = %q, want %q", got, want)
+				}
+				return driver.RowsAffected(1), nil
+			default:
+				return nil, fmt.Errorf("unexpected exec: %s", query)
+			}
+		},
+	})
+
+	registry := NewPluginRegistry()
+	if err := registry.RegisterPlugin(PluginDefinition{
+		ID:             "com.example.plugin",
+		Name:           "Native Plugin",
+		Source:         PluginSourceNative,
+		InstallState:   PluginInstallStateReady,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("registry.RegisterPlugin() error = %v", err)
+	}
+
+	pm := &PluginManager{
+		db:       db,
+		registry: registry,
+		nativePackages: map[string]*InstalledPluginPackage{
+			"com.example.plugin": {
+				PluginID:     "com.example.plugin",
+				Source:       PluginSourceNative,
+				Distribution: PluginDistributionSideload,
+				InstallState: PluginInstallStateReady,
+				RuntimePath:  "/tmp/com.example.plugin.so",
+				Checksum:     "old-checksum",
+			},
+		},
+		loadedNativePlugins: map[string]string{
+			"com.example.plugin": "1.0.0",
+		},
+	}
+
+	if err := pm.DeleteInstalledPluginPackage(context.Background(), "com.example.plugin"); err != nil {
+		t.Fatalf("DeleteInstalledPluginPackage() error = %v", err)
+	}
+
+	manifest := testManifest("com.example.plugin")
+	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), []byte("replacement-so"), nil, nil)
+
+	pkg, err := pm.installPluginBundle(context.Background(), bytes.NewReader(archive), int64(len(archive)), "replacement.zip", PluginDistributionSideload)
+	if err != nil {
+		t.Fatalf("installPluginBundle() error = %v", err)
+	}
+	if got, want := pkg.InstallState, PluginInstallStatePendingRestart; got != want {
+		t.Fatalf("pkg.InstallState = %q, want %q", got, want)
+	}
+	if insertCalls != 1 {
+		t.Fatalf("insertCalls = %d, want 1", insertCalls)
 	}
 }
 

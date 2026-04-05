@@ -34,24 +34,24 @@ type ConnectorPackageManifest struct {
 	EntrySymbol string                `json:"entry_symbol"`
 	Targets     []PluginPackageTarget `json:"targets"`
 
-	Author         string                          `json:"author,omitempty"`
-	InstanceKey    string                          `json:"instance_key,omitempty"`
-	LegacyIDs      []string                        `json:"legacy_ids,omitempty"`
-	ConfigSchema   plug_config_schema.ConfigSchema `json:"config_schema,omitempty"`
+	Author       string                          `json:"author,omitempty"`
+	InstanceKey  string                          `json:"instance_key,omitempty"`
+	LegacyIDs    []string                        `json:"legacy_ids,omitempty"`
+	ConfigSchema plug_config_schema.ConfigSchema `json:"config_schema,omitempty"`
 }
 
 func (m ConnectorPackageManifest) asPluginManifest() PluginPackageManifest {
 	return PluginPackageManifest{
-		PluginID:        m.ConnectorID,
-		Name:            m.Name,
-		Description:     m.Description,
-		Version:         m.Version,
-		Official:        m.Official,
-		License:         m.License,
-		EntrySymbol:     m.EntrySymbol,
-		Targets:         m.Targets,
-		Author:          m.Author,
-		ConfigSchema:    m.ConfigSchema,
+		PluginID:     m.ConnectorID,
+		Name:         m.Name,
+		Description:  m.Description,
+		Version:      m.Version,
+		Official:     m.Official,
+		License:      m.License,
+		EntrySymbol:  m.EntrySymbol,
+		Targets:      m.Targets,
+		Author:       m.Author,
+		ConfigSchema: m.ConfigSchema,
 	}
 }
 
@@ -85,6 +85,39 @@ func applyInstalledConnectorTarget(pkg *InstalledConnectorPackage, target Plugin
 	pkg.RequiredCapabilities = cloneRequiredCapabilities(target.RequiredCapabilities)
 	pkg.TargetOS = target.TargetOS
 	pkg.TargetArch = target.TargetArch
+}
+
+func connectorInstanceKeysForPackage(pkg *InstalledConnectorPackage) []string {
+	if pkg == nil {
+		return nil
+	}
+
+	keys := make([]string, 0, 2+len(pkg.Manifest.LegacyIDs))
+	seen := make(map[string]struct{}, 2+len(pkg.Manifest.LegacyIDs))
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, exists := seen[value]; exists {
+			return
+		}
+		seen[value] = struct{}{}
+		keys = append(keys, value)
+	}
+
+	definition := ConnectorDefinition{
+		ID:          pkg.ConnectorID,
+		InstanceKey: pkg.Manifest.InstanceKey,
+		LegacyIDs:   pkg.Manifest.LegacyIDs,
+	}
+	add(definition.ConnectorInstanceStorageKey())
+	add(pkg.ConnectorID)
+	for _, legacyID := range pkg.Manifest.LegacyIDs {
+		add(legacyID)
+	}
+
+	return keys
 }
 
 func selectedConnectorManifestTarget(manifest ConnectorPackageManifest) (PluginPackageTarget, error) {
@@ -312,6 +345,52 @@ func (pm *PluginManager) getLoadedNativeConnectorVersion(connectorID string) (st
 	defer pm.nativeMu.RUnlock()
 	v, ok := pm.loadedNativeConnectors[connectorID]
 	return v, ok
+}
+
+func (pm *PluginManager) hasConnectorInstances(ctx context.Context, instanceKeys []string) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(instanceKeys) == 0 {
+		return false, nil
+	}
+
+	if pm.db != nil {
+		args := make([]interface{}, len(instanceKeys))
+		placeholders := make([]string, len(instanceKeys))
+		for i, instanceKey := range instanceKeys {
+			args[i] = instanceKey
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+		}
+
+		query := fmt.Sprintf(`
+			SELECT EXISTS (
+				SELECT 1
+				FROM connectors
+				WHERE id IN (%s)
+			)
+		`, strings.Join(placeholders, ", "))
+
+		var exists bool
+		err := pm.db.QueryRowContext(ctx, query, args...).Scan(&exists)
+		if err != nil {
+			return false, fmt.Errorf("failed to check configured connector instances for %s: %w", strings.Join(instanceKeys, ", "), err)
+		}
+		if exists {
+			return true, nil
+		}
+	}
+
+	pm.connectorMu.RLock()
+	defer pm.connectorMu.RUnlock()
+
+	for _, instanceKey := range instanceKeys {
+		if _, exists := pm.connectors[instanceKey]; exists {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (pm *PluginManager) loadInstalledConnectorPackages() error {
@@ -736,22 +815,20 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 
 // DeleteInstalledConnectorPackage removes a native connector package from disk and registry.
 func (pm *PluginManager) DeleteInstalledConnectorPackage(ctx context.Context, connectorID string) error {
-	_ = ctx
 	pkg := pm.getNativeConnectorPackage(connectorID)
 	if pkg == nil {
 		return fmt.Errorf("connector package %s not found", connectorID)
 	}
 
-	storageKey := connectorID
-	if def, err := pm.connectorRegistry.GetConnector(connectorID); err == nil {
-		storageKey = def.ConnectorInstanceStorageKey()
-	}
-
-	pm.connectorMu.RLock()
-	_, hasInstance := pm.connectors[storageKey]
-	pm.connectorMu.RUnlock()
-	if hasInstance {
-		return fmt.Errorf("connector %s still has a running instance; delete the instance first", storageKey)
+	instanceKeys := connectorInstanceKeysForPackage(pkg)
+	if hasInstances, err := pm.hasConnectorInstances(ctx, instanceKeys); err != nil {
+		return err
+	} else if hasInstances {
+		instanceKey := connectorID
+		if len(instanceKeys) > 0 {
+			instanceKey = instanceKeys[0]
+		}
+		return fmt.Errorf("connector %s still has configured instances; delete the instance first", instanceKey)
 	}
 
 	if err := pm.deleteConnectorPackageFromDatabase(connectorID); err != nil {
