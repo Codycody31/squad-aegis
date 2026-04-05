@@ -8,12 +8,13 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/rs/zerolog/log"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
 
-// WASM connector guest ABI v1 (sideloaded connector packages):
-//   - Imports: none required for invoke-only v1 guests.
+// WASM connector guest ABI (sideloaded connector packages). See docs/wasm-guest-abi.md.
+//   - Optional import: aegis_host_v1.log when manifest required_capabilities includes api.log.
 //   - Exports: memory; aegis_init(config_ptr, config_len) -> i32; aegis_start() -> i32; aegis_stop() -> i32;
 //     aegis_invoke(req_ptr, req_len, out_ptr, out_cap, out_written_ptr) -> i32.
 //     The request is ConnectorInvokeRequest JSON. On success the guest writes ConnectorInvokeResponse JSON to out_ptr
@@ -32,15 +33,75 @@ type wasmConnector struct {
 	compiled wazero.CompiledModule
 	instance api.Module
 
+	logAPI LogAPI
 	config map[string]interface{}
 	status ConnectorStatus
 }
 
+func connectorDefinitionHasCapability(def ConnectorDefinition, capability string) bool {
+	return pluginDefinitionHasCapability(PluginDefinition{RequiredCapabilities: def.RequiredCapabilities}, capability)
+}
+
+type connectorWasmLog struct {
+	connectorID string
+}
+
+func newConnectorWasmLog(connectorID string) *connectorWasmLog {
+	return &connectorWasmLog{connectorID: strings.TrimSpace(connectorID)}
+}
+
+func (l *connectorWasmLog) Info(message string, fields map[string]interface{}) {
+	log.Info().Str("wasm_connector", l.connectorID).Interface("fields", fields).Msg(message)
+}
+
+func (l *connectorWasmLog) Warn(message string, fields map[string]interface{}) {
+	log.Warn().Str("wasm_connector", l.connectorID).Interface("fields", fields).Msg(message)
+}
+
+func (l *connectorWasmLog) Error(message string, err error, fields map[string]interface{}) {
+	ev := log.Error().Str("wasm_connector", l.connectorID).Interface("fields", fields)
+	if err != nil {
+		ev = ev.Err(err)
+	}
+	ev.Msg(message)
+}
+
+func (l *connectorWasmLog) Debug(message string, fields map[string]interface{}) {
+	log.Debug().Str("wasm_connector", l.connectorID).Interface("fields", fields).Msg(message)
+}
+
 func newWasmConnector(def ConnectorDefinition, wasmPath string) *wasmConnector {
-	return &wasmConnector{
+	c := &wasmConnector{
 		def:      def,
 		wasmPath: wasmPath,
 		status:   ConnectorStatusStopped,
+	}
+	if connectorDefinitionHasCapability(def, NativePluginCapabilityAPILog) {
+		c.logAPI = newConnectorWasmLog(def.ID)
+	}
+	return c
+}
+
+func (c *wasmConnector) hostLog(ctx context.Context, m api.Module, level, ptr, length uint32) {
+	_ = ctx
+	mem := m.Memory()
+	if mem == nil || c.logAPI == nil {
+		return
+	}
+	b, ok := mem.Read(ptr, length)
+	if !ok {
+		return
+	}
+	msg := string(b)
+	switch level {
+	case 0:
+		c.logAPI.Info(msg, nil)
+	case 1:
+		c.logAPI.Warn(msg, nil)
+	case 2:
+		c.logAPI.Error(msg, nil, nil)
+	default:
+		c.logAPI.Debug(msg, nil)
 	}
 }
 
@@ -117,6 +178,16 @@ func (c *wasmConnector) Initialize(config map[string]interface{}) error {
 	ctx := context.Background()
 	rcfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(wasmMemoryLimitPages)
 	c.rt = wazero.NewRuntimeWithConfig(ctx, rcfg)
+
+	if c.logAPI != nil {
+		if _, err = c.rt.NewHostModuleBuilder(WasmHostImportModule).
+			NewFunctionBuilder().WithFunc(c.hostLog).Export("log").
+			Instantiate(ctx); err != nil {
+			c.closeLocked(ctx)
+			c.status = ConnectorStatusError
+			return fmt.Errorf("wasm connector host imports: %w", err)
+		}
+	}
 
 	c.compiled, err = c.rt.CompileModule(ctx, code)
 	if err != nil {

@@ -1209,9 +1209,6 @@ func validatePluginManifest(manifest PluginPackageManifest) error {
 			if err := validateWasmTargetLibrarySuffix(target, index); err != nil {
 				return err
 			}
-			if err := wasmAllowedManifestCapabilities(target.RequiredCapabilities, index); err != nil {
-				return err
-			}
 		}
 
 		requiredCapabilitySet := make(map[string]struct{}, len(target.RequiredCapabilities))

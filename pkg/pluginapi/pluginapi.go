@@ -10,6 +10,9 @@ const NativePluginEntrySymbol = "GetAegisPlugin"
 const NativePluginHostAPIVersion = plugin_manager.NativePluginHostAPIVersion
 const WasmPluginHostABIVersion = plugin_manager.WasmPluginHostABIVersion
 
+// WasmHostImportModule is the WebAssembly import module name for Aegis host functions (see docs/wasm-guest-abi.md).
+const WasmHostImportModule = plugin_manager.WasmHostImportModule
+
 // ConnectorWireProtocolV1 is the JSON "v" field for ConnectorAPI.Call requests.
 const ConnectorWireProtocolV1 = plugin_manager.ConnectorWireProtocolV1
 

@@ -28,7 +28,7 @@ func TestWasmExampleGuestLoads(t *testing.T) {
 	r := wazero.NewRuntime(ctx)
 	defer r.Close(ctx)
 
-	_, err = r.NewHostModuleBuilder(wasmHostImportModule).
+	_, err = r.NewHostModuleBuilder(WasmHostImportModule).
 		NewFunctionBuilder().WithFunc(func(context.Context, api.Module, uint32, uint32, uint32) {}).Export("log").
 		Instantiate(ctx)
 	if err != nil {

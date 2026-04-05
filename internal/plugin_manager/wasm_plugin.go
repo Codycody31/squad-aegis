@@ -13,8 +13,11 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-// aegis_host_v1 imports (see docs in wasm_packages.go).
-const wasmHostImportModule = "aegis_host_v1"
+// WasmHostImportModule is the WebAssembly import module for Aegis host functions (docs/wasm-guest-abi.md).
+const WasmHostImportModule = "aegis_host_v1"
+
+const maxWasmHostCallRequestJSONBytes = 256 * 1024
+const maxWasmHostCallResponseJSONBytes = 512 * 1024
 
 type wasmPlugin struct {
 	mu sync.RWMutex
@@ -64,11 +67,12 @@ func (p *wasmPlugin) Initialize(config map[string]interface{}, apis *PluginAPIs)
 	rcfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(wasmMemoryLimitPages)
 	p.rt = wazero.NewRuntimeWithConfig(ctx, rcfg)
 
-	hostBuilder := p.rt.NewHostModuleBuilder(wasmHostImportModule).
+	hostBuilder := p.rt.NewHostModuleBuilder(WasmHostImportModule).
 		NewFunctionBuilder().WithFunc(p.hostLog).Export("log")
 	if pluginDefinitionHasCapability(p.def, NativePluginCapabilityAPIConnector) {
 		hostBuilder = hostBuilder.NewFunctionBuilder().WithFunc(p.hostConnectorInvoke).Export("connector_invoke")
 	}
+	hostBuilder = hostBuilder.NewFunctionBuilder().WithFunc(p.hostCall).Export("host_call")
 	if _, err := hostBuilder.Instantiate(ctx); err != nil {
 		p.closeLocked(ctx)
 		return fmt.Errorf("wasm host imports: %w", err)
@@ -421,6 +425,8 @@ const (
 	wasmHostOK           uint32 = 0
 	wasmHostErrMemory    uint32 = 1
 	wasmHostErrBuffer    uint32 = 2
+	wasmHostErrDenied    uint32 = 3
+	wasmHostErrInvalid   uint32 = 4
 )
 
 func wasmWriteAppend(mem api.Memory, data []byte) (offset uint32, length uint32, err error) {

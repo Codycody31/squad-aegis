@@ -1,4 +1,5 @@
-//! Squad Aegis WASM plugin ABI v1 (minimal demo).
+//! Squad Aegis WASM plugin (minimal demo: host log + `aegis_on_event`).
+//! Full import/export contract: see `docs/wasm-guest-abi.md`.
 //! Build: rustc --edition 2021 --crate-type cdylib plugin.rs --target wasm32-unknown-unknown -C opt-level=s -o plugin.wasm
 
 #![no_std]

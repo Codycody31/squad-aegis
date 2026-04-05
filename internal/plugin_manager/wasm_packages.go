@@ -10,17 +10,8 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
-// WASM plugin v1 guest contract (connector packages use the same manifest wasm_abi_version number;
-// see wasm_connector.go for connector-specific exports):
-//   - Import module "aegis_host_v1": log(i32 level, i32 ptr, i32 len)
-//     level 0=info, 1=warn, 2=error, other=debug. Payload is UTF-8 text (JSON recommended).
-//   - Optionally import connector_invoke (only if manifest required_capabilities includes api.connector):
-//     connector_invoke(id_ptr, id_len, req_ptr, req_len, out_ptr, out_cap, out_written_ptr) -> i32
-//     Returns 0 on success; writes ConnectorInvokeResponse JSON to out_ptr and length at out_written_ptr.
-//   - Exports: memory, aegis_init(config_ptr, config_len) -> i32, aegis_start() -> i32, aegis_stop() -> i32,
-//     aegis_on_event(type_ptr, type_len, payload_ptr, payload_len) -> i32 (0 = success).
-//
-// Denied v1: direct RCON, database, rules, admin, Discord, server mutation — use bundled/native plugins or future ABI versions.
+// WASM guest imports are documented in docs/wasm-guest-abi.md (import module aegis_host_v1).
+// Capabilities match native plugins: required_capabilities on wasm/wasm targets gate host_call, log, and connector_invoke.
 
 func wasmPluginsEnabled() bool {
 	return nativePluginsEnabled() && config.Config != nil && config.Config.Plugins.WasmEnabled
@@ -172,33 +163,6 @@ func validateWasmTargetLibrarySuffix(target PluginPackageTarget, index int) erro
 	lp := strings.TrimSpace(target.LibraryPath)
 	if !strings.HasSuffix(strings.ToLower(lp), ".wasm") {
 		return fmt.Errorf("plugin manifest target %d library_path for wasm must end in .wasm", index)
-	}
-	return nil
-}
-
-// wasmAllowedManifestCapabilities rejects capabilities wasm v1 cannot implement via imports.
-func wasmAllowedManifestCapabilities(caps []string, targetIndex int) error {
-	denied := []string{
-		NativePluginCapabilityAPIRCON,
-		NativePluginCapabilityAPIServer,
-		NativePluginCapabilityAPIDatabase,
-		NativePluginCapabilityAPIRule,
-		NativePluginCapabilityAPIAdmin,
-		NativePluginCapabilityAPIDiscord,
-		NativePluginCapabilityAPIEvent,
-	}
-	deniedSet := make(map[string]struct{}, len(denied))
-	for _, d := range denied {
-		deniedSet[d] = struct{}{}
-	}
-	for _, c := range caps {
-		c = strings.TrimSpace(c)
-		if c == "" {
-			return fmt.Errorf("plugin manifest target %d has an empty required capability", targetIndex)
-		}
-		if _, bad := deniedSet[c]; bad {
-			return fmt.Errorf("wasm plugin target %d cannot require capability %s in v1 (use native/bundled for full APIs)", targetIndex, c)
-		}
 	}
 	return nil
 }
