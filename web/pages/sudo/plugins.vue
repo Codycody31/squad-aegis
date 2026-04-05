@@ -53,6 +53,7 @@ const getStateVariant = (state: string) => {
 
 const getSourceLabel = (plugin: Pick<PluginPackage, "source" | "distribution" | "official">) => {
   if (plugin.source === "bundled") return "Bundled";
+  if (plugin.source === "wasm") return "Sideload WASM";
   return "Sideload Native";
 };
 
@@ -162,7 +163,7 @@ onMounted(async () => {
       <div>
         <h1 class="text-3xl font-bold">Plugin Packages</h1>
         <p class="text-muted-foreground">
-          Manage bundled plugins and sideload native bundles that can later be enabled per server.
+          Manage bundled plugins and sideload native (.so) or WASM plugin bundles that can later be enabled per server.
         </p>
       </div>
       <div class="flex gap-2">
@@ -251,7 +252,7 @@ onMounted(async () => {
                 <TableCell class="text-right">
                   <div class="flex justify-end gap-2">
                     <Button
-                      v-if="plugin.source === 'native'"
+                      v-if="plugin.source === 'native' || plugin.source === 'wasm'"
                       size="sm"
                       variant="destructive"
                       @click="deleteInstalledPlugin(plugin)"

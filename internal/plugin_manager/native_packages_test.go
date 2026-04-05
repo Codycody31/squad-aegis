@@ -702,7 +702,7 @@ func TestValidatePluginCompatibilityRejectsWrongArchitecture(t *testing.T) {
 		target.TargetArch = "amd64"
 	}
 
-	err := validatePluginCompatibility(target)
+	err := validatePluginCompatibility(PluginPackageManifest{}, target)
 	if err == nil {
 		t.Fatal("validatePluginCompatibility() error = nil, want error")
 	}
@@ -718,7 +718,7 @@ func TestValidatePluginCompatibilityRejectsNewerHostAPIRequirement(t *testing.T)
 	target := clonePluginPackageTargets(testManifest("com.example.api-version").Targets)[0]
 	target.MinHostAPIVersion = NativePluginHostAPIVersion + 1
 
-	err := validatePluginCompatibility(target)
+	err := validatePluginCompatibility(PluginPackageManifest{}, target)
 	if err == nil {
 		t.Fatal("validatePluginCompatibility() error = nil, want error")
 	}
@@ -734,7 +734,7 @@ func TestValidatePluginCompatibilityRejectsMissingCapabilities(t *testing.T) {
 	target := clonePluginPackageTargets(testManifest("com.example.capabilities").Targets)[0]
 	target.RequiredCapabilities = []string{"api.missing"}
 
-	err := validatePluginCompatibility(target)
+	err := validatePluginCompatibility(PluginPackageManifest{}, target)
 	if err == nil {
 		t.Fatal("validatePluginCompatibility() error = nil, want error")
 	}

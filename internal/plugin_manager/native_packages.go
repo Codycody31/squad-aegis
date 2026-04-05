@@ -301,6 +301,10 @@ func preferredPluginTarget(targets []PluginPackageTarget) PluginPackageTarget {
 }
 
 func selectedManifestTarget(manifest PluginPackageManifest) (PluginPackageTarget, error) {
+	if pluginManifestKindIsWasm(manifest) {
+		return selectWasmPluginTarget(manifest)
+	}
+
 	targets := clonePluginPackageTargets(manifest.Targets)
 	if len(targets) == 0 {
 		return PluginPackageTarget{}, fmt.Errorf("plugin manifest is missing targets")
@@ -454,7 +458,8 @@ func (pm *PluginManager) removeNativePackage(pluginID string) {
 
 func (pm *PluginManager) unregisterNativePlugin(pluginID string) {
 	if pm.registry != nil {
-		if definition, err := pm.registry.GetPlugin(pluginID); err == nil && definition.Source == PluginSourceNative {
+		if definition, err := pm.registry.GetPlugin(pluginID); err == nil &&
+			(definition.Source == PluginSourceNative || definition.Source == PluginSourceWasm) {
 			pm.registry.UnregisterPlugin(pluginID)
 		}
 	}
@@ -468,7 +473,7 @@ func (pm *PluginManager) unregisterNativePlugin(pluginID string) {
 func (pm *PluginManager) resetNativeRuntimeState() {
 	if pm.registry != nil {
 		for _, definition := range pm.registry.ListPlugins() {
-			if definition.Source == PluginSourceNative {
+			if definition.Source == PluginSourceNative || definition.Source == PluginSourceWasm {
 				pm.registry.UnregisterPlugin(definition.ID)
 			}
 		}
@@ -573,12 +578,18 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 			shouldPersistReadyState = true
 		}
 
-		if err := pm.loadNativePluginPackage(pkg); err != nil {
+		var loadErr error
+		if pluginManifestKindIsWasm(pkg.Manifest) {
+			loadErr = pm.loadWasmPluginPackage(pkg)
+		} else {
+			loadErr = pm.loadNativePluginPackage(pkg)
+		}
+		if loadErr != nil {
 			pkg.InstallState = PluginInstallStateError
-			pkg.LastError = err.Error()
+			pkg.LastError = loadErr.Error()
 			pkg.UpdatedAt = time.Now()
 			if saveErr := pm.savePluginPackageToDatabase(pkg); saveErr != nil {
-				log.Error().Err(saveErr).Str("plugin_id", pkg.PluginID).Msg("Failed to persist native plugin load error")
+				log.Error().Err(saveErr).Str("plugin_id", pkg.PluginID).Msg("Failed to persist sideloaded plugin load error")
 			}
 			pm.setNativePackage(pkg)
 			continue
@@ -688,7 +699,7 @@ func (pm *PluginManager) enrichPluginDefinition(definition PluginDefinition) Plu
 			definition.InstallState = PluginInstallStateReady
 		}
 		definition.Official = true
-	case PluginSourceNative:
+	case PluginSourceNative, PluginSourceWasm:
 		if pkg := pm.getNativePackage(definition.ID); pkg != nil {
 			definition.Source = pkg.Source
 			definition.Official = pkg.Official
@@ -819,7 +830,7 @@ func (pm *PluginManager) InstallPluginPackageFromBundle(ctx context.Context, arc
 
 func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.ReaderAt, size int64, originalName string, distribution PluginDistribution) (*InstalledPluginPackage, error) {
 	if !nativePluginsEnabled() {
-		return nil, fmt.Errorf("native plugins are disabled")
+		return nil, fmt.Errorf("plugin sideload is disabled")
 	}
 
 	if err := os.MkdirAll(pluginRuntimeDir(), 0o755); err != nil {
@@ -834,8 +845,12 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	if err := validatePluginManifest(manifest); err != nil {
 		return nil, err
 	}
-	if err := validatePluginCompatibility(selectedTarget); err != nil {
+	if err := validatePluginCompatibility(manifest, selectedTarget); err != nil {
 		return nil, err
+	}
+
+	if pluginManifestKindIsWasm(manifest) && !wasmPluginsEnabled() {
+		return nil, fmt.Errorf("wasm plugins are disabled")
 	}
 
 	if existingDefinition, err := pm.registry.GetPlugin(manifest.PluginID); err == nil {
@@ -869,7 +884,11 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 
 	pluginDir := filepath.Join(pluginRuntimeDir(), pluginIDSegment, versionSegment)
 	runtimePath := filepath.Join(pluginDir, sanitizeRuntimeSegment(filepath.Base(libraryName)))
-	if filepath.Ext(runtimePath) != ".so" {
+	if pluginManifestKindIsWasm(manifest) {
+		if filepath.Ext(runtimePath) != ".wasm" {
+			runtimePath = filepath.Join(pluginDir, pluginIDSegment+".wasm")
+		}
+	} else if filepath.Ext(runtimePath) != ".so" {
 		runtimePath = filepath.Join(pluginDir, pluginIDSegment+".so")
 	}
 
@@ -880,13 +899,18 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		return nil, fmt.Errorf("failed to write plugin library: %w", err)
 	}
 
+	pkgSource := PluginSourceNative
+	if pluginManifestKindIsWasm(manifest) {
+		pkgSource = PluginSourceWasm
+	}
+
 	now := time.Now()
 	pkg := &InstalledPluginPackage{
 		PluginID:          manifest.PluginID,
 		Name:              manifest.Name,
 		Description:       manifest.Description,
 		Version:           manifest.Version,
-		Source:            PluginSourceNative,
+		Source:            pkgSource,
 		Distribution:      distribution,
 		Official:          false,
 		InstallState:      PluginInstallStateReady,
@@ -913,7 +937,12 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		}
 
 		pkg.InstallState = PluginInstallStatePendingRestart
-		pkg.LastError = "Restart Aegis to activate the updated native plugin package"
+		pkg.LastError = "Restart Aegis to activate the updated plugin package"
+	} else if pluginManifestKindIsWasm(manifest) {
+		if err := pm.loadWasmPluginPackage(pkg); err != nil {
+			pkg.InstallState = PluginInstallStateError
+			pkg.LastError = err.Error()
+		}
 	} else if err := pm.loadNativePluginPackage(pkg); err != nil {
 		pkg.InstallState = PluginInstallStateError
 		pkg.LastError = err.Error()
@@ -1071,7 +1100,8 @@ func readPluginBundle(archive io.ReaderAt, size int64) (PluginPackageManifest, P
 		case pluginPublicKeyFile:
 			publicKeyFile = file
 		default:
-			if strings.HasSuffix(name, ".so") {
+			lower := strings.ToLower(name)
+			if strings.HasSuffix(lower, ".so") || strings.HasSuffix(lower, ".wasm") {
 				libraries[name] = file
 			}
 		}
@@ -1140,11 +1170,19 @@ func validatePluginManifest(manifest PluginPackageManifest) error {
 	if _, _, err := pluginRuntimeSegments(manifest.PluginID, manifest.Version); err != nil {
 		return err
 	}
-	if manifest.EntrySymbol == "" {
-		manifest.EntrySymbol = nativePluginEntrySymbol
-	}
-	if manifest.EntrySymbol != nativePluginEntrySymbol {
-		return fmt.Errorf("unsupported plugin entry symbol %s", manifest.EntrySymbol)
+
+	isWasm := pluginManifestKindIsWasm(manifest)
+	if isWasm {
+		if err := validateWasmPluginManifestFields(manifest); err != nil {
+			return err
+		}
+	} else {
+		if manifest.EntrySymbol == "" {
+			manifest.EntrySymbol = nativePluginEntrySymbol
+		}
+		if manifest.EntrySymbol != nativePluginEntrySymbol {
+			return fmt.Errorf("unsupported plugin entry symbol %s", manifest.EntrySymbol)
+		}
 	}
 
 	targets := clonePluginPackageTargets(manifest.Targets)
@@ -1166,6 +1204,16 @@ func validatePluginManifest(manifest PluginPackageManifest) error {
 		if strings.TrimSpace(target.LibraryPath) == "" {
 			return fmt.Errorf("plugin manifest target %d is missing library_path", index)
 		}
+
+		if isWasm {
+			if err := validateWasmTargetLibrarySuffix(target, index); err != nil {
+				return err
+			}
+			if err := wasmAllowedManifestCapabilities(target.RequiredCapabilities, index); err != nil {
+				return err
+			}
+		}
+
 		requiredCapabilitySet := make(map[string]struct{}, len(target.RequiredCapabilities))
 		requiredCapabilities := cloneRequiredCapabilities(target.RequiredCapabilities)
 		sort.Strings(requiredCapabilities)
@@ -1180,8 +1228,16 @@ func validatePluginManifest(manifest PluginPackageManifest) error {
 			requiredCapabilitySet[capability] = struct{}{}
 		}
 
-		key := target.TargetOS + "|" + target.TargetArch + "|" + strconv.Itoa(target.MinHostAPIVersion) + "|" + strings.Join(requiredCapabilities, ",")
+		var key string
+		if isWasm {
+			key = wasmManifestTargetKey(target)
+		} else {
+			key = target.TargetOS + "|" + target.TargetArch + "|" + strconv.Itoa(target.MinHostAPIVersion) + "|" + strings.Join(requiredCapabilities, ",")
+		}
 		if _, exists := seenTargets[key]; exists {
+			if isWasm {
+				return fmt.Errorf("plugin manifest has a duplicate wasm target %s", key)
+			}
 			return fmt.Errorf("plugin manifest has a duplicate target for %s/%s with min_host_api_version %d and capabilities %s", target.TargetOS, target.TargetArch, target.MinHostAPIVersion, strings.Join(requiredCapabilities, ","))
 		}
 		seenTargets[key] = struct{}{}
@@ -1190,7 +1246,20 @@ func validatePluginManifest(manifest PluginPackageManifest) error {
 	return nil
 }
 
-func validatePluginCompatibility(target PluginPackageTarget) error {
+func validatePluginCompatibility(manifest PluginPackageManifest, target PluginPackageTarget) error {
+	if pluginManifestKindIsWasm(manifest) {
+		if target.TargetOS != "wasm" || target.TargetArch != "wasm" {
+			return fmt.Errorf("wasm plugin target must be wasm/wasm")
+		}
+		if target.MinHostAPIVersion > NativePluginHostAPIVersion {
+			return fmt.Errorf("plugin requires host API version >= %d, but host provides %d", target.MinHostAPIVersion, NativePluginHostAPIVersion)
+		}
+		if missing := missingRequiredCapabilities(target.RequiredCapabilities); len(missing) > 0 {
+			return fmt.Errorf("plugin requires unsupported host capabilities: %s", strings.Join(missing, ", "))
+		}
+		return nil
+	}
+
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("native plugins are only supported on Linux")
 	}
@@ -1228,7 +1297,7 @@ func selectManifestLibrary(manifest PluginPackageManifest, target PluginPackageT
 	}
 
 	if len(libraries) == 0 {
-		return "", nil, fmt.Errorf("plugin archive is missing a .so library")
+		return "", nil, fmt.Errorf("plugin archive is missing a plugin binary (.so or .wasm)")
 	}
 
 	return "", nil, fmt.Errorf("plugin manifest target %s/%s with min_host_api_version %d is missing library_path", target.TargetOS, target.TargetArch, target.MinHostAPIVersion)

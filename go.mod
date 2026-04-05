@@ -26,11 +26,13 @@ require (
 	github.com/pkg/sftp v1.13.9
 	github.com/rs/zerolog v1.33.0
 	github.com/samber/oops v1.19.0
+	github.com/tetratelabs/wazero v1.8.2
 	github.com/uptrace/go-clickhouse v0.3.1
 	github.com/valkey-io/valkey-go v1.0.64
 	github.com/yuin/gopher-lua v1.1.1
 	golang.org/x/crypto v0.40.0
 	golang.org/x/sync v0.16.0
+	golang.org/x/text v0.27.0
 )
 
 require (
@@ -91,7 +93,6 @@ require (
 	golang.org/x/exp v0.0.0-20230315142452-642cacee5cc0 // indirect
 	golang.org/x/net v0.42.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
-	golang.org/x/text v0.27.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect

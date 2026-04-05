@@ -1,0 +1,27 @@
+{
+  "plugin_id": "com.squad-aegis.plugins.examples.wasm-hello",
+  "name": "WASM Hello Example",
+  "description": "Sandboxed demo: logs JSON for each subscribed event via the WASM host log import.",
+  "version": "0.1.0",
+  "official": false,
+  "license": "",
+  "kind": "wasm",
+  "wasm_abi_version": 1,
+  "author": "Squad Aegis",
+  "allow_multiple_instances": false,
+  "long_running": false,
+  "required_connectors": [],
+  "optional_connectors": [],
+  "config_schema": { "fields": [] },
+  "events": ["RCON_CHAT_MESSAGE"],
+  "targets": [
+    {
+      "min_host_api_version": 1,
+      "required_capabilities": ["api.log", "events.rcon"],
+      "target_os": "wasm",
+      "target_arch": "wasm",
+      "sha256": "",
+      "library_path": "bin/wasm/plugin.wasm"
+    }
+  ]
+}

@@ -17,7 +17,15 @@ type PluginSource string
 const (
 	PluginSourceBundled PluginSource = "bundled"
 	PluginSourceNative  PluginSource = "native"
+	PluginSourceWasm    PluginSource = "wasm"
 )
+
+// WasmPluginHostABIVersion is the import module + function contract for guest modules (manifest wasm_abi_version).
+const WasmPluginHostABIVersion = 1
+
+// WasmConnectorGuestABIVersion is the manifest wasm_abi_version for WASM connector packages.
+// It matches WasmPluginHostABIVersion numerically; connector guests use different exports than plugins.
+const WasmConnectorGuestABIVersion = WasmPluginHostABIVersion
 
 type PluginDistribution string
 
@@ -103,6 +111,19 @@ type PluginPackageManifest struct {
 	License     string                `json:"license,omitempty"`
 	EntrySymbol string                `json:"entry_symbol"`
 	Targets     []PluginPackageTarget `json:"targets"`
+
+	// Kind is "" or "native" for Linux .so packages (default). "wasm" for WebAssembly modules.
+	Kind string `json:"kind,omitempty"`
+	// WasmABIVersion must be WasmPluginHostABIVersion when Kind is wasm.
+	WasmABIVersion int `json:"wasm_abi_version,omitempty"`
+	// Manifest-level metadata used when Kind is wasm (no GetAegisPlugin symbol).
+	Author                     string                          `json:"author,omitempty"`
+	AllowMultipleInstances     bool                            `json:"allow_multiple_instances,omitempty"`
+	LongRunning                bool                            `json:"long_running,omitempty"`
+	ManifestRequiredConnectors []string                        `json:"required_connectors,omitempty"`
+	ManifestOptionalConnectors []string                        `json:"optional_connectors,omitempty"`
+	ConfigSchema               plug_config_schema.ConfigSchema `json:"config_schema,omitempty"`
+	WasmEvents                 []string                        `json:"events,omitempty"`
 }
 
 type InstalledPluginPackage struct {

@@ -111,7 +111,8 @@ const getPackageStateVariant = (state: string) => {
 
 const getConnectorSourceLabel = (pkg: ConnectorPackage) => {
   if (pkg.source === "bundled") return "Bundled";
-  return "Native";
+  if (pkg.source === "wasm") return "Sideload WASM";
+  return "Sideload Native";
 };
 
 const formatConnectorRuntime = (pkg: ConnectorPackage) => {
@@ -449,7 +450,7 @@ const uploadConnectorBundle = async () => {
 const deleteConnectorPackage = async (pkg: ConnectorPackage) => {
   if (
     !confirm(
-      `Delete native connector package "${pkg.name}" (${pkg.connector_id})? Remove any running connector instance for this id first.`,
+      `Delete sideloaded connector package "${pkg.name}" (${pkg.connector_id})? Remove any running connector instance for this id first.`,
     )
   ) {
     return;
@@ -590,14 +591,17 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Native connector packages (sideload .so, same idea as sudo plugin packages) -->
+    <!-- Sideloaded connector packages (.so or WASM, same idea as sudo plugin packages) -->
     <Card class="mb-4 sm:mb-6">
       <CardHeader class="pb-2 sm:pb-3">
-        <CardTitle class="text-base sm:text-lg">Native connector packages</CardTitle>
+        <CardTitle class="text-base sm:text-lg">Sideloaded connector packages</CardTitle>
         <CardDescription class="text-xs sm:text-sm">
           Upload a signed <code class="rounded bg-muted px-1 text-xs">.zip</code> with
-          <code class="rounded bg-muted px-1 text-xs">manifest.json</code> and Linux <code class="rounded bg-muted px-1 text-xs">.so</code>
-          (entry <code class="rounded bg-muted px-1 text-xs">GetAegisConnector</code>). Then add a connector instance above if the connector needs config.
+          <code class="rounded bg-muted px-1 text-xs">manifest.json</code> and either a Linux
+          <code class="rounded bg-muted px-1 text-xs">.so</code> (entry
+          <code class="rounded bg-muted px-1 text-xs">GetAegisConnector</code>) or a WASM
+          <code class="rounded bg-muted px-1 text-xs">.wasm</code> package (<code class="rounded bg-muted px-1 text-xs">kind: wasm</code>,
+          wasm/wasm target). Then add a connector instance above if the connector needs config.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
@@ -620,7 +624,7 @@ onMounted(async () => {
           Loading installed packages…
         </div>
         <div v-else-if="connectorPackages.length === 0" class="text-sm text-muted-foreground py-2">
-          No native connector packages installed.
+          No sideloaded connector packages installed.
         </div>
         <div v-else class="overflow-x-auto rounded-md border">
           <Table>
@@ -665,7 +669,7 @@ onMounted(async () => {
                 </TableCell>
                 <TableCell class="text-right">
                   <Button
-                    v-if="pkg.source === 'native'"
+                    v-if="pkg.source === 'native' || pkg.source === 'wasm'"
                     size="sm"
                     variant="destructive"
                     @click="deleteConnectorPackage(pkg)"

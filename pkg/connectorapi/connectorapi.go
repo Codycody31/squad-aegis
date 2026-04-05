@@ -1,4 +1,4 @@
-// Package connectorapi is the public SDK for authoring Squad Aegis native connectors (.so).
+// Package connectorapi is the public SDK for authoring Squad Aegis connectors (native .so or WASM sideloads).
 package connectorapi
 
 import (
@@ -33,6 +33,7 @@ type FieldType = plug_config_schema.FieldType
 const (
 	PluginSourceBundled = plugin_manager.PluginSourceBundled
 	PluginSourceNative  = plugin_manager.PluginSourceNative
+	PluginSourceWasm    = plugin_manager.PluginSourceWasm
 
 	PluginDistributionBundled  = plugin_manager.PluginDistributionBundled
 	PluginDistributionSideload = plugin_manager.PluginDistributionSideload

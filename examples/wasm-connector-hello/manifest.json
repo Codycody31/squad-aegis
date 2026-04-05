@@ -1,0 +1,25 @@
+{
+  "connector_id": "com.squad-aegis.connectors.examples.wasm-hello",
+  "name": "WASM Connector Hello Example",
+  "description": "Sandboxed demo: JSON invoke ping/pong via aegis_invoke (no host imports).",
+  "version": "0.1.0",
+  "official": false,
+  "license": "",
+  "kind": "wasm",
+  "wasm_abi_version": 1,
+  "author": "Squad Aegis",
+  "instance_key": "",
+  "legacy_ids": [],
+  "config_schema": { "fields": [] },
+  "entry_symbol": "",
+  "targets": [
+    {
+      "min_host_api_version": 1,
+      "required_capabilities": [],
+      "target_os": "wasm",
+      "target_arch": "wasm",
+      "sha256": "",
+      "library_path": "bin/wasm/plugin.wasm"
+    }
+  ]
+}

@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
 
 var nativeConnectorDefinitionLoader = loadNativeConnectorDefinition
@@ -31,18 +33,31 @@ type ConnectorPackageManifest struct {
 	License     string                `json:"license,omitempty"`
 	EntrySymbol string                `json:"entry_symbol"`
 	Targets     []PluginPackageTarget `json:"targets"`
+
+	// Kind is "" for Linux .so packages. "wasm" for WebAssembly connectors (manifest wasm_abi_version required).
+	Kind string `json:"kind,omitempty"`
+	// WasmABIVersion must be WasmConnectorGuestABIVersion when Kind is wasm.
+	WasmABIVersion int `json:"wasm_abi_version,omitempty"`
+	Author         string                          `json:"author,omitempty"`
+	InstanceKey    string                          `json:"instance_key,omitempty"`
+	LegacyIDs      []string                        `json:"legacy_ids,omitempty"`
+	ConfigSchema   plug_config_schema.ConfigSchema `json:"config_schema,omitempty"`
 }
 
 func (m ConnectorPackageManifest) asPluginManifest() PluginPackageManifest {
 	return PluginPackageManifest{
-		PluginID:    m.ConnectorID,
-		Name:        m.Name,
-		Description: m.Description,
-		Version:     m.Version,
-		Official:    m.Official,
-		License:     m.License,
-		EntrySymbol: m.EntrySymbol,
-		Targets:     m.Targets,
+		PluginID:        m.ConnectorID,
+		Name:            m.Name,
+		Description:     m.Description,
+		Version:         m.Version,
+		Official:        m.Official,
+		License:         m.License,
+		EntrySymbol:     m.EntrySymbol,
+		Targets:         m.Targets,
+		Kind:            m.Kind,
+		WasmABIVersion:  m.WasmABIVersion,
+		Author:          m.Author,
+		ConfigSchema:    m.ConfigSchema,
 	}
 }
 
@@ -95,6 +110,10 @@ func validateConnectorManifest(manifest *ConnectorPackageManifest) error {
 	if _, _, err := pluginRuntimeSegments(manifest.ConnectorID, manifest.Version); err != nil {
 		return err
 	}
+	if pluginManifestKindIsWasm(manifest.asPluginManifest()) {
+		return validatePluginManifest(manifest.asPluginManifest())
+	}
+
 	if manifest.EntrySymbol == "" {
 		manifest.EntrySymbol = nativeConnectorEntrySymbol
 	}
@@ -145,7 +164,10 @@ func validateConnectorManifest(manifest *ConnectorPackageManifest) error {
 	return nil
 }
 
-func validateConnectorCompatibility(target PluginPackageTarget) error {
+func validateConnectorCompatibility(manifest ConnectorPackageManifest, target PluginPackageTarget) error {
+	if pluginManifestKindIsWasm(manifest.asPluginManifest()) {
+		return validatePluginCompatibility(manifest.asPluginManifest(), target)
+	}
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("native connectors are only supported on Linux")
 	}
@@ -196,7 +218,8 @@ func readConnectorBundle(archive io.ReaderAt, size int64) (ConnectorPackageManif
 		case pluginPublicKeyFile:
 			publicKeyFile = file
 		default:
-			if strings.HasSuffix(name, ".so") {
+			lower := strings.ToLower(name)
+			if strings.HasSuffix(lower, ".so") || strings.HasSuffix(lower, ".wasm") {
 				libraries[name] = file
 			}
 		}
@@ -254,7 +277,7 @@ func readConnectorBundle(archive io.ReaderAt, size int64) (ConnectorPackageManif
 
 func (pm *PluginManager) resetNativeConnectorRuntimeState() {
 	for _, definition := range pm.connectorRegistry.ListConnectors() {
-		if definition.Source == PluginSourceNative {
+		if definition.Source == PluginSourceNative || definition.Source == PluginSourceWasm {
 			pm.connectorRegistry.UnregisterConnector(definition.ID)
 		}
 	}
@@ -397,9 +420,19 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 			shouldPersistReadyState = true
 		}
 
-		if err := pm.loadNativeConnectorPackage(pkg); err != nil {
+		var loadErr error
+		if pluginManifestKindIsWasm(pkg.Manifest.asPluginManifest()) {
+			if !wasmPluginsEnabled() {
+				loadErr = fmt.Errorf("wasm connectors require plugins.wasm_enabled")
+			} else {
+				loadErr = pm.loadWasmConnectorPackage(pkg)
+			}
+		} else {
+			loadErr = pm.loadNativeConnectorPackage(pkg)
+		}
+		if loadErr != nil {
 			pkg.InstallState = PluginInstallStateError
-			pkg.LastError = err.Error()
+			pkg.LastError = loadErr.Error()
 			pkg.UpdatedAt = time.Now()
 			if saveErr := pm.saveConnectorPackageToDatabase(pkg); saveErr != nil {
 				log.Error().Err(saveErr).Str("connector_id", pkg.ConnectorID).Msg("Failed to persist native connector load error")
@@ -547,7 +580,7 @@ func (pm *PluginManager) enrichConnectorDefinition(definition ConnectorDefinitio
 	if definition.Source == "" {
 		definition.Source = PluginSourceBundled
 	}
-	if definition.Source != PluginSourceNative {
+	if definition.Source != PluginSourceNative && definition.Source != PluginSourceWasm {
 		return definition
 	}
 
@@ -628,8 +661,12 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 	if err := validateConnectorManifest(&manifest); err != nil {
 		return nil, err
 	}
-	if err := validateConnectorCompatibility(selectedTarget); err != nil {
+	if err := validateConnectorCompatibility(manifest, selectedTarget); err != nil {
 		return nil, err
+	}
+
+	if pluginManifestKindIsWasm(manifest.asPluginManifest()) && !wasmPluginsEnabled() {
+		return nil, fmt.Errorf("wasm connectors are disabled")
 	}
 
 	if existingDefinition, err := pm.connectorRegistry.GetConnector(manifest.ConnectorID); err == nil {
@@ -662,7 +699,11 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 
 	connectorDir := filepath.Join(pluginRuntimeDir(), "connectors", idSegment, versionSegment)
 	runtimePath := filepath.Join(connectorDir, sanitizeRuntimeSegment(filepath.Base(libraryName)))
-	if filepath.Ext(runtimePath) != ".so" {
+	if pluginManifestKindIsWasm(manifest.asPluginManifest()) {
+		if filepath.Ext(runtimePath) != ".wasm" {
+			runtimePath = filepath.Join(connectorDir, idSegment+".wasm")
+		}
+	} else if filepath.Ext(runtimePath) != ".so" {
 		runtimePath = filepath.Join(connectorDir, idSegment+".so")
 	}
 
@@ -673,13 +714,18 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 		return nil, fmt.Errorf("failed to write connector library: %w", err)
 	}
 
+	pkgSource := PluginSourceNative
+	if pluginManifestKindIsWasm(manifest.asPluginManifest()) {
+		pkgSource = PluginSourceWasm
+	}
+
 	now := time.Now()
 	pkg := &InstalledConnectorPackage{
 		ConnectorID:       manifest.ConnectorID,
 		Name:              manifest.Name,
 		Description:       manifest.Description,
 		Version:           manifest.Version,
-		Source:            PluginSourceNative,
+		Source:            pkgSource,
 		Distribution:      distribution,
 		Official:          false,
 		InstallState:      PluginInstallStateReady,
@@ -706,7 +752,12 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 		}
 
 		pkg.InstallState = PluginInstallStatePendingRestart
-		pkg.LastError = "Restart Aegis to activate the updated native connector package"
+		pkg.LastError = "Restart Aegis to activate the updated connector package"
+	} else if pluginManifestKindIsWasm(manifest.asPluginManifest()) {
+		if err := pm.loadWasmConnectorPackage(pkg); err != nil {
+			pkg.InstallState = PluginInstallStateError
+			pkg.LastError = err.Error()
+		}
 	} else if err := pm.loadNativeConnectorPackage(pkg); err != nil {
 		pkg.InstallState = PluginInstallStateError
 		pkg.LastError = err.Error()
