@@ -300,6 +300,7 @@ Start with `RconAPI` and `LogAPI`. They are enough for many moderation and autom
 - `manifest signed by untrusted public key`: the bundle's `manifest.pub` is not in `plugins.trusted_signing_keys`
 - `unsigned sideloads are disabled`: enable unsafe sideloads in config, or sign the bundle with a key listed in `plugins.trusted_signing_keys`
 - `plugin runtime path rejected`: the stored `runtime_path` resolves outside `plugins.runtime_dir` (DB tampering or a misconfigured `runtime_dir`)
+- `connector runtime path rejected`: the stored connector `runtime_path` resolves outside `plugins.connector_runtime_dir` (DB tampering or a misconfigured `connector_runtime_dir`)
 - `plugin runtime library checksum mismatch`: the on-disk `.so` no longer matches the checksum recorded at install time
 - `plugin signature cannot be re-verified against trusted keys`: the stored signature no longer verifies against the current `plugins.trusted_signing_keys` — re-sign and re-upload, or temporarily enable `allow_unsafe_sideload`
 

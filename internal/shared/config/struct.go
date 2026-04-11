@@ -63,6 +63,7 @@ type Struct struct {
 	Plugins struct {
 		NativeEnabled       bool   `default:"true"`
 		RuntimeDir          string `default:""`
+		ConnectorRuntimeDir string `default:""`
 		AllowUnsafeSideload bool   `default:"false"`
 		MaxUploadSize       int64  `default:"52428800"`
 		// Comma-separated base64 ed25519 public keys. A manifest.pub not in

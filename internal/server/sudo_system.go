@@ -138,6 +138,7 @@ func (s *Server) GetSystemConfig(c *gin.Context) {
 		Plugins: gin.H{
 			"native_enabled":           cfg.Plugins.NativeEnabled,
 			"runtime_dir":              cfg.Plugins.RuntimeDir,
+			"connector_runtime_dir":    cfg.Plugins.ConnectorRuntimeDir,
 			"allow_unsafe_sideload":    cfg.Plugins.AllowUnsafeSideload,
 			"max_upload_size":          cfg.Plugins.MaxUploadSize,
 			"trusted_signing_keys_set": strings.TrimSpace(cfg.Plugins.TrustedSigningKeys) != "",

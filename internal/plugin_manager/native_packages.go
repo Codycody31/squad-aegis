@@ -53,6 +53,22 @@ func pluginRuntimeDir() string {
 	return "plugins"
 }
 
+func connectorRuntimeDir() string {
+	if config.Config == nil {
+		return "connectors"
+	}
+
+	if runtimeDir := strings.TrimSpace(config.Config.Plugins.ConnectorRuntimeDir); runtimeDir != "" {
+		return runtimeDir
+	}
+
+	if config.Config.App.InContainer {
+		return "/etc/squad-aegis/connectors"
+	}
+
+	return "connectors"
+}
+
 // writeRuntimeLibrary unlinks any existing file then delegates to the
 // per-platform writer which uses O_EXCL|O_NOFOLLOW on Unix to defeat
 // symlink-clobber attacks.

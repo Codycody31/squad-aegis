@@ -25,12 +25,13 @@ RUN go mod tidy && go mod vendor && \
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libc6 && rm -rf /var/lib/apt/lists/* && \
     useradd --system --uid 10001 --create-home --home-dir /var/lib/squad-aegis squad-aegis && \
-    mkdir -p /etc/squad-aegis/storage /etc/squad-aegis/plugins && \
+    mkdir -p /etc/squad-aegis/storage /etc/squad-aegis/plugins /etc/squad-aegis/connectors && \
     chown -R squad-aegis:squad-aegis /etc/squad-aegis /var/lib/squad-aegis
 COPY --from=go-build /out/squad-aegis /usr/local/bin/squad-aegis
 ENV APP_IN_CONTAINER=true
 ENV STORAGE_LOCAL_PATH=/etc/squad-aegis/storage
 ENV PLUGINS_RUNTIME_DIR=/etc/squad-aegis/plugins
+ENV PLUGINS_CONNECTOR_RUNTIME_DIR=/etc/squad-aegis/connectors
 VOLUME /etc/squad-aegis
 EXPOSE 3113
 USER squad-aegis

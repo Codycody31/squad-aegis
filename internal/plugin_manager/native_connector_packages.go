@@ -223,7 +223,7 @@ func (pm *PluginManager) hasConnectorInstances(ctx context.Context, instanceKeys
 }
 
 func (pm *PluginManager) loadNativeConnectorPackage(pkg *InstalledConnectorPackage) error {
-	safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir())
+	safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, connectorRuntimeDir())
 	if pathErr != nil {
 		return fmt.Errorf("connector runtime path rejected: %w", pathErr)
 	}
@@ -360,8 +360,8 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 		return nil, fmt.Errorf("native plugins and connectors are disabled")
 	}
 
-	if err := os.MkdirAll(pluginRuntimeDir(), 0o750); err != nil {
-		return nil, fmt.Errorf("failed to create plugin runtime directory: %w", err)
+	if err := os.MkdirAll(connectorRuntimeDir(), 0o750); err != nil {
+		return nil, fmt.Errorf("failed to create connector runtime directory: %w", err)
 	}
 
 	manifest, selectedTarget, manifestBytes, signatureBytes, publicKeyBytes, libraryBytes, libraryName, err := readConnectorBundle(archive, size)
@@ -404,7 +404,7 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 		return nil, err
 	}
 
-	connectorDir := filepath.Join(pluginRuntimeDir(), "connectors", idSegment, versionSegment)
+	connectorDir := filepath.Join(connectorRuntimeDir(), idSegment, versionSegment)
 	runtimePath := filepath.Join(connectorDir, sanitizeRuntimeSegment(filepath.Base(libraryName)))
 	if filepath.Ext(runtimePath) != ".so" {
 		runtimePath = filepath.Join(connectorDir, idSegment+".so")
@@ -496,7 +496,7 @@ func (pm *PluginManager) DeleteInstalledConnectorPackage(ctx context.Context, co
 	pm.removeNativeConnectorPackage(connectorID)
 
 	if pkg.RuntimePath != "" {
-		safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir())
+		safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, connectorRuntimeDir())
 		if pathErr != nil {
 			log.Warn().Err(pathErr).Str("connector_id", connectorID).Str("path", pkg.RuntimePath).Msg("Refusing to remove native connector library outside runtime root")
 		} else if err := os.Remove(safePath); err != nil && !os.IsNotExist(err) {
