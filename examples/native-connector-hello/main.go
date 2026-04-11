@@ -1,8 +1,10 @@
-// Native connector example: build with:
+// Subprocess-isolated native connector example. Build as a standalone binary:
 //
-//	go build -buildmode=plugin -o hello-connector.so .
+//	go build -o hello-connector .
 //
-// Bundle manifest.json (connector_id, targets, etc.) like native plugin packages; entry symbol GetAegisConnector.
+// Package the resulting binary into a connector bundle alongside a
+// manifest.json whose target.library_path points at the binary. The Aegis
+// host will launch it via hashicorp/go-plugin and communicate over net/rpc.
 package main
 
 import (
@@ -10,38 +12,34 @@ import (
 	"fmt"
 	"sync"
 
-	connectorapi "go.codycody31.dev/squad-aegis/pkg/connectorapi"
+	connectorrpc "go.codycody31.dev/squad-aegis/pkg/connectorrpc"
 )
 
 type helloConnector struct {
 	mu     sync.RWMutex
 	config map[string]interface{}
-	status connectorapi.ConnectorStatus
+	status connectorrpc.ConnectorStatus
 }
 
-func definition() connectorapi.ConnectorDefinition {
-	return connectorapi.ConnectorDefinition{
+func definition() connectorrpc.ConnectorDefinition {
+	return connectorrpc.ConnectorDefinition{
 		ID:          "com.squad-aegis.connectors.examples.hello",
-		Source:      connectorapi.PluginSourceNative,
+		Source:      connectorrpc.PluginSourceNative,
 		Name:        "Hello connector example",
 		Description: "Responds to JSON invoke action ping.",
 		Version:     "0.1.0",
 		Author:      "Squad Aegis",
-		ConfigSchema: connectorapi.ConfigSchema{
-			Fields: []connectorapi.ConfigField{},
-		},
-		CreateInstance: func() connectorapi.Connector {
-			return &helloConnector{}
+		ConfigSchema: connectorrpc.ConfigSchema{
+			Fields: []connectorrpc.ConfigField{},
 		},
 	}
 }
 
-// GetAegisConnector is the required native connector entrypoint.
-func GetAegisConnector() connectorapi.ConnectorDefinition {
-	return definition()
+func main() {
+	connectorrpc.Serve(&helloConnector{})
 }
 
-func (c *helloConnector) GetDefinition() connectorapi.ConnectorDefinition {
+func (c *helloConnector) GetDefinition() connectorrpc.ConnectorDefinition {
 	return definition()
 }
 
@@ -49,14 +47,14 @@ func (c *helloConnector) Initialize(config map[string]interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.config = config
-	c.status = connectorapi.ConnectorStatusStopped
+	c.status = connectorrpc.ConnectorStatusStopped
 	return nil
 }
 
 func (c *helloConnector) Start(ctx context.Context) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.status = connectorapi.ConnectorStatusRunning
+	c.status = connectorrpc.ConnectorStatusRunning
+	c.mu.Unlock()
 	go func() {
 		<-ctx.Done()
 		_ = c.Stop()
@@ -67,11 +65,11 @@ func (c *helloConnector) Start(ctx context.Context) error {
 func (c *helloConnector) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.status = connectorapi.ConnectorStatusStopped
+	c.status = connectorrpc.ConnectorStatusStopped
 	return nil
 }
 
-func (c *helloConnector) GetStatus() connectorapi.ConnectorStatus {
+func (c *helloConnector) GetStatus() connectorrpc.ConnectorStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.status
@@ -93,13 +91,9 @@ func (c *helloConnector) UpdateConfig(config map[string]interface{}) error {
 	return nil
 }
 
-func (c *helloConnector) GetAPI() interface{} {
-	return nil
-}
-
-func (c *helloConnector) Invoke(ctx context.Context, req *connectorapi.ConnectorInvokeRequest) (*connectorapi.ConnectorInvokeResponse, error) {
+func (c *helloConnector) Invoke(ctx context.Context, req *connectorrpc.ConnectorInvokeRequest) (*connectorrpc.ConnectorInvokeResponse, error) {
 	_ = ctx
-	out := &connectorapi.ConnectorInvokeResponse{V: connectorapi.ConnectorWireProtocolV1}
+	out := &connectorrpc.ConnectorInvokeResponse{V: "1"}
 	if req == nil || req.Data == nil {
 		out.Error = "missing data"
 		return out, nil

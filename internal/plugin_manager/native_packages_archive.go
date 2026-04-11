@@ -127,10 +127,11 @@ func readPluginBundle(archive io.ReaderAt, size int64) (PluginPackageManifest, P
 			if base == pluginManifestFile || base == pluginSignatureFile || base == pluginPublicKeyFile {
 				return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive must place %s at the archive root, found %s", base, file.Name)
 			}
-			lower := strings.ToLower(name)
-			if strings.HasSuffix(lower, ".so") {
-				libraries[name] = file
-			}
+			// Everything else is a candidate runtime binary. The manifest's
+			// library_path field disambiguates exactly which one is the
+			// plugin entrypoint, so we intentionally accept all non-metadata
+			// files here rather than filtering by suffix.
+			libraries[name] = file
 		}
 	}
 
@@ -202,7 +203,7 @@ func selectManifestLibrary(manifest PluginPackageManifest, target PluginPackageT
 	}
 
 	if len(libraries) == 0 {
-		return "", nil, fmt.Errorf("plugin archive is missing a plugin binary (.so)")
+		return "", nil, fmt.Errorf("plugin archive is missing a plugin binary")
 	}
 
 	return "", nil, fmt.Errorf("plugin manifest target %s/%s with min_host_api_version %d is missing library_path", target.TargetOS, target.TargetArch, target.MinHostAPIVersion)

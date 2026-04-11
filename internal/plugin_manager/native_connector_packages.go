@@ -19,30 +19,44 @@ import (
 
 const nativeConnectorEntrySymbol = "GetAegisConnector"
 
-// nativeConnectorVerifiedLoader is the connector counterpart of
-// nativePluginVerifiedLoader: opens the file once with O_NOFOLLOW, hashes via
-// the fd, and dlopens the same inode via /proc/self/fd/N. Hookable by tests.
-var nativeConnectorVerifiedLoader = loadNativeVerifiedConnectorPath
+// nativeConnectorVerifiedLoader is the subprocess-isolated counterpart of
+// nativePluginVerifiedLoader for connector packages. The default production
+// impl spawns a peek subprocess via hashicorp/go-plugin to fetch the
+// static connector definition, then kills it; actual instances are spawned
+// per-connector via the CreateInstance factory attached to the returned
+// ConnectorDefinition.
+var nativeConnectorVerifiedLoader = peekNativeConnectorDefinition
 
-func loadNativeVerifiedConnectorPath(runtimePath, expectedSHA256 string) (ConnectorDefinition, error) {
-	file, err := openNoFollow(runtimePath)
+// peekNativeConnectorDefinition spawns a throwaway connector subprocess,
+// fetches the wire definition, kills it, and returns a host-typed definition
+// whose CreateInstance factory spawns a fresh subprocess per instance.
+func peekNativeConnectorDefinition(runtimePath, expectedSHA256 string) (ConnectorDefinition, error) {
+	handle, err := nativeConnectorSubprocessLauncher(runtimePath, expectedSHA256)
 	if err != nil {
 		return ConnectorDefinition{}, err
 	}
-	defer file.Close()
+	defer handle.Kill()
 
-	if expectedSHA256 = strings.TrimSpace(expectedSHA256); expectedSHA256 != "" {
-		hasher := sha256.New()
-		if _, copyErr := io.Copy(hasher, file); copyErr != nil {
-			return ConnectorDefinition{}, fmt.Errorf("failed to hash connector runtime library: %w", copyErr)
-		}
-		actual := fmt.Sprintf("%x", hasher.Sum(nil))
-		if !strings.EqualFold(expectedSHA256, actual) {
-			return ConnectorDefinition{}, fmt.Errorf("connector runtime library checksum mismatch: expected %s, got %s", expectedSHA256, actual)
-		}
+	wire, err := handle.rpc.GetDefinition()
+	if err != nil {
+		return ConnectorDefinition{}, fmt.Errorf("failed to fetch connector definition: %w", err)
+	}
+	hostDef, err := wireConnectorDefinitionToHost(wire)
+	if err != nil {
+		return ConnectorDefinition{}, err
 	}
 
-	return loadNativeConnectorDefinitionFromFD(file.Fd())
+	captured := hostDef
+	captured.CreateInstance = func() Connector {
+		return &subprocessConnectorShim{
+			connectorID:  captured.ID,
+			definition:   captured,
+			runtimePath:  runtimePath,
+			expectedHash: expectedSHA256,
+			status:       ConnectorStatusStopped,
+		}
+	}
+	return captured, nil
 }
 
 // ConnectorPackageManifest is the manifest.json format for native connector bundles.
@@ -433,10 +447,11 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 	}
 
 	connectorDir := filepath.Join(connectorRuntimeDir(), idSegment, versionSegment)
-	runtimePath := filepath.Join(connectorDir, sanitizeRuntimeSegment(filepath.Base(libraryName)))
-	if filepath.Ext(runtimePath) != ".so" {
-		runtimePath = filepath.Join(connectorDir, idSegment+".so")
+	runtimeBase := sanitizeRuntimeSegment(filepath.Base(libraryName))
+	if runtimeBase == "" {
+		runtimeBase = idSegment
 	}
+	runtimePath := filepath.Join(connectorDir, runtimeBase)
 
 	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create connector directory: %w", err)

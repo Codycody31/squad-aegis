@@ -64,10 +64,9 @@ func readConnectorBundle(archive io.ReaderAt, size int64) (ConnectorPackageManif
 			if base == pluginManifestFile || base == pluginSignatureFile || base == pluginPublicKeyFile {
 				return ConnectorPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("connector archive must place %s at the archive root, found %s", base, file.Name)
 			}
-			lower := strings.ToLower(name)
-			if strings.HasSuffix(lower, ".so") {
-				libraries[name] = file
-			}
+			// Accept every non-metadata file as a potential runtime binary;
+			// manifest.library_path disambiguates the entrypoint.
+			libraries[name] = file
 		}
 	}
 

@@ -12,7 +12,7 @@ MIN_HOST_API_VERSION="${MIN_HOST_API_VERSION:-1}"
 REQUIRED_CAPABILITIES="${REQUIRED_CAPABILITIES:-api.rcon,api.connector,events.rcon}"
 TARGETS="${TARGETS:-linux/$(go env GOARCH)}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist/native-plugin-hello}"
-LIBRARY_NAME="${LIBRARY_NAME:-hello-example.so}"
+LIBRARY_NAME="${LIBRARY_NAME:-hello-example}"
 
 rm -rf "${OUTPUT_DIR}/bin"
 mkdir -p "${OUTPUT_DIR}/bin"
@@ -53,12 +53,13 @@ for RAW_TARGET_SPEC in "${TARGET_SPECS[@]}"; do
   LIBRARY_PATH="${OUTPUT_DIR}/${LIBRARY_RELATIVE_PATH}"
   mkdir -p "$(dirname "${LIBRARY_PATH}")"
 
-  echo "Building native plugin shared object for ${TARGET_OS}/${TARGET_ARCH}..."
+  echo "Building subprocess-isolated native plugin binary for ${TARGET_OS}/${TARGET_ARCH}..."
   (
     cd "${ROOT_DIR}"
     env GOCACHE=/tmp/go-build-cache GOOS="${TARGET_OS}" GOARCH="${TARGET_ARCH}" \
-      go build -buildmode=plugin -o "${LIBRARY_PATH}" ./examples/native-plugin-hello
+      go build -o "${LIBRARY_PATH}" ./examples/native-plugin-hello
   )
+  chmod 0755 "${LIBRARY_PATH}"
 
   if command -v sha256sum >/dev/null 2>&1; then
     SHA256="$(sha256sum "${LIBRARY_PATH}" | awk '{print $1}')"

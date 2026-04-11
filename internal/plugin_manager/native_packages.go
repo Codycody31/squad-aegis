@@ -32,36 +32,15 @@ const (
 	pluginArchiveMaxEntries = 256
 )
 
-// nativePluginVerifiedLoader is a hookable loader that performs the SHA-256
-// verification and the dlopen against the same file descriptor, closing the
-// TOCTOU between hash and load. Tests override this to inject canned plugin
-// definitions without touching the filesystem.
-var nativePluginVerifiedLoader = loadNativeVerifiedPluginPath
-
-// loadNativeVerifiedPluginPath opens runtimePath with O_NOFOLLOW, verifies
-// the SHA-256 of the file contents matches expectedSHA256 (when non-empty),
-// and dlopens the same inode via /proc/self/fd/N. Holding the fd across
-// hash + dlopen guarantees both operations target the same bytes.
-func loadNativeVerifiedPluginPath(runtimePath, expectedSHA256 string) (PluginDefinition, error) {
-	file, err := openNoFollow(runtimePath)
-	if err != nil {
-		return PluginDefinition{}, err
-	}
-	defer file.Close()
-
-	if expectedSHA256 = strings.TrimSpace(expectedSHA256); expectedSHA256 != "" {
-		hasher := sha256.New()
-		if _, copyErr := io.Copy(hasher, file); copyErr != nil {
-			return PluginDefinition{}, fmt.Errorf("failed to hash plugin runtime library: %w", copyErr)
-		}
-		actual := fmt.Sprintf("%x", hasher.Sum(nil))
-		if !strings.EqualFold(expectedSHA256, actual) {
-			return PluginDefinition{}, fmt.Errorf("plugin runtime library checksum mismatch: expected %s, got %s", expectedSHA256, actual)
-		}
-	}
-
-	return loadNativePluginDefinitionFromFD(file.Fd())
-}
+// nativePluginVerifiedLoader is a hookable loader that fetches the static
+// definition of a native plugin package. In production it spawns a
+// hashicorp/go-plugin subprocess, pulls the definition out over net/rpc,
+// then kills the peek subprocess. The returned definition's CreateInstance
+// factory spawns a fresh subprocess per instance — so a buggy or malicious
+// plugin can only ever corrupt its own process image, never the host's.
+// Tests override this hook to inject canned definitions without spawning
+// a real process.
+var nativePluginVerifiedLoader = peekNativePluginDefinition
 
 // runtimeDirCache caches the resolved absolute paths for the plugin and
 // connector runtime directories. Resolving once at first use guarantees the
@@ -577,10 +556,11 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	}
 
 	pluginDir := filepath.Join(pluginRuntimeDir(), pluginIDSegment, versionSegment)
-	runtimePath := filepath.Join(pluginDir, sanitizeRuntimeSegment(filepath.Base(libraryName)))
-	if filepath.Ext(runtimePath) != ".so" {
-		runtimePath = filepath.Join(pluginDir, pluginIDSegment+".so")
+	runtimeBase := sanitizeRuntimeSegment(filepath.Base(libraryName))
+	if runtimeBase == "" {
+		runtimeBase = pluginIDSegment
 	}
+	runtimePath := filepath.Join(pluginDir, runtimeBase)
 
 	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create plugin directory: %w", err)

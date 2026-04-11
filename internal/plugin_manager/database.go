@@ -361,6 +361,10 @@ func (pm *PluginManager) initializeConnectorInstance(instance *ConnectorInstance
 		return fmt.Errorf("failed to initialize connector: %w", err)
 	}
 
+	// Wire health reporting for subprocess-isolated connectors so a
+	// crashing subprocess flips the instance to the error state.
+	pm.attachConnectorUnexpectedExitReporter(instance)
+
 	// Start connector
 	if err := safePluginCall(instance.ID, "Connector.Start", func() error {
 		return instance.Connector.Start(instance.Context)
@@ -373,6 +377,31 @@ func (pm *PluginManager) initializeConnectorInstance(instance *ConnectorInstance
 	instance.Status = ConnectorStatusRunning
 	instance.LastError = ""
 	return nil
+}
+
+// attachConnectorUnexpectedExitReporter wires the instance-level error state
+// into the connector shim's health watcher so a crashing subprocess flips
+// the connector to the error state.
+func (pm *PluginManager) attachConnectorUnexpectedExitReporter(instance *ConnectorInstance) {
+	reporter, ok := instance.Connector.(unexpectedExitReporter)
+	if !ok {
+		return
+	}
+	connectorID := instance.ID
+	reporter.OnUnexpectedExit(func(err error) {
+		pm.connectorMu.Lock()
+		defer pm.connectorMu.Unlock()
+		if live, ok := pm.connectors[connectorID]; ok {
+			live.Status = ConnectorStatusError
+			if err != nil {
+				live.LastError = err.Error()
+			}
+		}
+		log.Warn().
+			Err(err).
+			Str("connector_id", connectorID).
+			Msg("Connector subprocess exited unexpectedly; instance marked as errored")
+	})
 }
 
 func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) error {

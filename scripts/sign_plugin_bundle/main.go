@@ -141,18 +141,20 @@ func collectBundleFiles(bundleDir string) ([]string, error) {
 			return nil
 		}
 
-		// Allow .so files only under bin/ to keep the layout deterministic.
-		if strings.HasSuffix(lower, ".so") {
-			if !strings.HasPrefix(rel, "bin/") {
-				return fmt.Errorf("refusing to bundle %s: plugin libraries must live under bin/", rel)
-			}
+		// Any file under bin/ is accepted. The layout is deterministic
+		// because the manifest's library_path field pinpoints the
+		// subprocess executable, and the SHA-256 is bound by the signed
+		// manifest. Subprocess-isolated plugins are plain Go binaries, so
+		// there is no fixed extension we can rely on.
+		if strings.HasPrefix(rel, "bin/") {
 			files = append(files, rel)
 			return nil
 		}
+		_ = lower
 
 		// Anything else is rejected. Operators must explicitly stage what
 		// they want signed.
-		return fmt.Errorf("refusing to bundle %s: only manifest.json, %s, %s, and bin/*.so are accepted", rel, plugin_signing.ManifestSignatureFile, plugin_signing.ManifestPublicKeyFile)
+		return fmt.Errorf("refusing to bundle %s: only manifest.json, %s, %s, and files under bin/ are accepted", rel, plugin_signing.ManifestSignatureFile, plugin_signing.ManifestPublicKeyFile)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect bundle files: %w", err)

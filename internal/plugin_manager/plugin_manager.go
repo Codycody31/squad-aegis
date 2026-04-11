@@ -105,6 +105,7 @@ func (pm *PluginManager) Start() error {
 		if !nativePluginsConfigured() {
 			log.Warn().Msg("Native plugins are enabled but neither Plugins.TrustedSigningKeys nor Plugins.AllowUnsafeSideload is set; sideloads will be rejected. Configure a trust store before going to production.")
 		}
+		logSubprocessHardeningPosture()
 	}
 
 	if err := pm.loadInstalledPluginPackages(); err != nil {
@@ -850,6 +851,12 @@ func safePluginCall(pluginID string, op string, fn func() error) (err error) {
 	return fn()
 }
 
+// unexpectedExitReporter is the narrow interface subprocess shims expose so
+// the plugin manager can be notified when their subprocess crashes.
+type unexpectedExitReporter interface {
+	OnUnexpectedExit(func(error))
+}
+
 func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) error {
 	if err := pm.ensurePluginInstanceRuntime(instance); err != nil {
 		instance.Status = PluginStatusError
@@ -872,6 +879,11 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 		return fmt.Errorf("failed to initialize plugin: %w", err)
 	}
 
+	// Wire unexpected-exit reporting for subprocess-isolated plugins. A
+	// crashing subprocess flips the instance to error state so operators
+	// can see the failure on the server's plugin page.
+	pm.attachUnexpectedExitReporter(instance)
+
 	// Start plugin if it's long-running
 	definition := instance.Plugin.GetDefinition()
 	if definition.LongRunning {
@@ -887,6 +899,37 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 	instance.Status = PluginStatusRunning
 	instance.LastError = ""
 	return nil
+}
+
+// attachUnexpectedExitReporter wires the instance-level error state into the
+// shim's health watcher so a crashing subprocess automatically marks the
+// instance as errored. No-op if the plugin isn't subprocess-isolated.
+func (pm *PluginManager) attachUnexpectedExitReporter(instance *PluginInstance) {
+	reporter, ok := instance.Plugin.(unexpectedExitReporter)
+	if !ok {
+		return
+	}
+	pluginID := instance.PluginID
+	instanceID := instance.ID
+	serverID := instance.ServerID
+	reporter.OnUnexpectedExit(func(err error) {
+		pm.mu.Lock()
+		defer pm.mu.Unlock()
+		if serverPlugins, ok := pm.plugins[serverID]; ok {
+			if live, ok := serverPlugins[instanceID]; ok {
+				live.Status = PluginStatusError
+				if err != nil {
+					live.LastError = err.Error()
+				}
+			}
+		}
+		log.Warn().
+			Err(err).
+			Str("plugin_id", pluginID).
+			Str("instance_id", instanceID.String()).
+			Str("server_id", serverID.String()).
+			Msg("Plugin subprocess exited unexpectedly; instance marked as errored")
+	})
 }
 
 func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {

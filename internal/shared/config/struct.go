@@ -69,5 +69,27 @@ type Struct struct {
 		// Comma-separated base64 ed25519 public keys. A manifest.pub not in
 		// this list is treated as unsigned regardless of signature validity.
 		TrustedSigningKeys string `default:""`
+
+		// Subprocess rate limiting: per-instance HostAPI token bucket. A
+		// compromised plugin that floods the host with RconAPI/LogAPI calls
+		// is throttled to HostAPIRatePerSec sustained with HostAPIBurst peak.
+		// Zero or negative values disable rate limiting (NOT recommended in
+		// production).
+		HostAPIRatePerSec float64 `default:"50"`
+		HostAPIBurst      int     `default:"100"`
+
+		// Subprocess health monitoring: how often to ping each subprocess.
+		// Zero or negative disables the background health monitor.
+		HealthCheckIntervalSeconds int `default:"10"`
+
+		// Subprocess privilege drop (unix only). Set a non-zero UID/GID to
+		// launch native plugin/connector subprocesses under a different
+		// user/group. Subprocesses always run with NoNewPrivs=true so they
+		// cannot gain additional capabilities after exec. Groups is a
+		// comma-separated list of supplementary group IDs.
+		SubprocessUID         int    `default:"0"`
+		SubprocessGID         int    `default:"0"`
+		SubprocessGroups      string `default:""`
+		SubprocessNoNewPrivs  bool   `default:"true"`
 	}
 }
