@@ -39,14 +39,31 @@ func readConnectorBundle(archive io.ReaderAt, size int64) (ConnectorPackageManif
 			return ConnectorPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("connector archive contains an unsupported symlink: %s", file.Name)
 		}
 
-		switch filepath.Base(name) {
-		case pluginManifestFile:
+		// Manifest, signature and public key files are only accepted at the
+		// archive root, mirroring the plugin reader. See native_packages_archive.go
+		// for the rationale.
+		isRoot := !strings.ContainsRune(name, filepath.Separator)
+		switch {
+		case isRoot && name == pluginManifestFile:
+			if manifestFile != nil {
+				return ConnectorPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("connector archive contains multiple %s entries", pluginManifestFile)
+			}
 			manifestFile = file
-		case pluginSignatureFile:
+		case isRoot && name == pluginSignatureFile:
+			if signatureFile != nil {
+				return ConnectorPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("connector archive contains multiple %s entries", pluginSignatureFile)
+			}
 			signatureFile = file
-		case pluginPublicKeyFile:
+		case isRoot && name == pluginPublicKeyFile:
+			if publicKeyFile != nil {
+				return ConnectorPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("connector archive contains multiple %s entries", pluginPublicKeyFile)
+			}
 			publicKeyFile = file
 		default:
+			base := filepath.Base(name)
+			if base == pluginManifestFile || base == pluginSignatureFile || base == pluginPublicKeyFile {
+				return ConnectorPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("connector archive must place %s at the archive root, found %s", base, file.Name)
+			}
 			lower := strings.ToLower(name)
 			if strings.HasSuffix(lower, ".so") {
 				libraries[name] = file

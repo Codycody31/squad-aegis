@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -31,71 +32,138 @@ const (
 	pluginArchiveMaxEntries = 256
 )
 
-var nativePluginDefinitionLoader = loadNativePluginDefinition
+// nativePluginVerifiedLoader is a hookable loader that performs the SHA-256
+// verification and the dlopen against the same file descriptor, closing the
+// TOCTOU between hash and load. Tests override this to inject canned plugin
+// definitions without touching the filesystem.
+var nativePluginVerifiedLoader = loadNativeVerifiedPluginPath
+
+// loadNativeVerifiedPluginPath opens runtimePath with O_NOFOLLOW, verifies
+// the SHA-256 of the file contents matches expectedSHA256 (when non-empty),
+// and dlopens the same inode via /proc/self/fd/N. Holding the fd across
+// hash + dlopen guarantees both operations target the same bytes.
+func loadNativeVerifiedPluginPath(runtimePath, expectedSHA256 string) (PluginDefinition, error) {
+	file, err := openNoFollow(runtimePath)
+	if err != nil {
+		return PluginDefinition{}, err
+	}
+	defer file.Close()
+
+	if expectedSHA256 = strings.TrimSpace(expectedSHA256); expectedSHA256 != "" {
+		hasher := sha256.New()
+		if _, copyErr := io.Copy(hasher, file); copyErr != nil {
+			return PluginDefinition{}, fmt.Errorf("failed to hash plugin runtime library: %w", copyErr)
+		}
+		actual := fmt.Sprintf("%x", hasher.Sum(nil))
+		if !strings.EqualFold(expectedSHA256, actual) {
+			return PluginDefinition{}, fmt.Errorf("plugin runtime library checksum mismatch: expected %s, got %s", expectedSHA256, actual)
+		}
+	}
+
+	return loadNativePluginDefinitionFromFD(file.Fd())
+}
+
+// runtimeDirCache caches the resolved absolute paths for the plugin and
+// connector runtime directories. Resolving once at first use guarantees the
+// containment checks remain consistent even if the process changes its
+// working directory after start, and avoids tying the trust boundary of the
+// install path to a mutable global state.
+var (
+	runtimeDirCacheMu          sync.Mutex
+	cachedPluginRuntimeDir     string
+	cachedConnectorRuntimeDir  string
+	runtimeDirRelativeWarnOnce sync.Once
+)
+
+// ResetRuntimeDirCache clears the cached runtime directories. Tests use this
+// to swap config.Config between cases; production callers must not invoke it.
+func ResetRuntimeDirCache() {
+	runtimeDirCacheMu.Lock()
+	defer runtimeDirCacheMu.Unlock()
+	cachedPluginRuntimeDir = ""
+	cachedConnectorRuntimeDir = ""
+	runtimeDirRelativeWarnOnce = sync.Once{}
+}
 
 func nativePluginsEnabled() bool {
 	return config.Config != nil && config.Config.Plugins.NativeEnabled
 }
 
+func resolveRuntimeDirAbsolute(raw string) string {
+	abs, err := filepath.Abs(raw)
+	if err != nil {
+		log.Warn().Err(err).Str("dir", raw).Msg("Failed to resolve runtime directory to absolute path; falling back to raw value")
+		return raw
+	}
+	return filepath.Clean(abs)
+}
+
+func warnIfRelative(field, configured string) {
+	if configured == "" {
+		runtimeDirRelativeWarnOnce.Do(func() {
+			log.Warn().Str("field", field).Msg("Native plugin runtime directory is unset; defaulting to a relative path. Set Plugins." + field + " to an absolute path in production")
+		})
+	} else if !filepath.IsAbs(configured) {
+		log.Warn().Str("field", field).Str("value", configured).Msg("Native plugin runtime directory is relative; resolving against current working directory. Set Plugins." + field + " to an absolute path in production")
+	}
+}
+
 func pluginRuntimeDir() string {
-	if config.Config == nil {
-		return "plugins"
+	runtimeDirCacheMu.Lock()
+	defer runtimeDirCacheMu.Unlock()
+
+	if cachedPluginRuntimeDir != "" {
+		return cachedPluginRuntimeDir
 	}
 
-	if runtimeDir := strings.TrimSpace(config.Config.Plugins.RuntimeDir); runtimeDir != "" {
-		return runtimeDir
+	raw := "plugins"
+	configured := ""
+	if config.Config != nil {
+		configured = strings.TrimSpace(config.Config.Plugins.RuntimeDir)
+		switch {
+		case configured != "":
+			raw = configured
+		case config.Config.App.InContainer:
+			raw = "/etc/squad-aegis/plugins"
+		}
 	}
 
-	if config.Config.App.InContainer {
-		return "/etc/squad-aegis/plugins"
-	}
-
-	return "plugins"
+	warnIfRelative("RuntimeDir", configured)
+	cachedPluginRuntimeDir = resolveRuntimeDirAbsolute(raw)
+	return cachedPluginRuntimeDir
 }
 
 func connectorRuntimeDir() string {
-	if config.Config == nil {
-		return "connectors"
+	runtimeDirCacheMu.Lock()
+	defer runtimeDirCacheMu.Unlock()
+
+	if cachedConnectorRuntimeDir != "" {
+		return cachedConnectorRuntimeDir
 	}
 
-	if runtimeDir := strings.TrimSpace(config.Config.Plugins.ConnectorRuntimeDir); runtimeDir != "" {
-		return runtimeDir
+	raw := "connectors"
+	configured := ""
+	if config.Config != nil {
+		configured = strings.TrimSpace(config.Config.Plugins.ConnectorRuntimeDir)
+		switch {
+		case configured != "":
+			raw = configured
+		case config.Config.App.InContainer:
+			raw = "/etc/squad-aegis/connectors"
+		}
 	}
 
-	if config.Config.App.InContainer {
-		return "/etc/squad-aegis/connectors"
-	}
-
-	return "connectors"
+	warnIfRelative("ConnectorRuntimeDir", configured)
+	cachedConnectorRuntimeDir = resolveRuntimeDirAbsolute(raw)
+	return cachedConnectorRuntimeDir
 }
 
-// writeRuntimeLibrary unlinks any existing file then delegates to the
-// per-platform writer which uses O_EXCL|O_NOFOLLOW on Unix to defeat
-// symlink-clobber attacks.
+// writeRuntimeLibrary delegates to the per-platform writer which performs
+// an atomic write via temp file + rename(2). On Unix the temp file is opened
+// with O_NOFOLLOW to defeat symlink-clobber attacks; the rename atomically
+// replaces any existing file at runtimePath without a Remove/Create window.
 func writeRuntimeLibrary(runtimePath string, libraryBytes []byte) error {
-	if err := os.Remove(runtimePath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to clear existing runtime library at %s: %w", runtimePath, err)
-	}
-
-	if err := writeRuntimeLibraryPlatform(runtimePath, libraryBytes); err != nil {
-		_ = os.Remove(runtimePath)
-		return err
-	}
-	return nil
-}
-
-func hashFileSHA256(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x", hasher.Sum(nil)), nil
+	return writeRuntimeLibraryPlatform(runtimePath, libraryBytes)
 }
 
 // validateRuntimePathWithinRoot rejects a runtime_path that does not resolve
@@ -452,6 +520,13 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	pm.installMu.Lock()
 	defer pm.installMu.Unlock()
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if !nativePluginsEnabled() {
 		return nil, fmt.Errorf("plugin sideload is disabled")
 	}
@@ -510,11 +585,30 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create plugin directory: %w", err)
 	}
+
+	// Same-bytes short-circuit: if a package with this plugin ID + version
+	// is already loaded with the same checksum, return the existing entry
+	// without rewriting the runtime file. The bytes on disk are already
+	// guaranteed by the previous install.
+	if loadedVersion, loaded := pm.getLoadedNativePluginVersion(manifest.PluginID); loaded && loadedVersion == manifest.Version {
+		if existing := pm.getNativePackage(manifest.PluginID); existing != nil && existing.Checksum == checksum {
+			log.Info().Str("plugin_id", manifest.PluginID).Str("version", manifest.Version).Msg("Skipping native plugin re-install: bytes match already-loaded package")
+			return existing, nil
+		}
+	}
+
 	if err := writeRuntimeLibrary(runtimePath, libraryBytes); err != nil {
 		return nil, err
 	}
-
-	pkgSource := PluginSourceNative
+	// Track whether the install completed atomically. On any error after
+	// this point that leaves disk and DB out of sync, the deferred cleanup
+	// removes the runtime file so the next reload doesn't see a phantom .so.
+	installCommitted := false
+	defer func() {
+		if !installCommitted {
+			removeRuntimeFile(runtimePath)
+		}
+	}()
 
 	now := time.Now()
 	pkg := &InstalledPluginPackage{
@@ -522,7 +616,7 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		Name:              manifest.Name,
 		Description:       manifest.Description,
 		Version:           manifest.Version,
-		Source:            pkgSource,
+		Source:            PluginSourceNative,
 		Distribution:      distribution,
 		Official:          false,
 		InstallState:      PluginInstallStateReady,
@@ -543,24 +637,52 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		pkg.CreatedAt = existing.CreatedAt
 	}
 
+	// Decide the final state. Loading happens BEFORE the database save so
+	// that if the load fails we can record the error in a single round-trip,
+	// and so that a successful load is rolled back (registry unregister) if
+	// the subsequent save fails.
+	loadFailureRecorded := false
+	loadAttempted := false
 	if loadedVersion, loaded := pm.getLoadedNativePluginVersion(manifest.PluginID); loaded {
-		if loadedVersion == manifest.Version {
-			if existing := pm.getNativePackage(manifest.PluginID); existing != nil && existing.Checksum == checksum {
-				return existing, nil
-			}
-		}
-
+		// A version of this plugin is already in-process. Go's `plugin`
+		// package cannot unload, so the new bytes activate at next restart
+		// regardless of whether they match the loaded version's checksum
+		// (the same-bytes case was short-circuited above).
 		pkg.InstallState = PluginInstallStatePendingRestart
 		pkg.LastError = "Restart Aegis to activate the updated plugin package"
-	} else if err := pm.loadNativePluginPackage(pkg); err != nil {
-		pkg.InstallState = PluginInstallStateError
-		pkg.LastError = err.Error()
+		_ = loadedVersion
+	} else {
+		loadAttempted = true
+		if err := pm.loadNativePluginPackage(pkg); err != nil {
+			pm.unregisterNativePluginDefinition(manifest.PluginID)
+			pkg.InstallState = PluginInstallStateError
+			pkg.LastError = err.Error()
+			loadFailureRecorded = true
+			log.Warn().Err(err).Str("plugin_id", manifest.PluginID).Str("version", manifest.Version).Msg("Failed to load uploaded native plugin package")
+		} else {
+			pkg.InstallState = PluginInstallStateReady
+			pkg.LastError = ""
+		}
+	}
+	pkg.UpdatedAt = time.Now()
+
+	if err := pm.savePluginPackageToDatabaseContext(ctx, pkg); err != nil {
+		// DB save failed. Clean up the loaded state so the live registry
+		// doesn't outlive the (now-rolled-back) database row, and let the
+		// deferred file remover clear the runtime file from disk.
+		if loadAttempted {
+			pm.unregisterNativePlugin(manifest.PluginID)
+		}
+		return nil, fmt.Errorf("failed to persist plugin package state: %w", err)
 	}
 
-	if err := pm.savePluginPackageToDatabase(pkg); err != nil {
-		return nil, err
-	}
 	pm.setNativePackage(pkg)
+	installCommitted = true
+	if loadFailureRecorded {
+		log.Info().Str("plugin_id", pkg.PluginID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Msg("Persisted native plugin package install error state")
+	} else {
+		log.Info().Str("plugin_id", pkg.PluginID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Bool("signature_verified", pkg.SignatureVerified).Msg("Installed native plugin package")
+	}
 
 	return cloneInstalledPluginPackage(pkg), nil
 }
@@ -569,22 +691,33 @@ func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, plugi
 	pm.installMu.Lock()
 	defer pm.installMu.Unlock()
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	pkg := pm.getNativePackage(pluginID)
 	if pkg == nil {
 		return fmt.Errorf("plugin package %s not found", pluginID)
 	}
 
-	hasInstances, err := pm.hasPluginInstances(ctx, pluginID)
+	// Holding pm.mu blocks CreatePluginInstance for the duration of the
+	// existence check + DB delete, closing the delete-during-create race.
+	pm.mu.Lock()
+	hasInstances, err := pm.hasPluginInstancesLocked(ctx, pluginID)
 	if err != nil {
+		pm.mu.Unlock()
 		return err
 	}
 	if hasInstances {
+		pm.mu.Unlock()
 		return fmt.Errorf("plugin %s still has configured server instances", pluginID)
 	}
 
-	if err := pm.deletePluginPackageFromDatabase(pluginID); err != nil {
+	if err := pm.deletePluginPackageFromDatabaseContext(ctx, pluginID); err != nil {
+		pm.mu.Unlock()
 		return err
 	}
+	pm.mu.Unlock()
 
 	if _, loaded := pm.getLoadedNativePluginVersion(pluginID); loaded {
 		pm.unregisterNativePluginDefinition(pluginID)
@@ -613,6 +746,16 @@ func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, plugi
 }
 
 func (pm *PluginManager) hasPluginInstances(ctx context.Context, pluginID string) (bool, error) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.hasPluginInstancesLocked(ctx, pluginID)
+}
+
+// hasPluginInstancesLocked is the lock-free helper used when the caller
+// already holds pm.mu (read or write). It is the only safe entry point from
+// within the delete flow which must hold pm.mu.Lock to block concurrent
+// CreatePluginInstance.
+func (pm *PluginManager) hasPluginInstancesLocked(ctx context.Context, pluginID string) (bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -634,9 +777,6 @@ func (pm *PluginManager) hasPluginInstances(ctx context.Context, pluginID string
 		}
 	}
 
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-
 	for _, serverPlugins := range pm.plugins {
 		for _, instance := range serverPlugins {
 			if instance.PluginID == pluginID {
@@ -655,17 +795,7 @@ func (pm *PluginManager) loadNativePluginPackage(pkg *InstalledPluginPackage) er
 	}
 	pkg.RuntimePath = safePath
 
-	if expected := strings.TrimSpace(pkg.Checksum); expected != "" {
-		actual, err := hashFileSHA256(safePath)
-		if err != nil {
-			return fmt.Errorf("failed to hash plugin runtime library: %w", err)
-		}
-		if !strings.EqualFold(expected, actual) {
-			return fmt.Errorf("plugin runtime library checksum mismatch: expected %s, got %s", expected, actual)
-		}
-	}
-
-	definition, err := nativePluginDefinitionLoader(pkg.RuntimePath)
+	definition, err := nativePluginVerifiedLoader(safePath, pkg.Checksum)
 	if err != nil {
 		return err
 	}

@@ -99,14 +99,34 @@ func readPluginBundle(archive io.ReaderAt, size int64) (PluginPackageManifest, P
 			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive contains an unsupported symlink: %s", file.Name)
 		}
 
-		switch filepath.Base(name) {
-		case pluginManifestFile:
+		// Manifest, signature and public key files are accepted only at the
+		// archive root. This prevents bundles from shipping multiple
+		// candidates (e.g. `manifest.json` AND `subdir/manifest.json`) where
+		// the last entry seen would silently win and bypass operator review.
+		isRoot := !strings.ContainsRune(name, filepath.Separator)
+		switch {
+		case isRoot && name == pluginManifestFile:
+			if manifestFile != nil {
+				return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive contains multiple %s entries", pluginManifestFile)
+			}
 			manifestFile = file
-		case pluginSignatureFile:
+		case isRoot && name == pluginSignatureFile:
+			if signatureFile != nil {
+				return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive contains multiple %s entries", pluginSignatureFile)
+			}
 			signatureFile = file
-		case pluginPublicKeyFile:
+		case isRoot && name == pluginPublicKeyFile:
+			if publicKeyFile != nil {
+				return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive contains multiple %s entries", pluginPublicKeyFile)
+			}
 			publicKeyFile = file
 		default:
+			// Reject non-root manifest/sig/pubkey files outright; nothing
+			// legitimate ships them in subdirectories.
+			base := filepath.Base(name)
+			if base == pluginManifestFile || base == pluginSignatureFile || base == pluginPublicKeyFile {
+				return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive must place %s at the archive root, found %s", base, file.Name)
+			}
 			lower := strings.ToLower(name)
 			if strings.HasSuffix(lower, ".so") {
 				libraries[name] = file

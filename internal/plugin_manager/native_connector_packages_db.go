@@ -1,6 +1,7 @@
 package plugin_manager
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -17,7 +18,12 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 		return nil
 	}
 
-	rows, err := pm.db.Query(`
+	ctx := pm.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	rows, err := pm.db.QueryContext(ctx, `
 		SELECT connector_id, name, description, version, source, distribution, official, install_state,
 		       runtime_path, manifest_json, signature_verified, unsafe, checksum, min_host_api_version,
 		       required_capabilities, target_os, target_arch, last_error, created_at, updated_at,
@@ -103,8 +109,14 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 		pkg.Unsafe = !reverified
 		if !reverified && !allowUnsafeSideload() {
 			if pkg.InstallState == PluginInstallStateReady || pkg.InstallState == PluginInstallStatePendingRestart {
+				log.Warn().Str("connector_id", pkg.ConnectorID).Msg("Quarantining native connector: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
 				pkg.InstallState = PluginInstallStateError
 				pkg.LastError = "connector signature cannot be re-verified against trusted keys"
+				if pkg.RuntimePath != "" {
+					if safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, connectorRuntimeDir()); pathErr == nil {
+						removeRuntimeFile(safePath)
+					}
+				}
 			}
 		}
 
@@ -130,14 +142,13 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 			shouldPersistReadyState = true
 		}
 
-		var loadErr error
-		loadErr = pm.loadNativeConnectorPackage(pkg)
+		loadErr := pm.loadNativeConnectorPackage(pkg)
 		if loadErr != nil {
 			pkg.InstallState = PluginInstallStateError
 			pkg.LastError = loadErr.Error()
 			pkg.UpdatedAt = time.Now()
-			if saveErr := pm.saveConnectorPackageToDatabase(pkg); saveErr != nil {
-				log.Error().Err(saveErr).Str("connector_id", pkg.ConnectorID).Msg("Failed to persist native connector load error")
+			if saveErr := pm.saveConnectorPackageToDatabaseContext(ctx, pkg); saveErr != nil {
+				return fmt.Errorf("failed to persist load error for connector %s: %w (load error: %v)", pkg.ConnectorID, saveErr, loadErr)
 			}
 			pm.setNativeConnectorPackage(pkg)
 			continue
@@ -146,17 +157,26 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 		if shouldPersistReadyState || pkg.LastError != "" {
 			pkg.LastError = ""
 			pkg.UpdatedAt = time.Now()
-			if saveErr := pm.saveConnectorPackageToDatabase(pkg); saveErr != nil {
-				log.Error().Err(saveErr).Str("connector_id", pkg.ConnectorID).Msg("Failed to persist native connector package activation")
+			if saveErr := pm.saveConnectorPackageToDatabaseContext(ctx, pkg); saveErr != nil {
+				return fmt.Errorf("failed to persist native connector package activation for %s: %w", pkg.ConnectorID, saveErr)
 			}
 			pm.setNativeConnectorPackage(pkg)
 		}
+
+		log.Info().Str("connector_id", pkg.ConnectorID).Str("version", pkg.Version).Bool("signature_verified", pkg.SignatureVerified).Msg("Loaded native connector package")
 	}
 
 	return nil
 }
 
 func (pm *PluginManager) saveConnectorPackageToDatabase(pkg *InstalledConnectorPackage) error {
+	return pm.saveConnectorPackageToDatabaseContext(context.Background(), pkg)
+}
+
+func (pm *PluginManager) saveConnectorPackageToDatabaseContext(ctx context.Context, pkg *InstalledConnectorPackage) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	manifestJSON := pkg.ManifestJSON
 	if len(manifestJSON) == 0 {
 		var err error
@@ -166,7 +186,7 @@ func (pm *PluginManager) saveConnectorPackageToDatabase(pkg *InstalledConnectorP
 		}
 	}
 
-	_, err := pm.db.Exec(`
+	_, err := pm.db.ExecContext(ctx, `
 		INSERT INTO connector_packages (
 			connector_id, name, description, version, source, distribution, official, install_state,
 			runtime_path, manifest_json, signature_verified, unsafe, checksum, min_host_api_version,
@@ -231,7 +251,14 @@ func (pm *PluginManager) saveConnectorPackageToDatabase(pkg *InstalledConnectorP
 }
 
 func (pm *PluginManager) deleteConnectorPackageFromDatabase(connectorID string) error {
-	_, err := pm.db.Exec(`DELETE FROM connector_packages WHERE connector_id = $1`, connectorID)
+	return pm.deleteConnectorPackageFromDatabaseContext(context.Background(), connectorID)
+}
+
+func (pm *PluginManager) deleteConnectorPackageFromDatabaseContext(ctx context.Context, connectorID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := pm.db.ExecContext(ctx, `DELETE FROM connector_packages WHERE connector_id = $1`, connectorID)
 	if err != nil {
 		return fmt.Errorf("failed to delete connector package: %w", err)
 	}

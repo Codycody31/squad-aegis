@@ -216,10 +216,13 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 		},
 	})
 
-	previousLoader := nativePluginDefinitionLoader
-	nativePluginDefinitionLoader = func(gotPath string) (PluginDefinition, error) {
+	previousLoader := nativePluginVerifiedLoader
+	nativePluginVerifiedLoader = func(gotPath, gotChecksum string) (PluginDefinition, error) {
 		if gotPath != runtimePath {
 			t.Fatalf("runtimePath = %q, want %q", gotPath, runtimePath)
+		}
+		if gotChecksum != checksum {
+			t.Fatalf("checksum = %q, want %q", gotChecksum, checksum)
 		}
 
 		return PluginDefinition{
@@ -230,7 +233,7 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 		}, nil
 	}
 	t.Cleanup(func() {
-		nativePluginDefinitionLoader = previousLoader
+		nativePluginVerifiedLoader = previousLoader
 	})
 
 	pm := &PluginManager{

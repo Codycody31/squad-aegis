@@ -351,15 +351,20 @@ func (pm *PluginManager) startConnectors() error {
 func (pm *PluginManager) initializeConnectorInstance(instance *ConnectorInstance) error {
 	instance.Status = ConnectorStatusStarting
 
-	// Initialize connector
-	if err := instance.Connector.Initialize(instance.Config); err != nil {
+	// Initialize connector (panic-safe so a crashing native connector cannot
+	// take down the manager).
+	if err := safePluginCall(instance.ID, "Connector.Initialize", func() error {
+		return instance.Connector.Initialize(instance.Config)
+	}); err != nil {
 		instance.Status = ConnectorStatusError
 		instance.LastError = err.Error()
 		return fmt.Errorf("failed to initialize connector: %w", err)
 	}
 
 	// Start connector
-	if err := instance.Connector.Start(instance.Context); err != nil {
+	if err := safePluginCall(instance.ID, "Connector.Start", func() error {
+		return instance.Connector.Start(instance.Context)
+	}); err != nil {
 		instance.Status = ConnectorStatusError
 		instance.LastError = err.Error()
 		return fmt.Errorf("failed to start connector: %w", err)

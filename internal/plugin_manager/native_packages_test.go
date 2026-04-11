@@ -78,9 +78,11 @@ func setPluginTestConfig(t *testing.T, mutate func(*config.Struct)) {
 
 	mutate(&cfg)
 	config.Config = &cfg
+	ResetRuntimeDirCache()
 
 	t.Cleanup(func() {
 		config.Config = prev
+		ResetRuntimeDirCache()
 	})
 }
 
@@ -437,8 +439,12 @@ func TestPluginRuntimeDirUsesLocalDefaultOutsideContainer(t *testing.T) {
 		cfg.Plugins.RuntimeDir = ""
 	})
 
-	if got, want := pluginRuntimeDir(), "plugins"; got != want {
-		t.Fatalf("pluginRuntimeDir() = %q, want %q", got, want)
+	wantAbs, err := filepath.Abs("plugins")
+	if err != nil {
+		t.Fatalf("filepath.Abs() error = %v", err)
+	}
+	if got := pluginRuntimeDir(); got != wantAbs {
+		t.Fatalf("pluginRuntimeDir() = %q, want %q", got, wantAbs)
 	}
 }
 
@@ -966,12 +972,16 @@ func TestVerifyManifestSignatureRejectsUntrustedKey(t *testing.T) {
 		t.Fatalf("plugin_signing.SignManifest() error = %v", err)
 	}
 
-	_, err = verifyManifestSignature(manifestRaw, signatureRaw, publicKeyRaw)
-	if err == nil {
-		t.Fatal("verifyManifestSignature() error = nil, want untrusted-key error")
+	// Untrusted key should yield (false, nil) — i.e. "not verified" — rather
+	// than a hard error. This way the AllowUnsafeSideload gate can apply
+	// uniformly to "unsigned" and "signed by wrong key" without inverting
+	// the security gradient.
+	ok, err := verifyManifestSignature(manifestRaw, signatureRaw, publicKeyRaw)
+	if err != nil {
+		t.Fatalf("verifyManifestSignature() error = %v, want nil for untrusted-key", err)
 	}
-	if !strings.Contains(err.Error(), "untrusted") {
-		t.Fatalf("verifyManifestSignature() error = %q, want untrusted-key rejection", err)
+	if ok {
+		t.Fatal("verifyManifestSignature() = true, want false for untrusted-key")
 	}
 }
 
@@ -1319,8 +1329,8 @@ func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
 
 	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), libraryBytes, signatureRaw, publicKeyRaw)
 
-	previousLoader := nativePluginDefinitionLoader
-	nativePluginDefinitionLoader = func(string) (PluginDefinition, error) {
+	previousLoader := nativePluginVerifiedLoader
+	nativePluginVerifiedLoader = func(string, string) (PluginDefinition, error) {
 		return PluginDefinition{
 			ID:             "com.example.signed",
 			Name:           manifest.Name,
@@ -1328,7 +1338,7 @@ func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
 			CreateInstance: func() Plugin { return &noopPlugin{} },
 		}, nil
 	}
-	t.Cleanup(func() { nativePluginDefinitionLoader = previousLoader })
+	t.Cleanup(func() { nativePluginVerifiedLoader = previousLoader })
 
 	pm := &PluginManager{
 		registry:            NewPluginRegistry(),

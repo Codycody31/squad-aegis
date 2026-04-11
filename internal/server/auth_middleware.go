@@ -99,3 +99,37 @@ func IsLoggedIn(c *gin.Context) bool {
 	_, exists := c.Get("session")
 	return exists
 }
+
+// requireSuperAdmin is a defense-in-depth helper for handlers that perform
+// privileged operations like installing native plugins or connectors. It
+// duplicates the AuthIsSuperAdmin middleware check at the handler level so
+// that an accidentally-mis-routed handler still refuses non-super-admin
+// callers. Returns true when the request may proceed.
+func (s *Server) requireSuperAdmin(c *gin.Context) bool {
+	sess, exists := c.Get("session")
+	if !exists {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"message": "Unauthorized",
+			"code":    http.StatusUnauthorized,
+		})
+		return false
+	}
+	session, ok := sess.(*models.Session)
+	if !ok || session == nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"message": "Unauthorized",
+			"code":    http.StatusUnauthorized,
+		})
+		return false
+	}
+
+	row := s.Dependencies.DB.QueryRow("SELECT FROM users WHERE id = $1 AND super_admin = true", session.UserId)
+	if err := row.Scan(); err != nil {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"message": "Forbidden",
+			"code":    http.StatusForbidden,
+		})
+		return false
+	}
+	return true
+}

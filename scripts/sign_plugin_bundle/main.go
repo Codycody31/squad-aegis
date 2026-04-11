@@ -92,7 +92,18 @@ func run(bundleDir, privateKeyPath, outputZip string) error {
 	return nil
 }
 
+// collectBundleFiles walks bundleDir and selects only the files that belong
+// in a signed bundle: manifest.json, manifest.sig, manifest.pub at the root,
+// and any *.so under bin/. It refuses any file whose name suggests it might
+// be a private key or credential to defend against an operator accidentally
+// dropping a private key inside the bundle dir before zipping.
 func collectBundleFiles(bundleDir string) ([]string, error) {
+	allowedRoots := map[string]struct{}{
+		"manifest.json": {},
+		plugin_signing.ManifestSignatureFile: {},
+		plugin_signing.ManifestPublicKeyFile: {},
+	}
+
 	var files []string
 
 	err := filepath.WalkDir(bundleDir, func(path string, d os.DirEntry, err error) error {
@@ -110,8 +121,38 @@ func collectBundleFiles(bundleDir string) ([]string, error) {
 		if err != nil {
 			return fmt.Errorf("failed to compute relative path for %s: %w", path, err)
 		}
-		files = append(files, filepath.ToSlash(relativePath))
-		return nil
+		rel := filepath.ToSlash(relativePath)
+		base := filepath.Base(rel)
+		lower := strings.ToLower(base)
+
+		// Refuse anything that looks like a private key, credential, or
+		// other secret. The bundle should never contain these, but operators
+		// have been known to leave them next to manifest.json.
+		if isLikelySecretFile(lower) {
+			return fmt.Errorf("refusing to bundle %s: filename looks like a secret/private key. Move it outside %s before signing", rel, bundleDir)
+		}
+
+		// Allow manifest/sig/pubkey only at archive root.
+		if _, ok := allowedRoots[base]; ok {
+			if strings.ContainsRune(rel, '/') {
+				return fmt.Errorf("refusing to bundle %s: %s must live at the bundle root", rel, base)
+			}
+			files = append(files, rel)
+			return nil
+		}
+
+		// Allow .so files only under bin/ to keep the layout deterministic.
+		if strings.HasSuffix(lower, ".so") {
+			if !strings.HasPrefix(rel, "bin/") {
+				return fmt.Errorf("refusing to bundle %s: plugin libraries must live under bin/", rel)
+			}
+			files = append(files, rel)
+			return nil
+		}
+
+		// Anything else is rejected. Operators must explicitly stage what
+		// they want signed.
+		return fmt.Errorf("refusing to bundle %s: only manifest.json, %s, %s, and bin/*.so are accepted", rel, plugin_signing.ManifestSignatureFile, plugin_signing.ManifestPublicKeyFile)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect bundle files: %w", err)
@@ -119,6 +160,31 @@ func collectBundleFiles(bundleDir string) ([]string, error) {
 
 	sort.Strings(files)
 	return files, nil
+}
+
+// isLikelySecretFile returns true when the lowercased basename matches
+// common patterns for private keys, credentials, or other secrets that must
+// never end up inside a signed bundle.
+func isLikelySecretFile(lowerBase string) bool {
+	switch lowerBase {
+	case "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+		".env", "credentials", "credentials.json",
+		"secret", "secret.txt", "secrets.json":
+		return true
+	}
+	suffixes := []string{".pem", ".key", ".p12", ".pfx", ".jks", ".kdbx"}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(lowerBase, suffix) {
+			return true
+		}
+	}
+	prefixes := []string{"private", "priv-", "priv_"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lowerBase, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeZip(outputZip, bundleDir string, files []string) error {

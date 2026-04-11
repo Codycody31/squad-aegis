@@ -14,11 +14,17 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
+// pluginUploadMaxBytes mirrors plugin_manager.defaultPluginMaxUploadSize
+// (50 MiB) when no override is configured. The constant lives in
+// plugin_manager but the handler enforces the limit before delegating, so
+// keep them in sync.
+const handlerDefaultPluginMaxUploadSize = 50 * 1024 * 1024
+
 func pluginUploadMaxBytes() int64 {
 	if maxUploadSize := config.Config.Plugins.MaxUploadSize; maxUploadSize > 0 {
 		return maxUploadSize
 	}
-	return 50 * 1024 * 1024
+	return handlerDefaultPluginMaxUploadSize
 }
 
 func (s *Server) pluginAuditActorID(c *gin.Context) *uuid.UUID {
@@ -63,6 +69,9 @@ func (s *Server) PluginListInstalled(c *gin.Context) {
 
 // PluginUpload installs a plugin package uploaded by a super admin.
 func (s *Server) PluginUpload(c *gin.Context) {
+	if !s.requireSuperAdmin(c) {
+		return
+	}
 	if !s.requirePluginManager(c) {
 		return
 	}
@@ -98,8 +107,9 @@ func (s *Server) PluginUpload(c *gin.Context) {
 		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:upload_failed", gin.H{
 			"filename": file.Filename,
 			"size":     file.Size,
+			"error":    err.Error(),
 		})
-		responses.BadRequest(c, "Failed to install uploaded plugin bundle", &gin.H{})
+		responses.BadRequest(c, "Failed to install uploaded plugin bundle", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -122,6 +132,9 @@ func (s *Server) PluginUpload(c *gin.Context) {
 
 // PluginInstalledDelete removes an installed native plugin package.
 func (s *Server) PluginInstalledDelete(c *gin.Context) {
+	if !s.requireSuperAdmin(c) {
+		return
+	}
 	if !s.requirePluginManager(c) {
 		return
 	}
@@ -136,8 +149,9 @@ func (s *Server) PluginInstalledDelete(c *gin.Context) {
 		log.Error().Err(err).Str("plugin_id", pluginID).Msg("Failed to delete installed plugin")
 		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:delete_failed", gin.H{
 			"plugin_id": pluginID,
+			"error":     err.Error(),
 		})
-		responses.BadRequest(c, "Failed to delete installed plugin", &gin.H{})
+		responses.BadRequest(c, "Failed to delete installed plugin", &gin.H{"error": err.Error()})
 		return
 	}
 

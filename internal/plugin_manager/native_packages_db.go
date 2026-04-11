@@ -1,9 +1,11 @@
 package plugin_manager
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -14,7 +16,12 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 		return nil
 	}
 
-	rows, err := pm.db.Query(`
+	ctx := pm.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	rows, err := pm.db.QueryContext(ctx, `
 		SELECT plugin_id, name, description, version, source, distribution, official, install_state,
 		       runtime_path, manifest_json, signature_verified, unsafe, checksum, min_host_api_version,
 		       required_capabilities, target_os, target_arch, last_error, created_at, updated_at,
@@ -105,8 +112,17 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 		pkg.Unsafe = !reverified
 		if !reverified && !allowUnsafeSideload() {
 			if pkg.InstallState == PluginInstallStateReady || pkg.InstallState == PluginInstallStatePendingRestart {
+				log.Warn().Str("plugin_id", pkg.PluginID).Msg("Quarantining native plugin: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
 				pkg.InstallState = PluginInstallStateError
 				pkg.LastError = "plugin signature cannot be re-verified against trusted keys"
+				// Quarantine: actively remove the .so so a future trust-store
+				// rotation cannot silently re-activate it. The DB row remains
+				// in error state so operators see why.
+				if pkg.RuntimePath != "" {
+					if safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir()); pathErr == nil {
+						removeRuntimeFile(safePath)
+					}
+				}
 			}
 		}
 
@@ -132,14 +148,13 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 			shouldPersistReadyState = true
 		}
 
-		var loadErr error
-		loadErr = pm.loadNativePluginPackage(pkg)
+		loadErr := pm.loadNativePluginPackage(pkg)
 		if loadErr != nil {
 			pkg.InstallState = PluginInstallStateError
 			pkg.LastError = loadErr.Error()
 			pkg.UpdatedAt = time.Now()
-			if saveErr := pm.savePluginPackageToDatabase(pkg); saveErr != nil {
-				log.Error().Err(saveErr).Str("plugin_id", pkg.PluginID).Msg("Failed to persist sideloaded plugin load error")
+			if saveErr := pm.savePluginPackageToDatabaseContext(ctx, pkg); saveErr != nil {
+				return fmt.Errorf("failed to persist load error for plugin %s: %w (load error: %v)", pkg.PluginID, saveErr, loadErr)
 			}
 			pm.setNativePackage(pkg)
 			continue
@@ -148,17 +163,26 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 		if shouldPersistReadyState || pkg.LastError != "" {
 			pkg.LastError = ""
 			pkg.UpdatedAt = time.Now()
-			if saveErr := pm.savePluginPackageToDatabase(pkg); saveErr != nil {
-				log.Error().Err(saveErr).Str("plugin_id", pkg.PluginID).Msg("Failed to persist native plugin package activation")
+			if saveErr := pm.savePluginPackageToDatabaseContext(ctx, pkg); saveErr != nil {
+				return fmt.Errorf("failed to persist native plugin package activation for %s: %w", pkg.PluginID, saveErr)
 			}
 			pm.setNativePackage(pkg)
 		}
+
+		log.Info().Str("plugin_id", pkg.PluginID).Str("version", pkg.Version).Bool("signature_verified", pkg.SignatureVerified).Msg("Loaded native plugin package")
 	}
 
 	return nil
 }
 
 func (pm *PluginManager) savePluginPackageToDatabase(pkg *InstalledPluginPackage) error {
+	return pm.savePluginPackageToDatabaseContext(context.Background(), pkg)
+}
+
+func (pm *PluginManager) savePluginPackageToDatabaseContext(ctx context.Context, pkg *InstalledPluginPackage) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	manifestJSON := pkg.ManifestJSON
 	if len(manifestJSON) == 0 {
 		var err error
@@ -168,7 +192,7 @@ func (pm *PluginManager) savePluginPackageToDatabase(pkg *InstalledPluginPackage
 		}
 	}
 
-	_, err := pm.db.Exec(`
+	_, err := pm.db.ExecContext(ctx, `
 		INSERT INTO plugin_packages (
 			plugin_id, name, description, version, source, distribution, official, install_state,
 			runtime_path, manifest_json, signature_verified, unsafe, checksum, min_host_api_version,
@@ -233,10 +257,28 @@ func (pm *PluginManager) savePluginPackageToDatabase(pkg *InstalledPluginPackage
 }
 
 func (pm *PluginManager) deletePluginPackageFromDatabase(pluginID string) error {
-	_, err := pm.db.Exec(`DELETE FROM plugin_packages WHERE plugin_id = $1`, pluginID)
+	return pm.deletePluginPackageFromDatabaseContext(context.Background(), pluginID)
+}
+
+func (pm *PluginManager) deletePluginPackageFromDatabaseContext(ctx context.Context, pluginID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := pm.db.ExecContext(ctx, `DELETE FROM plugin_packages WHERE plugin_id = $1`, pluginID)
 	if err != nil {
 		return fmt.Errorf("failed to delete plugin package: %w", err)
 	}
 
 	return nil
+}
+
+// removeRuntimeFile is a best-effort cleanup helper that the install flow uses
+// to roll back a partial write when the database persistence step fails.
+func removeRuntimeFile(path string) {
+	if path == "" {
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Warn().Err(err).Str("path", path).Msg("Failed to roll back native plugin runtime file")
+	}
 }

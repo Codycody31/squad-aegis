@@ -78,7 +78,6 @@ const getStateVariant = (state: string) => {
 
 const getSourceLabel = (plugin: Pick<PluginPackage, "source" | "distribution" | "official">) => {
   if (plugin.source === "bundled") return "Bundled";
-  if (plugin.source === "wasm") return "Sideload WASM";
   return "Sideload Native";
 };
 
@@ -350,7 +349,7 @@ onMounted(async () => {
                 <TableCell class="text-right">
                   <div class="flex justify-end gap-2">
                     <Button
-                      v-if="plugin.source === 'native' || plugin.source === 'wasm'"
+                      v-if="plugin.source === 'native'"
                       size="sm"
                       variant="destructive"
                       @click="confirmDeleteInstalledPlugin(plugin)"

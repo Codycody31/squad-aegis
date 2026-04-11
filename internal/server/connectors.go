@@ -115,6 +115,9 @@ func (s *Server) ConnectorPackageListInstalled(c *gin.Context) {
 
 // ConnectorPackageUpload installs a sideloaded connector package (zip: manifest + .so) uploaded by a super admin.
 func (s *Server) ConnectorPackageUpload(c *gin.Context) {
+	if !s.requireSuperAdmin(c) {
+		return
+	}
 	if !s.requirePluginManager(c) {
 		return
 	}
@@ -150,8 +153,9 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "connector:package:upload_failed", gin.H{
 			"filename": file.Filename,
 			"size":     file.Size,
+			"error":    err.Error(),
 		})
-		responses.BadRequest(c, "Failed to install uploaded connector bundle", &gin.H{})
+		responses.BadRequest(c, "Failed to install uploaded connector bundle", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -174,6 +178,9 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 
 // ConnectorPackageInstalledDelete removes an installed sideloaded connector package.
 func (s *Server) ConnectorPackageInstalledDelete(c *gin.Context) {
+	if !s.requireSuperAdmin(c) {
+		return
+	}
 	if !s.requirePluginManager(c) {
 		return
 	}
@@ -188,8 +195,9 @@ func (s *Server) ConnectorPackageInstalledDelete(c *gin.Context) {
 		log.Error().Err(err).Str("connector_id", connectorID).Msg("Failed to delete installed connector package")
 		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "connector:package:delete_failed", gin.H{
 			"connector_id": connectorID,
+			"error":        err.Error(),
 		})
-		responses.BadRequest(c, "Failed to delete installed connector package", &gin.H{})
+		responses.BadRequest(c, "Failed to delete installed connector package", &gin.H{"error": err.Error()})
 		return
 	}
 

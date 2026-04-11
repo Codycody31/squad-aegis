@@ -17,7 +17,33 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
 
-var nativeConnectorDefinitionLoader = loadNativeConnectorDefinition
+const nativeConnectorEntrySymbol = "GetAegisConnector"
+
+// nativeConnectorVerifiedLoader is the connector counterpart of
+// nativePluginVerifiedLoader: opens the file once with O_NOFOLLOW, hashes via
+// the fd, and dlopens the same inode via /proc/self/fd/N. Hookable by tests.
+var nativeConnectorVerifiedLoader = loadNativeVerifiedConnectorPath
+
+func loadNativeVerifiedConnectorPath(runtimePath, expectedSHA256 string) (ConnectorDefinition, error) {
+	file, err := openNoFollow(runtimePath)
+	if err != nil {
+		return ConnectorDefinition{}, err
+	}
+	defer file.Close()
+
+	if expectedSHA256 = strings.TrimSpace(expectedSHA256); expectedSHA256 != "" {
+		hasher := sha256.New()
+		if _, copyErr := io.Copy(hasher, file); copyErr != nil {
+			return ConnectorDefinition{}, fmt.Errorf("failed to hash connector runtime library: %w", copyErr)
+		}
+		actual := fmt.Sprintf("%x", hasher.Sum(nil))
+		if !strings.EqualFold(expectedSHA256, actual) {
+			return ConnectorDefinition{}, fmt.Errorf("connector runtime library checksum mismatch: expected %s, got %s", expectedSHA256, actual)
+		}
+	}
+
+	return loadNativeConnectorDefinitionFromFD(file.Fd())
+}
 
 // ConnectorPackageManifest is the manifest.json format for native connector bundles.
 type ConnectorPackageManifest struct {
@@ -177,6 +203,15 @@ func (pm *PluginManager) getLoadedNativeConnectorVersion(connectorID string) (st
 }
 
 func (pm *PluginManager) hasConnectorInstances(ctx context.Context, instanceKeys []string) (bool, error) {
+	pm.connectorMu.RLock()
+	defer pm.connectorMu.RUnlock()
+	return pm.hasConnectorInstancesLocked(ctx, instanceKeys)
+}
+
+// hasConnectorInstancesLocked is the lock-free helper used when the caller
+// already holds pm.connectorMu (read or write). The connector delete flow
+// holds it as a writer to block concurrent CreateConnectorInstance.
+func (pm *PluginManager) hasConnectorInstancesLocked(ctx context.Context, instanceKeys []string) (bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -210,9 +245,6 @@ func (pm *PluginManager) hasConnectorInstances(ctx context.Context, instanceKeys
 		}
 	}
 
-	pm.connectorMu.RLock()
-	defer pm.connectorMu.RUnlock()
-
 	for _, instanceKey := range instanceKeys {
 		if _, exists := pm.connectors[instanceKey]; exists {
 			return true, nil
@@ -229,17 +261,7 @@ func (pm *PluginManager) loadNativeConnectorPackage(pkg *InstalledConnectorPacka
 	}
 	pkg.RuntimePath = safePath
 
-	if expected := strings.TrimSpace(pkg.Checksum); expected != "" {
-		actual, err := hashFileSHA256(safePath)
-		if err != nil {
-			return fmt.Errorf("failed to hash connector runtime library: %w", err)
-		}
-		if !strings.EqualFold(expected, actual) {
-			return fmt.Errorf("connector runtime library checksum mismatch: expected %s, got %s", expected, actual)
-		}
-	}
-
-	definition, err := nativeConnectorDefinitionLoader(pkg.RuntimePath)
+	definition, err := nativeConnectorVerifiedLoader(safePath, pkg.Checksum)
 	if err != nil {
 		return err
 	}
@@ -352,9 +374,15 @@ func (pm *PluginManager) InstallConnectorPackageFromBundle(ctx context.Context, 
 }
 
 func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.ReaderAt, size int64, originalName string, distribution PluginDistribution) (*InstalledConnectorPackage, error) {
-	_ = ctx
 	pm.installMu.Lock()
 	defer pm.installMu.Unlock()
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	if !nativePluginsEnabled() {
 		return nil, fmt.Errorf("native plugins and connectors are disabled")
@@ -413,11 +441,24 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create connector directory: %w", err)
 	}
+
+	// Same-bytes short circuit before writing.
+	if loadedVersion, loaded := pm.getLoadedNativeConnectorVersion(manifest.ConnectorID); loaded && loadedVersion == manifest.Version {
+		if existing := pm.getNativeConnectorPackage(manifest.ConnectorID); existing != nil && existing.Checksum == checksum {
+			log.Info().Str("connector_id", manifest.ConnectorID).Str("version", manifest.Version).Msg("Skipping native connector re-install: bytes match already-loaded package")
+			return existing, nil
+		}
+	}
+
 	if err := writeRuntimeLibrary(runtimePath, libraryBytes); err != nil {
 		return nil, err
 	}
-
-	pkgSource := PluginSourceNative
+	installCommitted := false
+	defer func() {
+		if !installCommitted {
+			removeRuntimeFile(runtimePath)
+		}
+	}()
 
 	now := time.Now()
 	pkg := &InstalledConnectorPackage{
@@ -425,7 +466,7 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 		Name:              manifest.Name,
 		Description:       manifest.Description,
 		Version:           manifest.Version,
-		Source:            pkgSource,
+		Source:            PluginSourceNative,
 		Distribution:      distribution,
 		Official:          false,
 		InstallState:      PluginInstallStateReady,
@@ -446,24 +487,44 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 		pkg.CreatedAt = existing.CreatedAt
 	}
 
-	if loadedVersion, loaded := pm.getLoadedNativeConnectorVersion(manifest.ConnectorID); loaded {
-		if loadedVersion == manifest.Version {
-			if existing := pm.getNativeConnectorPackage(manifest.ConnectorID); existing != nil && existing.Checksum == checksum {
-				return existing, nil
-			}
-		}
-
+	loadFailureRecorded := false
+	loadAttempted := false
+	if _, loaded := pm.getLoadedNativeConnectorVersion(manifest.ConnectorID); loaded {
 		pkg.InstallState = PluginInstallStatePendingRestart
 		pkg.LastError = "Restart Aegis to activate the updated connector package"
-	} else if err := pm.loadNativeConnectorPackage(pkg); err != nil {
-		pkg.InstallState = PluginInstallStateError
-		pkg.LastError = err.Error()
+	} else {
+		loadAttempted = true
+		if err := pm.loadNativeConnectorPackage(pkg); err != nil {
+			pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
+			pkg.InstallState = PluginInstallStateError
+			pkg.LastError = err.Error()
+			loadFailureRecorded = true
+			log.Warn().Err(err).Str("connector_id", manifest.ConnectorID).Str("version", manifest.Version).Msg("Failed to load uploaded native connector package")
+		} else {
+			pkg.InstallState = PluginInstallStateReady
+			pkg.LastError = ""
+		}
+	}
+	pkg.UpdatedAt = time.Now()
+
+	if err := pm.saveConnectorPackageToDatabaseContext(ctx, pkg); err != nil {
+		// Roll back the live registry so it does not outlive the (now-rolled-back) DB row.
+		if loadAttempted {
+			pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
+			pm.nativeMu.Lock()
+			delete(pm.loadedNativeConnectors, manifest.ConnectorID)
+			pm.nativeMu.Unlock()
+		}
+		return nil, fmt.Errorf("failed to persist connector package state: %w", err)
 	}
 
-	if err := pm.saveConnectorPackageToDatabase(pkg); err != nil {
-		return nil, err
-	}
 	pm.setNativeConnectorPackage(pkg)
+	installCommitted = true
+	if loadFailureRecorded {
+		log.Info().Str("connector_id", pkg.ConnectorID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Msg("Persisted native connector package install error state")
+	} else {
+		log.Info().Str("connector_id", pkg.ConnectorID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Bool("signature_verified", pkg.SignatureVerified).Msg("Installed native connector package")
+	}
 
 	return cloneInstalledConnectorPackage(pkg), nil
 }
@@ -472,15 +533,27 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 func (pm *PluginManager) DeleteInstalledConnectorPackage(ctx context.Context, connectorID string) error {
 	pm.installMu.Lock()
 	defer pm.installMu.Unlock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	pkg := pm.getNativeConnectorPackage(connectorID)
 	if pkg == nil {
 		return fmt.Errorf("connector package %s not found", connectorID)
 	}
 
 	instanceKeys := connectorInstanceKeysForPackage(pkg)
-	if hasInstances, err := pm.hasConnectorInstances(ctx, instanceKeys); err != nil {
+
+	// Hold connectorMu (write) for the existence check + DB delete to block
+	// concurrent CreateConnectorInstance, closing the delete-during-create race.
+	pm.connectorMu.Lock()
+	hasInstances, err := pm.hasConnectorInstancesLocked(ctx, instanceKeys)
+	if err != nil {
+		pm.connectorMu.Unlock()
 		return err
-	} else if hasInstances {
+	}
+	if hasInstances {
+		pm.connectorMu.Unlock()
 		instanceKey := connectorID
 		if len(instanceKeys) > 0 {
 			instanceKey = instanceKeys[0]
@@ -488,9 +561,11 @@ func (pm *PluginManager) DeleteInstalledConnectorPackage(ctx context.Context, co
 		return fmt.Errorf("connector %s still has configured instances; delete the instance first", instanceKey)
 	}
 
-	if err := pm.deleteConnectorPackageFromDatabase(connectorID); err != nil {
+	if err := pm.deleteConnectorPackageFromDatabaseContext(ctx, connectorID); err != nil {
+		pm.connectorMu.Unlock()
 		return err
 	}
+	pm.connectorMu.Unlock()
 
 	pm.connectorRegistry.UnregisterConnector(connectorID)
 	pm.removeNativeConnectorPackage(connectorID)

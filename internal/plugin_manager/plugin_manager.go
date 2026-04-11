@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -93,6 +94,18 @@ func (pm *PluginManager) SetBanSyncFunc(fn func(ctx context.Context, serverID uu
 // Start starts the plugin manager
 func (pm *PluginManager) Start() error {
 	log.Info().Msg("Starting plugin manager")
+
+	if nativePluginsEnabled() {
+		// Force runtime dirs to resolve once at startup so the abs-path
+		// warning fires before any uploads can race the cache, and so
+		// containment checks remain stable across CWD changes.
+		_ = pluginRuntimeDir()
+		_ = connectorRuntimeDir()
+
+		if !nativePluginsConfigured() {
+			log.Warn().Msg("Native plugins are enabled but neither Plugins.TrustedSigningKeys nor Plugins.AllowUnsafeSideload is set; sideloads will be rejected. Configure a trust store before going to production.")
+		}
+	}
 
 	if err := pm.loadInstalledPluginPackages(); err != nil {
 		return fmt.Errorf("failed to load installed plugin packages: %w", err)
@@ -817,6 +830,26 @@ func (pm *PluginManager) ensurePluginInstanceRuntime(instance *PluginInstance) e
 	return nil
 }
 
+// safePluginCall wraps an arbitrary plugin lifecycle call with a recover so a
+// panicking native plugin cannot crash the entire PluginManager process. The
+// returned error is non-nil if the call panicked or returned an error.
+func safePluginCall(pluginID string, op string, fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			stack := make([]byte, 4096)
+			n := runtime.Stack(stack, false)
+			log.Error().
+				Str("plugin_id", pluginID).
+				Str("operation", op).
+				Interface("panic", r).
+				Bytes("stack", stack[:n]).
+				Msg("Plugin lifecycle call panicked; isolating failure")
+			err = fmt.Errorf("plugin %s panicked in %s: %v", pluginID, op, r)
+		}
+	}()
+	return fn()
+}
+
 func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) error {
 	if err := pm.ensurePluginInstanceRuntime(instance); err != nil {
 		instance.Status = PluginStatusError
@@ -829,8 +862,11 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 	// Create plugin APIs
 	apis := pm.createPluginAPIs(instance.ServerID, instance.ID, instance.PluginName, instance.PluginID, instance.LogLevel)
 
-	// Initialize plugin
-	if err := instance.Plugin.Initialize(instance.Config, apis); err != nil {
+	// Initialize plugin (with panic recovery so a misbehaving native .so
+	// cannot take down the manager).
+	if err := safePluginCall(instance.PluginID, "Initialize", func() error {
+		return instance.Plugin.Initialize(instance.Config, apis)
+	}); err != nil {
 		instance.Status = PluginStatusError
 		instance.LastError = err.Error()
 		return fmt.Errorf("failed to initialize plugin: %w", err)
@@ -839,7 +875,9 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 	// Start plugin if it's long-running
 	definition := instance.Plugin.GetDefinition()
 	if definition.LongRunning {
-		if err := instance.Plugin.Start(instance.Context); err != nil {
+		if err := safePluginCall(instance.PluginID, "Start", func() error {
+			return instance.Plugin.Start(instance.Context)
+		}); err != nil {
 			instance.Status = PluginStatusError
 			instance.LastError = err.Error()
 			return fmt.Errorf("failed to start plugin: %w", err)
