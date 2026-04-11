@@ -46,6 +46,11 @@ type PluginManager struct {
 	nativeConnectorPackages map[string]*InstalledConnectorPackage
 	loadedNativeConnectors  map[string]string
 
+	// installMu serializes the full native plugin/connector install and
+	// delete flow. nativeMu / connectorMu alone are insufficient because
+	// the install flow spans multiple separate critical sections.
+	installMu sync.Mutex
+
 	// Event subscription
 	eventSubscriber *event_manager.EventSubscriber
 

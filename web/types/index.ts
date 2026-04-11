@@ -179,6 +179,13 @@ export interface SystemConfig {
   valkey: Record<string, any>;
   storage: Record<string, any>;
   log: Record<string, any>;
+  plugins?: {
+    native_enabled?: boolean;
+    runtime_dir?: string;
+    allow_unsafe_sideload?: boolean;
+    max_upload_size?: number;
+    trusted_signing_keys_set?: boolean;
+  };
 }
 
 export interface GlobalAuditLog {

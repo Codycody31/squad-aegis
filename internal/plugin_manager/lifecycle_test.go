@@ -2,11 +2,14 @@ package plugin_manager
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -111,11 +114,24 @@ func openTestSQLDB(t *testing.T, driverImpl *testSQLDriver) *sql.DB {
 func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *testing.T) {
 	requireLinuxNativePlugins(t)
 
+	runtimeDir := t.TempDir()
 	setPluginTestConfig(t, func(cfg *config.Struct) {
 		cfg.App.InContainer = false
 		cfg.Plugins.NativeEnabled = true
-		cfg.Plugins.RuntimeDir = t.TempDir()
+		cfg.Plugins.RuntimeDir = runtimeDir
+		cfg.Plugins.AllowUnsafeSideload = true
 	})
+
+	pluginSubdir := filepath.Join(runtimeDir, "com.example.pending", "1.0.0")
+	if err := os.MkdirAll(pluginSubdir, 0o750); err != nil {
+		t.Fatalf("os.MkdirAll() error = %v", err)
+	}
+	runtimePath := filepath.Join(pluginSubdir, "com.example.pending.so")
+	libraryBytes := []byte("fake-runtime-library")
+	if err := os.WriteFile(runtimePath, libraryBytes, 0o640); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	checksum := fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
 
 	manifest := testManifest("com.example.pending")
 	manifestRaw, err := json.Marshal(manifest)
@@ -154,6 +170,8 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 					"last_error",
 					"created_at",
 					"updated_at",
+					"manifest_signature",
+					"manifest_public_key",
 				},
 				values: [][]driver.Value{{
 					"com.example.pending",
@@ -164,11 +182,11 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 					string(PluginDistributionSideload),
 					false,
 					string(PluginInstallStatePendingRestart),
-					"/tmp/com.example.pending.so",
+					runtimePath,
 					manifestRaw,
 					true,
 					false,
-					"checksum",
+					checksum,
 					int64(NativePluginHostAPIVersion),
 					[]byte("[]"),
 					manifest.Targets[0].TargetOS,
@@ -176,6 +194,8 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 					"Restart Aegis to activate the updated native plugin package",
 					now,
 					now,
+					"",
+					"",
 				}},
 			}, nil
 		},
@@ -197,9 +217,9 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 	})
 
 	previousLoader := nativePluginDefinitionLoader
-	nativePluginDefinitionLoader = func(runtimePath string) (PluginDefinition, error) {
-		if got, want := runtimePath, "/tmp/com.example.pending.so"; got != want {
-			t.Fatalf("runtimePath = %q, want %q", got, want)
+	nativePluginDefinitionLoader = func(gotPath string) (PluginDefinition, error) {
+		if gotPath != runtimePath {
+			t.Fatalf("runtimePath = %q, want %q", gotPath, runtimePath)
 		}
 
 		return PluginDefinition{

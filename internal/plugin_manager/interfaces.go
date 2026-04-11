@@ -124,6 +124,8 @@ type InstalledPluginPackage struct {
 	RuntimePath          string                `json:"runtime_path,omitempty"`
 	Manifest             PluginPackageManifest `json:"manifest"`
 	ManifestJSON         json.RawMessage       `json:"-"`
+	ManifestSignature    []byte                `json:"-"`
+	ManifestPublicKey    []byte                `json:"-"`
 	SignatureVerified    bool                  `json:"signature_verified"`
 	Unsafe               bool                  `json:"unsafe"`
 	Checksum             string                `json:"checksum"`

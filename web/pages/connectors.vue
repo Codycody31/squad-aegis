@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { computed, ref, onMounted } from "vue";
+import type { SystemConfig } from "~/types";
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -86,6 +87,37 @@ const connectorPackages = ref<ConnectorPackage[]>([]);
 const loadingPackages = ref(false);
 const uploadingPackage = ref(false);
 const selectedConnectorBundle = ref<File | null>(null);
+
+const systemPluginsConfig = ref<SystemConfig["plugins"] | null>(null);
+const deleteConnectorTarget = ref<any | null>(null);
+const deletePackageTarget = ref<ConnectorPackage | null>(null);
+
+const trustStoreConfigured = computed(
+  () => systemPluginsConfig.value?.trusted_signing_keys_set === true,
+);
+const unsafeSideloadEnabled = computed(
+  () => systemPluginsConfig.value?.allow_unsafe_sideload === true,
+);
+const reverifyFailures = computed(() =>
+  connectorPackages.value.filter(
+    (pkg) =>
+      pkg.install_state === "error" &&
+      typeof pkg.last_error === "string" &&
+      pkg.last_error.includes("signature cannot be re-verified"),
+  ),
+);
+
+const fetchSystemPluginsConfig = async () => {
+  try {
+    if (!authStore.user?.super_admin) return;
+    const response = await useAuthFetchImperative<any>("/api/sudo/system/config");
+    const cfg = response.data?.data as SystemConfig | undefined;
+    systemPluginsConfig.value = cfg?.plugins ?? null;
+  } catch (error: any) {
+    console.error("Failed to load system plugin config:", error);
+    systemPluginsConfig.value = null;
+  }
+};
 
 /** Match a running instance id (e.g. `discord`) to an available definition (canonical or legacy). */
 const connectorDefForInstance = (instanceId: string) => {
@@ -237,10 +269,17 @@ const createConnector = async () => {
 };
 
 // Delete connector instance
-const deleteConnector = async (connector: any) => {
-  if (!confirm(`Are you sure you want to delete the connector "${connector.id}"?`)) {
-    return;
-  }
+const confirmDeleteConnector = (connector: any) => {
+  deleteConnectorTarget.value = connector;
+};
+
+const cancelDeleteConnector = () => {
+  deleteConnectorTarget.value = null;
+};
+
+const deleteConnector = async () => {
+  const connector = deleteConnectorTarget.value;
+  if (!connector) return;
 
   try {
     await useAuthFetchImperative(`/api/connectors/${connector.id}`, {
@@ -252,6 +291,7 @@ const deleteConnector = async (connector: any) => {
       description: "Connector deleted successfully",
     });
 
+    deleteConnectorTarget.value = null;
     await loadConnectors();
   } catch (error: any) {
     console.error("Failed to delete connector:", error);
@@ -446,14 +486,17 @@ const uploadConnectorBundle = async () => {
   }
 };
 
-const deleteConnectorPackage = async (pkg: ConnectorPackage) => {
-  if (
-    !confirm(
-      `Delete sideloaded connector package "${pkg.name}" (${pkg.connector_id})? Remove any running connector instance for this id first.`,
-    )
-  ) {
-    return;
-  }
+const confirmDeleteConnectorPackage = (pkg: ConnectorPackage) => {
+  deletePackageTarget.value = pkg;
+};
+
+const cancelDeleteConnectorPackage = () => {
+  deletePackageTarget.value = null;
+};
+
+const deleteConnectorPackage = async () => {
+  const pkg = deletePackageTarget.value;
+  if (!pkg) return;
 
   try {
     await useAuthFetchImperative(`/api/connectors/packages/installed/${encodeURIComponent(pkg.connector_id)}`, {
@@ -463,6 +506,7 @@ const deleteConnectorPackage = async (pkg: ConnectorPackage) => {
       title: "Deleted",
       description: "Connector package removed",
     });
+    deletePackageTarget.value = null;
     await Promise.all([loadConnectorPackages(), loadAvailableConnectors()]);
   } catch (error: any) {
     console.error("Failed to delete connector package:", error);
@@ -477,7 +521,12 @@ const deleteConnectorPackage = async (pkg: ConnectorPackage) => {
 onMounted(async () => {
   loading.value = true;
   try {
-    await Promise.all([loadConnectors(), loadAvailableConnectors(), loadConnectorPackages()]);
+    await Promise.all([
+      loadConnectors(),
+      loadAvailableConnectors(),
+      loadConnectorPackages(),
+      fetchSystemPluginsConfig(),
+    ]);
   } finally {
     loading.value = false;
   }
@@ -590,6 +639,56 @@ onMounted(async () => {
       </div>
     </div>
 
+    <div
+      v-if="authStore.user?.super_admin && !trustStoreConfigured && !unsafeSideloadEnabled"
+      class="mb-4 rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+    >
+      <div class="flex items-start gap-2">
+        <AlertCircle class="mt-0.5 h-5 w-5 flex-shrink-0" />
+        <div>
+          <p class="font-medium">No trusted connector signing keys configured</p>
+          <p class="mt-1">
+            <code>plugins.trusted_signing_keys</code> is empty and
+            <code>plugins.allow_unsafe_sideload</code> is disabled. No connector bundles can be uploaded
+            until one of these is set.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div
+      v-else-if="authStore.user?.super_admin && !trustStoreConfigured && unsafeSideloadEnabled"
+      class="mb-4 rounded-md border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm text-yellow-700 dark:text-yellow-300"
+    >
+      <div class="flex items-start gap-2">
+        <AlertCircle class="mt-0.5 h-5 w-5 flex-shrink-0" />
+        <div>
+          <p class="font-medium">Unsafe sideloads are enabled</p>
+          <p class="mt-1">
+            Any uploaded connector bundle will load without signature verification. Do not use this in production.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="reverifyFailures.length > 0"
+      class="mb-4 rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+    >
+      <div class="flex items-start gap-2">
+        <AlertCircle class="mt-0.5 h-5 w-5 flex-shrink-0" />
+        <div>
+          <p class="font-medium">
+            {{ reverifyFailures.length }}
+            connector {{ reverifyFailures.length === 1 ? "package" : "packages" }} failed signature re-verification
+          </p>
+          <p class="mt-1">
+            Re-sign and re-upload these bundles, or update
+            <code>plugins.trusted_signing_keys</code> to include the signing key.
+          </p>
+        </div>
+      </div>
+    </div>
+
     <!-- Sideloaded connector packages (.so) -->
     <Card class="mb-4 sm:mb-6">
       <CardHeader class="pb-2 sm:pb-3">
@@ -614,7 +713,8 @@ onMounted(async () => {
           </Button>
         </div>
         <p class="text-xs sm:text-sm text-muted-foreground">
-          Unsigned bundles are rejected unless unsafe sideload is enabled on the server. After upload, restart Aegis if the package says pending restart.
+          Bundles must be signed with a key in <code>plugins.trusted_signing_keys</code>, unless
+          <code>plugins.allow_unsafe_sideload</code> is enabled. After upload, restart Aegis if the package says pending restart.
         </p>
 
         <div v-if="loadingPackages" class="py-6 text-center text-muted-foreground text-sm">
@@ -669,7 +769,7 @@ onMounted(async () => {
                     v-if="pkg.source === 'native'"
                     size="sm"
                     variant="destructive"
-                    @click="deleteConnectorPackage(pkg)"
+                    @click="confirmDeleteConnectorPackage(pkg)"
                   >
                     Delete
                   </Button>
@@ -763,7 +863,7 @@ onMounted(async () => {
                       <Button
                         variant="destructive"
                         size="sm"
-                        @click="deleteConnector(connector)"
+                        @click="confirmDeleteConnector(connector)"
                         class="text-xs"
                       >
                         <Trash2 class="w-4 h-4" />
@@ -829,7 +929,7 @@ onMounted(async () => {
                 <Button
                   variant="destructive"
                   size="sm"
-                  @click="deleteConnector(connector)"
+                  @click="confirmDeleteConnector(connector)"
                   class="h-8 text-xs flex-1"
                 >
                   <Trash2 class="w-3 h-3 mr-1" />
@@ -898,6 +998,47 @@ onMounted(async () => {
         <DialogFooter>
           <Button variant="outline" @click="showConfigDialog = false">Cancel</Button>
           <Button @click="saveConnectorConfig">Save Configuration</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      :open="deleteConnectorTarget !== null"
+      @update:open="(open) => !open && cancelDeleteConnector()"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete connector instance?</DialogTitle>
+          <DialogDescription>
+            Delete the connector instance
+            <span class="font-medium">"{{ deleteConnectorTarget?.id }}"</span>?
+            Any plugin that depends on this connector will stop receiving it.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="cancelDeleteConnector">Cancel</Button>
+          <Button variant="destructive" @click="deleteConnector">Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      :open="deletePackageTarget !== null"
+      @update:open="(open) => !open && cancelDeleteConnectorPackage()"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete connector package?</DialogTitle>
+          <DialogDescription>
+            Delete the sideloaded connector package
+            <span class="font-medium">"{{ deletePackageTarget?.name || deletePackageTarget?.connector_id }}"</span>?
+            Remove any running connector instance for this id first. The package's
+            <code>.so</code> file will be removed from disk.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="cancelDeleteConnectorPackage">Cancel</Button>
+          <Button variant="destructive" @click="deleteConnectorPackage">Delete</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

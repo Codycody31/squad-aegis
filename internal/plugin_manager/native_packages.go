@@ -1,20 +1,15 @@
 package plugin_manager
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +25,10 @@ const (
 	pluginPublicKeyFile         = plugin_signing.ManifestPublicKeyFile
 	defaultPluginMaxUploadSize  = 50 * 1024 * 1024
 	pluginArchiveMetadataBudget = 1 * 1024 * 1024
+	// pluginArchiveMaxEntries bounds the central directory entry count to
+	// prevent metadata-scanning DoS via zip files with millions of tiny
+	// headers. A legitimate plugin bundle has at most a handful of files.
+	pluginArchiveMaxEntries = 256
 )
 
 var nativePluginDefinitionLoader = loadNativePluginDefinition
@@ -54,6 +53,69 @@ func pluginRuntimeDir() string {
 	return "plugins"
 }
 
+// writeRuntimeLibrary unlinks any existing file then delegates to the
+// per-platform writer which uses O_EXCL|O_NOFOLLOW on Unix to defeat
+// symlink-clobber attacks.
+func writeRuntimeLibrary(runtimePath string, libraryBytes []byte) error {
+	if err := os.Remove(runtimePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to clear existing runtime library at %s: %w", runtimePath, err)
+	}
+
+	if err := writeRuntimeLibraryPlatform(runtimePath, libraryBytes); err != nil {
+		_ = os.Remove(runtimePath)
+		return err
+	}
+	return nil
+}
+
+func hashFileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hasher.Sum(nil)), nil
+}
+
+// validateRuntimePathWithinRoot rejects a runtime_path that does not resolve
+// inside root, guarding against DB tampering that would otherwise make the
+// loader open arbitrary files on the host.
+func validateRuntimePathWithinRoot(runtimePath, root string) (string, error) {
+	if strings.TrimSpace(runtimePath) == "" {
+		return "", fmt.Errorf("runtime path is empty")
+	}
+	if strings.TrimSpace(root) == "" {
+		return "", fmt.Errorf("runtime root is empty")
+	}
+
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve runtime root: %w", err)
+	}
+	absRoot = filepath.Clean(absRoot)
+
+	absPath, err := filepath.Abs(runtimePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve runtime path: %w", err)
+	}
+	absPath = filepath.Clean(absPath)
+
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return "", fmt.Errorf("runtime path %s is not under %s", absPath, absRoot)
+	}
+	if rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("runtime path %s escapes runtime root %s", absPath, absRoot)
+	}
+
+	return absPath, nil
+}
+
 func allowUnsafeSideload() bool {
 	return config.Config != nil && config.Config.Plugins.AllowUnsafeSideload
 }
@@ -73,66 +135,6 @@ func pluginMaxArchiveUncompressedSize() int64 {
 	}
 
 	return maxUploadSize + pluginArchiveMetadataBudget
-}
-
-type pluginArchiveReadBudget struct {
-	entryLimit int64
-	totalLimit int64
-	remaining  int64
-}
-
-func newPluginArchiveReadBudget() pluginArchiveReadBudget {
-	totalLimit := pluginMaxArchiveUncompressedSize()
-	return pluginArchiveReadBudget{
-		entryLimit: pluginMaxUploadSize(),
-		totalLimit: totalLimit,
-		remaining:  totalLimit,
-	}
-}
-
-func (b *pluginArchiveReadBudget) read(file *zip.File) ([]byte, error) {
-	if file == nil {
-		return nil, nil
-	}
-
-	if file.UncompressedSize64 > uint64(b.entryLimit) {
-		return nil, fmt.Errorf("plugin archive entry %s exceeds uncompressed size limit of %d bytes", file.Name, b.entryLimit)
-	}
-	if file.UncompressedSize64 > uint64(b.remaining) {
-		return nil, fmt.Errorf("plugin archive exceeds total uncompressed size limit of %d bytes", b.totalLimit)
-	}
-
-	rc, err := file.Open()
-	if err != nil {
-		return nil, fmt.Errorf("failed to open archive entry %s: %w", file.Name, err)
-	}
-
-	readLimit := b.entryLimit
-	totalLimited := false
-	if b.remaining < readLimit {
-		readLimit = b.remaining
-		totalLimited = true
-	}
-
-	limited := &io.LimitedReader{R: rc, N: readLimit + 1}
-	data, readErr := io.ReadAll(limited)
-	closeErr := rc.Close()
-	if readErr != nil {
-		return nil, fmt.Errorf("failed to read archive entry %s: %w", file.Name, readErr)
-	}
-	if int64(len(data)) > readLimit {
-		if totalLimited {
-			return nil, fmt.Errorf("plugin archive exceeds total uncompressed size limit of %d bytes", b.totalLimit)
-		}
-		return nil, fmt.Errorf("plugin archive entry %s exceeds uncompressed size limit of %d bytes", file.Name, b.entryLimit)
-	}
-	if closeErr != nil {
-		return nil, fmt.Errorf("failed to close archive entry %s: %w", file.Name, closeErr)
-	}
-
-	b.remaining -= int64(len(data))
-
-	return data, nil
 }
 
 func sanitizeRuntimeSegment(value string) string {
@@ -188,210 +190,6 @@ func pluginRuntimeSegments(pluginID, version string) (string, string, error) {
 	return pluginSegment, versionSegment, nil
 }
 
-func clonePluginPackageTargets(targets []PluginPackageTarget) []PluginPackageTarget {
-	if len(targets) == 0 {
-		return nil
-	}
-
-	cloned := make([]PluginPackageTarget, len(targets))
-	copy(cloned, targets)
-	return cloned
-}
-
-func cloneRequiredCapabilities(capabilities []string) []string {
-	if len(capabilities) == 0 {
-		return nil
-	}
-
-	cloned := make([]string, len(capabilities))
-	copy(cloned, capabilities)
-	return cloned
-}
-
-func hostNativePluginCapabilitiesSet() map[string]struct{} {
-	capabilities := make(map[string]struct{}, len(nativePluginHostCapabilities))
-	for _, capability := range NativePluginHostCapabilities() {
-		capabilities[capability] = struct{}{}
-	}
-	return capabilities
-}
-
-func missingRequiredCapabilities(required []string) []string {
-	if len(required) == 0 {
-		return nil
-	}
-
-	hostCapabilities := hostNativePluginCapabilitiesSet()
-	missingSet := make(map[string]struct{})
-	for _, capability := range required {
-		capability = strings.TrimSpace(capability)
-		if capability == "" {
-			continue
-		}
-		if _, ok := hostCapabilities[capability]; !ok {
-			missingSet[capability] = struct{}{}
-		}
-	}
-
-	missing := make([]string, 0, len(missingSet))
-	for capability := range missingSet {
-		missing = append(missing, capability)
-	}
-	sort.Strings(missing)
-	return missing
-}
-
-func isCompatibleHostTarget(target PluginPackageTarget) bool {
-	return target.MinHostAPIVersion <= NativePluginHostAPIVersion && len(missingRequiredCapabilities(target.RequiredCapabilities)) == 0
-}
-
-func betterPluginTarget(left, right PluginPackageTarget) bool {
-	if left.MinHostAPIVersion != right.MinHostAPIVersion {
-		return left.MinHostAPIVersion > right.MinHostAPIVersion
-	}
-	if len(left.RequiredCapabilities) != len(right.RequiredCapabilities) {
-		return len(left.RequiredCapabilities) > len(right.RequiredCapabilities)
-	}
-	return left.LibraryPath < right.LibraryPath
-}
-
-func preferredPluginTarget(targets []PluginPackageTarget) PluginPackageTarget {
-	if len(targets) == 0 {
-		return PluginPackageTarget{}
-	}
-
-	hostOS := runtime.GOOS
-	hostArch := runtime.GOARCH
-	var bestCompatible *PluginPackageTarget
-	var bestHostTarget *PluginPackageTarget
-	var bestLinuxAMD64 *PluginPackageTarget
-
-	for _, target := range targets {
-		target.RequiredCapabilities = cloneRequiredCapabilities(target.RequiredCapabilities)
-
-		if target.TargetOS == hostOS && target.TargetArch == hostArch {
-			if bestHostTarget == nil || betterPluginTarget(target, *bestHostTarget) {
-				targetCopy := target
-				bestHostTarget = &targetCopy
-			}
-			if isCompatibleHostTarget(target) && (bestCompatible == nil || betterPluginTarget(target, *bestCompatible)) {
-				targetCopy := target
-				bestCompatible = &targetCopy
-			}
-		}
-
-		if target.TargetOS == "linux" && target.TargetArch == "amd64" {
-			if bestLinuxAMD64 == nil || betterPluginTarget(target, *bestLinuxAMD64) {
-				targetCopy := target
-				bestLinuxAMD64 = &targetCopy
-			}
-		}
-	}
-
-	if bestCompatible != nil {
-		return *bestCompatible
-	}
-	if bestHostTarget != nil {
-		return *bestHostTarget
-	}
-	if bestLinuxAMD64 != nil {
-		return *bestLinuxAMD64
-	}
-	return targets[0]
-}
-
-func selectedManifestTarget(manifest PluginPackageManifest) (PluginPackageTarget, error) {
-	targets := clonePluginPackageTargets(manifest.Targets)
-	if len(targets) == 0 {
-		return PluginPackageTarget{}, fmt.Errorf("plugin manifest is missing targets")
-	}
-
-	hostOS := runtime.GOOS
-	hostArch := runtime.GOARCH
-	var osMatches []PluginPackageTarget
-	var archMatches []PluginPackageTarget
-	var compatible []PluginPackageTarget
-	minRequiredHostAPI := 0
-	missingCapabilities := make(map[string]struct{})
-
-	for _, target := range targets {
-		target.RequiredCapabilities = cloneRequiredCapabilities(target.RequiredCapabilities)
-		if target.TargetOS != hostOS {
-			continue
-		}
-		osMatches = append(osMatches, target)
-		if target.TargetArch != hostArch {
-			continue
-		}
-		archMatches = append(archMatches, target)
-
-		if target.MinHostAPIVersion > NativePluginHostAPIVersion {
-			if minRequiredHostAPI == 0 || target.MinHostAPIVersion < minRequiredHostAPI {
-				minRequiredHostAPI = target.MinHostAPIVersion
-			}
-			continue
-		}
-
-		for _, capability := range missingRequiredCapabilities(target.RequiredCapabilities) {
-			missingCapabilities[capability] = struct{}{}
-		}
-		if len(missingRequiredCapabilities(target.RequiredCapabilities)) > 0 {
-			continue
-		}
-
-		compatible = append(compatible, target)
-	}
-
-	if len(compatible) > 0 {
-		best := compatible[0]
-		for _, target := range compatible[1:] {
-			if betterPluginTarget(target, best) {
-				best = target
-			}
-		}
-		return best, nil
-	}
-
-	if len(osMatches) == 0 {
-		return PluginPackageTarget{}, fmt.Errorf("plugin does not support host OS %s", hostOS)
-	}
-	if len(archMatches) == 0 {
-		return PluginPackageTarget{}, fmt.Errorf("plugin does not support host architecture %s on %s", hostArch, hostOS)
-	}
-
-	missingCapabilityList := make([]string, 0, len(missingCapabilities))
-	for capability := range missingCapabilities {
-		missingCapabilityList = append(missingCapabilityList, capability)
-	}
-	sort.Strings(missingCapabilityList)
-
-	if minRequiredHostAPI > 0 && len(missingCapabilityList) > 0 {
-		return PluginPackageTarget{}, fmt.Errorf(
-			"plugin has no compatible target for %s/%s: requires host API version >= %d and capabilities %s (host API version is %d)",
-			hostOS,
-			hostArch,
-			minRequiredHostAPI,
-			strings.Join(missingCapabilityList, ", "),
-			NativePluginHostAPIVersion,
-		)
-	}
-	if minRequiredHostAPI > 0 {
-		return PluginPackageTarget{}, fmt.Errorf(
-			"plugin requires host API version >= %d, but host provides %d",
-			minRequiredHostAPI,
-			NativePluginHostAPIVersion,
-		)
-	}
-	if len(missingCapabilityList) > 0 {
-		return PluginPackageTarget{}, fmt.Errorf(
-			"plugin requires unsupported host capabilities: %s",
-			strings.Join(missingCapabilityList, ", "),
-		)
-	}
-
-	return PluginPackageTarget{}, fmt.Errorf("plugin has no compatible target for %s/%s", hostOS, hostArch)
-}
-
 func cloneInstalledPluginPackage(pkg *InstalledPluginPackage) *InstalledPluginPackage {
 	if pkg == nil {
 		return nil
@@ -402,6 +200,12 @@ func cloneInstalledPluginPackage(pkg *InstalledPluginPackage) *InstalledPluginPa
 	cloned.RequiredCapabilities = cloneRequiredCapabilities(pkg.RequiredCapabilities)
 	if len(pkg.ManifestJSON) > 0 {
 		cloned.ManifestJSON = append(json.RawMessage(nil), pkg.ManifestJSON...)
+	}
+	if len(pkg.ManifestSignature) > 0 {
+		cloned.ManifestSignature = append([]byte(nil), pkg.ManifestSignature...)
+	}
+	if len(pkg.ManifestPublicKey) > 0 {
+		cloned.ManifestPublicKey = append([]byte(nil), pkg.ManifestPublicKey...)
 	}
 
 	return &cloned
@@ -483,202 +287,6 @@ func (pm *PluginManager) resetNativeRuntimeState() {
 	defer pm.nativeMu.Unlock()
 
 	pm.loadedNativePlugins = make(map[string]string)
-}
-
-func (pm *PluginManager) loadInstalledPluginPackages() error {
-	if !nativePluginsEnabled() {
-		return nil
-	}
-
-	rows, err := pm.db.Query(`
-		SELECT plugin_id, name, description, version, source, distribution, official, install_state,
-		       runtime_path, manifest_json, signature_verified, unsafe, checksum, min_host_api_version,
-		       required_capabilities, target_os, target_arch, last_error, created_at, updated_at
-		FROM plugin_packages
-		ORDER BY created_at
-	`)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil
-		}
-		return fmt.Errorf("failed to query plugin packages: %w", err)
-	}
-	defer rows.Close()
-
-	loadedPackages := make(map[string]*InstalledPluginPackage)
-
-	for rows.Next() {
-		var pkg InstalledPluginPackage
-		var manifestJSON []byte
-		var requiredCapabilitiesJSON []byte
-
-		if err := rows.Scan(
-			&pkg.PluginID,
-			&pkg.Name,
-			&pkg.Description,
-			&pkg.Version,
-			&pkg.Source,
-			&pkg.Distribution,
-			&pkg.Official,
-			&pkg.InstallState,
-			&pkg.RuntimePath,
-			&manifestJSON,
-			&pkg.SignatureVerified,
-			&pkg.Unsafe,
-			&pkg.Checksum,
-			&pkg.MinHostAPIVersion,
-			&requiredCapabilitiesJSON,
-			&pkg.TargetOS,
-			&pkg.TargetArch,
-			&pkg.LastError,
-			&pkg.CreatedAt,
-			&pkg.UpdatedAt,
-		); err != nil {
-			return fmt.Errorf("failed to scan plugin package row: %w", err)
-		}
-
-		pkg.ManifestJSON = append(json.RawMessage(nil), manifestJSON...)
-		if len(requiredCapabilitiesJSON) > 0 {
-			if err := json.Unmarshal(requiredCapabilitiesJSON, &pkg.RequiredCapabilities); err != nil {
-				pkg.InstallState = PluginInstallStateError
-				pkg.LastError = fmt.Sprintf("invalid required capabilities metadata: %v", err)
-			}
-		}
-		if len(manifestJSON) > 0 {
-			if err := json.Unmarshal(manifestJSON, &pkg.Manifest); err != nil {
-				pkg.InstallState = PluginInstallStateError
-				pkg.LastError = fmt.Sprintf("invalid manifest: %v", err)
-			} else if target, targetErr := selectedManifestTarget(pkg.Manifest); targetErr != nil {
-				pkg.InstallState = PluginInstallStateError
-				pkg.LastError = targetErr.Error()
-			} else {
-				applyInstalledPackageTarget(&pkg, target)
-			}
-		}
-
-		loadedPackages[pkg.PluginID] = &pkg
-	}
-
-	pm.resetNativeRuntimeState()
-
-	pm.nativeMu.Lock()
-	pm.nativePackages = loadedPackages
-	pm.nativeMu.Unlock()
-
-	for _, pkg := range loadedPackages {
-		if pkg.InstallState != PluginInstallStateReady && pkg.InstallState != PluginInstallStatePendingRestart {
-			continue
-		}
-
-		shouldPersistReadyState := false
-		if pkg.InstallState == PluginInstallStatePendingRestart {
-			pkg.InstallState = PluginInstallStateReady
-			pkg.LastError = ""
-			pkg.UpdatedAt = time.Now()
-			shouldPersistReadyState = true
-		}
-
-		var loadErr error
-		loadErr = pm.loadNativePluginPackage(pkg)
-		if loadErr != nil {
-			pkg.InstallState = PluginInstallStateError
-			pkg.LastError = loadErr.Error()
-			pkg.UpdatedAt = time.Now()
-			if saveErr := pm.savePluginPackageToDatabase(pkg); saveErr != nil {
-				log.Error().Err(saveErr).Str("plugin_id", pkg.PluginID).Msg("Failed to persist sideloaded plugin load error")
-			}
-			pm.setNativePackage(pkg)
-			continue
-		}
-
-		if shouldPersistReadyState || pkg.LastError != "" {
-			pkg.LastError = ""
-			pkg.UpdatedAt = time.Now()
-			if saveErr := pm.savePluginPackageToDatabase(pkg); saveErr != nil {
-				log.Error().Err(saveErr).Str("plugin_id", pkg.PluginID).Msg("Failed to persist native plugin package activation")
-			}
-			pm.setNativePackage(pkg)
-		}
-	}
-
-	return nil
-}
-
-func (pm *PluginManager) savePluginPackageToDatabase(pkg *InstalledPluginPackage) error {
-	manifestJSON := pkg.ManifestJSON
-	if len(manifestJSON) == 0 {
-		var err error
-		manifestJSON, err = json.Marshal(pkg.Manifest)
-		if err != nil {
-			return fmt.Errorf("failed to marshal plugin manifest: %w", err)
-		}
-	}
-
-	_, err := pm.db.Exec(`
-		INSERT INTO plugin_packages (
-			plugin_id, name, description, version, source, distribution, official, install_state,
-			runtime_path, manifest_json, signature_verified, unsafe, checksum, min_host_api_version,
-			required_capabilities, target_os, target_arch, last_error, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8,
-			$9, $10, $11, $12, $13, $14,
-			$15, $16, $17, $18, $19, $20
-		)
-		ON CONFLICT (plugin_id) DO UPDATE SET
-			name = EXCLUDED.name,
-			description = EXCLUDED.description,
-			version = EXCLUDED.version,
-			source = EXCLUDED.source,
-			distribution = EXCLUDED.distribution,
-			official = EXCLUDED.official,
-			install_state = EXCLUDED.install_state,
-			runtime_path = EXCLUDED.runtime_path,
-			manifest_json = EXCLUDED.manifest_json,
-			signature_verified = EXCLUDED.signature_verified,
-			unsafe = EXCLUDED.unsafe,
-			checksum = EXCLUDED.checksum,
-			min_host_api_version = EXCLUDED.min_host_api_version,
-			required_capabilities = EXCLUDED.required_capabilities,
-			target_os = EXCLUDED.target_os,
-			target_arch = EXCLUDED.target_arch,
-			last_error = EXCLUDED.last_error,
-			updated_at = EXCLUDED.updated_at
-	`,
-		pkg.PluginID,
-		pkg.Name,
-		pkg.Description,
-		pkg.Version,
-		pkg.Source,
-		pkg.Distribution,
-		pkg.Official,
-		pkg.InstallState,
-		pkg.RuntimePath,
-		string(manifestJSON),
-		pkg.SignatureVerified,
-		pkg.Unsafe,
-		pkg.Checksum,
-		pkg.MinHostAPIVersion,
-		string(mustMarshalRequiredCapabilities(pkg.RequiredCapabilities)),
-		pkg.TargetOS,
-		pkg.TargetArch,
-		pkg.LastError,
-		pkg.CreatedAt,
-		pkg.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to upsert plugin package: %w", err)
-	}
-
-	return nil
-}
-
-func (pm *PluginManager) deletePluginPackageFromDatabase(pluginID string) error {
-	_, err := pm.db.Exec(`DELETE FROM plugin_packages WHERE plugin_id = $1`, pluginID)
-	if err != nil {
-		return fmt.Errorf("failed to delete plugin package: %w", err)
-	}
-
-	return nil
 }
 
 func (pm *PluginManager) enrichPluginDefinition(definition PluginDefinition) PluginDefinition {
@@ -825,11 +433,14 @@ func (pm *PluginManager) InstallPluginPackageFromBundle(ctx context.Context, arc
 }
 
 func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.ReaderAt, size int64, originalName string, distribution PluginDistribution) (*InstalledPluginPackage, error) {
+	pm.installMu.Lock()
+	defer pm.installMu.Unlock()
+
 	if !nativePluginsEnabled() {
 		return nil, fmt.Errorf("plugin sideload is disabled")
 	}
 
-	if err := os.MkdirAll(pluginRuntimeDir(), 0o755); err != nil {
+	if err := os.MkdirAll(pluginRuntimeDir(), 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create plugin runtime directory: %w", err)
 	}
 
@@ -853,7 +464,7 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	}
 
 	checksum := fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
-	if selectedTarget.SHA256 != "" && !strings.EqualFold(selectedTarget.SHA256, checksum) {
+	if !strings.EqualFold(selectedTarget.SHA256, checksum) {
 		return nil, fmt.Errorf("plugin checksum mismatch")
 	}
 
@@ -880,11 +491,11 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		runtimePath = filepath.Join(pluginDir, pluginIDSegment+".so")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create plugin directory: %w", err)
 	}
-	if err := os.WriteFile(runtimePath, libraryBytes, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to write plugin library: %w", err)
+	if err := writeRuntimeLibrary(runtimePath, libraryBytes); err != nil {
+		return nil, err
 	}
 
 	pkgSource := PluginSourceNative
@@ -902,6 +513,8 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		RuntimePath:       runtimePath,
 		Manifest:          manifest,
 		ManifestJSON:      append(json.RawMessage(nil), manifestBytes...),
+		ManifestSignature: append([]byte(nil), signatureBytes...),
+		ManifestPublicKey: append([]byte(nil), publicKeyBytes...),
 		SignatureVerified: signatureVerified,
 		Unsafe:            !signatureVerified,
 		Checksum:          checksum,
@@ -937,6 +550,9 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 }
 
 func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, pluginID string) error {
+	pm.installMu.Lock()
+	defer pm.installMu.Unlock()
+
 	pkg := pm.getNativePackage(pluginID)
 	if pkg == nil {
 		return fmt.Errorf("plugin package %s not found", pluginID)
@@ -969,8 +585,11 @@ func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, plugi
 	}
 
 	if pkg.RuntimePath != "" {
-		if err := os.Remove(pkg.RuntimePath); err != nil && !os.IsNotExist(err) {
-			log.Warn().Err(err).Str("plugin_id", pluginID).Str("path", pkg.RuntimePath).Msg("Failed to remove native plugin library")
+		safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir())
+		if pathErr != nil {
+			log.Warn().Err(pathErr).Str("plugin_id", pluginID).Str("path", pkg.RuntimePath).Msg("Refusing to remove native plugin library outside runtime root")
+		} else if err := os.Remove(safePath); err != nil && !os.IsNotExist(err) {
+			log.Warn().Err(err).Str("plugin_id", pluginID).Str("path", safePath).Msg("Failed to remove native plugin library")
 		}
 	}
 
@@ -1014,6 +633,22 @@ func (pm *PluginManager) hasPluginInstances(ctx context.Context, pluginID string
 }
 
 func (pm *PluginManager) loadNativePluginPackage(pkg *InstalledPluginPackage) error {
+	safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir())
+	if pathErr != nil {
+		return fmt.Errorf("plugin runtime path rejected: %w", pathErr)
+	}
+	pkg.RuntimePath = safePath
+
+	if expected := strings.TrimSpace(pkg.Checksum); expected != "" {
+		actual, err := hashFileSHA256(safePath)
+		if err != nil {
+			return fmt.Errorf("failed to hash plugin runtime library: %w", err)
+		}
+		if !strings.EqualFold(expected, actual) {
+			return fmt.Errorf("plugin runtime library checksum mismatch: expected %s, got %s", expected, actual)
+		}
+	}
+
 	definition, err := nativePluginDefinitionLoader(pkg.RuntimePath)
 	if err != nil {
 		return err
@@ -1059,204 +694,7 @@ func (pm *PluginManager) loadNativePluginPackage(pkg *InstalledPluginPackage) er
 	return nil
 }
 
-func readPluginBundle(archive io.ReaderAt, size int64) (PluginPackageManifest, PluginPackageTarget, []byte, []byte, []byte, []byte, string, error) {
-	reader, err := zip.NewReader(archive, size)
-	if err != nil {
-		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("invalid plugin archive: %w", err)
-	}
-
-	var manifest PluginPackageManifest
-	var manifestBytes []byte
-	var signatureBytes []byte
-	var publicKeyBytes []byte
-	libraries := make(map[string]*zip.File)
-	var manifestFile *zip.File
-	var signatureFile *zip.File
-	var publicKeyFile *zip.File
-
-	for _, file := range reader.File {
-		name := filepath.Clean(strings.TrimPrefix(file.Name, "/"))
-		if name == "." || strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
-			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive contains an unsafe path: %s", file.Name)
-		}
-		if file.FileInfo().Mode()&os.ModeSymlink != 0 {
-			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive contains an unsupported symlink: %s", file.Name)
-		}
-
-		switch filepath.Base(name) {
-		case pluginManifestFile:
-			manifestFile = file
-		case pluginSignatureFile:
-			signatureFile = file
-		case pluginPublicKeyFile:
-			publicKeyFile = file
-		default:
-			lower := strings.ToLower(name)
-			if strings.HasSuffix(lower, ".so") {
-				libraries[name] = file
-			}
-		}
-	}
-
-	if manifestFile == nil {
-		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive is missing %s", pluginManifestFile)
-	}
-
-	budget := newPluginArchiveReadBudget()
-
-	manifestBytes, err = budget.read(manifestFile)
-	if err != nil {
-		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
-	}
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("invalid plugin manifest: %w", err)
-	}
-
-	selectedTarget, err := selectedManifestTarget(manifest)
-	if err != nil {
-		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
-	}
-
-	if signatureFile != nil {
-		signatureBytes, err = budget.read(signatureFile)
-		if err != nil {
-			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
-		}
-	}
-	if publicKeyFile != nil {
-		publicKeyBytes, err = budget.read(publicKeyFile)
-		if err != nil {
-			return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
-		}
-	}
-
-	hasSignature := len(bytes.TrimSpace(signatureBytes)) > 0
-	hasPublicKey := len(bytes.TrimSpace(publicKeyBytes)) > 0
-	if hasSignature != hasPublicKey {
-		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", fmt.Errorf("plugin archive must include %s and %s together", pluginSignatureFile, pluginPublicKeyFile)
-	}
-
-	libraryName, libraryFile, err := selectManifestLibrary(manifest, selectedTarget, libraries)
-	if err != nil {
-		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
-	}
-	libraryBytes, err := budget.read(libraryFile)
-	if err != nil {
-		return PluginPackageManifest{}, PluginPackageTarget{}, nil, nil, nil, nil, "", err
-	}
-
-	return manifest, selectedTarget, manifestBytes, signatureBytes, publicKeyBytes, libraryBytes, libraryName, nil
-}
-
-func validatePluginManifest(manifest PluginPackageManifest) error {
-	if manifest.PluginID == "" {
-		return fmt.Errorf("plugin manifest is missing plugin_id")
-	}
-	if manifest.Name == "" {
-		return fmt.Errorf("plugin manifest is missing name")
-	}
-	if manifest.Version == "" {
-		return fmt.Errorf("plugin manifest is missing version")
-	}
-	if _, _, err := pluginRuntimeSegments(manifest.PluginID, manifest.Version); err != nil {
-		return err
-	}
-
-	if manifest.EntrySymbol == "" {
-		manifest.EntrySymbol = nativePluginEntrySymbol
-	}
-	if manifest.EntrySymbol != nativePluginEntrySymbol {
-		return fmt.Errorf("unsupported plugin entry symbol %s", manifest.EntrySymbol)
-	}
-
-	targets := clonePluginPackageTargets(manifest.Targets)
-	if len(targets) == 0 {
-		return fmt.Errorf("plugin manifest is missing targets")
-	}
-
-	seenTargets := make(map[string]struct{}, len(targets))
-	for index, target := range targets {
-		if target.MinHostAPIVersion <= 0 {
-			return fmt.Errorf("plugin manifest target %d is missing min_host_api_version", index)
-		}
-		if target.TargetOS == "" {
-			return fmt.Errorf("plugin manifest target %d is missing target_os", index)
-		}
-		if target.TargetArch == "" {
-			return fmt.Errorf("plugin manifest target %d is missing target_arch", index)
-		}
-		if strings.TrimSpace(target.LibraryPath) == "" {
-			return fmt.Errorf("plugin manifest target %d is missing library_path", index)
-		}
-
-		requiredCapabilitySet := make(map[string]struct{}, len(target.RequiredCapabilities))
-		requiredCapabilities := cloneRequiredCapabilities(target.RequiredCapabilities)
-		sort.Strings(requiredCapabilities)
-		for _, capability := range requiredCapabilities {
-			capability = strings.TrimSpace(capability)
-			if capability == "" {
-				return fmt.Errorf("plugin manifest target %d has an empty required capability", index)
-			}
-			if _, exists := requiredCapabilitySet[capability]; exists {
-				return fmt.Errorf("plugin manifest target %d repeats required capability %s", index, capability)
-			}
-			requiredCapabilitySet[capability] = struct{}{}
-		}
-
-		key := target.TargetOS + "|" + target.TargetArch + "|" + strconv.Itoa(target.MinHostAPIVersion) + "|" + strings.Join(requiredCapabilities, ",")
-		if _, exists := seenTargets[key]; exists {
-			return fmt.Errorf("plugin manifest has a duplicate target for %s/%s with min_host_api_version %d and capabilities %s", target.TargetOS, target.TargetArch, target.MinHostAPIVersion, strings.Join(requiredCapabilities, ","))
-		}
-		seenTargets[key] = struct{}{}
-	}
-
-	return nil
-}
-
-func validatePluginCompatibility(manifest PluginPackageManifest, target PluginPackageTarget) error {
-	if runtime.GOOS != "linux" {
-		return fmt.Errorf("native plugins are only supported on Linux")
-	}
-	if target.TargetOS != runtime.GOOS {
-		return fmt.Errorf("plugin targets %s but host is %s", target.TargetOS, runtime.GOOS)
-	}
-	if target.TargetArch != runtime.GOARCH {
-		return fmt.Errorf("plugin targets %s but host architecture is %s", target.TargetArch, runtime.GOARCH)
-	}
-	if target.MinHostAPIVersion > NativePluginHostAPIVersion {
-		return fmt.Errorf("plugin requires host API version >= %d, but host provides %d", target.MinHostAPIVersion, NativePluginHostAPIVersion)
-	}
-	if missing := missingRequiredCapabilities(target.RequiredCapabilities); len(missing) > 0 {
-		return fmt.Errorf("plugin requires unsupported host capabilities: %s", strings.Join(missing, ", "))
-	}
-
-	return nil
-}
-
-func selectManifestLibrary(manifest PluginPackageManifest, target PluginPackageTarget, libraries map[string]*zip.File) (string, *zip.File, error) {
-	libraryPath := strings.TrimSpace(target.LibraryPath)
-	if libraryPath != "" {
-		declaredPath := filepath.Clean(strings.TrimPrefix(libraryPath, "/"))
-		libraryFile := libraries[declaredPath]
-		if libraryFile == nil {
-			return "", nil, fmt.Errorf("plugin archive is missing declared library %s", libraryPath)
-		}
-		return declaredPath, libraryFile, nil
-	}
-
-	if len(libraries) == 1 {
-		for name, file := range libraries {
-			return name, file, nil
-		}
-	}
-
-	if len(libraries) == 0 {
-		return "", nil, fmt.Errorf("plugin archive is missing a plugin binary (.so)")
-	}
-
-	return "", nil, fmt.Errorf("plugin manifest target %s/%s with min_host_api_version %d is missing library_path", target.TargetOS, target.TargetArch, target.MinHostAPIVersion)
-}
-
-func verifyManifestSignature(manifestBytes, signatureBytes, publicKeyBytes []byte) (bool, error) {
-	return plugin_signing.VerifyManifest(manifestBytes, signatureBytes, publicKeyBytes)
-}
+// verifyManifestSignature rejects any manifest.pub not in the operator-
+// configured trust store before delegating to the cryptographic verifier.
+// Without this anchor the signed-sideload gate is bypassable, since an
+// attacker could ship their own keypair inside the bundle.

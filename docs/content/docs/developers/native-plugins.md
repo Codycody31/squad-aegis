@@ -200,16 +200,18 @@ Notes:
 - Use a stable plugin ID. Reverse-DNS style IDs such as `com.squad-aegis.plugins.examples.hello` are recommended.
 - `entry_symbol` must be `GetAegisPlugin`.
 - `targets` is the only supported format. Each target describes one shipped binary.
-- Every target must include `min_host_api_version`, `target_os`, `target_arch`, and `library_path`.
+- Every target must include `min_host_api_version`, `target_os`, `target_arch`, `library_path`, and `sha256`.
 - `required_capabilities` is optional but recommended. Use it whenever your plugin depends on specific host-exposed APIs or event families.
-- `sha256` is checked against the selected target's `.so` contents when provided.
+- `sha256` is **required** and must be the hex-encoded SHA-256 of the target's `.so` bytes. The manifest signature only covers the manifest itself, so this field is what binds the signed manifest to the on-disk library — Aegis rejects any bundle where the hashes disagree.
 - Aegis selects the most capable target that matches the current host OS, architecture, host API version, and required capabilities.
 - A single bundle can include multiple binaries for future Squad Aegis platform support, even if the current host only loads one of them.
 - Signed bundles must include both `manifest.sig` and `manifest.pub` together.
 - `manifest.sig` is the base64 encoding of the 64 raw Ed25519 signature bytes.
 - `manifest.pub` is the base64 encoding of the 32 raw Ed25519 public key bytes.
+- **The public key embedded in `manifest.pub` must appear in `plugins.trusted_signing_keys`** on the host that receives the upload. A cryptographically valid signature from an unknown key is rejected — without an operator-configured trust anchor, anyone with upload access could ship their own keypair. Set `plugins.trusted_signing_keys` to a comma-separated list of base64-encoded Ed25519 public keys (one per signer you trust).
 - Aegis canonicalizes `manifest.json` deterministically before signing and before verification, so key order and whitespace do not affect the signature.
-- The signature payload is the canonicalized `manifest.json` bytes only.
+- The signature payload is the canonicalized `manifest.json` bytes only. Because `sha256` is a required manifest field, the signature transitively binds the on-disk `.so` contents.
+- Stored bundles are re-verified at each server start against the current trust store. Rotating a key in `plugins.trusted_signing_keys` will retroactively mark bundles signed with the old key as untrusted; re-upload them with a trusted signer to re-enable them.
 - Unsafe archive paths and symlinks are rejected during install.
 
 Current host runtime contract:
@@ -234,11 +236,33 @@ Current host runtime contract:
 
 ## Signatures
 
-Signed bundles are self-contained:
+Signed bundles carry both the signature and the public key:
 
-- `manifest.sig` must validate against the bundled `manifest.pub`
-- there is no separate catalog trust key or official signer configuration in the current system
-- uploaded native plugins are treated as sideloaded packages even when they are signed
+- `manifest.sig` must validate against the bundled `manifest.pub` AND
+- `manifest.pub` must appear in `plugins.trusted_signing_keys` on the host receiving the upload
+
+`plugins.trusted_signing_keys` is a comma-separated list of base64-encoded Ed25519 public keys. A cryptographically valid signature from a key that is not in this allowlist is rejected — otherwise anyone with upload access could ship their own keypair inside the bundle and defeat the "signed sideload" gate.
+
+Uploaded native plugins and connectors are treated as sideloaded packages even when they are signed.
+
+### Trust store rotation
+
+Aegis stores the signature and public-key bytes alongside each installed package and **re-verifies them against `plugins.trusted_signing_keys` at every server start**. This means:
+
+- Removing a key from `plugins.trusted_signing_keys` retroactively marks every package signed with that key as untrusted on the next restart.
+- Rotating your signing key requires re-signing and re-uploading existing bundles (or keeping the old public key in the allowlist until migration is complete).
+
+### Upgrade from earlier versions
+
+If you are upgrading from a build that predates `plugins.trusted_signing_keys`, packages installed under the old scheme have no stored signature material. On the first start after upgrading, those packages will flip to `error` state with the message `"plugin signature cannot be re-verified against trusted keys"`.
+
+To recover:
+
+1. Generate an Ed25519 keypair (`scripts/sign-plugin-bundle.sh` shows the signing workflow).
+2. Set `plugins.trusted_signing_keys` to the base64-encoded public key.
+3. Re-sign each affected bundle and re-upload it through `/sudo/plugins` (or `/sudo/connectors`).
+
+For development or single-operator trust models, `plugins.allow_unsafe_sideload = true` bypasses signing entirely. Do not enable this in production.
 
 ## Install and Enable
 
@@ -272,7 +296,12 @@ Start with `RconAPI` and `LogAPI`. They are enough for many moderation and autom
 - `plugin requires host API version >= ...`: the matching target requires a newer plugin runtime than the host exposes
 - `plugin requires unsupported host capabilities: ...`: the matching target depends on host features this Aegis build does not expose
 - `plugin checksum mismatch`: `manifest.json` does not match the shipped `.so`
-- `unsigned sideloads are disabled`: enable unsafe sideloads in config or sign the bundle before uploading it
+- `plugin manifest target N is missing sha256`: every manifest target must include `sha256` of its library
+- `manifest signed by untrusted public key`: the bundle's `manifest.pub` is not in `plugins.trusted_signing_keys`
+- `unsigned sideloads are disabled`: enable unsafe sideloads in config, or sign the bundle with a key listed in `plugins.trusted_signing_keys`
+- `plugin runtime path rejected`: the stored `runtime_path` resolves outside `plugins.runtime_dir` (DB tampering or a misconfigured `runtime_dir`)
+- `plugin runtime library checksum mismatch`: the on-disk `.so` no longer matches the checksum recorded at install time
+- `plugin signature cannot be re-verified against trusted keys`: the stored signature no longer verifies against the current `plugins.trusted_signing_keys` — re-sign and re-upload, or temporarily enable `allow_unsafe_sideload`
 
 ## Current Gaps
 

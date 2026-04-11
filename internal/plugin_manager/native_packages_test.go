@@ -6,10 +6,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -128,6 +130,21 @@ func buildPluginArchiveWithLibraries(t *testing.T, manifest PluginPackageManifes
 		libraries = map[string][]byte{
 			primaryManifestLibraryPath(manifest): []byte("fake-so-contents"),
 		}
+	}
+
+	for index := range manifest.Targets {
+		if strings.TrimSpace(manifest.Targets[index].SHA256) != "" {
+			continue
+		}
+		libName := manifest.Targets[index].LibraryPath
+		raw, ok := libraries[libName]
+		if !ok && libName != "" {
+			raw = []byte("fake-so-contents")
+		}
+		if len(raw) == 0 {
+			raw = []byte("fake-so-contents")
+		}
+		manifest.Targets[index].SHA256 = fmt.Sprintf("%x", sha256.Sum256(raw))
 	}
 
 	manifestRaw, err := json.Marshal(manifest)
@@ -364,12 +381,14 @@ func TestValidatePluginManifestRejectsDuplicateTargets(t *testing.T) {
 				TargetOS:          runtime.GOOS,
 				TargetArch:        runtime.GOARCH,
 				LibraryPath:       "bin/plugin-a.so",
+				SHA256:            "deadbeef",
 			},
 			{
 				MinHostAPIVersion: NativePluginHostAPIVersion,
 				TargetOS:          runtime.GOOS,
 				TargetArch:        runtime.GOARCH,
 				LibraryPath:       "bin/plugin-b.so",
+				SHA256:            "cafebabe",
 			},
 		},
 	}
@@ -903,10 +922,18 @@ func TestValidatePluginCompatibilityRejectsMissingCapabilities(t *testing.T) {
 }
 
 func TestVerifyManifestSignatureAcceptsCanonicalizedManifest(t *testing.T) {
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("ed25519.GenerateKey() error = %v", err)
 	}
+
+	trustedKey, err := plugin_signing.EncodePublicKeyString(publicKey)
+	if err != nil {
+		t.Fatalf("EncodePublicKeyString() error = %v", err)
+	}
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.TrustedSigningKeys = trustedKey
+	})
 
 	manifestRaw := []byte(`{"version":"1.0.0","plugin_id":"com.example.signed","nested":{"b":2,"a":1}}`)
 	signatureRaw, publicKeyRaw, err := plugin_signing.SignManifest(manifestRaw, privateKey)
@@ -921,6 +948,30 @@ func TestVerifyManifestSignatureAcceptsCanonicalizedManifest(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("verifyManifestSignature() = false, want true")
+	}
+}
+
+func TestVerifyManifestSignatureRejectsUntrustedKey(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey() error = %v", err)
+	}
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.TrustedSigningKeys = ""
+	})
+
+	manifestRaw := []byte(`{"plugin_id":"com.example.signed"}`)
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignManifest(manifestRaw, privateKey)
+	if err != nil {
+		t.Fatalf("plugin_signing.SignManifest() error = %v", err)
+	}
+
+	_, err = verifyManifestSignature(manifestRaw, signatureRaw, publicKeyRaw)
+	if err == nil {
+		t.Fatal("verifyManifestSignature() error = nil, want untrusted-key error")
+	}
+	if !strings.Contains(err.Error(), "untrusted") {
+		t.Fatalf("verifyManifestSignature() error = %q, want untrusted-key rejection", err)
 	}
 }
 
@@ -1084,5 +1135,220 @@ func TestInstallPluginBundleRejectsBundledPluginConflict(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "conflicts with a bundled plugin") {
 		t.Fatalf("installPluginBundle() error = %q, want bundled conflict", err)
+	}
+}
+
+// TestValidatePluginManifestRequiresSHA256 regression-tests that sha256 is
+// mandatory on every target. Without this, a signed manifest plus an
+// attacker-swapped .so would pass verification.
+func TestValidatePluginManifestRequiresSHA256(t *testing.T) {
+	t.Parallel()
+
+	manifest := PluginPackageManifest{
+		PluginID:    "com.example.missing-sha",
+		Name:        "Missing SHA",
+		Version:     "1.0.0",
+		EntrySymbol: nativePluginEntrySymbol,
+		Targets: []PluginPackageTarget{
+			{
+				MinHostAPIVersion: NativePluginHostAPIVersion,
+				TargetOS:          runtime.GOOS,
+				TargetArch:        runtime.GOARCH,
+				LibraryPath:       "bin/plugin.so",
+				// SHA256 intentionally omitted.
+			},
+		},
+	}
+
+	err := validatePluginManifest(manifest)
+	if err == nil {
+		t.Fatal("validatePluginManifest() error = nil, want missing-sha256 error")
+	}
+	if !strings.Contains(err.Error(), "missing sha256") {
+		t.Fatalf("validatePluginManifest() error = %q, want missing-sha256", err)
+	}
+}
+
+// TestValidateRuntimePathWithinRootRejectsEscape regression-tests the H6
+// clamp that prevents DB-tampered runtime_path values from turning plugin
+// load or delete into arbitrary file access.
+func TestValidateRuntimePathWithinRootRejectsEscape(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"absolute outside root", "/etc/passwd"},
+		{"parent traversal", filepath.Join(root, "..", "outside.so")},
+		{"symlink-like trailing .. ", filepath.Join(root, "..")},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := validateRuntimePathWithinRoot(tc.path, root); err == nil {
+				t.Fatalf("validateRuntimePathWithinRoot(%q, %q) error = nil, want escape rejection", tc.path, root)
+			}
+		})
+	}
+
+	inside := filepath.Join(root, "com.example", "1.0.0", "plugin.so")
+	if _, err := validateRuntimePathWithinRoot(inside, root); err != nil {
+		t.Fatalf("validateRuntimePathWithinRoot() unexpected error for in-root path: %v", err)
+	}
+}
+
+// TestLoadNativePluginPackageRejectsOnDiskChecksumMismatch regression-tests
+// H7: if the on-disk library is swapped between install and load, the loader
+// must refuse to dlopen it.
+func TestLoadNativePluginPackageRejectsOnDiskChecksumMismatch(t *testing.T) {
+	requireLinuxNativePlugins(t)
+
+	runtimeDir := t.TempDir()
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = runtimeDir
+	})
+
+	subdir := filepath.Join(runtimeDir, "com.example.tamper", "1.0.0")
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	runtimePath := filepath.Join(subdir, "plugin.so")
+	if err := os.WriteFile(runtimePath, []byte("tampered-contents"), 0o640); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	pm := &PluginManager{
+		registry:            NewPluginRegistry(),
+		plugins:             make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
+		nativePackages:      make(map[string]*InstalledPluginPackage),
+		loadedNativePlugins: make(map[string]string),
+	}
+
+	// Checksum recorded at install time for DIFFERENT content.
+	pkg := &InstalledPluginPackage{
+		PluginID:    "com.example.tamper",
+		Version:     "1.0.0",
+		RuntimePath: runtimePath,
+		Checksum:    fmt.Sprintf("%x", sha256.Sum256([]byte("original-contents"))),
+	}
+
+	err := pm.loadNativePluginPackage(pkg)
+	if err == nil {
+		t.Fatal("loadNativePluginPackage() error = nil, want checksum mismatch")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("loadNativePluginPackage() error = %q, want checksum mismatch", err)
+	}
+}
+
+// TestInstallPluginBundleRejectsZipWithTooManyEntries regression-tests the
+// zip-entry count cap against metadata-scanning DoS.
+func TestInstallPluginBundleRejectsZipWithTooManyEntries(t *testing.T) {
+	requireLinuxNativePlugins(t)
+
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = t.TempDir()
+		cfg.Plugins.AllowUnsafeSideload = true
+	})
+
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for i := 0; i <= pluginArchiveMaxEntries; i++ {
+		f, err := writer.Create(fmt.Sprintf("noise-%04d.txt", i))
+		if err != nil {
+			t.Fatalf("writer.Create() error = %v", err)
+		}
+		if _, err := f.Write([]byte("x")); err != nil {
+			t.Fatalf("f.Write() error = %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close() error = %v", err)
+	}
+
+	_, _, _, _, _, _, _, err := readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+	if err == nil {
+		t.Fatal("readPluginBundle() error = nil, want entry-count rejection")
+	}
+	if !strings.Contains(err.Error(), "exceeding limit") {
+		t.Fatalf("readPluginBundle() error = %q, want entry-count rejection", err)
+	}
+}
+
+// TestInstallPluginBundleAcceptsTrustedSignedBundle regression-tests the
+// trusted-key happy path: a signed bundle with manifest.pub in
+// trusted_signing_keys must install with SignatureVerified=true.
+func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
+	requireLinuxNativePlugins(t)
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey() error = %v", err)
+	}
+	trustedKey, err := plugin_signing.EncodePublicKeyString(publicKey)
+	if err != nil {
+		t.Fatalf("EncodePublicKeyString() error = %v", err)
+	}
+
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = t.TempDir()
+		cfg.Plugins.AllowUnsafeSideload = false
+		cfg.Plugins.TrustedSigningKeys = trustedKey
+	})
+
+	libraryBytes := []byte("fake-so-contents")
+	manifest := testManifest("com.example.signed")
+	manifest.Targets[0].SHA256 = fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
+
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignManifest(manifestRaw, privateKey)
+	if err != nil {
+		t.Fatalf("SignManifest() error = %v", err)
+	}
+
+	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), libraryBytes, signatureRaw, publicKeyRaw)
+
+	previousLoader := nativePluginDefinitionLoader
+	nativePluginDefinitionLoader = func(string) (PluginDefinition, error) {
+		return PluginDefinition{
+			ID:             "com.example.signed",
+			Name:           manifest.Name,
+			Source:         PluginSourceNative,
+			CreateInstance: func() Plugin { return &noopPlugin{} },
+		}, nil
+	}
+	t.Cleanup(func() { nativePluginDefinitionLoader = previousLoader })
+
+	pm := &PluginManager{
+		registry:            NewPluginRegistry(),
+		plugins:             make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
+		nativePackages:      make(map[string]*InstalledPluginPackage),
+		loadedNativePlugins: make(map[string]string),
+		db:                  openTestSQLDB(t, &testSQLDriver{execContext: func(string, []driver.NamedValue) (driver.Result, error) { return driver.RowsAffected(1), nil }}),
+	}
+
+	pkg, err := pm.installPluginBundle(context.Background(), bytes.NewReader(archive), int64(len(archive)), "signed.zip", PluginDistributionSideload)
+	if err != nil {
+		t.Fatalf("installPluginBundle() error = %v", err)
+	}
+	if !pkg.SignatureVerified {
+		t.Fatal("pkg.SignatureVerified = false, want true after signing with trusted key")
+	}
+	if pkg.Unsafe {
+		t.Fatal("pkg.Unsafe = true, want false after signing with trusted key")
+	}
+	if pkg.InstallState != PluginInstallStateReady {
+		t.Fatalf("pkg.InstallState = %q, want ready", pkg.InstallState)
 	}
 }

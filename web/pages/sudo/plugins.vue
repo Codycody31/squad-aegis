@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { computed, ref, onMounted } from "vue";
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
 import {
@@ -18,8 +18,16 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { Input } from "~/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/components/ui/dialog";
 import { toast } from "~/components/ui/toast";
-import type { PluginPackage } from "~/types";
+import type { PluginPackage, SystemConfig } from "~/types";
 
 definePageMeta({
   middleware: "auth",
@@ -37,6 +45,23 @@ const loadingInstalled = ref(true);
 const uploading = ref(false);
 const selectedBundle = ref<File | null>(null);
 const installedPlugins = ref<PluginPackage[]>([]);
+const systemPluginsConfig = ref<SystemConfig["plugins"] | null>(null);
+const deleteTarget = ref<PluginPackage | null>(null);
+
+const trustStoreConfigured = computed(
+  () => systemPluginsConfig.value?.trusted_signing_keys_set === true,
+);
+const unsafeSideloadEnabled = computed(
+  () => systemPluginsConfig.value?.allow_unsafe_sideload === true,
+);
+const reverifyFailures = computed(() =>
+  installedPlugins.value.filter(
+    (p) =>
+      p.install_state === "error" &&
+      typeof p.last_error === "string" &&
+      p.last_error.includes("signature cannot be re-verified"),
+  ),
+);
 
 const getStateVariant = (state: string) => {
   switch (state) {
@@ -85,10 +110,28 @@ const fetchInstalledPlugins = async () => {
   }
 };
 
-const deleteInstalledPlugin = async (plugin: PluginPackage) => {
-  if (!confirm(`Delete plugin package "${plugin.name}"? Existing server plugin instances must be removed first.`)) {
-    return;
+const fetchSystemPluginsConfig = async () => {
+  try {
+    const response = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/system/config`);
+    const cfg = response.data?.data as SystemConfig | undefined;
+    systemPluginsConfig.value = cfg?.plugins ?? null;
+  } catch (error: any) {
+    console.error("Failed to load system plugin config:", error);
+    systemPluginsConfig.value = null;
   }
+};
+
+const confirmDeleteInstalledPlugin = (plugin: PluginPackage) => {
+  deleteTarget.value = plugin;
+};
+
+const cancelDeleteInstalledPlugin = () => {
+  deleteTarget.value = null;
+};
+
+const deleteInstalledPlugin = async () => {
+  const plugin = deleteTarget.value;
+  if (!plugin) return;
 
   try {
     await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/plugins/installed/${plugin.plugin_id}`, {
@@ -98,6 +141,7 @@ const deleteInstalledPlugin = async (plugin: PluginPackage) => {
       title: "Deleted",
       description: "Plugin package deleted successfully",
     });
+    deleteTarget.value = null;
     await fetchInstalledPlugins();
   } catch (error: any) {
     console.error("Failed to delete plugin:", error);
@@ -153,7 +197,7 @@ const uploadBundle = async () => {
 };
 
 onMounted(async () => {
-  await fetchInstalledPlugins();
+  await Promise.all([fetchInstalledPlugins(), fetchSystemPluginsConfig()]);
 });
 </script>
 
@@ -174,6 +218,58 @@ onMounted(async () => {
       </div>
     </div>
 
+    <div
+      v-if="!trustStoreConfigured && !unsafeSideloadEnabled"
+      class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+    >
+      <div class="flex items-start gap-2">
+        <Icon name="mdi:shield-alert" class="mt-0.5 h-5 w-5 flex-shrink-0" />
+        <div>
+          <p class="font-medium">No trusted plugin signing keys configured</p>
+          <p class="mt-1">
+            <code>plugins.trusted_signing_keys</code> is empty. Signed bundles will be rejected, and
+            <code>plugins.allow_unsafe_sideload</code> is also disabled, so no plugin bundles can be uploaded
+            until one of these is set.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div
+      v-else-if="!trustStoreConfigured && unsafeSideloadEnabled"
+      class="rounded-md border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm text-yellow-700 dark:text-yellow-300"
+    >
+      <div class="flex items-start gap-2">
+        <Icon name="mdi:alert" class="mt-0.5 h-5 w-5 flex-shrink-0" />
+        <div>
+          <p class="font-medium">Unsafe sideloads are enabled</p>
+          <p class="mt-1">
+            <code>plugins.allow_unsafe_sideload</code> is on and no trusted signing keys are configured.
+            Any uploaded bundle will load without signature verification. Do not use this in production.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="reverifyFailures.length > 0"
+      class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+    >
+      <div class="flex items-start gap-2">
+        <Icon name="mdi:key-alert" class="mt-0.5 h-5 w-5 flex-shrink-0" />
+        <div>
+          <p class="font-medium">
+            {{ reverifyFailures.length }}
+            {{ reverifyFailures.length === 1 ? "plugin" : "plugins" }}
+            failed signature re-verification
+          </p>
+          <p class="mt-1">
+            The stored signature no longer verifies against the current trust store. Re-sign and re-upload
+            these bundles, or update <code>plugins.trusted_signing_keys</code> to include the signing key.
+          </p>
+        </div>
+      </div>
+    </div>
+
     <Card>
       <CardHeader>
         <CardTitle>Upload Native Bundle</CardTitle>
@@ -190,7 +286,9 @@ onMounted(async () => {
           </Button>
         </div>
         <p class="text-sm text-muted-foreground">
-          Unsigned sideload bundles are rejected unless unsafe sideloads are enabled in the Aegis instance config.
+          Signed bundles must be signed with a key present in
+          <code>plugins.trusted_signing_keys</code>. Unsigned bundles are rejected unless
+          <code>plugins.allow_unsafe_sideload</code> is enabled.
         </p>
       </CardContent>
     </Card>
@@ -255,7 +353,7 @@ onMounted(async () => {
                       v-if="plugin.source === 'native' || plugin.source === 'wasm'"
                       size="sm"
                       variant="destructive"
-                      @click="deleteInstalledPlugin(plugin)"
+                      @click="confirmDeleteInstalledPlugin(plugin)"
                     >
                       Delete
                     </Button>
@@ -267,5 +365,23 @@ onMounted(async () => {
         </div>
       </CardContent>
     </Card>
+
+    <Dialog :open="deleteTarget !== null" @update:open="(open) => !open && cancelDeleteInstalledPlugin()">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete plugin package?</DialogTitle>
+          <DialogDescription>
+            Delete the plugin package
+            <span class="font-medium">"{{ deleteTarget?.name }}"</span>?
+            Existing server plugin instances using this plugin must be removed first.
+            The plugin's <code>.so</code> file will be removed from disk.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="cancelDeleteInstalledPlugin">Cancel</Button>
+          <Button variant="destructive" @click="deleteInstalledPlugin">Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

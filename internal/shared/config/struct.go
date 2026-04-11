@@ -65,5 +65,8 @@ type Struct struct {
 		RuntimeDir          string `default:""`
 		AllowUnsafeSideload bool   `default:"false"`
 		MaxUploadSize       int64  `default:"52428800"`
+		// Comma-separated base64 ed25519 public keys. A manifest.pub not in
+		// this list is treated as unsigned regardless of signature validity.
+		TrustedSigningKeys string `default:""`
 	}
 }
