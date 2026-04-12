@@ -621,27 +621,22 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	// and so that a successful load is rolled back (registry unregister) if
 	// the subsequent save fails.
 	loadFailureRecorded := false
-	loadAttempted := false
-	if loadedVersion, loaded := pm.getLoadedNativePluginVersion(manifest.PluginID); loaded {
-		// A version of this plugin is already in-process. Go's `plugin`
-		// package cannot unload, so the new bytes activate at next restart
-		// regardless of whether they match the loaded version's checksum
-		// (the same-bytes case was short-circuited above).
-		pkg.InstallState = PluginInstallStatePendingRestart
-		pkg.LastError = "Restart Aegis to activate the updated plugin package"
-		_ = loadedVersion
+	// If a previous version is already loaded, unload it first so the new
+	// version can take its place immediately. With subprocess-based plugins
+	// (hashicorp/go-plugin) there is no in-process state to worry about —
+	// each instance spawns a fresh subprocess from the runtime binary.
+	if _, loaded := pm.getLoadedNativePluginVersion(manifest.PluginID); loaded {
+		pm.unregisterNativePlugin(manifest.PluginID)
+	}
+	if err := pm.loadNativePluginPackage(pkg); err != nil {
+		pm.unregisterNativePluginDefinition(manifest.PluginID)
+		pkg.InstallState = PluginInstallStateError
+		pkg.LastError = err.Error()
+		loadFailureRecorded = true
+		log.Warn().Err(err).Str("plugin_id", manifest.PluginID).Str("version", manifest.Version).Msg("Failed to load uploaded native plugin package")
 	} else {
-		loadAttempted = true
-		if err := pm.loadNativePluginPackage(pkg); err != nil {
-			pm.unregisterNativePluginDefinition(manifest.PluginID)
-			pkg.InstallState = PluginInstallStateError
-			pkg.LastError = err.Error()
-			loadFailureRecorded = true
-			log.Warn().Err(err).Str("plugin_id", manifest.PluginID).Str("version", manifest.Version).Msg("Failed to load uploaded native plugin package")
-		} else {
-			pkg.InstallState = PluginInstallStateReady
-			pkg.LastError = ""
-		}
+		pkg.InstallState = PluginInstallStateReady
+		pkg.LastError = ""
 	}
 	pkg.UpdatedAt = time.Now()
 
@@ -649,9 +644,7 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		// DB save failed. Clean up the loaded state so the live registry
 		// doesn't outlive the (now-rolled-back) database row, and let the
 		// deferred file remover clear the runtime file from disk.
-		if loadAttempted {
-			pm.unregisterNativePlugin(manifest.PluginID)
-		}
+		pm.unregisterNativePlugin(manifest.PluginID)
 		return nil, fmt.Errorf("failed to persist plugin package state: %w", err)
 	}
 
@@ -698,19 +691,8 @@ func (pm *PluginManager) DeleteInstalledPluginPackage(ctx context.Context, plugi
 	}
 	pm.mu.Unlock()
 
-	if _, loaded := pm.getLoadedNativePluginVersion(pluginID); loaded {
-		pm.unregisterNativePluginDefinition(pluginID)
-		pkg.InstallState = PluginInstallStatePendingRestart
-		pkg.LastError = "Restart Aegis to finish removing the plugin package"
-		pkg.UpdatedAt = time.Now()
-		// Force a replacement upload to be re-persisted even if the bytes match the
-		// just-deleted package, because the DB row is already gone.
-		pkg.Checksum = ""
-		pm.setNativePackage(pkg)
-	} else {
-		pm.unregisterNativePlugin(pluginID)
-		pm.removeNativePackage(pluginID)
-	}
+	pm.unregisterNativePlugin(pluginID)
+	pm.removeNativePackage(pluginID)
 
 	if pkg.RuntimePath != "" {
 		safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir())

@@ -220,7 +220,7 @@ func TestEnrichPluginDefinitionUsesNativePackageMetadata(t *testing.T) {
 				Source:               PluginSourceNative,
 				Distribution:         PluginDistributionSideload,
 				Official:             false,
-				InstallState:         PluginInstallStatePendingRestart,
+				InstallState:         PluginInstallStateReady,
 				RuntimePath:          "/tmp/plugins/test.so",
 				SignatureVerified:    true,
 				Unsafe:               false,
@@ -240,7 +240,7 @@ func TestEnrichPluginDefinitionUsesNativePackageMetadata(t *testing.T) {
 	if got, want := definition.Name, "External Test Plugin"; got != want {
 		t.Fatalf("definition.Name = %q, want %q", got, want)
 	}
-	if got, want := definition.InstallState, PluginInstallStatePendingRestart; got != want {
+	if got, want := definition.InstallState, PluginInstallStateReady; got != want {
 		t.Fatalf("definition.InstallState = %q, want %q", got, want)
 	}
 	if got, want := definition.Distribution, PluginDistributionSideload; got != want {
@@ -494,7 +494,7 @@ func TestListAvailablePluginsOmitsNativePluginsThatAreNotReady(t *testing.T) {
 				Name:         "Native Plugin",
 				Source:       PluginSourceNative,
 				Distribution: PluginDistributionSideload,
-				InstallState: PluginInstallStatePendingRestart,
+				InstallState: PluginInstallStateError,
 			},
 		},
 	}
@@ -600,7 +600,7 @@ func TestDeleteInstalledPluginPackageUnregistersUnloadedNativeRuntime(t *testing
 	}
 }
 
-func TestDeleteInstalledPluginPackageKeepsLoadedPackagePendingRestart(t *testing.T) {
+func TestDeleteInstalledPluginPackageCleansUpLoadedPlugin(t *testing.T) {
 	t.Parallel()
 
 	db := openTestSQLDB(t, &testSQLDriver{
@@ -655,33 +655,24 @@ func TestDeleteInstalledPluginPackageKeepsLoadedPackagePendingRestart(t *testing
 		t.Fatalf("DeleteInstalledPluginPackage() error = %v", err)
 	}
 
-	pkg := pm.getNativePackage("com.example.plugin")
-	if pkg == nil {
-		t.Fatal("getNativePackage() = nil, want pending-restart tombstone")
+	if pkg := pm.getNativePackage("com.example.plugin"); pkg != nil {
+		t.Fatalf("getNativePackage() = %+v, want nil (fully removed)", pkg)
 	}
-	if got, want := pkg.InstallState, PluginInstallStatePendingRestart; got != want {
-		t.Fatalf("pkg.InstallState = %q, want %q", got, want)
-	}
-	if got, want := pkg.LastError, "Restart Aegis to finish removing the plugin package"; got != want {
-		t.Fatalf("pkg.LastError = %q, want %q", got, want)
-	}
-	if got := pkg.Checksum; got != "" {
-		t.Fatalf("pkg.Checksum = %q, want empty string", got)
-	}
-	if loadedVersion, ok := pm.getLoadedNativePluginVersion("com.example.plugin"); !ok || loadedVersion != "1.0.0" {
-		t.Fatalf("getLoadedNativePluginVersion() = (%q, %t), want (1.0.0, true)", loadedVersion, ok)
+	if _, ok := pm.getLoadedNativePluginVersion("com.example.plugin"); ok {
+		t.Fatal("getLoadedNativePluginVersion() still present, want removed")
 	}
 	if _, err := pm.registry.GetPlugin("com.example.plugin"); err == nil {
 		t.Fatal("registry.GetPlugin() error = nil, want plugin definition to be unregistered")
 	}
 }
 
-func TestInstallPluginBundlePersistsReplacementAfterDeletingLoadedPackage(t *testing.T) {
+func TestInstallPluginBundleAfterDeletingLoadedPackageIsCleanInstall(t *testing.T) {
 	requireLinuxNativePlugins(t)
 
+	runtimeDir := t.TempDir()
 	setPluginTestConfig(t, func(cfg *config.Struct) {
 		cfg.Plugins.NativeEnabled = true
-		cfg.Plugins.RuntimeDir = t.TempDir()
+		cfg.Plugins.RuntimeDir = runtimeDir
 		cfg.Plugins.AllowUnsafeSideload = true
 	})
 
@@ -703,9 +694,6 @@ func TestInstallPluginBundlePersistsReplacementAfterDeletingLoadedPackage(t *tes
 				return driver.RowsAffected(1), nil
 			case strings.Contains(query, "INSERT INTO plugin_packages"):
 				insertCalls++
-				if got, want := fmt.Sprint(args[7].Value), string(PluginInstallStatePendingRestart); got != want {
-					t.Fatalf("persisted install state = %q, want %q", got, want)
-				}
 				return driver.RowsAffected(1), nil
 			default:
 				return nil, fmt.Errorf("unexpected exec: %s", query)
@@ -746,6 +734,24 @@ func TestInstallPluginBundlePersistsReplacementAfterDeletingLoadedPackage(t *tes
 		t.Fatalf("DeleteInstalledPluginPackage() error = %v", err)
 	}
 
+	// After delete, the plugin is fully removed — no pending_restart tombstone.
+	if pkg := pm.getNativePackage("com.example.plugin"); pkg != nil {
+		t.Fatalf("getNativePackage() = %+v after delete, want nil", pkg)
+	}
+
+	// Re-install should succeed as a clean install (not pending_restart).
+	// Hook the verified loader since there's no real subprocess binary.
+	previousLoader := nativePluginVerifiedLoader
+	nativePluginVerifiedLoader = func(string, string, PluginPackageManifest, PluginPackageTarget) (PluginDefinition, error) {
+		return PluginDefinition{
+			ID:             "com.example.plugin",
+			Name:           "Native Plugin",
+			Source:         PluginSourceNative,
+			CreateInstance: func() Plugin { return &noopPlugin{} },
+		}, nil
+	}
+	t.Cleanup(func() { nativePluginVerifiedLoader = previousLoader })
+
 	manifest := testManifest("com.example.plugin")
 	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), []byte("replacement-so"), nil, nil)
 
@@ -753,7 +759,7 @@ func TestInstallPluginBundlePersistsReplacementAfterDeletingLoadedPackage(t *tes
 	if err != nil {
 		t.Fatalf("installPluginBundle() error = %v", err)
 	}
-	if got, want := pkg.InstallState, PluginInstallStatePendingRestart; got != want {
+	if got, want := pkg.InstallState, PluginInstallStateReady; got != want {
 		t.Fatalf("pkg.InstallState = %q, want %q", got, want)
 	}
 	if insertCalls != 1 {

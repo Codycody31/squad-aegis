@@ -492,33 +492,33 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 	}
 
 	loadFailureRecorded := false
-	loadAttempted := false
+	// If a previous version is already loaded, unload it first so the new
+	// version can take its place immediately. With subprocess-based connectors
+	// (hashicorp/go-plugin) there is no in-process state to worry about.
 	if _, loaded := pm.getLoadedNativeConnectorVersion(manifest.ConnectorID); loaded {
-		pkg.InstallState = PluginInstallStatePendingRestart
-		pkg.LastError = "Restart Aegis to activate the updated connector package"
+		pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
+		pm.nativeMu.Lock()
+		delete(pm.loadedNativeConnectors, manifest.ConnectorID)
+		pm.nativeMu.Unlock()
+	}
+	if err := pm.loadNativeConnectorPackage(pkg); err != nil {
+		pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
+		pkg.InstallState = PluginInstallStateError
+		pkg.LastError = err.Error()
+		loadFailureRecorded = true
+		log.Warn().Err(err).Str("connector_id", manifest.ConnectorID).Str("version", manifest.Version).Msg("Failed to load uploaded native connector package")
 	} else {
-		loadAttempted = true
-		if err := pm.loadNativeConnectorPackage(pkg); err != nil {
-			pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
-			pkg.InstallState = PluginInstallStateError
-			pkg.LastError = err.Error()
-			loadFailureRecorded = true
-			log.Warn().Err(err).Str("connector_id", manifest.ConnectorID).Str("version", manifest.Version).Msg("Failed to load uploaded native connector package")
-		} else {
-			pkg.InstallState = PluginInstallStateReady
-			pkg.LastError = ""
-		}
+		pkg.InstallState = PluginInstallStateReady
+		pkg.LastError = ""
 	}
 	pkg.UpdatedAt = time.Now()
 
 	if err := pm.saveConnectorPackageToDatabaseContext(ctx, pkg); err != nil {
 		// Roll back the live registry so it does not outlive the (now-rolled-back) DB row.
-		if loadAttempted {
-			pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
-			pm.nativeMu.Lock()
-			delete(pm.loadedNativeConnectors, manifest.ConnectorID)
-			pm.nativeMu.Unlock()
-		}
+		pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
+		pm.nativeMu.Lock()
+		delete(pm.loadedNativeConnectors, manifest.ConnectorID)
+		pm.nativeMu.Unlock()
 		return nil, fmt.Errorf("failed to persist connector package state: %w", err)
 	}
 

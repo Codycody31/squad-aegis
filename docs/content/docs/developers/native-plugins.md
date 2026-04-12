@@ -1,30 +1,84 @@
 ---
-title: Creating Native Plugins
+title: Creating Native Plugins and Connectors
 ---
 
-This guide covers the native plugin path for Squad Aegis: writing a plugin in Go, compiling it to a standalone binary, bundling it for upload, and enabling it in the UI.
+Squad Aegis supports two native extension types:
 
-## What a Native Plugin Is
+- A **plugin** runs against a specific game server. It can subscribe to events, react to chat/log/system activity, and call host APIs such as RCON, logging, rules, admin, database, Discord, and connectors.
+- A **connector** is a reusable service that exposes a request/response interface. Plugins call connectors when they need shared logic or access to an external system.
 
-Bundled plugins ship inside the main Aegis server binary. Native plugins are separate Go programs that run as **isolated subprocesses** spawned by the Aegis host via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin). The host and plugin communicate over `net/rpc` on a private pipe; the plugin never shares memory with the Aegis server.
+Both are written in Go, built as standalone Linux binaries, and loaded by Aegis as subprocesses through [`hashicorp/go-plugin`](https://github.com/hashicorp/go-plugin). You ship a zip bundle with a `manifest.json` and one or more binaries. Aegis verifies the bundle, inspects the binary for its runtime definition, and then makes it available in the UI.
 
-Security posture:
+## Choose the Right Extension
 
-- A crash, panic, or malicious payload inside a plugin terminates only the subprocess. It cannot corrupt Aegis memory, steal secrets from unrelated packages, or monkey-patch the host runtime.
-- The host still verifies a SHA-256 checksum and (unless `allow_unsafe_sideload` is on) a manifest signature before launching the subprocess, so an unauthorized bundle is rejected before any plugin code runs.
-- All host APIs the plugin can call are proxied through a generic RPC dispatcher (`HostAPI`) on the host side — plugins cannot reach into the host database, filesystem, or configuration directly.
-- Killing a plugin is a single `SIGTERM` away, so uploading an updated bundle can replace the running subprocess without restarting Aegis.
+| Build this | When you need | Typical example |
+| --- | --- | --- |
+| Native plugin | Per-server automation that reacts to Aegis events or calls host APIs | Moderate chat, kick/ban players, emit plugin events, store plugin data |
+| Native connector | A reusable request/response service that other code can invoke | Talk to an external API, centralize integration logic, provide a stable service to multiple plugins |
 
-Current constraints:
+In practice:
 
-- Native plugins must be compiled for Linux. The host refuses bundles whose `target_os` is not `linux`.
-- The plugin binary Aegis selects at install time must match the server's `GOOS`/`GOARCH` and its target requirements must be satisfied by the host plugin runtime.
-- External plugins must import `pkg/pluginrpc`, not `internal/...`. The `pluginrpc` package is deliberately self-contained and has no dependency on the host internals.
-- The v1 SDK exposes typed wrappers for `LogAPI`, `RconAPI`, `ServerAPI`, `DatabaseAPI`, `RuleAPI`, `AdminAPI`, `EventAPI`, `DiscordAPI`, and `ConnectorAPI`.
+- If the feature is driven by game events, start with a plugin.
+- If the feature is an integration boundary or shared service, start with a connector.
+- If you need both, build a connector for the integration and a plugin that uses it through `ConnectorAPI`.
 
-## Plugin Shape
+## How Native Extensions Work
 
-A native plugin is a standalone Go program whose `main` calls `pluginrpc.Serve(impl)` where `impl` implements the `pluginrpc.Plugin` interface:
+The split is simple:
+
+- `manifest.json` contains the bundle identity and compatibility data Aegis must validate before it runs anything.
+- `GetDefinition()` inside your binary returns the runtime behavior Aegis can only learn by talking to the binary itself.
+
+For plugins, that means:
+
+- `manifest.json`: `plugin_id`, `name`, `description`, `version`, `author`, `license`, `official`, and `targets`
+- `GetDefinition()`: `PluginID`, `ConfigSchema`, `Events`, `LongRunning`, `AllowMultipleInstances`, `RequiredConnectors`, `OptionalConnectors`
+
+For connectors, that means:
+
+- `manifest.json`: `connector_id`, `name`, `description`, `version`, `author`, `license`, `official`, optional `instance_key`, optional `legacy_ids`, and `targets`
+- `GetDefinition()`: `ConnectorID` and `ConfigSchema`
+
+Aegis cross-checks the manifest ID against the ID returned by the binary. If they do not match, the bundle is rejected.
+
+## Start from the Checked-In Examples
+
+The fastest way to get oriented is to read the example implementations in this repository:
+
+- Plugin example: `examples/native-plugin-hello/main.go`
+- Connector example: `examples/native-connector-hello/main.go`
+- Plugin packager: `scripts/package-example-native-plugin.sh`
+- Connector packager: `scripts/package-example-native-connector.sh`
+- Signing helper: `scripts/sign_plugin_bundle/main.go`
+
+If you are building outside this repository, create a normal Go module and depend only on the public SDK package you need:
+
+```bash
+mkdir my-aegis-extension
+cd my-aegis-extension
+go mod init example.com/my-aegis-extension
+go get go.codycody31.dev/squad-aegis@latest
+```
+
+For production, pin that dependency to the specific tag or commit you want to support.
+
+Use:
+
+- `go.codycody31.dev/squad-aegis/pkg/pluginrpc` for plugins
+- `go.codycody31.dev/squad-aegis/pkg/connectorrpc` for connectors
+
+Do not import `internal/...` packages from an external extension.
+
+## Build a Native Plugin
+
+At minimum, a plugin needs:
+
+- `main()` calling `pluginrpc.Serve(...)`
+- `GetDefinition()` describing runtime behavior
+- lifecycle methods such as `Initialize`, `Start`, `Stop`, `GetStatus`, `GetConfig`, `UpdateConfig`
+- `HandleEvent(...)` if the plugin subscribes to events
+
+The plugin interface is:
 
 ```go
 type Plugin interface {
@@ -42,35 +96,7 @@ type Plugin interface {
 }
 ```
 
-The public SDK lives in `go.codycody31.dev/squad-aegis/pkg/pluginrpc` and exposes:
-
-- The `Plugin` interface and `Serve(impl)` entrypoint
-- Wire-safe lifecycle types: `PluginDefinition`, `PluginEvent`, `PluginCommand`, `CommandResult`, `PluginStatus`
-- Config schema types: `ConfigSchema`, `ConfigField`, `FieldType*`
-- Typed `HostAPIs` wrappers: `LogAPI`, `RconAPI`, `ServerAPI`, `DatabaseAPI`, `RuleAPI`, `AdminAPI`, `EventAPI`, `DiscordAPI`, `ConnectorAPI`
-
-`PluginEvent.Data` arrives as `json.RawMessage`. Your plugin chooses its own struct to unmarshal into — the SDK does not force you to import the host event package.
-
-## Manifest vs Runtime: Who Owns What
-
-Every native plugin ships as a zip bundle with **two** sources of truth the host merges at load time:
-
-| Field group | Lives in | Why |
-|---|---|---|
-| `plugin_id`, `name`, `description`, `version`, `author`, `license`, `official` | `manifest.json` | Immutable identity; operators need to see it before the binary is allowed to run. Part of the signed payload. |
-| `min_host_api_version`, `required_capabilities`, `target_os`, `target_arch`, `library_path`, `sha256` | `manifest.json` (per target) | Distribution/compatibility gate; operators evaluate it at upload time before any code runs. |
-| `config_schema`, `events`, `long_running`, `allow_multiple_instances`, `required_connectors`, `optional_connectors` | Plugin binary (returned from `GetDefinition()` over RPC) | Runtime behavior; only the binary knows it. |
-
-The plugin author writes **identity/compatibility in `manifest.json`** (operator-facing, cryptographically signed) and **behavior in the `definition()` Go function** (runtime contract with the host). The host cross-checks `manifest.plugin_id == wire.PluginID` during load and rejects mismatches.
-
-What this means for your plugin's `GetDefinition()`:
-
-- Do **not** return `Name`, `Version`, `Author`, `Source`, `Official`, etc. — those fields no longer exist on `pluginrpc.PluginDefinition`.
-- Do return `PluginID` (echoed back for the cross-check), `ConfigSchema`, `Events`, `LongRunning`, `AllowMultipleInstances`, `RequiredConnectors`, `OptionalConnectors`.
-
-## Minimal Example
-
-A complete example lives at `examples/native-plugin-hello/main.go`. It listens for `!hello` in chat and replies to the player with a warning message. The relevant pieces:
+A minimal event-driven plugin looks like this:
 
 ```go
 package main
@@ -90,25 +116,26 @@ type helloPlugin struct {
 }
 
 type rconChatMessage struct {
-    EOSID      string `json:"eos_id"`
-    SteamID    string `json:"steam_id"`
-    PlayerName string `json:"player_name"`
-    Message    string `json:"message"`
+    EOSID   string `json:"eos_id,omitempty"`
+    SteamID string `json:"steam_id,omitempty"`
+    Message string `json:"message,omitempty"`
 }
 
 func main() {
     pluginrpc.Serve(&helloPlugin{})
 }
 
-// definition() returns only the runtime/behavioral contract. Identity
-// (name, version, author, license, official) lives in manifest.json
-// alongside the compiled binary.
 func (p *helloPlugin) GetDefinition() pluginrpc.PluginDefinition {
     return pluginrpc.PluginDefinition{
-        PluginID: "com.squad-aegis.plugins.examples.hello",
+        PluginID: "com.example.plugins.hello",
         ConfigSchema: pluginrpc.ConfigSchema{
             Fields: []pluginrpc.ConfigField{
-                {Name: "trigger", Type: pluginrpc.FieldTypeString, Default: "!hello"},
+                {
+                    Name:        "trigger",
+                    Description: "Chat command to listen for.",
+                    Type:        pluginrpc.FieldTypeString,
+                    Default:     "!hello",
+                },
             },
         },
         Events: []string{"RCON_CHAT_MESSAGE"},
@@ -121,29 +148,14 @@ func (p *helloPlugin) Initialize(config map[string]interface{}, apis *pluginrpc.
     return nil
 }
 
-func (p *helloPlugin) HandleEvent(event *pluginrpc.PluginEvent) error {
-    if event.Type != "RCON_CHAT_MESSAGE" {
-        return nil
-    }
-    var data rconChatMessage
-    if err := json.Unmarshal(event.Data, &data); err != nil {
-        return fmt.Errorf("decode chat event: %w", err)
-    }
-    if !strings.EqualFold(strings.TrimSpace(data.Message), "!hello") {
-        return nil
-    }
-    playerID := data.EOSID
-    if playerID == "" {
-        playerID = data.SteamID
-    }
-    return p.apis.RconAPI.SendWarningToPlayer(playerID, "Hello from a native plugin.")
+func (p *helloPlugin) Start(context.Context) error       { return nil }
+func (p *helloPlugin) Stop() error                       { return nil }
+func (p *helloPlugin) GetStatus() pluginrpc.PluginStatus { return pluginrpc.PluginStatusRunning }
+func (p *helloPlugin) GetConfig() map[string]interface{} { return p.config }
+func (p *helloPlugin) UpdateConfig(c map[string]interface{}) error {
+    p.config = c
+    return nil
 }
-
-func (p *helloPlugin) Start(context.Context) error            { return nil }
-func (p *helloPlugin) Stop() error                            { return nil }
-func (p *helloPlugin) GetStatus() pluginrpc.PluginStatus      { return pluginrpc.PluginStatusRunning }
-func (p *helloPlugin) GetConfig() map[string]interface{}      { return p.config }
-func (p *helloPlugin) UpdateConfig(c map[string]interface{}) error { p.config = c; return nil }
 func (p *helloPlugin) GetCommands() []pluginrpc.PluginCommand { return nil }
 func (p *helloPlugin) ExecuteCommand(string, map[string]interface{}) (*pluginrpc.CommandResult, error) {
     return nil, fmt.Errorf("no commands")
@@ -151,56 +163,178 @@ func (p *helloPlugin) ExecuteCommand(string, map[string]interface{}) (*pluginrpc
 func (p *helloPlugin) GetCommandExecutionStatus(string) (*pluginrpc.CommandExecutionStatus, error) {
     return nil, fmt.Errorf("no commands")
 }
+
+func (p *helloPlugin) HandleEvent(event *pluginrpc.PluginEvent) error {
+    if event == nil || event.Type != "RCON_CHAT_MESSAGE" {
+        return nil
+    }
+
+    var msg rconChatMessage
+    if err := json.Unmarshal(event.Data, &msg); err != nil {
+        return err
+    }
+
+    if strings.TrimSpace(msg.Message) != "!hello" {
+        return nil
+    }
+
+    playerID := msg.EOSID
+    if playerID == "" {
+        playerID = msg.SteamID
+    }
+    return p.apis.RconAPI.SendWarningToPlayer(playerID, "Hello from Squad Aegis.")
+}
 ```
 
-## Start an External Plugin Module
+Key points:
 
-If you are building outside the Squad Aegis repository, start with a normal Go module and pin the Aegis dependency to the server line you are targeting:
+- `PluginEvent.Data` is `json.RawMessage`. Define the payload struct you need in your plugin and unmarshal it yourself.
+- `GetDefinition()` should describe runtime behavior only. Do not duplicate manifest identity fields there.
+- Event-driven plugins can often return `nil` from `Start`. Use `LongRunning: true` only when the plugin actually maintains background work.
+- If your plugin depends on a connector, declare it in `RequiredConnectors` or `OptionalConnectors`.
 
-```bash
-mkdir my-aegis-plugin
-cd my-aegis-plugin
-go mod init example.com/my-aegis-plugin
-go get go.codycody31.dev/squad-aegis@v1.2.3
+## Build a Native Connector
+
+Connectors are smaller than plugins. They expose a stable `Invoke` entrypoint and manage their own lifecycle.
+
+The connector interface is:
+
+```go
+type Connector interface {
+    GetDefinition() ConnectorDefinition
+    Initialize(config map[string]interface{}) error
+    Start(ctx context.Context) error
+    Stop() error
+    GetStatus() ConnectorStatus
+    GetConfig() map[string]interface{}
+    UpdateConfig(config map[string]interface{}) error
+    Invoke(ctx context.Context, req *ConnectorInvokeRequest) (*ConnectorInvokeResponse, error)
+}
 ```
 
-Only `pkg/pluginrpc` is imported — the rest of the Aegis module graph is irrelevant to your plugin.
+A minimal connector looks like this:
+
+```go
+package main
+
+import (
+    "context"
+
+    connectorrpc "go.codycody31.dev/squad-aegis/pkg/connectorrpc"
+)
+
+type helloConnector struct {
+    config map[string]interface{}
+}
+
+func main() {
+    connectorrpc.Serve(&helloConnector{})
+}
+
+func (c *helloConnector) GetDefinition() connectorrpc.ConnectorDefinition {
+    return connectorrpc.ConnectorDefinition{
+        ConnectorID: "com.example.connectors.hello",
+        ConfigSchema: connectorrpc.ConfigSchema{
+            Fields: []connectorrpc.ConfigField{},
+        },
+    }
+}
+
+func (c *helloConnector) Initialize(config map[string]interface{}) error {
+    c.config = config
+    return nil
+}
+
+func (c *helloConnector) Start(context.Context) error         { return nil }
+func (c *helloConnector) Stop() error                         { return nil }
+func (c *helloConnector) GetStatus() connectorrpc.ConnectorStatus { return connectorrpc.ConnectorStatusRunning }
+func (c *helloConnector) GetConfig() map[string]interface{}   { return c.config }
+func (c *helloConnector) UpdateConfig(config map[string]interface{}) error {
+    c.config = config
+    return nil
+}
+
+func (c *helloConnector) Invoke(ctx context.Context, req *connectorrpc.ConnectorInvokeRequest) (*connectorrpc.ConnectorInvokeResponse, error) {
+    _ = ctx
+    return &connectorrpc.ConnectorInvokeResponse{
+        V:    "1",
+        OK:   true,
+        Data: map[string]interface{}{"message": "pong"},
+    }, nil
+}
+```
+
+Key points:
+
+- A connector does not receive `HostAPIs`; it is its own boundary.
+- `Invoke` is where the useful work happens.
+- The request/response envelope currently uses version `"1"` in `V`.
+- `instance_key` and `legacy_ids` belong in the connector manifest, not in `GetDefinition()`.
+
+## Host APIs Available to Plugins
+
+Plugins receive `*pluginrpc.HostAPIs` during `Initialize`. The current SDK exposes:
+
+- `LogAPI`
+- `RconAPI`
+- `ServerAPI`
+- `DatabaseAPI`
+- `RuleAPI`
+- `AdminAPI`
+- `EventAPI`
+- `DiscordAPI`
+- `ConnectorAPI`
+
+Two practical patterns matter:
+
+- Use `RconAPI` and `LogAPI` first. Many moderation and automation plugins need nothing else.
+- Use `ConnectorAPI.Call(...)` when a plugin needs to talk to a connector.
+
+Example:
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+resp, err := apis.ConnectorAPI.Call(ctx, "com.example.connectors.hello", &pluginrpc.ConnectorInvokeRequest{
+    V:    "1",
+    Data: map[string]interface{}{"action": "ping"},
+})
+```
 
 ## Build the Binary
 
-Build on Linux with the standard `go build` command:
+Native plugins and connectors currently target Linux only.
+
+Build manually:
 
 ```bash
-go build -o hello-plugin ./examples/native-plugin-hello
+GOOS=linux GOARCH=amd64 go build -o dist/my-plugin .
+GOOS=linux GOARCH=amd64 go build -o dist/my-connector .
 ```
 
-For an external plugin repository, the same pattern applies:
+Or use the checked-in helper scripts from this repository:
 
 ```bash
-go build -o dist/my-plugin .
+./scripts/package-example-native-plugin.sh
+./scripts/package-example-native-connector.sh
 ```
 
-Practical advice:
-
-- Build with the same Go toolchain family you use for the target Aegis deployment.
-- Build one binary per target platform you want to ship in the bundle, for example `linux/amd64` and `linux/arm64`.
-- Set `min_host_api_version` to the oldest host plugin runtime you intend to support.
-- Declare `required_capabilities` for the host features your plugin actually depends on.
-
-The checked-in example packager can build a multi-target bundle:
+Both scripts can build multiple targets:
 
 ```bash
 TARGETS=linux/amd64,linux/arm64 ./scripts/package-example-native-plugin.sh
+TARGETS=linux/amd64,linux/arm64 ./scripts/package-example-native-connector.sh
 ```
 
-## Bundle Format
+## Bundle Layout
 
-Aegis installs native plugins from a zip bundle. Every bundle must contain:
+Every bundle is a zip archive containing:
 
 - `manifest.json`
-- the compiled binary (any filename; referenced from `manifest.targets[].library_path`)
+- one or more binaries under `bin/...`
 
-Unsigned bundles stop there. Signed bundles add a signature pair:
+Signed bundles also include:
 
 - `manifest.sig`
 - `manifest.pub`
@@ -208,24 +342,26 @@ Unsigned bundles stop there. Signed bundles add a signature pair:
 Example layout:
 
 ```text
-hello-plugin.zip
+my-extension.zip
 ├── manifest.json
 ├── manifest.sig
 ├── manifest.pub
 └── bin/
-    ├── linux-amd64/hello-plugin
-    └── linux-arm64/hello-plugin
+    ├── linux-amd64/my-extension
+    └── linux-arm64/my-extension
 ```
 
-Example `manifest.json` (identity + distribution metadata only):
+The `library_path` in `manifest.json` points at the binary Aegis should execute for a matching target.
+
+## Plugin Manifest Example
 
 ```json
 {
-  "plugin_id": "com.squad-aegis.plugins.examples.hello",
-  "name": "Hello Example",
-  "description": "Replies to players who type !hello in chat.",
+  "plugin_id": "com.example.plugins.hello",
+  "name": "Hello Plugin",
+  "description": "Replies to a chat command.",
   "version": "0.1.0",
-  "author": "Squad Aegis",
+  "author": "Example Team",
   "license": "MIT",
   "official": false,
   "targets": [
@@ -234,49 +370,22 @@ Example `manifest.json` (identity + distribution metadata only):
       "required_capabilities": ["api.rcon", "events.rcon"],
       "target_os": "linux",
       "target_arch": "amd64",
-      "sha256": "REPLACE_WITH_SHA256_OF_LINUX_AMD64_BINARY",
+      "sha256": "REPLACE_WITH_BINARY_SHA256",
       "library_path": "bin/linux-amd64/hello-plugin"
-    },
-    {
-      "min_host_api_version": 1,
-      "required_capabilities": ["api.rcon", "events.rcon"],
-      "target_os": "linux",
-      "target_arch": "arm64",
-      "sha256": "REPLACE_WITH_SHA256_OF_LINUX_ARM64_BINARY",
-      "library_path": "bin/linux-arm64/hello-plugin"
     }
   ]
 }
 ```
 
-Notes:
-
-- Use a stable plugin ID. Reverse-DNS style IDs such as `com.squad-aegis.plugins.examples.hello` are recommended.
-- There is **no** `entry_symbol` field anymore. The subprocess launch uses hashicorp/go-plugin's handshake, not a Go plugin entry point.
-- There is **no** `config_schema` in the manifest. The plugin binary is the source of truth for its config schema; it is fetched over RPC at load time and cross-checked against the operator-supplied config before `Initialize` is called.
-- `targets` is the only supported format. Each target describes one shipped binary.
-- Every target must include `min_host_api_version`, `target_os`, `target_arch`, `library_path`, and `sha256`.
-- `library_path` points at an **executable binary**, not a `.so`. There is no required file extension.
-- `required_capabilities` is optional but recommended. Use it whenever your plugin depends on specific host-exposed APIs or event families.
-- `sha256` is **required** and must be the hex-encoded SHA-256 of the target's binary bytes. The manifest signature only covers the manifest itself, so this field is what binds the signed manifest to the on-disk binary — Aegis rejects any bundle where the hashes disagree.
-- Aegis selects the most capable target that matches the current host OS, architecture, host API version, and required capabilities.
-- The host **also** spawns the plugin binary once during install (the "peek" step) and compares the `PluginID` echoed from `GetDefinition()` against the manifest's `plugin_id`. A mismatch aborts the install.
-- Signed bundles must include both `manifest.sig` and `manifest.pub` together.
-- **The public key embedded in `manifest.pub` must appear in `plugins.trusted_signing_keys`** on the host that receives the upload. A cryptographically valid signature from an unknown key is treated as unverified — without an operator-configured trust anchor, anyone with upload access could ship their own keypair.
-- Stored bundles are re-verified at each server start against the current trust store. Rotating a key in `plugins.trusted_signing_keys` will retroactively mark bundles signed with the old key as untrusted and quarantine the runtime file.
-- Unsafe archive paths and symlinks are rejected during install.
-
-### Connector manifest
-
-Connector bundles use the same split with two additional identity fields. Example:
+## Connector Manifest Example
 
 ```json
 {
-  "connector_id": "com.squad-aegis.connectors.examples.hello",
+  "connector_id": "com.example.connectors.hello",
   "name": "Hello Connector",
-  "description": "Responds to JSON invoke action ping.",
+  "description": "Responds to ping requests.",
   "version": "0.1.0",
-  "author": "Squad Aegis",
+  "author": "Example Team",
   "license": "MIT",
   "official": false,
   "instance_key": "",
@@ -284,140 +393,125 @@ Connector bundles use the same split with two additional identity fields. Exampl
   "targets": [
     {
       "min_host_api_version": 1,
+      "required_capabilities": [],
       "target_os": "linux",
       "target_arch": "amd64",
-      "sha256": "REPLACE_WITH_SHA256",
+      "sha256": "REPLACE_WITH_BINARY_SHA256",
       "library_path": "bin/linux-amd64/hello-connector"
     }
   ]
 }
 ```
 
-- `instance_key` is an optional routing hint — when non-empty, multiple connector IDs sharing the same key share a single connector instance. Leave empty for independent connectors.
-- `legacy_ids` lists previous connector IDs so operators migrating from an older build can continue to reference the connector by its old ID.
+Manifest rules that matter in practice:
 
-The connector binary's `GetDefinition()` returns only `ConnectorID` (echoed) and `ConfigSchema`.
+- Use a stable reverse-DNS identifier such as `com.example.plugins.foo`.
+- `sha256` must match the shipped binary bytes exactly.
+- `library_path` points to an executable binary, not a shared object.
+- `targets` is the supported format for native bundles.
+- `min_host_api_version` should be `1` unless the runtime contract changes in a future Aegis release.
+- For connectors, `instance_key` is optional. Use it only when multiple connector IDs should resolve to the same underlying connector instance.
+- For connectors, `legacy_ids` is optional and only needed for migration compatibility.
 
-## How the Subprocess Lifecycle Works
+## Choose Capabilities Deliberately
 
-1. **Upload**: An operator uploads the bundle through `/sudo/plugins`. The host verifies the bundle, writes the binary to `plugins.runtime_dir/<plugin_id>/<version>/<binary>` with owner-only execute permissions, and persists the package row in the database.
-2. **Peek**: The host spawns a temporary subprocess, calls `GetDefinition()` over RPC, compares the returned plugin ID to the manifest, and immediately kills the subprocess. This lets the host register the plugin with its registry without leaving a long-running subprocess attached.
-3. **Instance spawn**: When an admin enables the plugin on a server, `CreateInstance()` starts a **fresh subprocess** dedicated to that instance. Each server instance gets its own OS process.
-4. **Initialize**: The host opens an internal broker channel, registers the `HostAPI` RPC dispatcher (backed by the in-process `*PluginAPIs`), passes the broker ID to the plugin via `InitializeArgs`, and invokes `Plugin.Initialize`. The plugin dials the broker ID to get a `*HostAPIs` wrapper it can use to call back into the host.
-5. **Events**: The host forwards every event the plugin subscribed to via `HandleEvent`. `PluginEvent.Data` is a `json.RawMessage`, so your plugin unmarshals into whatever Go struct it wants.
-6. **Teardown**: `Stop()` fires the plugin's Stop RPC, closes the HostAPI broker channel, and sends SIGTERM to the subprocess. Uninstalling the package additionally removes the on-disk binary and DB row.
+The current native host API version is `1`.
 
-If the subprocess crashes (exits non-zero, panics, or closes the RPC pipe), the host reports a transport error on the next RPC call. A subsequent admin action (Restart / Disable / Enable on the instance page) spawns a fresh subprocess from the same binary.
+The current host capability strings are:
 
-## Host Capability Contract
+```text
+entrypoint.get_aegis_plugin
+api.rcon
+api.server
+api.database
+api.rule
+api.admin
+api.discord
+api.connector
+api.event
+api.log
+events.rcon
+events.log
+events.system
+events.connector
+events.plugin
+```
 
-- The current host plugin runtime version is `1`.
-- `min_host_api_version` must be less than or equal to the host's current plugin runtime version.
-- The current host capabilities are:
-  - `entrypoint.get_aegis_plugin`
-  - `api.rcon`
-  - `api.server`
-  - `api.database`
-  - `api.rule`
-  - `api.admin`
-  - `api.discord`
-  - `api.event`
-  - `api.log`
-  - `events.rcon`
-  - `events.log`
-  - `events.system`
-  - `events.connector`
-  - `events.plugin`
+A few common mappings:
 
-## Signatures
+- A plugin that reads RCON chat and warns players should declare `api.rcon` and `events.rcon`.
+- A plugin that calls connectors should declare `api.connector`.
+- A plugin that only logs and handles system events should declare `api.log` and `events.system`.
+- A connector may not need any required capabilities at all.
 
-Signed bundles carry both the signature and the public key:
+Declare only what you actually need. It keeps the contract clearer and avoids confusing install-time failures.
 
-- `manifest.sig` must validate against the bundled `manifest.pub` AND
-- `manifest.pub` must appear in `plugins.trusted_signing_keys` on the host receiving the upload
+## Sign Bundles for Shared or Production Environments
 
-`plugins.trusted_signing_keys` is a comma-separated list of base64-encoded Ed25519 public keys. A cryptographically valid signature from a key that is not in this allowlist is treated as unverified — otherwise anyone with upload access could ship their own keypair inside the bundle and defeat the "signed sideload" gate.
+For local development, unsigned bundles are usually enough if the host is configured with:
 
-Because native plugins now run in a separate process with narrowly-typed RPC channels, the signing private key is no longer equivalent to host root. It is still the **only** thing standing between an untrusted upload and a spawned subprocess that has full HostAPI access, so treat it accordingly: hardware-backed (YubiKey / HSM) or offline-signed are recommended for production.
+```yaml
+plugins:
+  allow_unsafe_sideload: true
+```
 
-### Trust store rotation
+For any shared or production environment, sign the bundle.
 
-Aegis stores the signature and public-key bytes alongside each installed package and **re-verifies them against `plugins.trusted_signing_keys` at every server start**. If a package no longer verifies and `plugins.allow_unsafe_sideload` is off, the runtime binary is removed from disk and the database row is marked as errored. The operator must re-sign and re-upload the bundle (or temporarily enable unsafe sideload) to recover.
+This repository includes helpers for both extension types:
 
-## Install and Enable
+```bash
+./scripts/sign-plugin-bundle.sh
+./scripts/sign-connector-bundle.sh
+```
 
-1. Open the Aegis sudo area and go to `/sudo/plugins`.
-2. Use the upload flow to sideload your zip bundle.
-3. After the package shows as `ready`, go to the target server's plugins page.
-4. Add the plugin to that server and configure its fields.
+The signing tool expects a base64-encoded Ed25519 private key file. It writes:
 
-## Using the Available APIs
+- `manifest.sig`
+- `manifest.pub`
+- a signed zip archive
 
-Your plugin instance receives `*pluginrpc.HostAPIs` in `Initialize`. The most useful APIs are:
+Important rules:
 
-- `RconAPI` for broadcasts, warnings, kicks, bans, and squad removal
-- `ServerAPI` for current players, squads, admins, and server metadata (returned as `map[string]interface{}` on the wire)
-- `DatabaseAPI` for plugin-scoped key/value storage
-- `RuleAPI` for read-only access to the current server's rules and escalation actions
-- `AdminAPI` for temporary admin management
-- `DiscordAPI` for sending messages or embeds when the Discord connector is available
-- `EventAPI` for plugin-generated events (note: `SubscribeToEvents` is NOT exposed to subprocesses — events are delivered to your plugin via the `HandleEvent` RPC call)
-- `LogAPI` for structured logs that show up under plugin logs
+- `manifest.pub` must be present in `plugins.trusted_signing_keys` on the Aegis host.
+- A valid signature from an unknown key is still rejected.
+- Aegis re-verifies stored signatures at server start, so rotating trust keys can invalidate old bundles.
 
-Start with `RconAPI` and `LogAPI`. They are enough for many moderation and automation plugins.
+## Upload and Enable in Squad Aegis
 
-## Common Failure Modes
+For plugins:
 
-- `failed to spawn plugin subprocess`: the runtime binary is missing, not executable, or the `GOOS`/`GOARCH` does not match
-- `plugin does not support host OS ...`: none of the bundle targets match the current OS
-- `plugin does not support host architecture ... on ...`: the bundle has the right OS but not the current architecture
-- `plugin requires host API version >= ...`: the matching target requires a newer plugin runtime than the host exposes
-- `plugin requires unsupported host capabilities: ...`: the matching target depends on host features this Aegis build does not expose
-- `plugin checksum mismatch`: `manifest.json` does not match the shipped binary
-- `plugin runtime binary checksum mismatch`: the on-disk binary no longer matches the checksum recorded at install time — the runtime directory was tampered with
-- `plugin runtime path rejected`: the stored `runtime_path` resolves outside `plugins.runtime_dir` (DB tampering or a misconfigured `runtime_dir`)
-- `unsigned sideloads are disabled`: enable unsafe sideloads in config, or sign the bundle with a key listed in `plugins.trusted_signing_keys`
-- `plugin signature cannot be re-verified against trusted keys`: the stored signature no longer verifies — re-sign and re-upload, or temporarily enable `allow_unsafe_sideload`
+1. Upload the bundle in `/sudo/plugins`.
+2. Wait for the package to reach `ready`.
+3. Open the target server's plugins page.
+4. Add the plugin to that server and fill in its config.
 
-## Operator Configuration
+For connectors:
 
-Host-side knobs that tune the subprocess runtime (all under `plugins.`):
+1. Open `/connectors`.
+2. Upload the connector bundle.
+3. Create or update the connector instance and configure it.
 
-| Key | Default | Purpose |
-|---|---|---|
-| `plugins.native_enabled` | `true` | Master switch for the native plugin runtime |
-| `plugins.runtime_dir` | `plugins` / `/etc/squad-aegis/plugins` in-container | Where extracted plugin binaries live. Must be absolute in production |
-| `plugins.connector_runtime_dir` | `connectors` / `/etc/squad-aegis/connectors` | Same for connectors |
-| `plugins.trusted_signing_keys` | *(empty)* | Comma-separated base64 Ed25519 public keys. Manifests signed by any other key are treated as unverified |
-| `plugins.allow_unsafe_sideload` | `false` | Allow unsigned sideloads (dev/test only). Do NOT enable in production |
-| `plugins.max_upload_size` | `52428800` (50 MiB) | Per-bundle upload cap |
-| `plugins.host_api_rate_per_sec` | `50` | Sustained HostAPI RPC rate per plugin instance. Non-positive disables rate limiting |
-| `plugins.host_api_burst` | `100` | Burst size for the HostAPI token bucket |
-| `plugins.health_check_interval_seconds` | `10` | How often the host polls each subprocess for unexpected exit. Zero or negative disables health monitoring |
-| `plugins.subprocess_uid` | `0` (inherit) | Non-zero UID drops plugin subprocesses to a dedicated user account on exec |
-| `plugins.subprocess_gid` | `0` (defaults to UID) | Primary GID for the dropped user |
-| `plugins.subprocess_groups` | *(empty)* | Comma-separated supplementary group IDs |
-| `plugins.subprocess_no_new_privs` | `true` | Advisory; enforce via systemd `NoNewPrivileges=yes` on the Aegis unit so the prctl is inherited |
+If the UI reports `pending restart`, restart Aegis before continuing.
 
-### Subprocess isolation posture
+## Troubleshooting
 
-When a native plugin subprocess is spawned, the host applies the following hardening:
+- `plugin_id` or `connector_id` mismatch: the manifest ID does not match the ID returned by `GetDefinition()`.
+- `plugin checksum mismatch` or `connector checksum mismatch`: the `sha256` in the manifest does not match the binary in the archive.
+- No matching target for the host: the bundle does not contain the current Linux architecture, or `min_host_api_version` is too high.
+- Unsupported capabilities: the bundle declares capabilities this Aegis build does not expose.
+- Signed bundle rejected: the manifest may be valid, but the public key is not present in `plugins.trusted_signing_keys`.
+- Plugin never sees events: the plugin did not list the event type in `GetDefinition().Events`, or the manifest capabilities do not include the matching `events.*` capability.
+- Plugin blocks the server workflow: host API calls are synchronous RPC. Long-running work belongs in your own goroutines or background loop, not inline in a hot event path.
+- Connector calls time out: keep `Invoke` small and deterministic. Do network work with clear timeouts and return structured errors.
 
-1. **UID/GID drop** — if `plugins.subprocess_uid` is non-zero, the plugin runs under that UID/GID with the configured supplementary groups. The default (zero) inherits the Aegis process UID. For production, provision a dedicated `aegis-plugins` user and set these knobs.
-2. **Own process group** — `Setpgid=true` so the host can signal the entire subprocess tree on kill.
-3. **No new privileges** — Go's `exec.Cmd` does not expose a `PR_SET_NO_NEW_PRIVS` hook directly, so the config knob is advisory. In production, run the Aegis server itself under a systemd unit with `NoNewPrivileges=yes` — the prctl is inherited by the subprocess across exec, which gives the same guarantee.
-4. **HostAPI rate limiting** — each loaded plugin instance has its own `golang.org/x/time/rate.Limiter` that throttles RPC callbacks into the host. A compromised plugin that floods the host with `RconAPI.SendCommand` or `LogAPI.Info` is rate-limited to the configured budget; excess calls return a wire error so the plugin can back off.
-5. **Health monitoring** — a background goroutine polls `goplugin.Client.Exited()` at `plugins.health_check_interval_seconds`. If the subprocess dies outside an intentional `Stop()`, the owning `PluginInstance` is flipped to `error` state and the operator sees the failure on the server's plugins page.
-6. **Panic recovery** — every lifecycle call (`Initialize`, `Start`, `Stop`, `HandleEvent`) is wrapped in a recover so a panicking plugin call marks the instance as errored instead of crashing the host.
+## Recommended Workflow
 
-## Current Gaps
+If you are starting fresh, this is a good default:
 
-The native plugin system is usable and isolated, but still intentionally narrow:
+1. Copy the closest example from `examples/`.
+2. Replace the IDs, config schema, and business logic.
+3. Build a single `linux/amd64` target first.
+4. Package it and upload it unsigned to a local Aegis instance with `plugins.allow_unsafe_sideload: true`.
+5. Once the flow works end-to-end, add additional targets and sign the bundle.
 
-- there is no built-in plugin catalog yet; distribution is upload-only
-- `EventAPI.SubscribeToEvents` is not exposed to subprocess plugins (use the event list in your PluginDefinition and the `HandleEvent` RPC instead)
-- host API calls are synchronous RPC; long-running operations inside the plugin should be handled with your own goroutines, not by blocking the HostAPI channel
-- `PR_SET_NO_NEW_PRIVS` cannot currently be applied per-subprocess from Go's `exec.Cmd` — set it on the Aegis systemd unit so it inherits
-- seccomp profiles are not applied by the host; a subprocess with untrusted code should be sandboxed at the deployment layer (systemd `SystemCallFilter=`, Docker `--security-opt seccomp=...`, etc.)
-
-If you are starting from scratch, use the checked-in example as the baseline and keep your plugin on the public `pkg/pluginrpc` surface.
+That path gets you to a working extension quickly without hiding how the actual runtime contract works.

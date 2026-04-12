@@ -816,8 +816,7 @@ func (pm *PluginManager) ensurePluginInstanceRuntime(instance *PluginInstance) e
 	enrichedDefinition := pm.enrichPluginDefinition(*definition)
 	pm.applyPluginDefinitionMetadata(instance, enrichedDefinition)
 	if enrichedDefinition.Source == PluginSourceNative &&
-		enrichedDefinition.InstallState != PluginInstallStateReady &&
-		enrichedDefinition.InstallState != PluginInstallStatePendingRestart {
+		enrichedDefinition.InstallState != PluginInstallStateReady {
 		return fmt.Errorf("plugin %s is not ready to be enabled (state=%s)", instance.PluginID, enrichedDefinition.InstallState)
 	}
 
