@@ -226,13 +226,6 @@ func validatePluginManifest(manifest PluginPackageManifest) error {
 		return err
 	}
 
-	if manifest.EntrySymbol == "" {
-		manifest.EntrySymbol = nativePluginEntrySymbol
-	}
-	if manifest.EntrySymbol != nativePluginEntrySymbol {
-		return fmt.Errorf("unsupported plugin entry symbol %s", manifest.EntrySymbol)
-	}
-
 	targets := clonePluginPackageTargets(manifest.Targets)
 	if len(targets) == 0 {
 		return fmt.Errorf("plugin manifest is missing targets")

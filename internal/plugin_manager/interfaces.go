@@ -94,22 +94,21 @@ type PluginPackageTarget struct {
 	LibraryPath          string   `json:"library_path"`
 }
 
+// PluginPackageManifest is the signed manifest.json shipped with every
+// native plugin bundle. It carries ONLY the identity and distribution
+// metadata operators need to evaluate a package at upload time. Runtime
+// behavior (config schema, event subscriptions, long-running flag,
+// required connectors, multi-instance support) lives in the plugin binary
+// and is fetched over RPC at load time via pluginrpc.PluginDefinition.
 type PluginPackageManifest struct {
 	PluginID    string                `json:"plugin_id"`
 	Name        string                `json:"name"`
-	Description string                `json:"description"`
+	Description string                `json:"description,omitempty"`
 	Version     string                `json:"version"`
-	Official    bool                  `json:"official"`
+	Author      string                `json:"author,omitempty"`
 	License     string                `json:"license,omitempty"`
-	EntrySymbol string                `json:"entry_symbol"`
+	Official    bool                  `json:"official,omitempty"`
 	Targets     []PluginPackageTarget `json:"targets"`
-
-	Author                     string                          `json:"author,omitempty"`
-	AllowMultipleInstances     bool                            `json:"allow_multiple_instances,omitempty"`
-	LongRunning                bool                            `json:"long_running,omitempty"`
-	ManifestRequiredConnectors []string                        `json:"required_connectors,omitempty"`
-	ManifestOptionalConnectors []string                        `json:"optional_connectors,omitempty"`
-	ConfigSchema               plug_config_schema.ConfigSchema `json:"config_schema,omitempty"`
 }
 
 type InstalledPluginPackage struct {

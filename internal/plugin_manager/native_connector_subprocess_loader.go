@@ -311,24 +311,30 @@ func (s *subprocessConnectorShim) Invoke(ctx context.Context, req *ConnectorInvo
 	}, nil
 }
 
-// wireConnectorDefinitionToHost converts wire types into the host's
-// ConnectorDefinition, re-marshaling the config schema through JSON.
-func wireConnectorDefinitionToHost(wire connectorrpc.ConnectorDefinition) (ConnectorDefinition, error) {
+// mergeWireConnectorIntoHost assembles a host ConnectorDefinition by
+// combining identity/compatibility from the signed manifest with the
+// runtime config schema from the subprocess. LegacyIDs and InstanceKey come
+// from the manifest because they are identity-level migration/routing
+// helpers, not runtime behavior.
+func mergeWireConnectorIntoHost(wire connectorrpc.ConnectorDefinition, manifest ConnectorPackageManifest, target PluginPackageTarget) (ConnectorDefinition, error) {
 	hostDef := ConnectorDefinition{
-		ID:                   wire.ID,
-		LegacyIDs:            append([]string(nil), wire.LegacyIDs...),
-		InstanceKey:          wire.InstanceKey,
-		Source:               PluginSource(wire.Source),
-		Name:                 wire.Name,
-		Description:          wire.Description,
-		Version:              wire.Version,
-		Author:               wire.Author,
-		MinHostAPIVersion:    wire.MinHostAPIVersion,
-		RequiredCapabilities: append([]string(nil), wire.RequiredCapabilities...),
+		// Identity comes from the manifest.
+		ID:          manifest.ConnectorID,
+		LegacyIDs:   append([]string(nil), manifest.LegacyIDs...),
+		InstanceKey: manifest.InstanceKey,
+		Source:      PluginSourceNative,
+		Name:        manifest.Name,
+		Description: manifest.Description,
+		Version:     manifest.Version,
+		Author:      manifest.Author,
+
+		// Compatibility comes from the selected target.
+		MinHostAPIVersion:    target.MinHostAPIVersion,
+		RequiredCapabilities: cloneRequiredCapabilities(target.RequiredCapabilities),
+		TargetOS:             target.TargetOS,
+		TargetArch:           target.TargetArch,
 	}
-	if hostDef.Source == "" {
-		hostDef.Source = PluginSourceNative
-	}
+
 	schemaJSON, err := json.Marshal(wire.ConfigSchema)
 	if err != nil {
 		return ConnectorDefinition{}, fmt.Errorf("failed to marshal connector config schema: %w", err)

@@ -217,17 +217,20 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 	})
 
 	previousLoader := nativePluginVerifiedLoader
-	nativePluginVerifiedLoader = func(gotPath, gotChecksum string) (PluginDefinition, error) {
+	nativePluginVerifiedLoader = func(gotPath, gotChecksum string, gotManifest PluginPackageManifest, gotTarget PluginPackageTarget) (PluginDefinition, error) {
 		if gotPath != runtimePath {
 			t.Fatalf("runtimePath = %q, want %q", gotPath, runtimePath)
 		}
 		if gotChecksum != checksum {
 			t.Fatalf("checksum = %q, want %q", gotChecksum, checksum)
 		}
+		if gotManifest.PluginID != "com.example.pending" {
+			t.Fatalf("manifest.PluginID = %q, want com.example.pending", gotManifest.PluginID)
+		}
 
 		return PluginDefinition{
-			ID:             "com.example.pending",
-			Name:           manifest.Name,
+			ID:             gotManifest.PluginID,
+			Name:           gotManifest.Name,
 			Source:         PluginSourceNative,
 			CreateInstance: func() Plugin { return &noopPlugin{} },
 		}, nil

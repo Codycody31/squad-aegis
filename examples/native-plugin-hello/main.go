@@ -45,39 +45,34 @@ type helloPlugin struct {
 	status pluginrpc.PluginStatus
 }
 
+// definition returns the plugin's runtime behavior. Identity (name,
+// version, author, license, official flag, min host API version, required
+// capabilities, target OS/arch, sha256) lives in the signed manifest.json
+// that ships alongside the binary — this struct is only the behavioral
+// contract the host needs to validate config and route events.
 func definition() pluginrpc.PluginDefinition {
 	return pluginrpc.PluginDefinition{
-		ID:                     "com.squad-aegis.plugins.examples.hello",
-		Name:                   "Hello Example",
-		Description:            "Replies to players who type !hello in chat.",
-		Version:                "0.1.0",
-		Author:                 "Squad Aegis",
-		Source:                 pluginrpc.PluginSourceNative,
-		Official:               false,
+		PluginID:               "com.squad-aegis.plugins.examples.hello",
 		AllowMultipleInstances: false,
 		LongRunning:            false,
+		OptionalConnectors:     []string{helloExampleConnectorID},
 		ConfigSchema: pluginrpc.ConfigSchema{
 			Fields: []pluginrpc.ConfigField{
 				{
 					Name:        "trigger",
 					Description: "Chat message that will trigger the response.",
-					Required:    false,
 					Type:        pluginrpc.FieldTypeString,
 					Default:     "!hello",
 				},
 				{
 					Name:        "response",
 					Description: "Private message sent back to the player.",
-					Required:    false,
 					Type:        pluginrpc.FieldTypeString,
 					Default:     "Hello from a native Squad Aegis plugin.",
 				},
 			},
 		},
-		Events: []string{
-			"RCON_CHAT_MESSAGE",
-		},
-		OptionalConnectors: []string{helloExampleConnectorID},
+		Events: []string{"RCON_CHAT_MESSAGE"},
 	}
 }
 

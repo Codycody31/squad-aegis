@@ -13,14 +13,6 @@ import "time"
 // WireProtocolVersion bumps when the connector wire format changes.
 const WireProtocolVersion = 1
 
-// PluginSource mirrors the plugin_manager.PluginSource constants.
-type PluginSource string
-
-const (
-	PluginSourceBundled PluginSource = "bundled"
-	PluginSourceNative  PluginSource = "native"
-)
-
 // ConnectorStatus mirrors plugin_manager.ConnectorStatus on the wire.
 type ConnectorStatus string
 
@@ -65,19 +57,21 @@ type ConfigSchema struct {
 	Fields []ConfigField `json:"fields"`
 }
 
-// ConnectorDefinition is the wire-safe subset of plugin_manager.ConnectorDefinition.
+// ConnectorDefinition is what the subprocess returns from GetDefinition().
+// Like pluginrpc.PluginDefinition, it covers ONLY the runtime/behavioral
+// surface. Identity (name, version, author, license, legacy_ids, instance
+// key) and compatibility (min host API version, required capabilities,
+// target OS/arch) live in the signed manifest.json shipped alongside the
+// connector binary. The host cross-checks ConnectorID against
+// manifest.connector_id during load and merges the two halves.
 type ConnectorDefinition struct {
-	ID                   string       `json:"id"`
-	LegacyIDs            []string     `json:"legacy_ids,omitempty"`
-	InstanceKey          string       `json:"instance_key,omitempty"`
-	Source               PluginSource `json:"source,omitempty"`
-	Name                 string       `json:"name"`
-	Description          string       `json:"description,omitempty"`
-	Version              string       `json:"version"`
-	Author               string       `json:"author,omitempty"`
-	ConfigSchema         ConfigSchema `json:"config_schema"`
-	MinHostAPIVersion    int          `json:"min_host_api_version,omitempty"`
-	RequiredCapabilities []string     `json:"required_capabilities,omitempty"`
+	// ConnectorID is echoed so the host can verify the subprocess agrees
+	// with the manifest. A mismatch aborts the load.
+	ConnectorID string `json:"connector_id"`
+
+	// ConfigSchema describes the config fields the connector accepts, used
+	// by the host to validate operator-provided config before Initialize.
+	ConfigSchema ConfigSchema `json:"config_schema"`
 }
 
 // ConnectorInvokeRequest mirrors plugin_manager.ConnectorInvokeRequest.

@@ -20,14 +20,6 @@ import (
 // host refuses to spawn a plugin whose protocol is too new or too old.
 const WireProtocolVersion = 1
 
-// PluginSource mirrors plugin_manager.PluginSource on the wire.
-type PluginSource string
-
-const (
-	PluginSourceBundled PluginSource = "bundled"
-	PluginSourceNative  PluginSource = "native"
-)
-
 // PluginStatus mirrors plugin_manager.PluginStatus on the wire.
 type PluginStatus string
 
@@ -94,25 +86,38 @@ type ConfigSchema struct {
 	Fields []ConfigField `json:"fields"`
 }
 
-// PluginDefinition is the wire-safe subset of plugin_manager.PluginDefinition.
-// The host enriches the definition with runtime metadata (install state,
-// runtime path, signature status, etc.) after Load.
+// PluginDefinition is what the subprocess returns from GetDefinition(). It
+// covers ONLY the runtime/behavioral surface that the plugin uniquely knows
+// about — identity (name, version, author, license, etc.) and compatibility
+// (min host API version, required capabilities, target OS/arch) live in the
+// signed manifest.json shipped alongside the plugin binary. The host
+// cross-checks PluginID against manifest.plugin_id during load and then
+// merges the two halves into its in-process PluginDefinition.
 type PluginDefinition struct {
-	ID                     string       `json:"id"`
-	Name                   string       `json:"name"`
-	Description            string       `json:"description,omitempty"`
-	Version                string       `json:"version"`
-	Author                 string       `json:"author,omitempty"`
-	Source                 PluginSource `json:"source,omitempty"`
-	Official               bool         `json:"official,omitempty"`
-	MinHostAPIVersion      int          `json:"min_host_api_version,omitempty"`
-	RequiredCapabilities   []string     `json:"required_capabilities,omitempty"`
-	AllowMultipleInstances bool         `json:"allow_multiple_instances,omitempty"`
-	RequiredConnectors     []string     `json:"required_connectors,omitempty"`
-	OptionalConnectors     []string     `json:"optional_connectors,omitempty"`
-	ConfigSchema           ConfigSchema `json:"config_schema"`
-	Events                 []string     `json:"events,omitempty"`
-	LongRunning            bool         `json:"long_running,omitempty"`
+	// PluginID is echoed here so the host can verify the subprocess agrees
+	// with the manifest it was loaded from. A mismatch aborts the load.
+	PluginID string `json:"plugin_id"`
+
+	// AllowMultipleInstances governs whether more than one instance of this
+	// plugin can be enabled on a single server.
+	AllowMultipleInstances bool `json:"allow_multiple_instances,omitempty"`
+
+	// LongRunning is true for plugins that need a dedicated Start() call.
+	// Event-driven plugins can leave it false.
+	LongRunning bool `json:"long_running,omitempty"`
+
+	// RequiredConnectors are connector IDs the plugin cannot run without.
+	// OptionalConnectors are connectors the plugin can use if available.
+	RequiredConnectors []string `json:"required_connectors,omitempty"`
+	OptionalConnectors []string `json:"optional_connectors,omitempty"`
+
+	// ConfigSchema describes the config fields the plugin accepts, used by
+	// the host to validate operator-provided config before Initialize.
+	ConfigSchema ConfigSchema `json:"config_schema"`
+
+	// Events is the list of event types the plugin wants to receive via
+	// HandleEvent RPC calls.
+	Events []string `json:"events,omitempty"`
 }
 
 // PluginEvent is the wire shape of plugin_manager.PluginEvent. Data is a raw

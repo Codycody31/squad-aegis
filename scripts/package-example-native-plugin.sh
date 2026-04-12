@@ -99,9 +99,8 @@ cat > "${MANIFEST_PATH}" <<EOF
   "name": "${PLUGIN_NAME}",
   "description": "${PLUGIN_DESCRIPTION}",
   "version": "${PLUGIN_VERSION}",
+  "author": "${PLUGIN_AUTHOR}",
   "official": false,
-  "license": "",
-  "entry_symbol": "GetAegisPlugin",
   "targets": [
 $(printf '%b\n' "${TARGET_JSON}")
   ]

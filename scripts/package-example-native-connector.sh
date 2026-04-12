@@ -101,9 +101,8 @@ cat > "${MANIFEST_PATH}" <<EOF
   "name": "${CONNECTOR_NAME}",
   "description": "${CONNECTOR_DESCRIPTION}",
   "version": "${CONNECTOR_VERSION}",
+  "author": "${CONNECTOR_AUTHOR}",
   "official": false,
-  "license": "",
-  "entry_symbol": "GetAegisConnector",
   "targets": [
 $(printf '%b\n' "${TARGET_JSON}")
   ]

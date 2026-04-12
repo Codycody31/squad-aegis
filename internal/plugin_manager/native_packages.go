@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	nativePluginEntrySymbol     = "GetAegisPlugin"
 	pluginManifestFile          = "manifest.json"
 	pluginSignatureFile         = plugin_signing.ManifestSignatureFile
 	pluginPublicKeyFile         = plugin_signing.ManifestPublicKeyFile
@@ -775,36 +774,27 @@ func (pm *PluginManager) loadNativePluginPackage(pkg *InstalledPluginPackage) er
 	}
 	pkg.RuntimePath = safePath
 
-	definition, err := nativePluginVerifiedLoader(safePath, pkg.Checksum)
+	// Rebuild the target snapshot from the package's compatibility fields
+	// so the peek/merge step has everything it needs. We don't serialize the
+	// full manifest.targets array onto InstalledPluginPackage — the selected
+	// target was already applied at install time.
+	target := PluginPackageTarget{
+		MinHostAPIVersion:    pkg.MinHostAPIVersion,
+		RequiredCapabilities: cloneRequiredCapabilities(pkg.RequiredCapabilities),
+		TargetOS:             pkg.TargetOS,
+		TargetArch:           pkg.TargetArch,
+	}
+
+	definition, err := nativePluginVerifiedLoader(safePath, pkg.Checksum, pkg.Manifest, target)
 	if err != nil {
 		return err
 	}
 
-	if definition.ID == "" {
-		definition.ID = pkg.PluginID
-	}
-	if definition.ID != pkg.PluginID {
-		return fmt.Errorf("native plugin definition ID %s does not match manifest ID %s", definition.ID, pkg.PluginID)
-	}
-
-	if definition.Name == "" {
-		definition.Name = pkg.Name
-	}
-	if definition.Description == "" {
-		definition.Description = pkg.Description
-	}
-	if definition.Version == "" {
-		definition.Version = pkg.Version
-	}
-
-	definition.Source = PluginSourceNative
-	definition.Official = pkg.Official
+	// The manifest is already the source of truth for identity — the peek
+	// merger enforced ID match — so we only need to overlay install-time
+	// state the manifest does not carry.
 	definition.InstallState = pkg.InstallState
 	definition.Distribution = pkg.Distribution
-	definition.MinHostAPIVersion = pkg.MinHostAPIVersion
-	definition.RequiredCapabilities = cloneRequiredCapabilities(pkg.RequiredCapabilities)
-	definition.TargetOS = pkg.TargetOS
-	definition.TargetArch = pkg.TargetArch
 	definition.RuntimePath = pkg.RuntimePath
 	definition.SignatureVerified = pkg.SignatureVerified
 	definition.Unsafe = pkg.Unsafe

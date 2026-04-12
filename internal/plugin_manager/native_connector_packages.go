@@ -13,11 +13,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-
-	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
-
-const nativeConnectorEntrySymbol = "GetAegisConnector"
 
 // nativeConnectorVerifiedLoader is the subprocess-isolated counterpart of
 // nativePluginVerifiedLoader for connector packages. The default production
@@ -28,9 +24,11 @@ const nativeConnectorEntrySymbol = "GetAegisConnector"
 var nativeConnectorVerifiedLoader = peekNativeConnectorDefinition
 
 // peekNativeConnectorDefinition spawns a throwaway connector subprocess,
-// fetches the wire definition, kills it, and returns a host-typed definition
-// whose CreateInstance factory spawns a fresh subprocess per instance.
-func peekNativeConnectorDefinition(runtimePath, expectedSHA256 string) (ConnectorDefinition, error) {
+// fetches the wire definition, merges it with the identity fields from the
+// signed manifest, kills the peek subprocess, and returns a host-typed
+// definition whose CreateInstance factory spawns a fresh subprocess per
+// instance.
+func peekNativeConnectorDefinition(runtimePath, expectedSHA256 string, manifest ConnectorPackageManifest, target PluginPackageTarget) (ConnectorDefinition, error) {
 	handle, err := nativeConnectorSubprocessLauncher(runtimePath, expectedSHA256)
 	if err != nil {
 		return ConnectorDefinition{}, err
@@ -41,7 +39,12 @@ func peekNativeConnectorDefinition(runtimePath, expectedSHA256 string) (Connecto
 	if err != nil {
 		return ConnectorDefinition{}, fmt.Errorf("failed to fetch connector definition: %w", err)
 	}
-	hostDef, err := wireConnectorDefinitionToHost(wire)
+
+	if wire.ConnectorID != manifest.ConnectorID {
+		return ConnectorDefinition{}, fmt.Errorf("connector subprocess reported id %q but manifest declares %q", wire.ConnectorID, manifest.ConnectorID)
+	}
+
+	hostDef, err := mergeWireConnectorIntoHost(wire, manifest, target)
 	if err != nil {
 		return ConnectorDefinition{}, err
 	}
@@ -59,35 +62,35 @@ func peekNativeConnectorDefinition(runtimePath, expectedSHA256 string) (Connecto
 	return captured, nil
 }
 
-// ConnectorPackageManifest is the manifest.json format for native connector bundles.
+// ConnectorPackageManifest is the signed manifest.json shipped with every
+// native connector bundle. Like PluginPackageManifest, it carries only
+// identity and distribution metadata. Runtime behavior (config schema)
+// lives in the connector binary and is fetched via connectorrpc at load
+// time. LegacyIDs and InstanceKey are identity-level migration helpers
+// and belong with the other distribution metadata.
 type ConnectorPackageManifest struct {
 	ConnectorID string                `json:"connector_id"`
 	Name        string                `json:"name"`
-	Description string                `json:"description"`
+	Description string                `json:"description,omitempty"`
 	Version     string                `json:"version"`
-	Official    bool                  `json:"official"`
+	Author      string                `json:"author,omitempty"`
 	License     string                `json:"license,omitempty"`
-	EntrySymbol string                `json:"entry_symbol"`
+	Official    bool                  `json:"official,omitempty"`
+	InstanceKey string                `json:"instance_key,omitempty"`
+	LegacyIDs   []string              `json:"legacy_ids,omitempty"`
 	Targets     []PluginPackageTarget `json:"targets"`
-
-	Author       string                          `json:"author,omitempty"`
-	InstanceKey  string                          `json:"instance_key,omitempty"`
-	LegacyIDs    []string                        `json:"legacy_ids,omitempty"`
-	ConfigSchema plug_config_schema.ConfigSchema `json:"config_schema,omitempty"`
 }
 
 func (m ConnectorPackageManifest) asPluginManifest() PluginPackageManifest {
 	return PluginPackageManifest{
-		PluginID:     m.ConnectorID,
-		Name:         m.Name,
-		Description:  m.Description,
-		Version:      m.Version,
-		Official:     m.Official,
-		License:      m.License,
-		EntrySymbol:  m.EntrySymbol,
-		Targets:      m.Targets,
-		Author:       m.Author,
-		ConfigSchema: m.ConfigSchema,
+		PluginID:    m.ConnectorID,
+		Name:        m.Name,
+		Description: m.Description,
+		Version:     m.Version,
+		Author:      m.Author,
+		License:     m.License,
+		Official:    m.Official,
+		Targets:     m.Targets,
 	}
 }
 
@@ -275,36 +278,22 @@ func (pm *PluginManager) loadNativeConnectorPackage(pkg *InstalledConnectorPacka
 	}
 	pkg.RuntimePath = safePath
 
-	definition, err := nativeConnectorVerifiedLoader(safePath, pkg.Checksum)
+	// Reconstruct the target snapshot from the stored compatibility fields.
+	target := PluginPackageTarget{
+		MinHostAPIVersion:    pkg.MinHostAPIVersion,
+		RequiredCapabilities: cloneRequiredCapabilities(pkg.RequiredCapabilities),
+		TargetOS:             pkg.TargetOS,
+		TargetArch:           pkg.TargetArch,
+	}
+
+	definition, err := nativeConnectorVerifiedLoader(safePath, pkg.Checksum, pkg.Manifest, target)
 	if err != nil {
 		return err
 	}
 
-	if definition.ID == "" {
-		definition.ID = pkg.ConnectorID
-	}
-	if definition.ID != pkg.ConnectorID {
-		return fmt.Errorf("native connector definition ID %s does not match manifest ID %s", definition.ID, pkg.ConnectorID)
-	}
-
-	if definition.Name == "" {
-		definition.Name = pkg.Name
-	}
-	if definition.Description == "" {
-		definition.Description = pkg.Description
-	}
-	if definition.Version == "" {
-		definition.Version = pkg.Version
-	}
-
-	definition.Source = PluginSourceNative
-	definition.Official = pkg.Official
+	// Overlay install-time state the manifest does not carry.
 	definition.InstallState = pkg.InstallState
 	definition.Distribution = pkg.Distribution
-	definition.MinHostAPIVersion = pkg.MinHostAPIVersion
-	definition.RequiredCapabilities = cloneRequiredCapabilities(pkg.RequiredCapabilities)
-	definition.TargetOS = pkg.TargetOS
-	definition.TargetArch = pkg.TargetArch
 	definition.RuntimePath = pkg.RuntimePath
 	definition.SignatureVerified = pkg.SignatureVerified
 	definition.Unsafe = pkg.Unsafe

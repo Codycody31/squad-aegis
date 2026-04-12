@@ -25,12 +25,6 @@ func validateConnectorManifest(manifest *ConnectorPackageManifest) error {
 	if _, _, err := pluginRuntimeSegments(manifest.ConnectorID, manifest.Version); err != nil {
 		return err
 	}
-	if manifest.EntrySymbol == "" {
-		manifest.EntrySymbol = nativeConnectorEntrySymbol
-	}
-	if manifest.EntrySymbol != nativeConnectorEntrySymbol {
-		return fmt.Errorf("unsupported connector entry symbol %s", manifest.EntrySymbol)
-	}
 
 	targets := clonePluginPackageTargets(manifest.Targets)
 	if len(targets) == 0 {

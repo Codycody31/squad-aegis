@@ -100,7 +100,6 @@ func testManifest(pluginID string) PluginPackageManifest {
 		Name:        "Test Plugin",
 		Description: "A native test plugin",
 		Version:     "1.0.0",
-		EntrySymbol: nativePluginEntrySymbol,
 		Targets: []PluginPackageTarget{
 			{
 				MinHostAPIVersion: NativePluginHostAPIVersion,
@@ -261,7 +260,6 @@ func TestReadPluginBundleUsesManifestAndLibrary(t *testing.T) {
 		Description: "A packaged plugin",
 		Version:     "1.0.0",
 		Official:    false,
-		EntrySymbol: nativePluginEntrySymbol,
 		Targets: []PluginPackageTarget{
 			{
 				MinHostAPIVersion: NativePluginHostAPIVersion,
@@ -329,7 +327,6 @@ func TestReadPluginBundleSelectsMatchingTargetFromMatrix(t *testing.T) {
 		Description: "A packaged plugin",
 		Version:     "1.0.0",
 		Official:    false,
-		EntrySymbol: nativePluginEntrySymbol,
 		Targets: []PluginPackageTarget{
 			{
 				MinHostAPIVersion: NativePluginHostAPIVersion,
@@ -376,7 +373,6 @@ func TestValidatePluginManifestRejectsDuplicateTargets(t *testing.T) {
 		Description: "A packaged plugin",
 		Version:     "1.0.0",
 		Official:    false,
-		EntrySymbol: nativePluginEntrySymbol,
 		Targets: []PluginPackageTarget{
 			{
 				MinHostAPIVersion: NativePluginHostAPIVersion,
@@ -1158,7 +1154,6 @@ func TestValidatePluginManifestRequiresSHA256(t *testing.T) {
 		PluginID:    "com.example.missing-sha",
 		Name:        "Missing SHA",
 		Version:     "1.0.0",
-		EntrySymbol: nativePluginEntrySymbol,
 		Targets: []PluginPackageTarget{
 			{
 				MinHostAPIVersion: NativePluginHostAPIVersion,
@@ -1330,7 +1325,7 @@ func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
 	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), libraryBytes, signatureRaw, publicKeyRaw)
 
 	previousLoader := nativePluginVerifiedLoader
-	nativePluginVerifiedLoader = func(string, string) (PluginDefinition, error) {
+	nativePluginVerifiedLoader = func(string, string, PluginPackageManifest, PluginPackageTarget) (PluginDefinition, error) {
 		return PluginDefinition{
 			ID:             "com.example.signed",
 			Name:           manifest.Name,

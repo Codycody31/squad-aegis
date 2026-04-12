@@ -51,6 +51,23 @@ The public SDK lives in `go.codycody31.dev/squad-aegis/pkg/pluginrpc` and expose
 
 `PluginEvent.Data` arrives as `json.RawMessage`. Your plugin chooses its own struct to unmarshal into — the SDK does not force you to import the host event package.
 
+## Manifest vs Runtime: Who Owns What
+
+Every native plugin ships as a zip bundle with **two** sources of truth the host merges at load time:
+
+| Field group | Lives in | Why |
+|---|---|---|
+| `plugin_id`, `name`, `description`, `version`, `author`, `license`, `official` | `manifest.json` | Immutable identity; operators need to see it before the binary is allowed to run. Part of the signed payload. |
+| `min_host_api_version`, `required_capabilities`, `target_os`, `target_arch`, `library_path`, `sha256` | `manifest.json` (per target) | Distribution/compatibility gate; operators evaluate it at upload time before any code runs. |
+| `config_schema`, `events`, `long_running`, `allow_multiple_instances`, `required_connectors`, `optional_connectors` | Plugin binary (returned from `GetDefinition()` over RPC) | Runtime behavior; only the binary knows it. |
+
+The plugin author writes **identity/compatibility in `manifest.json`** (operator-facing, cryptographically signed) and **behavior in the `definition()` Go function** (runtime contract with the host). The host cross-checks `manifest.plugin_id == wire.PluginID` during load and rejects mismatches.
+
+What this means for your plugin's `GetDefinition()`:
+
+- Do **not** return `Name`, `Version`, `Author`, `Source`, `Official`, etc. — those fields no longer exist on `pluginrpc.PluginDefinition`.
+- Do return `PluginID` (echoed back for the cross-check), `ConfigSchema`, `Events`, `LongRunning`, `AllowMultipleInstances`, `RequiredConnectors`, `OptionalConnectors`.
+
 ## Minimal Example
 
 A complete example lives at `examples/native-plugin-hello/main.go`. It listens for `!hello` in chat and replies to the player with a warning message. The relevant pieces:
@@ -83,13 +100,12 @@ func main() {
     pluginrpc.Serve(&helloPlugin{})
 }
 
+// definition() returns only the runtime/behavioral contract. Identity
+// (name, version, author, license, official) lives in manifest.json
+// alongside the compiled binary.
 func (p *helloPlugin) GetDefinition() pluginrpc.PluginDefinition {
     return pluginrpc.PluginDefinition{
-        ID:          "com.squad-aegis.plugins.examples.hello",
-        Name:        "Hello Example",
-        Description: "Replies to players who type !hello in chat.",
-        Version:     "0.1.0",
-        Source:      pluginrpc.PluginSourceNative,
+        PluginID: "com.squad-aegis.plugins.examples.hello",
         ConfigSchema: pluginrpc.ConfigSchema{
             Fields: []pluginrpc.ConfigField{
                 {Name: "trigger", Type: pluginrpc.FieldTypeString, Default: "!hello"},
@@ -201,7 +217,7 @@ hello-plugin.zip
     └── linux-arm64/hello-plugin
 ```
 
-Example `manifest.json`:
+Example `manifest.json` (identity + distribution metadata only):
 
 ```json
 {
@@ -209,8 +225,9 @@ Example `manifest.json`:
   "name": "Hello Example",
   "description": "Replies to players who type !hello in chat.",
   "version": "0.1.0",
+  "author": "Squad Aegis",
+  "license": "MIT",
   "official": false,
-  "entry_symbol": "GetAegisPlugin",
   "targets": [
     {
       "min_host_api_version": 1,
@@ -235,17 +252,51 @@ Example `manifest.json`:
 Notes:
 
 - Use a stable plugin ID. Reverse-DNS style IDs such as `com.squad-aegis.plugins.examples.hello` are recommended.
-- `entry_symbol` is carried for legacy compatibility but no longer used by the loader; the subprocess launch uses hashicorp/go-plugin's handshake instead.
+- There is **no** `entry_symbol` field anymore. The subprocess launch uses hashicorp/go-plugin's handshake, not a Go plugin entry point.
+- There is **no** `config_schema` in the manifest. The plugin binary is the source of truth for its config schema; it is fetched over RPC at load time and cross-checked against the operator-supplied config before `Initialize` is called.
 - `targets` is the only supported format. Each target describes one shipped binary.
 - Every target must include `min_host_api_version`, `target_os`, `target_arch`, `library_path`, and `sha256`.
 - `library_path` points at an **executable binary**, not a `.so`. There is no required file extension.
 - `required_capabilities` is optional but recommended. Use it whenever your plugin depends on specific host-exposed APIs or event families.
 - `sha256` is **required** and must be the hex-encoded SHA-256 of the target's binary bytes. The manifest signature only covers the manifest itself, so this field is what binds the signed manifest to the on-disk binary — Aegis rejects any bundle where the hashes disagree.
 - Aegis selects the most capable target that matches the current host OS, architecture, host API version, and required capabilities.
+- The host **also** spawns the plugin binary once during install (the "peek" step) and compares the `PluginID` echoed from `GetDefinition()` against the manifest's `plugin_id`. A mismatch aborts the install.
 - Signed bundles must include both `manifest.sig` and `manifest.pub` together.
 - **The public key embedded in `manifest.pub` must appear in `plugins.trusted_signing_keys`** on the host that receives the upload. A cryptographically valid signature from an unknown key is treated as unverified — without an operator-configured trust anchor, anyone with upload access could ship their own keypair.
 - Stored bundles are re-verified at each server start against the current trust store. Rotating a key in `plugins.trusted_signing_keys` will retroactively mark bundles signed with the old key as untrusted and quarantine the runtime file.
 - Unsafe archive paths and symlinks are rejected during install.
+
+### Connector manifest
+
+Connector bundles use the same split with two additional identity fields. Example:
+
+```json
+{
+  "connector_id": "com.squad-aegis.connectors.examples.hello",
+  "name": "Hello Connector",
+  "description": "Responds to JSON invoke action ping.",
+  "version": "0.1.0",
+  "author": "Squad Aegis",
+  "license": "MIT",
+  "official": false,
+  "instance_key": "",
+  "legacy_ids": [],
+  "targets": [
+    {
+      "min_host_api_version": 1,
+      "target_os": "linux",
+      "target_arch": "amd64",
+      "sha256": "REPLACE_WITH_SHA256",
+      "library_path": "bin/linux-amd64/hello-connector"
+    }
+  ]
+}
+```
+
+- `instance_key` is an optional routing hint — when non-empty, multiple connector IDs sharing the same key share a single connector instance. Leave empty for independent connectors.
+- `legacy_ids` lists previous connector IDs so operators migrating from an older build can continue to reference the connector by its old ID.
+
+The connector binary's `GetDefinition()` returns only `ConnectorID` (echoed) and `ConfigSchema`.
 
 ## How the Subprocess Lifecycle Works
 

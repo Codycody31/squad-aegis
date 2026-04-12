@@ -51,40 +51,115 @@ func buildExampleBinary(t *testing.T, pkg string) (path, sha string) {
 	return outPath, fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
+// helloPluginTestManifest returns a slim manifest matching the example
+// hello plugin binary at examples/native-plugin-hello. Tests that spawn
+// real subprocesses use this as the manifest that would ship alongside
+// the binary in a real bundle.
+func helloPluginTestManifest() PluginPackageManifest {
+	return PluginPackageManifest{
+		PluginID:    "com.squad-aegis.plugins.examples.hello",
+		Name:        "Hello Example",
+		Description: "Replies to players who type !hello in chat.",
+		Version:     "0.1.0",
+		Author:      "Squad Aegis",
+	}
+}
+
+// helloPluginTestTarget returns a target snapshot matching the current host.
+func helloPluginTestTarget() PluginPackageTarget {
+	return PluginPackageTarget{
+		MinHostAPIVersion: NativePluginHostAPIVersion,
+		TargetOS:          runtime.GOOS,
+		TargetArch:        runtime.GOARCH,
+	}
+}
+
+// helloConnectorTestManifest returns a slim connector manifest matching
+// the example hello connector binary.
+func helloConnectorTestManifest() ConnectorPackageManifest {
+	return ConnectorPackageManifest{
+		ConnectorID: "com.squad-aegis.connectors.examples.hello",
+		Name:        "Hello connector example",
+		Description: "Responds to JSON invoke action ping.",
+		Version:     "0.1.0",
+		Author:      "Squad Aegis",
+	}
+}
+
+func helloConnectorTestTarget() PluginPackageTarget {
+	return PluginPackageTarget{
+		MinHostAPIVersion: NativeConnectorHostAPIVersion,
+		TargetOS:          runtime.GOOS,
+		TargetArch:        runtime.GOARCH,
+	}
+}
+
 func TestPeekNativePluginDefinitionFromRealSubprocess(t *testing.T) {
 	path, sha := buildExampleBinary(t, "examples/native-plugin-hello")
+	manifest := helloPluginTestManifest()
+	target := helloPluginTestTarget()
 
-	def, err := peekNativePluginDefinition(path, sha)
+	def, err := peekNativePluginDefinition(path, sha, manifest, target)
 	if err != nil {
 		t.Fatalf("peekNativePluginDefinition() error = %v", err)
 	}
 	if got, want := def.ID, "com.squad-aegis.plugins.examples.hello"; got != want {
 		t.Fatalf("def.ID = %q, want %q", got, want)
 	}
-	if def.Name == "" {
-		t.Fatal("def.Name should not be empty")
+	if def.Name != manifest.Name {
+		t.Fatalf("def.Name = %q, want %q (merged from manifest)", def.Name, manifest.Name)
+	}
+	if def.Version != manifest.Version {
+		t.Fatalf("def.Version = %q, want %q", def.Version, manifest.Version)
 	}
 	if def.CreateInstance == nil {
 		t.Fatal("def.CreateInstance should not be nil")
 	}
+	// The runtime fields come from the subprocess, not the manifest.
+	if len(def.Events) == 0 {
+		t.Fatal("def.Events is empty; expected RCON_CHAT_MESSAGE from subprocess")
+	}
+	if len(def.OptionalConnectors) == 0 {
+		t.Fatal("def.OptionalConnectors is empty; expected example hello connector from subprocess")
+	}
+
 	// Mismatched checksum must fail fast.
-	if _, err := peekNativePluginDefinition(path, "deadbeef"); err == nil {
+	if _, err := peekNativePluginDefinition(path, "deadbeef", manifest, target); err == nil {
 		t.Fatal("peekNativePluginDefinition() with bad sha error = nil, want error")
+	}
+
+	// Manifest plugin_id mismatch must fail fast.
+	wrong := manifest
+	wrong.PluginID = "com.example.wrong"
+	if _, err := peekNativePluginDefinition(path, sha, wrong, target); err == nil {
+		t.Fatal("peekNativePluginDefinition() with mismatched plugin_id error = nil, want error")
 	}
 }
 
 func TestPeekNativeConnectorDefinitionFromRealSubprocess(t *testing.T) {
 	path, sha := buildExampleBinary(t, "examples/native-connector-hello")
+	manifest := helloConnectorTestManifest()
+	target := helloConnectorTestTarget()
 
-	def, err := peekNativeConnectorDefinition(path, sha)
+	def, err := peekNativeConnectorDefinition(path, sha, manifest, target)
 	if err != nil {
 		t.Fatalf("peekNativeConnectorDefinition() error = %v", err)
 	}
 	if got, want := def.ID, "com.squad-aegis.connectors.examples.hello"; got != want {
 		t.Fatalf("def.ID = %q, want %q", got, want)
 	}
+	if def.Name != manifest.Name {
+		t.Fatalf("def.Name = %q, want %q (merged from manifest)", def.Name, manifest.Name)
+	}
 	if def.CreateInstance == nil {
 		t.Fatal("def.CreateInstance should not be nil")
+	}
+
+	// Manifest connector_id mismatch must fail fast.
+	wrong := manifest
+	wrong.ConnectorID = "com.example.wrong"
+	if _, err := peekNativeConnectorDefinition(path, sha, wrong, target); err == nil {
+		t.Fatal("peekNativeConnectorDefinition() with mismatched connector_id error = nil, want error")
 	}
 }
 
@@ -154,7 +229,7 @@ func (f *fakeLogAPI) Debug(string, map[string]interface{})        {}
 func TestSubprocessConnectorLifecycle(t *testing.T) {
 	path, sha := buildExampleBinary(t, "examples/native-connector-hello")
 
-	def, err := peekNativeConnectorDefinition(path, sha)
+	def, err := peekNativeConnectorDefinition(path, sha, helloConnectorTestManifest(), helloConnectorTestTarget())
 	if err != nil {
 		t.Fatalf("peekNativeConnectorDefinition() error = %v", err)
 	}
@@ -228,7 +303,7 @@ func TestSubprocessPluginHealthMonitorFiresOnUnexpectedExit(t *testing.T) {
 
 	path, sha := buildExampleBinary(t, "examples/native-plugin-hello")
 
-	def, err := peekNativePluginDefinition(path, sha)
+	def, err := peekNativePluginDefinition(path, sha, helloPluginTestManifest(), helloPluginTestTarget())
 	if err != nil {
 		t.Fatalf("peekNativePluginDefinition() error = %v", err)
 	}
@@ -287,7 +362,7 @@ func TestSubprocessPluginHealthMonitorFiresOnUnexpectedExit(t *testing.T) {
 func TestSubprocessPluginLifecycleWithHostAPICallbacks(t *testing.T) {
 	path, sha := buildExampleBinary(t, "examples/native-plugin-hello")
 
-	def, err := peekNativePluginDefinition(path, sha)
+	def, err := peekNativePluginDefinition(path, sha, helloPluginTestManifest(), helloPluginTestTarget())
 	if err != nil {
 		t.Fatalf("peekNativePluginDefinition() error = %v", err)
 	}

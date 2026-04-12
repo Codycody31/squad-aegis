@@ -146,10 +146,18 @@ func (s *subprocessPluginShim) OnUnexpectedExit(fn func(error)) {
 }
 
 // peekNativePluginDefinition starts a throwaway subprocess, fetches the
-// plugin's static definition, converts it to the host type, and then kills
-// the subprocess. The returned definition's CreateInstance factory spawns a
-// fresh subprocess per instance via the same launcher.
-func peekNativePluginDefinition(runtimePath, expectedSHA256 string) (PluginDefinition, error) {
+// plugin's runtime definition, merges it with the identity fields from the
+// manifest, kills the peek subprocess, and returns a host PluginDefinition.
+// The returned definition's CreateInstance factory spawns a fresh subprocess
+// per instance via the same launcher.
+//
+// The manifest is the source of truth for identity (ID, name, version,
+// author, license, official, min host API version, required capabilities).
+// The runtime RPC is the source of truth for behavior (config schema,
+// events, long running, allow multiple instances, required/optional
+// connectors). Any mismatch between manifest.plugin_id and the PluginID
+// echoed by the subprocess aborts the load.
+func peekNativePluginDefinition(runtimePath, expectedSHA256 string, manifest PluginPackageManifest, target PluginPackageTarget) (PluginDefinition, error) {
 	handle, err := nativePluginSubprocessLauncher(runtimePath, expectedSHA256)
 	if err != nil {
 		return PluginDefinition{}, err
@@ -160,13 +168,17 @@ func peekNativePluginDefinition(runtimePath, expectedSHA256 string) (PluginDefin
 	if err != nil {
 		return PluginDefinition{}, fmt.Errorf("failed to fetch plugin definition: %w", err)
 	}
-	hostDef, err := wirePluginDefinitionToHost(wire)
+
+	if wire.PluginID != manifest.PluginID {
+		return PluginDefinition{}, fmt.Errorf("plugin subprocess reported id %q but manifest declares %q", wire.PluginID, manifest.PluginID)
+	}
+
+	hostDef, err := mergeWirePluginIntoHost(wire, manifest, target)
 	if err != nil {
 		return PluginDefinition{}, err
 	}
 
-	captured := PluginDefinition{}
-	captured = hostDef
+	captured := hostDef
 	captured.CreateInstance = func() Plugin {
 		return &subprocessPluginShim{
 			pluginID:     captured.ID,
@@ -491,28 +503,35 @@ func (s *subprocessPluginShim) GetCommandExecutionStatus(executionID string) (*C
 	return status, nil
 }
 
-// wirePluginDefinitionToHost converts the wire-safe PluginDefinition into the
-// host's runtime type, re-marshaling the config schema through JSON so the
-// host's plug_config_schema package owns the validation surface.
-func wirePluginDefinitionToHost(wire pluginrpc.PluginDefinition) (PluginDefinition, error) {
+// mergeWirePluginIntoHost assembles a host PluginDefinition by merging
+// identity/compatibility fields from the signed manifest with the runtime
+// behavioral fields returned by the subprocess over RPC. It re-marshals the
+// config schema through JSON so the host's plug_config_schema package owns
+// the validation surface.
+func mergeWirePluginIntoHost(wire pluginrpc.PluginDefinition, manifest PluginPackageManifest, target PluginPackageTarget) (PluginDefinition, error) {
 	hostDef := PluginDefinition{
-		ID:                     wire.ID,
-		Name:                   wire.Name,
-		Description:            wire.Description,
-		Version:                wire.Version,
-		Author:                 wire.Author,
-		Source:                 PluginSource(wire.Source),
-		Official:               wire.Official,
-		MinHostAPIVersion:      wire.MinHostAPIVersion,
-		RequiredCapabilities:   append([]string(nil), wire.RequiredCapabilities...),
+		// Identity comes from the manifest.
+		ID:          manifest.PluginID,
+		Name:        manifest.Name,
+		Description: manifest.Description,
+		Version:     manifest.Version,
+		Author:      manifest.Author,
+		Source:      PluginSourceNative,
+		Official:    manifest.Official,
+
+		// Compatibility comes from the selected target.
+		MinHostAPIVersion:    target.MinHostAPIVersion,
+		RequiredCapabilities: cloneRequiredCapabilities(target.RequiredCapabilities),
+		TargetOS:             target.TargetOS,
+		TargetArch:           target.TargetArch,
+
+		// Behavior comes from the subprocess runtime definition.
 		AllowMultipleInstances: wire.AllowMultipleInstances,
 		RequiredConnectors:     append([]string(nil), wire.RequiredConnectors...),
 		OptionalConnectors:     append([]string(nil), wire.OptionalConnectors...),
 		LongRunning:            wire.LongRunning,
 	}
-	if hostDef.Source == "" {
-		hostDef.Source = PluginSourceNative
-	}
+
 	schemaJSON, err := json.Marshal(wire.ConfigSchema)
 	if err != nil {
 		return PluginDefinition{}, fmt.Errorf("failed to marshal plugin config schema: %w", err)

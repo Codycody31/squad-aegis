@@ -21,14 +21,12 @@ type helloConnector struct {
 	status connectorrpc.ConnectorStatus
 }
 
+// definition returns the connector's runtime behavior. Identity (name,
+// version, author, legacy_ids, instance_key, license, target OS/arch,
+// sha256) lives in the signed manifest.json shipped alongside the binary.
 func definition() connectorrpc.ConnectorDefinition {
 	return connectorrpc.ConnectorDefinition{
-		ID:          "com.squad-aegis.connectors.examples.hello",
-		Source:      connectorrpc.PluginSourceNative,
-		Name:        "Hello connector example",
-		Description: "Responds to JSON invoke action ping.",
-		Version:     "0.1.0",
-		Author:      "Squad Aegis",
+		ConnectorID: "com.squad-aegis.connectors.examples.hello",
 		ConfigSchema: connectorrpc.ConfigSchema{
 			Fields: []connectorrpc.ConfigField{},
 		},
