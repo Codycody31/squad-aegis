@@ -97,7 +97,7 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 func verifyRuntimeBinaryChecksum(runtimePath, expectedSHA256 string) error {
 	expected := strings.TrimSpace(expectedSHA256)
 	if expected == "" {
-		return nil
+		return fmt.Errorf("refusing to launch plugin subprocess: no expected checksum configured")
 	}
 	file, err := openNoFollow(runtimePath)
 	if err != nil {

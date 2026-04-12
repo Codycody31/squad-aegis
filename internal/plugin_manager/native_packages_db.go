@@ -129,6 +129,10 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 		loadedPackages[pkg.PluginID] = &pkg
 	}
 
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating plugin package rows: %w", err)
+	}
+
 	pm.resetNativeRuntimeState()
 
 	pm.nativeMu.Lock()

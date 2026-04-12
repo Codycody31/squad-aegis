@@ -13,6 +13,10 @@ import (
 // ServerPluginCommandsList returns available commands for a plugin instance
 func (s *Server) ServerPluginCommandsList(c *gin.Context) {
 	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
 
 	if !s.requirePluginManager(c) {
 		return
@@ -32,7 +36,8 @@ func (s *Server) ServerPluginCommandsList(c *gin.Context) {
 
 	commands, err := s.Dependencies.PluginManager.GetPluginCommands(serverID, instanceID)
 	if err != nil {
-		responses.BadRequest(c, "Failed to get plugin commands", &gin.H{"error": err.Error()})
+		log.Error().Err(err).Str("server_id", serverID.String()).Str("instance_id", instanceID.String()).Msg("Failed to get plugin commands")
+		responses.BadRequest(c, "Failed to get plugin commands", nil)
 		return
 	}
 
@@ -60,6 +65,10 @@ func (s *Server) ServerPluginCommandsList(c *gin.Context) {
 // ServerPluginCommandExecute executes a command on a plugin instance
 func (s *Server) ServerPluginCommandExecute(c *gin.Context) {
 	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
 
 	if !s.requirePluginManager(c) {
 		return
@@ -98,7 +107,8 @@ func (s *Server) ServerPluginCommandExecute(c *gin.Context) {
 
 	commands, err := s.Dependencies.PluginManager.GetPluginCommands(serverID, instanceID)
 	if err != nil {
-		responses.BadRequest(c, "Failed to get plugin commands", &gin.H{"error": err.Error()})
+		log.Error().Err(err).Str("server_id", serverID.String()).Str("instance_id", instanceID.String()).Msg("Failed to get plugin commands")
+		responses.BadRequest(c, "Failed to get plugin commands", nil)
 		return
 	}
 
@@ -130,7 +140,8 @@ func (s *Server) ServerPluginCommandExecute(c *gin.Context) {
 
 	result, err := s.Dependencies.PluginManager.ExecutePluginCommand(serverID, instanceID, commandID, requestBody.Params)
 	if err != nil {
-		responses.BadRequest(c, "Failed to execute command", &gin.H{"error": err.Error()})
+		log.Error().Err(err).Str("server_id", serverID.String()).Str("instance_id", instanceID.String()).Str("command_id", commandID).Msg("Failed to execute plugin command")
+		responses.BadRequest(c, "Failed to execute command", nil)
 		return
 	}
 
@@ -182,7 +193,8 @@ func (s *Server) ServerPluginCommandStatus(c *gin.Context) {
 
 	status, err := s.Dependencies.PluginManager.GetCommandExecutionStatus(serverID, instanceID, executionID)
 	if err != nil {
-		responses.BadRequest(c, "Failed to get command execution status", &gin.H{"error": err.Error()})
+		log.Error().Err(err).Str("server_id", serverID.String()).Str("instance_id", instanceID.String()).Str("execution_id", executionID).Msg("Failed to get command execution status")
+		responses.BadRequest(c, "Failed to get command execution status", nil)
 		return
 	}
 

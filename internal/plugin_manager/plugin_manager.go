@@ -325,6 +325,9 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 	if err := pm.initializePluginInstance(instance); err != nil {
 		delete(pm.plugins[serverID], instanceID)
 		cancel()
+		if dbErr := pm.deletePluginInstanceFromDatabase(instanceID); dbErr != nil {
+			log.Error().Err(dbErr).Str("instanceID", instanceID.String()).Msg("Failed to clean up plugin instance from database after init failure")
+		}
 		return nil, fmt.Errorf("failed to initialize plugin instance: %w", err)
 	}
 
@@ -409,6 +412,7 @@ func (pm *PluginManager) DeletePluginInstance(serverID, instanceID uuid.UUID) er
 			Str("instanceID", instanceID.String()).
 			Err(err).
 			Msg("Failed to delete plugin instance from database")
+		return fmt.Errorf("failed to delete plugin instance from database: %w", err)
 	}
 
 	// Remove from memory
@@ -1062,8 +1066,10 @@ func (pm *PluginManager) handlePluginEvent(instance *PluginInstance, event *Plug
 				Interface("panic", r).
 				Msg("Plugin panicked while handling event")
 
+			instance.mu.Lock()
 			instance.Status = PluginStatusError
 			instance.LastError = fmt.Sprintf("panic: %v", r)
+			instance.mu.Unlock()
 		}
 	}()
 
@@ -1076,16 +1082,18 @@ func (pm *PluginManager) handlePluginEvent(instance *PluginInstance, event *Plug
 			Err(err).
 			Msg("Plugin failed to handle event")
 
+		instance.mu.Lock()
 		instance.LastError = err.Error()
+		instance.mu.Unlock()
 	}
 }
 
 func (pm *PluginManager) convertEventSource(eventType event_manager.EventType) EventSource {
 	eventTypeStr := string(eventType)
 	switch {
-	case eventTypeStr[:4] == "RCON":
+	case strings.HasPrefix(eventTypeStr, "RCON"):
 		return EventSourceRCON
-	case eventTypeStr[:3] == "LOG":
+	case strings.HasPrefix(eventTypeStr, "LOG"):
 		return EventSourceLog
 	default:
 		return EventSourceSystem

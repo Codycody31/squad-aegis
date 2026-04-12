@@ -631,6 +631,7 @@ func (pm *PluginManager) DeleteConnectorInstance(connectorID string) error {
 			Str("connectorID", storageKey).
 			Err(err).
 			Msg("Failed to delete connector from database")
+		return fmt.Errorf("failed to delete connector from database: %w", err)
 	}
 
 	// Remove from memory

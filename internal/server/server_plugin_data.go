@@ -31,12 +31,13 @@ func (s *Server) ServerPluginDataGet(c *gin.Context) {
 	}
 
 	// Verify plugin instance exists and belongs to the server
-	if s.Dependencies.PluginManager != nil {
-		_, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID)
-		if err != nil {
-			responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
-			return
-		}
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+	if _, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID); err != nil {
+		responses.NotFound(c, "Plugin instance not found", nil)
+		return
 	}
 
 	query := `SELECT key, value, created_at, updated_at FROM plugin_data WHERE plugin_instance_id = $1 ORDER BY key`
@@ -91,12 +92,13 @@ func (s *Server) ServerPluginDataClear(c *gin.Context) {
 		return
 	}
 
-	if s.Dependencies.PluginManager != nil {
-		_, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID)
-		if err != nil {
-			responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
-			return
-		}
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+	if _, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID); err != nil {
+		responses.NotFound(c, "Plugin instance not found", nil)
+		return
 	}
 
 	query := `DELETE FROM plugin_data WHERE plugin_instance_id = $1`
@@ -140,12 +142,13 @@ func (s *Server) ServerPluginDataSet(c *gin.Context) {
 		return
 	}
 
-	if s.Dependencies.PluginManager != nil {
-		_, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID)
-		if err != nil {
-			responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
-			return
-		}
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+	if _, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID); err != nil {
+		responses.NotFound(c, "Plugin instance not found", nil)
+		return
 	}
 
 	var requestBody struct {
@@ -203,12 +206,13 @@ func (s *Server) ServerPluginDataDelete(c *gin.Context) {
 		return
 	}
 
-	if s.Dependencies.PluginManager != nil {
-		_, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID)
-		if err != nil {
-			responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
-			return
-		}
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return
+	}
+	if _, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID); err != nil {
+		responses.NotFound(c, "Plugin instance not found", nil)
+		return
 	}
 
 	query := `DELETE FROM plugin_data WHERE plugin_instance_id = $1 AND key = $2`

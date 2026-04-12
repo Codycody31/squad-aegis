@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -306,6 +307,10 @@ type PluginInstance struct {
 	LastError         string                 `json:"last_error,omitempty"`
 	CreatedAt         time.Time              `json:"created_at"`
 	UpdatedAt         time.Time              `json:"updated_at"`
+
+	// mu protects mutable state (Status, LastError) that may be written
+	// from concurrent event-handler goroutines.
+	mu sync.Mutex `json:"-"`
 }
 
 // ConnectorInvokeRequest is the versioned JSON envelope plugins send to connectors via ConnectorAPI.

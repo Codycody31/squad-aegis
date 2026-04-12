@@ -47,7 +47,8 @@ func (s *Server) ConnectorCreate(c *gin.Context) {
 
 	instance, err := s.Dependencies.PluginManager.CreateConnectorInstance(request.ConnectorID, request.Config)
 	if err != nil {
-		responses.BadRequest(c, "Failed to create connector", &gin.H{"error": err.Error()})
+		log.Error().Err(err).Str("connector_id", request.ConnectorID).Msg("Failed to create connector")
+		responses.BadRequest(c, "Failed to create connector", nil)
 		return
 	}
 
@@ -76,7 +77,8 @@ func (s *Server) ConnectorUpdate(c *gin.Context) {
 	}
 
 	if err := s.Dependencies.PluginManager.UpdateConnectorConfig(connectorID, request.Config); err != nil {
-		responses.BadRequest(c, "Failed to update connector", &gin.H{"error": err.Error()})
+		log.Error().Err(err).Str("connector_id", connectorID).Msg("Failed to update connector")
+		responses.BadRequest(c, "Failed to update connector", nil)
 		return
 	}
 
@@ -96,7 +98,8 @@ func (s *Server) ConnectorDelete(c *gin.Context) {
 	}
 
 	if err := s.Dependencies.PluginManager.DeleteConnectorInstance(connectorID); err != nil {
-		responses.BadRequest(c, "Failed to delete connector", &gin.H{"error": err.Error()})
+		log.Error().Err(err).Str("connector_id", connectorID).Msg("Failed to delete connector")
+		responses.BadRequest(c, "Failed to delete connector", nil)
 		return
 	}
 
@@ -155,7 +158,7 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 			"size":     file.Size,
 			"error":    err.Error(),
 		})
-		responses.BadRequest(c, "Failed to install uploaded connector bundle", &gin.H{"error": err.Error()})
+		responses.BadRequest(c, "Failed to install uploaded connector bundle", nil)
 		return
 	}
 
@@ -197,7 +200,7 @@ func (s *Server) ConnectorPackageInstalledDelete(c *gin.Context) {
 			"connector_id": connectorID,
 			"error":        err.Error(),
 		})
-		responses.BadRequest(c, "Failed to delete installed connector package", &gin.H{"error": err.Error()})
+		responses.BadRequest(c, "Failed to delete installed connector package", nil)
 		return
 	}
 

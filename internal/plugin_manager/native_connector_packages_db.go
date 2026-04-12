@@ -123,6 +123,10 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 		loaded[pkg.ConnectorID] = &pkg
 	}
 
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating connector package rows: %w", err)
+	}
+
 	pm.resetNativeConnectorRuntimeState()
 
 	pm.nativeMu.Lock()

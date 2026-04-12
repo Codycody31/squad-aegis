@@ -109,7 +109,7 @@ func (s *Server) PluginUpload(c *gin.Context) {
 			"size":     file.Size,
 			"error":    err.Error(),
 		})
-		responses.BadRequest(c, "Failed to install uploaded plugin bundle", &gin.H{"error": err.Error()})
+		responses.BadRequest(c, "Failed to install uploaded plugin bundle", nil)
 		return
 	}
 
@@ -151,7 +151,7 @@ func (s *Server) PluginInstalledDelete(c *gin.Context) {
 			"plugin_id": pluginID,
 			"error":     err.Error(),
 		})
-		responses.BadRequest(c, "Failed to delete installed plugin", &gin.H{"error": err.Error()})
+		responses.BadRequest(c, "Failed to delete installed plugin", nil)
 		return
 	}
 

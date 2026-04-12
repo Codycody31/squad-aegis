@@ -70,6 +70,9 @@ func NewRouter(server *Server) *gin.Engine {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", config.Config.App.Url)
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, PATCH, DELETE")
+		c.Writer.Header().Set("Vary", "Origin")
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		c.Writer.Header().Set("X-Frame-Options", "DENY")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -138,7 +141,7 @@ func NewRouter(server *Server) *gin.Engine {
 					return
 				}
 			})
-			authGroup.POST("/login", server.AuthLogin)
+			authGroup.POST("/login", RateLimitMiddleware(5.0/60, 5), server.AuthLogin)
 		}
 
 		usersGroup := apiGroup.Group("/users")
@@ -402,7 +405,7 @@ func NewRouter(server *Server) *gin.Engine {
 
 			pluginsGroup.GET("/available", server.PluginListAvailable)
 			pluginsGroup.GET("/installed", server.AuthIsSuperAdmin(), server.PluginListInstalled)
-			pluginsGroup.POST("/upload", server.AuthIsSuperAdmin(), server.PluginUpload)
+			pluginsGroup.POST("/upload", server.AuthIsSuperAdmin(), RateLimitMiddleware(10.0/60, 3), server.PluginUpload)
 			pluginsGroup.DELETE("/installed/:pluginId", server.AuthIsSuperAdmin(), server.PluginInstalledDelete)
 		}
 
@@ -413,7 +416,7 @@ func NewRouter(server *Server) *gin.Engine {
 
 			connectorsGroup.GET("/available", server.ConnectorListAvailable)
 			connectorsGroup.GET("/packages/installed", server.ConnectorPackageListInstalled)
-			connectorsGroup.POST("/packages/upload", server.ConnectorPackageUpload)
+			connectorsGroup.POST("/packages/upload", RateLimitMiddleware(10.0/60, 3), server.ConnectorPackageUpload)
 			connectorsGroup.DELETE("/packages/installed/:connectorId", server.ConnectorPackageInstalledDelete)
 			connectorsGroup.GET("", server.ConnectorList)
 			connectorsGroup.POST("", server.ConnectorCreate)
