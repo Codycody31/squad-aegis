@@ -88,7 +88,6 @@ func (s *Server) customLoggerWithFormatter(param gin.LogFormatterParams) string 
 	)
 }
 
-
 func (s *Server) getUserFromSession(c *gin.Context) *models.User {
 	session, exists := c.Get("session")
 	if exists {

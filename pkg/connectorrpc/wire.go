@@ -58,7 +58,7 @@ type ConfigField struct {
 	Type        FieldType     `json:"type"`
 	Default     interface{}   `json:"default,omitempty"`
 	Sensitive   bool          `json:"sensitive,omitempty"`
-	Enum        []interface{} `json:"enum,omitempty"`
+	Options     []interface{} `json:"options,omitempty"`
 	Nested      []ConfigField `json:"nested,omitempty"`
 }
 

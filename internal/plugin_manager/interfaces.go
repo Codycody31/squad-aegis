@@ -95,6 +95,12 @@ type PluginPackageTarget struct {
 	LibraryPath          string   `json:"library_path"`
 }
 
+// ManifestAuthor identifies a plugin or connector author.
+type ManifestAuthor struct {
+	Name    string `json:"name"`
+	Contact string `json:"contact,omitempty"`
+}
+
 // PluginPackageManifest is the signed manifest.json shipped with every
 // native plugin bundle. It carries ONLY the identity and distribution
 // metadata operators need to evaluate a package at upload time. Runtime
@@ -106,8 +112,10 @@ type PluginPackageManifest struct {
 	Name        string                `json:"name"`
 	Description string                `json:"description,omitempty"`
 	Version     string                `json:"version"`
-	Author      string                `json:"author,omitempty"`
+	Authors     []ManifestAuthor      `json:"authors,omitempty"`
 	License     string                `json:"license,omitempty"`
+	Repository  string                `json:"repository,omitempty"`
+	DocsURL     string                `json:"docs_url,omitempty"`
 	Official    bool                  `json:"official,omitempty"`
 	Targets     []PluginPackageTarget `json:"targets"`
 }
@@ -182,7 +190,7 @@ type PluginDefinition struct {
 	Name                   string                          `json:"name"`
 	Description            string                          `json:"description"`
 	Version                string                          `json:"version"`
-	Author                 string                          `json:"author"`
+	Authors                []ManifestAuthor                `json:"authors,omitempty"`
 	Source                 PluginSource                    `json:"source"`
 	Official               bool                            `json:"official"`
 	InstallState           PluginInstallState              `json:"install_state"`
@@ -389,7 +397,7 @@ type ConnectorDefinition struct {
 	Name         string                          `json:"name"`
 	Description  string                          `json:"description"`
 	Version      string                          `json:"version"`
-	Author       string                          `json:"author"`
+	Authors      []ManifestAuthor                `json:"authors,omitempty"`
 	ConfigSchema plug_config_schema.ConfigSchema `json:"config_schema"`
 	APIInterface interface{}                     `json:"-"`
 	// MinHostAPIVersion is required for native connector packages (see NativeConnectorHostAPIVersion).

@@ -32,14 +32,9 @@ type RuleLookupPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "rule_lookup",
-		Name:                   "Rule Lookup",
-		Description:            "Allows players to look up server rules by typing !rule followed by a rule number (e.g., !rule 1.1)",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "rule_lookup",
+		Name:        "Rule Lookup",
+		Description: "Allows players to look up server rules by typing !rule followed by a rule number (e.g., !rule 1.1)",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

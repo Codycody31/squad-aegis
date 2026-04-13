@@ -87,9 +87,9 @@ type Struct struct {
 		// user/group. Subprocesses always run with NoNewPrivs=true so they
 		// cannot gain additional capabilities after exec. Groups is a
 		// comma-separated list of supplementary group IDs.
-		SubprocessUID         int    `default:"0"`
-		SubprocessGID         int    `default:"0"`
-		SubprocessGroups      string `default:""`
-		SubprocessNoNewPrivs  bool   `default:"true"`
+		SubprocessUID        int    `default:"0"`
+		SubprocessGID        int    `default:"0"`
+		SubprocessGroups     string `default:""`
+		SubprocessNoNewPrivs bool   `default:"true"`
 	}
 }

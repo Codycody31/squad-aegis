@@ -42,9 +42,6 @@ func Define() plugin_manager.ConnectorDefinition {
 		Source:      plugin_manager.PluginSourceBundled,
 		Name:        "Discord",
 		Description: "Discord bot connector for sending messages and managing Discord integration",
-		Version:     "1.0.0",
-		Author:      "Squad Aegis",
-
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
 				{
@@ -397,4 +394,3 @@ func (api *discordAPI) SendEmbed(channelID string, embed *DiscordEmbed) (string,
 
 	return api.connector.sendEmbedLocked(channelID, embed)
 }
-

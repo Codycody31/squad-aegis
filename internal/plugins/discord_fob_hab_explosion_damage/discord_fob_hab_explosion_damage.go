@@ -35,14 +35,10 @@ type DiscordFOBHABExplosionDamagePlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_fob_hab_explosion_damage",
-		Name:                   "Discord FOB/HAB Explosion Damage",
-		Description:            "The Discord FOB/HAB Explosion Damage plugin logs damage done to FOBs and HABs by explosions to help identify engineers blowing up friendly FOBs and HABs.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_fob_hab_explosion_damage",
+		Name:               "Discord FOB/HAB Explosion Damage",
+		Description:        "The Discord FOB/HAB Explosion Damage plugin logs damage done to FOBs and HABs by explosions to help identify engineers blowing up friendly FOBs and HABs.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

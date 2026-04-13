@@ -46,7 +46,7 @@ type helloPlugin struct {
 }
 
 // definition returns the plugin's runtime behavior. Identity (name,
-// version, author, license, official flag, min host API version, required
+// version, authors, license, official flag, min host API version, required
 // capabilities, target OS/arch, sha256) lives in the signed manifest.json
 // that ships alongside the binary — this struct is only the behavioral
 // contract the host needs to validate config and route events.

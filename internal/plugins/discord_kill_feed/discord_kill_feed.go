@@ -30,14 +30,10 @@ type DiscordKillFeedPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_kill_feed",
-		Name:                   "Discord Kill Feed",
-		Description:            "The Discord Kill Feed plugin logs all wounds and related information to a Discord channel for admins to review.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_kill_feed",
+		Name:               "Discord Kill Feed",
+		Description:        "The Discord Kill Feed plugin logs all wounds and related information to a Discord channel for admins to review.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

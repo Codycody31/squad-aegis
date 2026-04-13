@@ -30,14 +30,10 @@ type DiscordChatPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_chat",
-		Name:                   "Discord Chat",
-		Description:            "The Discord Chat plugin will log in-game chat to a Discord channel.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_chat",
+		Name:               "Discord Chat",
+		Description:        "The Discord Chat plugin will log in-game chat to a Discord channel.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

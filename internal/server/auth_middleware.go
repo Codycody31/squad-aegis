@@ -122,7 +122,7 @@ func (s *Server) requireSuperAdmin(c *gin.Context) bool {
 		return false
 	}
 	session, ok := sess.(*models.Session)
-	if !ok || session == nil {
+	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 			"message": "Unauthorized",
 			"code":    http.StatusUnauthorized,

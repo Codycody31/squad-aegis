@@ -163,13 +163,13 @@ func (r *RconAPI) KickPlayer(playerID, reason string) error {
 }
 
 type rconBanArgs struct {
-	PlayerID   string        `json:"player_id"`
-	Reason     string        `json:"reason"`
-	Duration   time.Duration `json:"duration"`
-	EventID    string        `json:"event_id,omitempty"`
-	EventType  string        `json:"event_type,omitempty"`
-	RuleID     *string       `json:"rule_id,omitempty"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	PlayerID  string                 `json:"player_id"`
+	Reason    string                 `json:"reason"`
+	Duration  time.Duration          `json:"duration"`
+	EventID   string                 `json:"event_id,omitempty"`
+	EventType string                 `json:"event_type,omitempty"`
+	RuleID    *string                `json:"rule_id,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // BanPlayer bans a player for the given duration.

@@ -115,8 +115,8 @@ func (s *Server) GetSystemConfig(c *gin.Context) {
 			"configured": cfg.Valkey.Host != "",
 		},
 		Storage: gin.H{
-			"type":           cfg.Storage.Type,
-			"s3_configured":  cfg.Storage.S3.Bucket != "",
+			"type":          cfg.Storage.Type,
+			"s3_configured": cfg.Storage.S3.Bucket != "",
 		},
 		Plugins: gin.H{
 			"native_enabled":           cfg.Plugins.NativeEnabled,

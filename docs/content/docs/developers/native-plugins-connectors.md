@@ -53,7 +53,7 @@ graph TB
 Key invariants:
 
 - **Process isolation.** Each extension runs in its own OS process. The host monitors health and restarts as needed.
-- **Manifest vs. definition split.** The `manifest.json` carries identity and trust data (name, version, author, signature, checksums). The binary's `GetDefinition()` returns runtime behavior (config schema, events, connector dependencies). The host cross-checks the ID from both - a mismatch rejects the bundle.
+- **Manifest vs. definition split.** The `manifest.json` carries identity and trust data (name, version, authors, signature, checksums). The binary's `GetDefinition()` returns runtime behavior (config schema, events, connector dependencies). The host cross-checks the ID from both - a mismatch rejects the bundle.
 - **Plugins call connectors, not the reverse.** A plugin reaches a connector through `ConnectorAPI.Call()`. Connectors never import plugin code.
 
 ---
@@ -692,8 +692,10 @@ The `library_path` in each manifest target points to the binary Aegis should exe
   "name": "Hello Plugin",
   "description": "Replies to a chat command with a private message.",
   "version": "0.1.0",
-  "author": "Example Team",
+  "authors": [{"name": "Example Team", "contact": "team@example.com"}],
   "license": "MIT",
+  "repository": "https://github.com/example/hello-plugin",
+  "docs_url": "https://example.com/docs/hello-plugin",
   "official": false,
   "targets": [
     {
@@ -716,8 +718,10 @@ The `library_path` in each manifest target points to the binary Aegis should exe
   "name": "Hello Connector",
   "description": "Responds to ping requests.",
   "version": "0.1.0",
-  "author": "Example Team",
+  "authors": [{"name": "Example Team", "contact": "team@example.com"}],
   "license": "MIT",
+  "repository": "https://github.com/example/hello-connector",
+  "docs_url": "https://example.com/docs/hello-connector",
   "official": false,
   "instance_key": "",
   "legacy_ids": [],

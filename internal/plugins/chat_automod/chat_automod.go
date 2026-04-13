@@ -38,14 +38,9 @@ type ChatAutoModPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "chat_automod",
-		Name:                   "Chat AutoMod",
-		Description:            "Automatically moderates chat for hate speech, slurs, discrimination, and other rule violations with escalating consequences.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "chat_automod",
+		Name:        "Chat AutoMod",
+		Description: "Automatically moderates chat for hate speech, slurs, discrimination, and other rule violations with escalating consequences.",
 
 		ConfigSchema: getConfigSchema(),
 

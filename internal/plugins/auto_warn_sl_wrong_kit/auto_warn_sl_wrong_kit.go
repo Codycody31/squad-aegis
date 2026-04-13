@@ -110,14 +110,10 @@ func (p *AutoWarnSLWrongKitPlugin) findMatchingPlayer(players []*plugin_manager.
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "auto_warn_sl_wrong_kit",
-		Name:                   "Auto Kick SL Wrong Kit",
-		Description:            "The Auto Kick SL Wrong Kit plugin will automatically kick squad leaders that have the wrong kit for longer than a specified amount of time.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            true,
+		ID:          "auto_warn_sl_wrong_kit",
+		Name:        "Auto Kick SL Wrong Kit",
+		Description: "The Auto Kick SL Wrong Kit plugin will automatically kick squad leaders that have the wrong kit for longer than a specified amount of time.",
+		LongRunning: true,
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

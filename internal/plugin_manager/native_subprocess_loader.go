@@ -147,14 +147,14 @@ type subprocessPluginShim struct {
 	runtimePath  string
 	expectedHash string
 
-	mu           sync.Mutex
-	handle       *pluginSubprocessHandle
-	hostAPISvc   *hostAPIServer
-	status       PluginStatus
-	onExit       func(error)
-	stopWatcher  chan struct{}
-	watcherDone  chan struct{}
-	intentional  bool // set when Stop() is called, so the watcher knows the exit was deliberate
+	mu          sync.Mutex
+	handle      *pluginSubprocessHandle
+	hostAPISvc  *hostAPIServer
+	status      PluginStatus
+	onExit      func(error)
+	stopWatcher chan struct{}
+	watcherDone chan struct{}
+	intentional bool // set when Stop() is called, so the watcher knows the exit was deliberate
 }
 
 // OnUnexpectedExit registers a callback invoked when the subprocess dies
@@ -542,7 +542,7 @@ func mergeWirePluginIntoHost(wire pluginrpc.PluginDefinition, manifest PluginPac
 		Name:        manifest.Name,
 		Description: manifest.Description,
 		Version:     manifest.Version,
-		Author:      manifest.Author,
+		Authors:     manifest.Authors,
 		Source:      PluginSourceNative,
 		Official:    manifest.Official,
 

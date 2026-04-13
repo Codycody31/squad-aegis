@@ -99,7 +99,7 @@ func run(bundleDir, privateKeyPath, outputZip string) error {
 // dropping a private key inside the bundle dir before zipping.
 func collectBundleFiles(bundleDir string) ([]string, error) {
 	allowedRoots := map[string]struct{}{
-		"manifest.json": {},
+		"manifest.json":                      {},
 		plugin_signing.ManifestSignatureFile: {},
 		plugin_signing.ManifestPublicKeyFile: {},
 	}

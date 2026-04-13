@@ -97,8 +97,10 @@ type ConnectorPackageManifest struct {
 	Name        string                `json:"name"`
 	Description string                `json:"description,omitempty"`
 	Version     string                `json:"version"`
-	Author      string                `json:"author,omitempty"`
+	Authors     []ManifestAuthor      `json:"authors,omitempty"`
 	License     string                `json:"license,omitempty"`
+	Repository  string                `json:"repository,omitempty"`
+	DocsURL     string                `json:"docs_url,omitempty"`
 	Official    bool                  `json:"official,omitempty"`
 	InstanceKey string                `json:"instance_key,omitempty"`
 	LegacyIDs   []string              `json:"legacy_ids,omitempty"`
@@ -111,7 +113,7 @@ func (m ConnectorPackageManifest) asPluginManifest() PluginPackageManifest {
 		Name:        m.Name,
 		Description: m.Description,
 		Version:     m.Version,
-		Author:      m.Author,
+		Authors:     m.Authors,
 		License:     m.License,
 		Official:    m.Official,
 		Targets:     m.Targets,

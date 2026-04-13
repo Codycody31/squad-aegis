@@ -28,13 +28,10 @@ type DiscordSquadCreatedPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_squad_created",
-		Name:                   "Discord Squad Created",
-		Description:            "The SquadCreated plugin will log Squad Creation events to a Discord channel.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
+		ID:                 "discord_squad_created",
+		Name:               "Discord Squad Created",
+		Description:        "The SquadCreated plugin will log Squad Creation events to a Discord channel.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

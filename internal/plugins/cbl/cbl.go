@@ -84,14 +84,10 @@ type CBLPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "cbl",
-		Name:                   "Community Ban List",
-		Description:            "The CBL plugin alerts admins when a harmful player is detected joining their server based on data from the Community Ban List.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "cbl",
+		Name:               "Community Ban List",
+		Description:        "The CBL plugin alerts admins when a harmful player is detected joining their server based on data from the Community Ban List.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

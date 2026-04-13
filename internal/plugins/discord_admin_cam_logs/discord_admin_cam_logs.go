@@ -90,14 +90,10 @@ func (p *DiscordAdminCamLogsPlugin) findAdminCamSessionKeyLocked(steamID string,
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_admin_cam_logs",
-		Name:                   "Discord Admin Camera Logs",
-		Description:            "The Discord Admin Camera Logs plugin will log in game admin camera usage to a Discord channel.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_admin_cam_logs",
+		Name:               "Discord Admin Camera Logs",
+		Description:        "The Discord Admin Camera Logs plugin will log in game admin camera usage to a Discord channel.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

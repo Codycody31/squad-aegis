@@ -338,7 +338,7 @@ func mergeWireConnectorIntoHost(wire connectorrpc.ConnectorDefinition, manifest 
 		Name:        manifest.Name,
 		Description: manifest.Description,
 		Version:     manifest.Version,
-		Author:      manifest.Author,
+		Authors:     manifest.Authors,
 
 		// Compatibility comes from the selected target.
 		MinHostAPIVersion:    target.MinHostAPIVersion,

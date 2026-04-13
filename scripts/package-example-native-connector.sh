@@ -125,7 +125,7 @@ cat > "${MANIFEST_PATH}" <<EOF
   "name": "${CONNECTOR_NAME}",
   "description": "${CONNECTOR_DESCRIPTION}",
   "version": "${CONNECTOR_VERSION}",
-  "author": "${CONNECTOR_AUTHOR}",
+  "authors": [{"name": "${CONNECTOR_AUTHOR}"}],
   "official": false,
   "targets": [
 $(printf '%b\n' "${TARGET_JSON}")

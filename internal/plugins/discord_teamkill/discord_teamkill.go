@@ -30,14 +30,10 @@ type DiscordTeamkillPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_teamkill",
-		Name:                   "Discord Teamkill",
-		Description:            "The Discord Teamkill plugin logs all wounds and related information to a Discord channel.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_teamkill",
+		Name:               "Discord Teamkill",
+		Description:        "The Discord Teamkill plugin logs all wounds and related information to a Discord channel.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

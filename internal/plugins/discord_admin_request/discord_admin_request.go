@@ -32,14 +32,10 @@ type DiscordAdminRequestPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_admin_request",
-		Name:                   "Discord Admin Requests",
-		Description:            "Will ping admins in a Discord channel when a player requests an admin via the !admin command in in-game chat.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_admin_request",
+		Name:               "Discord Admin Requests",
+		Description:        "Will ping admins in a Discord channel when a player requests an admin via the !admin command in in-game chat.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

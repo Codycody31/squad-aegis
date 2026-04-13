@@ -61,7 +61,7 @@ func helloPluginTestManifest() PluginPackageManifest {
 		Name:        "Hello Example",
 		Description: "Replies to players who type !hello in chat.",
 		Version:     "0.1.0",
-		Author:      "Squad Aegis",
+		Authors:     []ManifestAuthor{{Name: "Squad Aegis"}},
 	}
 }
 
@@ -82,7 +82,7 @@ func helloConnectorTestManifest() ConnectorPackageManifest {
 		Name:        "Hello connector example",
 		Description: "Responds to JSON invoke action ping.",
 		Version:     "0.1.0",
-		Author:      "Squad Aegis",
+		Authors:     []ManifestAuthor{{Name: "Squad Aegis"}},
 	}
 }
 
@@ -206,7 +206,7 @@ func (f *fakeRconAPI) RemovePlayerFromSquadById(string) error { return nil }
 // fakeServerAPI is a minimal ServerAPI impl for tests.
 type fakeServerAPI struct{ id uuid.UUID }
 
-func (f *fakeServerAPI) GetServerID() uuid.UUID             { return f.id }
+func (f *fakeServerAPI) GetServerID() uuid.UUID              { return f.id }
 func (f *fakeServerAPI) GetServerInfo() (*ServerInfo, error) { return nil, nil }
 func (f *fakeServerAPI) GetPlayers() ([]*PlayerInfo, error)  { return nil, nil }
 func (f *fakeServerAPI) GetAdmins() ([]*AdminInfo, error)    { return nil, nil }

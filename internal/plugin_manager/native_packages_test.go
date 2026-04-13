@@ -1155,9 +1155,9 @@ func TestValidatePluginManifestRequiresSHA256(t *testing.T) {
 	t.Parallel()
 
 	manifest := PluginPackageManifest{
-		PluginID:    "com.example.missing-sha",
-		Name:        "Missing SHA",
-		Version:     "1.0.0",
+		PluginID: "com.example.missing-sha",
+		Name:     "Missing SHA",
+		Version:  "1.0.0",
 		Targets: []PluginPackageTarget{
 			{
 				MinHostAPIVersion: NativePluginHostAPIVersion,

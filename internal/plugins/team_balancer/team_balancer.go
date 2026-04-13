@@ -61,14 +61,9 @@ type WinStreakState struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "team_balancer",
-		Name:                   "Team Balancer",
-		Description:            "Tracks dominant win streaks and triggers fair, squad-preserving team scrambles to maintain balanced matches.",
-		Version:                "2.0.0",
-		Author:                 "Squad Aegis (ported from Slacker's SquadJS plugin)",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "team_balancer",
+		Name:        "Team Balancer",
+		Description: "Tracks dominant win streaks and triggers fair, squad-preserving team scrambles to maintain balanced matches.",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

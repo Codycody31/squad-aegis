@@ -19,9 +19,9 @@ type ServerMOTDConfig struct {
 	IncludeRuleDescriptions bool `json:"include_rule_descriptions"`
 
 	// Upload settings
-	UploadEnabled      bool   `json:"upload_enabled"`
-	AutoUploadOnChange bool   `json:"auto_upload_on_change"`
-	UseLogCredentials  bool   `json:"use_log_credentials"`
+	UploadEnabled      bool    `json:"upload_enabled"`
+	AutoUploadOnChange bool    `json:"auto_upload_on_change"`
+	UseLogCredentials  bool    `json:"use_log_credentials"`
 	UploadHost         *string `json:"upload_host,omitempty"`
 	UploadPort         *int    `json:"upload_port,omitempty"`
 	UploadUsername     *string `json:"upload_username,omitempty"`
