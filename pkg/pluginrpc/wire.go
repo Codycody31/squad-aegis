@@ -32,6 +32,16 @@ const (
 	PluginStatusDisabled PluginStatus = "disabled"
 )
 
+// Valid returns true if s is one of the recognised plugin statuses.
+func (s PluginStatus) Valid() bool {
+	switch s {
+	case PluginStatusStopped, PluginStatusStarting, PluginStatusRunning,
+		PluginStatusStopping, PluginStatusError, PluginStatusDisabled:
+		return true
+	}
+	return false
+}
+
 // EventSource mirrors plugin_manager.EventSource on the wire.
 type EventSource string
 
@@ -43,6 +53,16 @@ const (
 	EventSourcePlugin    EventSource = "plugin"
 )
 
+// Valid returns true if s is one of the recognised event sources.
+func (s EventSource) Valid() bool {
+	switch s {
+	case EventSourceRCON, EventSourceLog, EventSourceSystem,
+		EventSourceConnector, EventSourcePlugin:
+		return true
+	}
+	return false
+}
+
 // CommandExecutionType mirrors plugin_manager.CommandExecutionType.
 type CommandExecutionType string
 
@@ -50,6 +70,15 @@ const (
 	CommandExecutionSync  CommandExecutionType = "sync"
 	CommandExecutionAsync CommandExecutionType = "async"
 )
+
+// Valid returns true if t is one of the recognised command execution types.
+func (t CommandExecutionType) Valid() bool {
+	switch t {
+	case CommandExecutionSync, CommandExecutionAsync:
+		return true
+	}
+	return false
+}
 
 // FieldType mirrors plug_config_schema.FieldType as raw strings so the wire
 // format survives without importing the internal schema package.
@@ -66,6 +95,17 @@ const (
 	FieldTypeArrayBool   FieldType = "arraybool"
 	FieldTypeArrayObject FieldType = "arrayobject"
 )
+
+// Valid returns true if t is one of the recognised field types.
+func (t FieldType) Valid() bool {
+	switch t {
+	case FieldTypeString, FieldTypeInt, FieldTypeBool, FieldTypeObject,
+		FieldTypeArray, FieldTypeArrayString, FieldTypeArrayInt,
+		FieldTypeArrayBool, FieldTypeArrayObject:
+		return true
+	}
+	return false
+}
 
 // ConfigField is the wire representation of a single config field.
 type ConfigField struct {

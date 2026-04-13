@@ -515,8 +515,7 @@ func (pm *PluginManager) UpdatePluginLogLevel(serverID, instanceID uuid.UUID, lo
 				Str("instanceID", instanceID.String()).
 				Err(err).
 				Msg("Failed to restart plugin instance after log level update")
-			instance.Status = PluginStatusError
-			instance.LastError = err.Error()
+			instance.setError(PluginStatusError, err.Error())
 			return fmt.Errorf("failed to restart plugin instance: %w", err)
 		}
 	}
@@ -590,7 +589,7 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 	}
 
 	instance.Enabled = false
-	instance.Status = PluginStatusDisabled
+	instance.setStatus(PluginStatusDisabled)
 	instance.UpdatedAt = time.Now()
 
 	// Save to database
@@ -862,23 +861,21 @@ type unexpectedExitReporter interface {
 
 func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) error {
 	if err := pm.ensurePluginInstanceRuntime(instance); err != nil {
-		instance.Status = PluginStatusError
-		instance.LastError = err.Error()
+		instance.setError(PluginStatusError, err.Error())
 		return err
 	}
 
-	instance.Status = PluginStatusStarting
+	instance.setStatus(PluginStatusStarting)
 
 	// Create plugin APIs
-	apis := pm.createPluginAPIs(instance.ServerID, instance.ID, instance.PluginName, instance.PluginID, instance.LogLevel)
+	apis := pm.createPluginAPIs(instance.Context, instance.ServerID, instance.ID, instance.PluginName, instance.PluginID, instance.LogLevel)
 
 	// Initialize plugin (with panic recovery so a misbehaving native .so
 	// cannot take down the manager).
 	if err := safePluginCall(instance.PluginID, "Initialize", func() error {
 		return instance.Plugin.Initialize(instance.Config, apis)
 	}); err != nil {
-		instance.Status = PluginStatusError
-		instance.LastError = err.Error()
+		instance.setError(PluginStatusError, err.Error())
 		return fmt.Errorf("failed to initialize plugin: %w", err)
 	}
 
@@ -893,14 +890,12 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 		if err := safePluginCall(instance.PluginID, "Start", func() error {
 			return instance.Plugin.Start(instance.Context)
 		}); err != nil {
-			instance.Status = PluginStatusError
-			instance.LastError = err.Error()
+			instance.setError(PluginStatusError, err.Error())
 			return fmt.Errorf("failed to start plugin: %w", err)
 		}
 	}
 
-	instance.Status = PluginStatusRunning
-	instance.LastError = ""
+	instance.clearError(PluginStatusRunning)
 	return nil
 }
 
@@ -920,9 +915,10 @@ func (pm *PluginManager) attachUnexpectedExitReporter(instance *PluginInstance) 
 		defer pm.mu.Unlock()
 		if serverPlugins, ok := pm.plugins[serverID]; ok {
 			if live, ok := serverPlugins[instanceID]; ok {
-				live.Status = PluginStatusError
 				if err != nil {
-					live.LastError = err.Error()
+					live.setError(PluginStatusError, err.Error())
+				} else {
+					live.setStatus(PluginStatusError)
 				}
 			}
 		}
@@ -940,11 +936,11 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 		return nil // Not running, nothing to do
 	}
 	if instance.Plugin == nil {
-		instance.Status = PluginStatusStopped
+		instance.setStatus(PluginStatusStopped)
 		return nil
 	}
 
-	instance.Status = PluginStatusStopping
+	instance.setStatus(PluginStatusStopping)
 
 	// Cancel context
 	if instance.Cancel != nil {
@@ -964,31 +960,29 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 	select {
 	case err := <-stopChan:
 		if err != nil {
-			instance.Status = PluginStatusError
-			instance.LastError = err.Error()
+			instance.setError(PluginStatusError, err.Error())
 			return fmt.Errorf("failed to stop plugin: %w", err)
 		}
-		instance.Status = PluginStatusStopped
+		instance.setStatus(PluginStatusStopped)
 		return nil
 	case <-ctx.Done():
 		log.Warn().
 			Str("pluginID", instance.PluginID).
 			Str("instanceID", instance.ID.String()).
 			Msg("Plugin shutdown timed out after 30 seconds, forcefully killing it")
-		instance.Status = PluginStatusStopped
-		instance.LastError = "Plugin shutdown timed out after 30 seconds"
+		instance.setError(PluginStatusStopped, "Plugin shutdown timed out after 30 seconds")
 		return nil
 	}
 }
 
-func (pm *PluginManager) createPluginAPIs(serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string) *PluginAPIs {
+func (pm *PluginManager) createPluginAPIs(ctx context.Context, serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string) *PluginAPIs {
 	apis := &PluginAPIs{
 		ServerAPI:   NewServerAPI(serverID, pm.db, pm.rconManager),
 		DatabaseAPI: NewDatabaseAPI(instanceID, pm.db),
 		RuleAPI:     NewRuleAPI(serverID, pm.db),
 		RconAPI:     NewRconAPI(serverID, pm.db, pm.rconManager, pm.clickhouseClient, pm.banSyncFunc),
 		AdminAPI:    NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
-		EventAPI:    NewEventAPI(serverID, instanceID, pluginName, pm.eventManager),
+		EventAPI:    NewEventAPI(ctx, serverID, instanceID, pluginName, pm.eventManager),
 		DiscordAPI:  pm.getDiscordAPI(),
 		LogAPI:      NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager),
 	}
@@ -1066,10 +1060,7 @@ func (pm *PluginManager) handlePluginEvent(instance *PluginInstance, event *Plug
 				Interface("panic", r).
 				Msg("Plugin panicked while handling event")
 
-			instance.mu.Lock()
-			instance.Status = PluginStatusError
-			instance.LastError = fmt.Sprintf("panic: %v", r)
-			instance.mu.Unlock()
+			instance.setError(PluginStatusError, fmt.Sprintf("panic: %v", r))
 		}
 	}()
 

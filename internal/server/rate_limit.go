@@ -9,11 +9,14 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const maxTrackedIPs = 100_000
+
 type ipRateLimiter struct {
 	mu       sync.Mutex
 	limiters map[string]*rateLimiterEntry
 	rate     rate.Limit
 	burst    int
+	done     chan struct{}
 }
 
 type rateLimiterEntry struct {
@@ -26,6 +29,7 @@ func newIPRateLimiter(r rate.Limit, burst int) *ipRateLimiter {
 		limiters: make(map[string]*rateLimiterEntry),
 		rate:     r,
 		burst:    burst,
+		done:     make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
@@ -37,6 +41,10 @@ func (rl *ipRateLimiter) getLimiter(ip string) *rate.Limiter {
 
 	entry, exists := rl.limiters[ip]
 	if !exists {
+		// Cap map size to prevent memory exhaustion from many unique IPs.
+		if len(rl.limiters) >= maxTrackedIPs {
+			return rate.NewLimiter(0, 0) // deny when at capacity
+		}
 		limiter := rate.NewLimiter(rl.rate, rl.burst)
 		rl.limiters[ip] = &rateLimiterEntry{limiter: limiter, lastSeen: time.Now()}
 		return limiter
@@ -47,16 +55,27 @@ func (rl *ipRateLimiter) getLimiter(ip string) *rate.Limiter {
 
 // cleanup evicts entries not seen for 10 minutes.
 func (rl *ipRateLimiter) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
 	for {
-		time.Sleep(5 * time.Minute)
-		rl.mu.Lock()
-		for ip, entry := range rl.limiters {
-			if time.Since(entry.lastSeen) > 10*time.Minute {
-				delete(rl.limiters, ip)
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			for ip, entry := range rl.limiters {
+				if time.Since(entry.lastSeen) > 10*time.Minute {
+					delete(rl.limiters, ip)
+				}
 			}
+			rl.mu.Unlock()
+		case <-rl.done:
+			return
 		}
-		rl.mu.Unlock()
 	}
+}
+
+// Stop terminates the background cleanup goroutine.
+func (rl *ipRateLimiter) Stop() {
+	close(rl.done)
 }
 
 // RateLimitMiddleware returns a Gin middleware that enforces per-IP rate
@@ -67,6 +86,7 @@ func RateLimitMiddleware(r rate.Limit, burst int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 		if !limiter.getLimiter(ip).Allow() {
+			c.Abort()
 			responses.TooManyRequests(c, "Rate limit exceeded, please try again later", nil)
 			return
 		}

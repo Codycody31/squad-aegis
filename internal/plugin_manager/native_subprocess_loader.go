@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -40,6 +41,7 @@ func (h *pluginSubprocessHandle) Kill() {
 	if h == nil || h.client == nil {
 		return
 	}
+	killProcessGroup(h.client)
 	h.client.Kill()
 }
 
@@ -48,11 +50,24 @@ func (h *pluginSubprocessHandle) Kill() {
 // client can be used to drive the plugin; on failure the subprocess (if any)
 // is killed and the error is returned.
 func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSubprocessHandle, error) {
-	if err := verifyRuntimeBinaryChecksum(runtimePath, expectedSHA256); err != nil {
+	verifiedFile, err := verifyRuntimeBinaryChecksum(runtimePath, expectedSHA256)
+	if err != nil {
 		return nil, err
 	}
+	defer verifiedFile.Close()
 
-	cmd := exec.Command(runtimePath)
+	// Execute from the verified fd to eliminate the TOCTOU window between
+	// checksum verification and exec. The /proc/self/fd path is Linux-only,
+	// which is fine because native plugins are gated by nativePluginsEnabled().
+	execPath := fmt.Sprintf("/proc/self/fd/%d", verifiedFile.Fd())
+	cmd := exec.Command(execPath)
+	// Restrict the subprocess environment to a minimal allowlist so host
+	// credentials (DB passwords, API keys, etc.) are never leaked.
+	cmd.Env = []string{
+		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"HOME=/nonexistent",
+		"LANG=C.UTF-8",
+	}
 	if err := applySubprocessHardening(cmd); err != nil {
 		return nil, fmt.Errorf("failed to harden plugin subprocess: %w", err)
 	}
@@ -90,30 +105,36 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 }
 
 // verifyRuntimeBinaryChecksum opens the runtime file with O_NOFOLLOW and
-// verifies its SHA-256 against the expected value before returning. The fd
-// is closed on return; the subsequent exec relies on the path-based
-// integrity of the runtime directory (which must be exclusively writable by
-// the Aegis process user).
-func verifyRuntimeBinaryChecksum(runtimePath, expectedSHA256 string) error {
+// verifies its SHA-256 against the expected value. On success, the verified
+// file is returned with the fd still open so the caller can exec directly
+// from /proc/self/fd/<fd>, eliminating the TOCTOU window between checksum
+// verification and exec. The caller is responsible for closing the file.
+func verifyRuntimeBinaryChecksum(runtimePath, expectedSHA256 string) (*os.File, error) {
 	expected := strings.TrimSpace(expectedSHA256)
 	if expected == "" {
-		return fmt.Errorf("refusing to launch plugin subprocess: no expected checksum configured")
+		return nil, fmt.Errorf("refusing to launch plugin subprocess: no expected checksum configured")
 	}
 	file, err := openNoFollow(runtimePath)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer file.Close()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
-		return fmt.Errorf("failed to hash plugin runtime binary: %w", err)
+		file.Close()
+		return nil, fmt.Errorf("failed to hash plugin runtime binary: %w", err)
 	}
 	actual := fmt.Sprintf("%x", hasher.Sum(nil))
 	if !strings.EqualFold(expected, actual) {
-		return fmt.Errorf("plugin runtime binary checksum mismatch: expected %s, got %s", expected, actual)
+		file.Close()
+		return nil, fmt.Errorf("plugin runtime binary checksum mismatch: expected %s, got %s", expected, actual)
 	}
-	return nil
+	// Seek back to start so the fd is usable for exec.
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("failed to seek plugin binary: %w", err)
+	}
+	return file, nil
 }
 
 // subprocessPluginShim adapts an out-of-process plugin onto the host-side
@@ -169,6 +190,12 @@ func peekNativePluginDefinition(runtimePath, expectedSHA256 string, manifest Plu
 		return PluginDefinition{}, fmt.Errorf("failed to fetch plugin definition: %w", err)
 	}
 
+	// Guard against adversarial config schemas with unbounded nesting depth.
+	const maxConfigFieldDepth = 10
+	if err := validateConfigFieldDepth(wire.ConfigSchema.Fields, maxConfigFieldDepth); err != nil {
+		return PluginDefinition{}, fmt.Errorf("plugin %q: %w", manifest.PluginID, err)
+	}
+
 	if wire.PluginID != manifest.PluginID {
 		return PluginDefinition{}, fmt.Errorf("plugin subprocess reported id %q but manifest declares %q", wire.PluginID, manifest.PluginID)
 	}
@@ -212,7 +239,7 @@ func (s *subprocessPluginShim) Initialize(config map[string]interface{}, apis *P
 		return fmt.Errorf("failed to spawn plugin subprocess: %w", err)
 	}
 
-	svc, brokerID, err := startHostAPIServer(handle.rpc, apis)
+	svc, brokerID, err := startHostAPIServer(handle.rpc, apis, s.pluginID)
 	if err != nil {
 		handle.Kill()
 		return fmt.Errorf("failed to start host api server: %w", err)
@@ -569,6 +596,24 @@ func hostPluginEventToWire(event *PluginEvent) (pluginrpc.PluginEvent, error) {
 		wire.Data = payload
 	}
 	return wire, nil
+}
+
+// validateConfigFieldDepth walks the config schema tree and returns an error
+// if any branch exceeds maxDepth levels of nesting. This prevents a malicious
+// subprocess from sending a deeply-recursive schema that could blow the host
+// stack during JSON re-marshal or validation.
+func validateConfigFieldDepth(fields []pluginrpc.ConfigField, maxDepth int) error {
+	if maxDepth <= 0 {
+		return fmt.Errorf("config schema exceeds maximum nesting depth")
+	}
+	for _, f := range fields {
+		if len(f.Nested) > 0 {
+			if err := validateConfigFieldDepth(f.Nested, maxDepth-1); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // wirePluginCommandToHost converts a wire PluginCommand into the host type.

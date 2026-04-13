@@ -79,7 +79,11 @@ func (c *helloConnector) GetConfig() map[string]interface{} {
 	if c.config == nil {
 		return map[string]interface{}{}
 	}
-	return c.config
+	cloned := make(map[string]interface{}, len(c.config))
+	for k, v := range c.config {
+		cloned[k] = v
+	}
+	return cloned
 }
 
 func (c *helloConnector) UpdateConfig(config map[string]interface{}) error {

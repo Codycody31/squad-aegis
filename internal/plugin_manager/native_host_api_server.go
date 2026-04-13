@@ -9,11 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/time/rate"
 
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 	"go.codycody31.dev/squad-aegis/pkg/pluginrpc"
 )
+
+const maxHostAPIPayloadSize = 1 << 20 // 1 MiB
 
 // hostAPIServer wires the in-process *PluginAPIs onto a net/rpc server that
 // the plugin subprocess calls into. There is exactly one hostAPIServer per
@@ -29,11 +32,12 @@ type hostAPIServer struct {
 // handle that the caller uses to Close() on shutdown. Each hostAPIServer
 // gets its own rate limiter, so a compromised plugin cannot starve other
 // plugins by burning through a shared token bucket.
-func startHostAPIServer(rpcClient *pluginrpc.PluginRPCClient, apis *PluginAPIs) (*hostAPIServer, uint32, error) {
+func startHostAPIServer(rpcClient *pluginrpc.PluginRPCClient, apis *PluginAPIs, pluginID string) (*hostAPIServer, uint32, error) {
 	rpcServer := rpc.NewServer()
 	dispatcher := &hostAPIDispatcher{
-		apis:    apis,
-		limiter: buildHostAPIRateLimiter(),
+		pluginID: pluginID,
+		apis:     apis,
+		limiter:  buildHostAPIRateLimiter(),
 	}
 	if err := rpcServer.RegisterName("HostAPI", dispatcher); err != nil {
 		return nil, 0, fmt.Errorf("failed to register HostAPI service: %w", err)
@@ -80,8 +84,9 @@ func (s *hostAPIServer) Close() {
 // own rate limiter so one misbehaving subprocess cannot starve other
 // subprocesses from host-side resources.
 type hostAPIDispatcher struct {
-	apis    *PluginAPIs
-	limiter *rate.Limiter
+	pluginID string
+	apis     *PluginAPIs
+	limiter  *rate.Limiter
 }
 
 // Call is the single dispatch method invoked by subprocess plugins. It
@@ -94,6 +99,11 @@ func (d *hostAPIDispatcher) Call(req pluginrpc.HostAPIRequest, reply *pluginrpc.
 	}
 	reply.Payload = nil
 	reply.Error = ""
+
+	if len(req.Payload) > maxHostAPIPayloadSize {
+		reply.Error = "payload exceeds maximum size"
+		return nil
+	}
 
 	if d.limiter != nil && !d.limiter.Allow() {
 		reply.Error = fmt.Sprintf("host api rate limit exceeded for target %s", req.Target)
@@ -154,6 +164,16 @@ type logArgs struct {
 	Error   string                 `json:"error,omitempty"`
 }
 
+func sanitizeLogMessage(msg string) string {
+	// Strip control characters that could enable log injection
+	msg = strings.ReplaceAll(msg, "\n", "\\n")
+	msg = strings.ReplaceAll(msg, "\r", "\\r")
+	if len(msg) > 4096 {
+		msg = msg[:4096] + "...[truncated]"
+	}
+	return msg
+}
+
 func (d *hostAPIDispatcher) dispatchLog(method string, payload json.RawMessage) (interface{}, error) {
 	if d.apis.LogAPI == nil {
 		return nil, errors.New("log api is unavailable")
@@ -163,6 +183,10 @@ func (d *hostAPIDispatcher) dispatchLog(method string, payload json.RawMessage) 
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, fmt.Errorf("invalid log args: %w", err)
 		}
+	}
+	args.Message = sanitizeLogMessage(args.Message)
+	if len(args.Fields) > 32 {
+		return nil, fmt.Errorf("log fields exceed maximum count of 32")
 	}
 	switch method {
 	case "Info":
@@ -235,6 +259,7 @@ func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage)
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		log.Warn().Str("plugin_id", d.pluginID).Str("command", args.Command).Msg("Plugin executing raw RCON command via SendCommand")
 		resp, err := d.apis.RconAPI.SendCommand(args.Command)
 		if err != nil {
 			return nil, err
@@ -378,6 +403,16 @@ type dbReply struct {
 	Value string `json:"value"`
 }
 
+func validatePluginDataKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("database key must not be empty")
+	}
+	if len(key) > 256 {
+		return fmt.Errorf("database key exceeds maximum length of 256")
+	}
+	return nil
+}
+
 func (d *hostAPIDispatcher) dispatchDatabase(method string, payload json.RawMessage) (interface{}, error) {
 	if d.apis.DatabaseAPI == nil {
 		return nil, errors.New("database api is unavailable")
@@ -390,14 +425,23 @@ func (d *hostAPIDispatcher) dispatchDatabase(method string, payload json.RawMess
 	}
 	switch method {
 	case "GetPluginData":
+		if err := validatePluginDataKey(args.Key); err != nil {
+			return nil, err
+		}
 		value, err := d.apis.DatabaseAPI.GetPluginData(args.Key)
 		if err != nil {
 			return nil, err
 		}
 		return dbReply{Value: value}, nil
 	case "SetPluginData":
+		if err := validatePluginDataKey(args.Key); err != nil {
+			return nil, err
+		}
 		return nil, d.apis.DatabaseAPI.SetPluginData(args.Key, args.Value)
 	case "DeletePluginData":
+		if err := validatePluginDataKey(args.Key); err != nil {
+			return nil, err
+		}
 		return nil, d.apis.DatabaseAPI.DeletePluginData(args.Key)
 	default:
 		return nil, fmt.Errorf("unknown database method %q", method)
@@ -467,6 +511,16 @@ func (d *hostAPIDispatcher) dispatchAdmin(method string, payload json.RawMessage
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		// Enforce maximum TTL for plugin-granted admin roles
+		const maxAdminTTL = 24 * time.Hour
+		if args.ExpiresAt == nil {
+			defaultExpiry := time.Now().Add(maxAdminTTL)
+			args.ExpiresAt = &defaultExpiry
+		} else if time.Until(*args.ExpiresAt) > maxAdminTTL {
+			clamped := time.Now().Add(maxAdminTTL)
+			args.ExpiresAt = &clamped
+		}
+		log.Info().Str("plugin_id", d.pluginID).Str("player_id", args.PlayerID).Str("role", args.RoleName).Time("expires_at", *args.ExpiresAt).Msg("Plugin granting temporary admin")
 		return nil, d.apis.AdminAPI.AddTemporaryAdmin(args.PlayerID, args.RoleName, args.Notes, args.ExpiresAt)
 	case "RemoveTemporaryAdmin":
 		var args removeTempAdminArgs
@@ -511,6 +565,10 @@ func (d *hostAPIDispatcher) dispatchEvent(method string, payload json.RawMessage
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		// Namespace plugin-emitted events to prevent impersonation of system events
+		if !strings.HasPrefix(args.EventType, "PLUGIN_") {
+			args.EventType = "PLUGIN_" + args.EventType
+		}
 		return nil, d.apis.EventAPI.PublishEvent(args.EventType, args.Data, args.Raw)
 	default:
 		return nil, fmt.Errorf("unknown event method %q", method)
@@ -541,12 +599,14 @@ func (d *hostAPIDispatcher) dispatchDiscord(method string, payload json.RawMessa
 	}
 	switch method {
 	case "SendMessage":
+		log.Info().Str("plugin_id", d.pluginID).Str("channel_id", args.ChannelID).Msg("Plugin sending Discord message")
 		id, err := d.apis.DiscordAPI.SendMessage(args.ChannelID, args.Content)
 		if err != nil {
 			return nil, err
 		}
 		return discordMessageReply{MessageID: id}, nil
 	case "SendEmbed":
+		log.Info().Str("plugin_id", d.pluginID).Str("channel_id", args.ChannelID).Msg("Plugin sending Discord embed")
 		embed, err := mapToDiscordEmbed(args.Embed)
 		if err != nil {
 			return nil, err

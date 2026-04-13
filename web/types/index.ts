@@ -309,6 +309,100 @@ export interface PluginPackage {
   updated_at?: string;
 }
 
+// Plugin & Connector Types
+
+export interface ConfigSchemaField {
+  name: string;
+  type: string;
+  label?: string;
+  description?: string;
+  required?: boolean;
+  default?: any;
+  enum?: any[];
+  sensitive?: boolean;
+  nested?: ConfigSchemaField[];
+  item_type?: string;
+  item_fields?: ConfigSchemaField[];
+}
+
+export interface PluginInstance {
+  id: string;
+  server_id: string;
+  plugin_id: string;
+  plugin_name: string;
+  source?: string;
+  official?: boolean;
+  distribution?: string;
+  install_state?: string;
+  min_host_api_version?: number;
+  notes: string;
+  config: Record<string, any>;
+  status: string;
+  enabled: boolean;
+  log_level: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginDefinition {
+  id: string;
+  name: string;
+  description: string;
+  version?: string;
+  source?: string;
+  official?: boolean;
+  distribution?: string;
+  install_state?: string;
+  config_schema?: { fields?: ConfigSchemaField[] };
+  events?: string[];
+  allow_multiple_instances?: boolean;
+  long_running?: boolean;
+  required_connectors?: string[];
+  optional_connectors?: string[];
+}
+
+export interface ConnectorInstance {
+  id: string;
+  config: Record<string, any>;
+  status: string;
+  enabled: boolean;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectorDefinition {
+  id: string;
+  name: string;
+  description: string;
+  version?: string;
+  config_schema?: { fields?: ConfigSchemaField[] };
+  source?: string;
+  official?: boolean;
+  distribution?: string;
+  install_state?: string;
+}
+
+export interface PluginCommand {
+  id: string;
+  name: string;
+  description: string;
+  required_permissions?: string[];
+  params?: CommandParam[];
+  execution_type?: string;
+}
+
+export interface CommandParam {
+  name: string;
+  type: string;
+  label?: string;
+  description?: string;
+  required?: boolean;
+  default?: any;
+  enum?: any[];
+}
+
 export interface ClickHouseTableStats {
   table_name: string;
   total_rows: number;

@@ -14,6 +14,30 @@ TARGETS="${TARGETS:-linux/$(go env GOARCH)}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist/native-plugin-hello}"
 LIBRARY_NAME="${LIBRARY_NAME:-hello-example}"
 
+# Validate inputs that will be embedded in JSON
+validate_json_string() {
+    local name="$1" value="$2"
+    if [[ "$value" == *'"'* ]] || [[ "$value" == *'\\'* ]]; then
+        echo "ERROR: ${name} contains characters unsafe for JSON embedding: ${value}" >&2
+        exit 1
+    fi
+}
+
+validate_json_integer() {
+    local name="$1" value="$2"
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: ${name} must be a non-negative integer, got: ${value}" >&2
+        exit 1
+    fi
+}
+
+validate_json_string "PLUGIN_ID" "${PLUGIN_ID}"
+validate_json_string "PLUGIN_NAME" "${PLUGIN_NAME}"
+validate_json_string "PLUGIN_DESCRIPTION" "${PLUGIN_DESCRIPTION}"
+validate_json_string "PLUGIN_VERSION" "${PLUGIN_VERSION}"
+validate_json_string "PLUGIN_AUTHOR" "${PLUGIN_AUTHOR}"
+validate_json_integer "MIN_HOST_API_VERSION" "${MIN_HOST_API_VERSION}"
+
 rm -rf "${OUTPUT_DIR}/bin"
 mkdir -p "${OUTPUT_DIR}/bin"
 

@@ -6,6 +6,7 @@ ALTER TABLE server_admins
     DROP COLUMN IF EXISTS managed_by_plugin_instance_id;
 
 DROP INDEX IF EXISTS idx_connector_packages_install_state;
+DROP INDEX IF EXISTS idx_connector_packages_distribution;
 DROP INDEX IF EXISTS idx_connector_packages_source;
 DROP TABLE IF EXISTS connector_packages;
 

@@ -100,7 +100,7 @@ func (pm *PluginManager) hydratePluginInstanceFromDatabase(instance *PluginInsta
 		return nil
 	}
 
-	instance.Status = PluginStatusStopped
+	instance.setStatus(PluginStatusStopped)
 	pm.storeLoadedPluginInstance(instance)
 
 	if instance.Enabled {
@@ -111,12 +111,11 @@ func (pm *PluginManager) hydratePluginInstanceFromDatabase(instance *PluginInsta
 				Err(err).
 				Msg("Failed to initialize plugin instance")
 
-			instance.Status = PluginStatusError
-			instance.LastError = err.Error()
+			instance.setError(PluginStatusError, err.Error())
 			return nil
 		}
 	} else {
-		instance.Status = PluginStatusDisabled
+		instance.setStatus(PluginStatusDisabled)
 	}
 
 	log.Info().
@@ -151,7 +150,9 @@ func (pm *PluginManager) markPluginInstanceUnavailable(instance *PluginInstance,
 		instance.InstallState = pkg.InstallState
 		instance.MinHostAPIVersion = pkg.MinHostAPIVersion
 		if pkg.LastError != "" {
+			instance.mu.Lock()
 			instance.LastError = pkg.LastError
+			instance.mu.Unlock()
 		}
 	}
 
@@ -159,14 +160,16 @@ func (pm *PluginManager) markPluginInstanceUnavailable(instance *PluginInstance,
 		instance.PluginName = instance.PluginID
 	}
 	if instance.LastError == "" {
+		instance.mu.Lock()
 		instance.LastError = fmt.Sprintf("plugin definition unavailable: %v", cause)
+		instance.mu.Unlock()
 	}
 	if instance.Enabled {
-		instance.Status = PluginStatusError
+		instance.setStatus(PluginStatusError)
 		return
 	}
 
-	instance.Status = PluginStatusDisabled
+	instance.setStatus(PluginStatusDisabled)
 }
 
 func (pm *PluginManager) ensurePluginInstanceContext(instance *PluginInstance) {
@@ -251,20 +254,19 @@ func (pm *PluginManager) updatePluginInstanceInDatabase(instance *PluginInstance
 }
 
 func (pm *PluginManager) deletePluginInstanceFromDatabase(instanceID uuid.UUID) error {
-	// Delete plugin data first
-	_, err := pm.db.Exec("DELETE FROM plugin_data WHERE plugin_instance_id = $1", instanceID)
+	tx, err := pm.db.Begin()
 	if err != nil {
-		log.Error().Str("instanceID", instanceID.String()).Err(err).Msg("Failed to delete plugin data")
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+	defer tx.Rollback()
 
-	// Delete plugin instance
-	query := `DELETE FROM plugin_instances WHERE id = $1`
-	_, err = pm.db.Exec(query, instanceID)
-	if err != nil {
+	if _, err := tx.Exec("DELETE FROM plugin_data WHERE plugin_instance_id = $1", instanceID); err != nil {
+		return fmt.Errorf("failed to delete plugin data: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM plugin_instances WHERE id = $1", instanceID); err != nil {
 		return fmt.Errorf("failed to delete plugin instance: %w", err)
 	}
-
-	return nil
+	return tx.Commit()
 }
 
 // Connector database operations
@@ -343,6 +345,10 @@ func (pm *PluginManager) startConnectors() error {
 		log.Info().
 			Str("connectorID", instance.ID).
 			Msg("Started connector instance")
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating connector rows: %w", err)
 	}
 
 	return nil

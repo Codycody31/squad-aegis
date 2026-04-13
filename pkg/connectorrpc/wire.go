@@ -25,6 +25,16 @@ const (
 	ConnectorStatusDisabled ConnectorStatus = "disabled"
 )
 
+// Valid returns true if s is one of the recognised connector statuses.
+func (s ConnectorStatus) Valid() bool {
+	switch s {
+	case ConnectorStatusStopped, ConnectorStatusStarting, ConnectorStatusRunning,
+		ConnectorStatusStopping, ConnectorStatusError, ConnectorStatusDisabled:
+		return true
+	}
+	return false
+}
+
 // FieldType mirrors plug_config_schema.FieldType.
 type FieldType string
 

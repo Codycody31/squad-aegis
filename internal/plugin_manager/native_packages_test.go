@@ -1052,8 +1052,6 @@ func TestLoadInstalledPluginPackagesDoesNotRequireCreatingRuntimeDir(t *testing.
 }
 
 func TestLoadInstalledPluginPackagesClearsStaleNativeRuntimeState(t *testing.T) {
-	t.Parallel()
-
 	setPluginTestConfig(t, func(cfg *config.Struct) {
 		cfg.Plugins.NativeEnabled = true
 		cfg.Plugins.RuntimeDir = t.TempDir()

@@ -97,11 +97,12 @@ func (s *connectorRPCServer) UpdateConfig(args map[string]interface{}, _ *Empty)
 // timeout carried on the wire.
 func (s *connectorRPCServer) Invoke(args InvokeArgs, reply *ConnectorInvokeResponse) error {
 	ctx := context.Background()
-	if args.TimeoutMs > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(args.TimeoutMs)*time.Millisecond)
-		defer cancel()
+	timeout := time.Duration(args.TimeoutMs) * time.Millisecond
+	if timeout <= 0 || timeout > WaitTimeout {
+		timeout = WaitTimeout
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	resp, err := s.impl.Invoke(ctx, &args.Request)
 	if err != nil {
 		return err

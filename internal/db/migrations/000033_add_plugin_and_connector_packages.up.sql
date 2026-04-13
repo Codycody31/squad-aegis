@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS connector_packages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_connector_packages_source ON connector_packages(source);
+CREATE INDEX IF NOT EXISTS idx_connector_packages_distribution ON connector_packages(distribution);
 CREATE INDEX IF NOT EXISTS idx_connector_packages_install_state ON connector_packages(install_state);
 
 -- server_admins: track which plugin instance manages each admin row

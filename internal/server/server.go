@@ -57,6 +57,11 @@ func New(serverDependencies *Dependencies) *Server {
 func NewRouter(server *Server) *gin.Engine {
 	router := gin.New()
 
+	// Disable trusting X-Forwarded-For headers by default to prevent
+	// IP spoofing that would bypass rate limiting. Operators behind a
+	// reverse proxy should configure trusted proxies explicitly.
+	router.SetTrustedProxies(nil) //nolint:errcheck
+
 	if config.Config.Log.ShowGin {
 		// General Middleware
 		router.Use(gin.Logger())
@@ -73,6 +78,7 @@ func NewRouter(server *Server) *gin.Engine {
 		c.Writer.Header().Set("Vary", "Origin")
 		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
 		c.Writer.Header().Set("X-Frame-Options", "DENY")
+		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -484,7 +490,10 @@ func NewRouter(server *Server) *gin.Engine {
 			sudoGroup.POST("/database/optimize/:type", server.OptimizeDatabase)
 		}
 
-		// Public Routes for the server
+		// Public server config endpoints - intentionally unauthenticated.
+		// These are consumed by Squad game servers via remote admin file loading
+		// (RCON RemoteAdminListHosts). Operators should use network-level access
+		// controls (firewall, VPN) if additional protection is needed.
 		apiGroup.GET("/servers/:serverId/admins/cfg", server.ServerAdminsCfg)
 		apiGroup.GET("/servers/:serverId/bans/cfg", server.ServerBansCfgEnhanced)
 		apiGroup.GET("/ban-lists/:banListId/cfg", server.BanListCfg)

@@ -89,6 +89,10 @@ func (p *RuleLookupPlugin) Initialize(config map[string]interface{}, apis *plugi
 	p.apis = apis
 	p.status = plugin_manager.PluginStatusStopped
 
+	if apis.RuleAPI == nil {
+		return fmt.Errorf("rule API is required but not available")
+	}
+
 	// Validate config
 	definition := p.GetDefinition()
 	if err := definition.ConfigSchema.Validate(config); err != nil {

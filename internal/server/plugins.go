@@ -404,6 +404,9 @@ func (s *Server) ServerPluginLogs(c *gin.Context) {
 			limit = parsed
 		}
 	}
+	if limit > 1000 {
+		limit = 1000
+	}
 
 	before := c.Query("before")
 	after := c.Query("after")
@@ -439,6 +442,9 @@ func (s *Server) ServerPluginLogsAll(c *gin.Context) {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
 		}
+	}
+	if limit > 1000 {
+		limit = 1000
 	}
 
 	before := c.Query("before")

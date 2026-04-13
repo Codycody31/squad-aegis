@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	goplugin "github.com/hashicorp/go-plugin"
 	"github.com/rs/zerolog/log"
 
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
@@ -83,6 +84,20 @@ func logSubprocessHardeningPosture() {
 	}
 	if cfg.SubprocessNoNewPrivs {
 		log.Info().Msg("Plugins.SubprocessNoNewPrivs is advisory: run the Aegis process itself under a systemd unit with NoNewPrivileges=yes (or equivalent) so the prctl is inherited into subprocesses.")
+	}
+}
+
+// killProcessGroup sends SIGKILL to the entire process group of the
+// go-plugin client subprocess, catching any forked children. Errors are
+// ignored since the process may have already exited.
+func killProcessGroup(client *goplugin.Client) {
+	if client == nil {
+		return
+	}
+	rc := client.ReattachConfig()
+	if rc.Pid > 0 {
+		// Kill the entire process group to catch forked children.
+		_ = syscall.Kill(-rc.Pid, syscall.SIGKILL)
 	}
 }
 

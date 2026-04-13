@@ -15,6 +15,9 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 	if !nativePluginsEnabled() {
 		return nil
 	}
+	if pm.db == nil {
+		return nil
+	}
 
 	ctx := pm.ctx
 	if ctx == nil {
@@ -30,9 +33,6 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 		ORDER BY created_at
 	`)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil
-		}
 		return fmt.Errorf("failed to query plugin packages: %w", err)
 	}
 	defer rows.Close()

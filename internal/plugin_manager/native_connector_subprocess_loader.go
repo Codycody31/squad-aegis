@@ -33,17 +33,29 @@ func (h *connectorSubprocessHandle) Kill() {
 	if h == nil || h.client == nil {
 		return
 	}
+	killProcessGroup(h.client)
 	h.client.Kill()
 }
 
 // launchNativeConnectorSubprocess verifies the checksum and spawns the
 // connector subprocess.
 func launchNativeConnectorSubprocess(runtimePath, expectedSHA256 string) (*connectorSubprocessHandle, error) {
-	if err := verifyRuntimeBinaryChecksum(runtimePath, expectedSHA256); err != nil {
+	verifiedFile, err := verifyRuntimeBinaryChecksum(runtimePath, expectedSHA256)
+	if err != nil {
 		return nil, err
 	}
+	defer verifiedFile.Close()
 
-	cmd := exec.Command(runtimePath)
+	// Execute from the verified fd to eliminate the TOCTOU window.
+	execPath := fmt.Sprintf("/proc/self/fd/%d", verifiedFile.Fd())
+	cmd := exec.Command(execPath)
+	// Restrict the subprocess environment to a minimal allowlist so host
+	// credentials (DB passwords, API keys, etc.) are never leaked.
+	cmd.Env = []string{
+		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"HOME=/nonexistent",
+		"LANG=C.UTF-8",
+	}
 	if err := applySubprocessHardening(cmd); err != nil {
 		return nil, fmt.Errorf("failed to harden connector subprocess: %w", err)
 	}

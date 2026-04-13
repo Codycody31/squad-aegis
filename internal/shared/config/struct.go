@@ -2,7 +2,7 @@ package config
 
 type Struct struct {
 	App struct {
-		IsDevelopment bool   `default:"true"`
+		IsDevelopment bool   `default:"false"`
 		WebUiProxy    string `default:""`
 		Port          string `default:"3113"`
 		Url           string `default:"http://localhost:3113"`

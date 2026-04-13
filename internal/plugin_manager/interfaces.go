@@ -203,13 +203,6 @@ type PluginDefinition struct {
 	CreateInstance         func() Plugin                   `json:"-"`
 }
 
-// EventHandler defines an event handler for a plugin
-type EventHandler struct {
-	Source      EventSource `json:"source"`
-	EventType   string      `json:"event_type"`
-	Description string      `json:"description"`
-}
-
 // EventSource represents the source of an event
 type EventSource string
 
@@ -311,6 +304,29 @@ type PluginInstance struct {
 	// mu protects mutable state (Status, LastError) that may be written
 	// from concurrent event-handler goroutines.
 	mu sync.Mutex `json:"-"`
+}
+
+// setStatus safely updates the instance status.
+func (pi *PluginInstance) setStatus(s PluginStatus) {
+	pi.mu.Lock()
+	pi.Status = s
+	pi.mu.Unlock()
+}
+
+// setError safely updates the instance status and last error.
+func (pi *PluginInstance) setError(s PluginStatus, msg string) {
+	pi.mu.Lock()
+	pi.Status = s
+	pi.LastError = msg
+	pi.mu.Unlock()
+}
+
+// clearError safely updates status and clears the last error.
+func (pi *PluginInstance) clearError(s PluginStatus) {
+	pi.mu.Lock()
+	pi.Status = s
+	pi.LastError = ""
+	pi.mu.Unlock()
 }
 
 // ConnectorInvokeRequest is the versioned JSON envelope plugins send to connectors via ConnectorAPI.

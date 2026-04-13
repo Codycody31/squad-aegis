@@ -460,7 +460,11 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 	installCommitted := false
 	defer func() {
 		if !installCommitted {
-			removeRuntimeFile(runtimePath)
+			if safePath, pathErr := validateRuntimePathWithinRoot(runtimePath, connectorRuntimeDir()); pathErr != nil {
+				log.Warn().Err(pathErr).Str("path", runtimePath).Msg("Refusing to roll back runtime file outside connector runtime root")
+			} else {
+				removeRuntimeFile(safePath)
+			}
 		}
 	}()
 

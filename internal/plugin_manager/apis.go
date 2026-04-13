@@ -272,6 +272,10 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating admin rows: %w", err)
+	}
+
 	// Convert map to slice
 	var admins []*AdminInfo
 	for _, admin := range adminMap {
@@ -843,6 +847,10 @@ func (api *adminAPI) ListTemporaryAdmins() ([]*TemporaryAdminInfo, error) {
 		registerAdminPlayerID(admin.SteamID, &admin)
 		registerAdminPlayerID(admin.EOSID, &admin)
 		admins = append(admins, &admin)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating temporary admin rows: %w", err)
 	}
 
 	if api.rconManager != nil {
@@ -1540,14 +1548,16 @@ func (api *rconAPI) BanWithEvidenceAndRuleAndMetadata(playerID string, reason st
 
 // eventAPI implements EventAPI interface
 type eventAPI struct {
+	ctx              context.Context
 	serverID         uuid.UUID
 	pluginInstanceID uuid.UUID
 	pluginName       string
 	eventManager     *event_manager.EventManager
 }
 
-func NewEventAPI(serverID uuid.UUID, pluginInstanceID uuid.UUID, pluginName string, eventManager *event_manager.EventManager) EventAPI {
+func NewEventAPI(ctx context.Context, serverID uuid.UUID, pluginInstanceID uuid.UUID, pluginName string, eventManager *event_manager.EventManager) EventAPI {
 	return &eventAPI{
+		ctx:              ctx,
 		serverID:         serverID,
 		pluginInstanceID: pluginInstanceID,
 		pluginName:       pluginName,
@@ -1584,26 +1594,35 @@ func (api *eventAPI) SubscribeToEvents(eventTypes []string, handler func(*Plugin
 	// Subscribe to events
 	subscriber := api.eventManager.Subscribe(filter, &api.serverID, 100)
 
-	// Start goroutine to handle events
+	// Start goroutine to handle events with context cancellation
 	go func() {
-		for event := range subscriber.Channel {
-			rawString := ""
-			if event.RawData != nil {
-				if str, ok := event.RawData.(string); ok {
-					rawString = str
+		defer api.eventManager.Unsubscribe(subscriber.ID)
+		for {
+			select {
+			case <-api.ctx.Done():
+				return
+			case event, ok := <-subscriber.Channel:
+				if !ok {
+					return
 				}
-			}
+				rawString := ""
+				if event.RawData != nil {
+					if str, ok := event.RawData.(string); ok {
+						rawString = str
+					}
+				}
 
-			pluginEvent := &PluginEvent{
-				ID:        event.ID,
-				ServerID:  event.ServerID,
-				Source:    EventSourceSystem,
-				Type:      string(event.Type),
-				Data:      event.Data,
-				Raw:       rawString,
-				Timestamp: event.Timestamp,
+				pluginEvent := &PluginEvent{
+					ID:        event.ID,
+					ServerID:  event.ServerID,
+					Source:    EventSourceSystem,
+					Type:      string(event.Type),
+					Data:      event.Data,
+					Raw:       rawString,
+					Timestamp: event.Timestamp,
+				}
+				handler(pluginEvent)
 			}
-			handler(pluginEvent)
 		}
 	}()
 
@@ -1658,6 +1677,10 @@ func (api *logAPI) shouldStoreLog(logLevel string) bool {
 
 // Helper function to write log to ClickHouse
 func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fields map[string]interface{}) {
+	if api.clickhouseClient == nil {
+		return
+	}
+
 	// Marshal fields to JSON
 	fieldsJSON := "{}"
 	if len(fields) > 0 {

@@ -596,6 +596,10 @@ func (p *ChatAutoModPlugin) getServerRuleActions() ([]EscalationAction, error) {
 		return nil, fmt.Errorf("rule_id not configured")
 	}
 
+	if p.apis.RuleAPI == nil {
+		return nil, fmt.Errorf("rule API is not available")
+	}
+
 	actions, err := p.apis.RuleAPI.ListServerRuleActions(ruleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query server rule actions: %w", err)

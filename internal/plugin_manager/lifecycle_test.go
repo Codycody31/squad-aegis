@@ -41,8 +41,15 @@ func (c *testSQLConn) Close() error {
 }
 
 func (c *testSQLConn) Begin() (driver.Tx, error) {
-	return nil, fmt.Errorf("transactions are not implemented in testSQLConn")
+	return &testSQLTx{conn: c}, nil
 }
+
+type testSQLTx struct {
+	conn *testSQLConn
+}
+
+func (tx *testSQLTx) Commit() error   { return nil }
+func (tx *testSQLTx) Rollback() error { return nil }
 
 func (c *testSQLConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	if c.driver.queryContext == nil {

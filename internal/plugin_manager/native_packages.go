@@ -406,7 +406,26 @@ func (pm *PluginManager) maskAndEnrichPluginInstance(instance *PluginInstance) *
 		return nil
 	}
 
-	maskedInstance := *instance
+	// Build a shallow copy field-by-field to avoid copying the sync.Mutex.
+	maskedInstance := &PluginInstance{
+		ID:                instance.ID,
+		ServerID:          instance.ServerID,
+		PluginID:          instance.PluginID,
+		PluginName:        instance.PluginName,
+		Source:            instance.Source,
+		Official:          instance.Official,
+		Distribution:      instance.Distribution,
+		InstallState:      instance.InstallState,
+		MinHostAPIVersion: instance.MinHostAPIVersion,
+		Notes:             instance.Notes,
+		Config:            instance.Config,
+		Status:            instance.Status,
+		Enabled:           instance.Enabled,
+		LogLevel:          instance.LogLevel,
+		LastError:         instance.LastError,
+		CreatedAt:         instance.CreatedAt,
+		UpdatedAt:         instance.UpdatedAt,
+	}
 	if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
 		enrichedDefinition := pm.enrichPluginDefinition(*definition)
 		maskedInstance.PluginName = enrichedDefinition.Name
@@ -416,7 +435,7 @@ func (pm *PluginManager) maskAndEnrichPluginInstance(instance *PluginInstance) *
 		maskedInstance.InstallState = enrichedDefinition.InstallState
 		maskedInstance.MinHostAPIVersion = enrichedDefinition.MinHostAPIVersion
 		maskedInstance.Config = enrichedDefinition.ConfigSchema.MaskSensitiveFields(instance.Config)
-		return &maskedInstance
+		return maskedInstance
 	}
 
 	if pkg := pm.getNativePackage(instance.PluginID); pkg != nil {
@@ -441,7 +460,7 @@ func (pm *PluginManager) maskAndEnrichPluginInstance(instance *PluginInstance) *
 		maskedInstance.Config = map[string]interface{}{}
 	}
 
-	return &maskedInstance
+	return maskedInstance
 }
 
 func (pm *PluginManager) ListInstalledPluginPackages() []*InstalledPluginPackage {
@@ -585,7 +604,11 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	installCommitted := false
 	defer func() {
 		if !installCommitted {
-			removeRuntimeFile(runtimePath)
+			if safePath, pathErr := validateRuntimePathWithinRoot(runtimePath, pluginRuntimeDir()); pathErr != nil {
+				log.Warn().Err(pathErr).Str("path", runtimePath).Msg("Refusing to roll back runtime file outside plugin runtime root")
+			} else {
+				removeRuntimeFile(safePath)
+			}
 		}
 	}()
 
