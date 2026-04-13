@@ -393,7 +393,7 @@ func TestSubprocessPluginLifecycleWithHostAPICallbacks(t *testing.T) {
 
 	// Deliver a chat event that should trigger the plugin to call RconAPI.
 	chatData := map[string]interface{}{
-		"eos_id":      "eos-123",
+		"eos_id":      "76561198012345678",
 		"player_name": "Alice",
 		"message":     "!hello",
 	}
@@ -410,7 +410,7 @@ func TestSubprocessPluginLifecycleWithHostAPICallbacks(t *testing.T) {
 		t.Fatalf("HandleEvent() error = %v", err)
 	}
 
-	if got := rcon.lastPlayerID.Load(); got != "eos-123" {
+	if got := rcon.lastPlayerID.Load(); got != "76561198012345678" {
 		t.Fatalf("RconAPI.SendWarningToPlayer player = %v, want eos-123", got)
 	}
 	if got := rcon.lastMessage.Load(); got != "hi" {

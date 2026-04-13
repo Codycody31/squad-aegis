@@ -441,6 +441,32 @@ type ConnectorInstance struct {
 	LastError string                 `json:"last_error,omitempty"`
 	CreatedAt time.Time              `json:"created_at"`
 	UpdatedAt time.Time              `json:"updated_at"`
+
+	mu sync.Mutex `json:"-"`
+}
+
+// setStatus safely updates the connector instance status.
+func (ci *ConnectorInstance) setStatus(s ConnectorStatus) {
+	ci.mu.Lock()
+	ci.Status = s
+	ci.mu.Unlock()
+}
+
+// setError safely records an error on the connector instance.
+func (ci *ConnectorInstance) setError(err error) {
+	ci.mu.Lock()
+	if err != nil {
+		ci.LastError = err.Error()
+		ci.Status = ConnectorStatusError
+	}
+	ci.mu.Unlock()
+}
+
+// clearError safely clears the last error.
+func (ci *ConnectorInstance) clearError() {
+	ci.mu.Lock()
+	ci.LastError = ""
+	ci.mu.Unlock()
 }
 
 // PluginAPIs provides secure access to server functionality for plugins

@@ -103,42 +103,23 @@ func (s *Server) GetSystemConfig(c *gin.Context) {
 			"in_container":   cfg.App.InContainer,
 		},
 		Database: gin.H{
-			"host": cfg.Db.Host,
-			"port": cfg.Db.Port,
-			"name": cfg.Db.Name,
-			"user": cfg.Db.User,
-			"pass": "***REDACTED***",
+			"configured": cfg.Db.Host != "",
+			"name":       cfg.Db.Name,
 		},
 		ClickHouse: gin.H{
-			"host":     cfg.ClickHouse.Host,
-			"port":     cfg.ClickHouse.Port,
-			"database": cfg.ClickHouse.Database,
-			"username": cfg.ClickHouse.Username,
-			"password": "***REDACTED***",
-			"debug":    cfg.ClickHouse.Debug,
+			"configured": cfg.ClickHouse.Host != "",
+			"database":   cfg.ClickHouse.Database,
+			"debug":      cfg.ClickHouse.Debug,
 		},
 		Valkey: gin.H{
-			"host":     cfg.Valkey.Host,
-			"port":     cfg.Valkey.Port,
-			"password": "***REDACTED***",
-			"database": cfg.Valkey.Database,
+			"configured": cfg.Valkey.Host != "",
 		},
 		Storage: gin.H{
-			"type":       cfg.Storage.Type,
-			"local_path": cfg.Storage.LocalPath,
-			"s3": gin.H{
-				"region":            cfg.Storage.S3.Region,
-				"bucket":            cfg.Storage.S3.Bucket,
-				"access_key_id":     maskString(cfg.Storage.S3.AccessKeyID),
-				"secret_access_key": "***REDACTED***",
-				"endpoint":          cfg.Storage.S3.Endpoint,
-				"use_ssl":           cfg.Storage.S3.UseSSL,
-			},
+			"type":           cfg.Storage.Type,
+			"s3_configured":  cfg.Storage.S3.Bucket != "",
 		},
 		Plugins: gin.H{
 			"native_enabled":           cfg.Plugins.NativeEnabled,
-			"runtime_dir":              cfg.Plugins.RuntimeDir,
-			"connector_runtime_dir":    cfg.Plugins.ConnectorRuntimeDir,
 			"allow_unsafe_sideload":    cfg.Plugins.AllowUnsafeSideload,
 			"max_upload_size":          cfg.Plugins.MaxUploadSize,
 			"trusted_signing_keys_set": strings.TrimSpace(cfg.Plugins.TrustedSigningKeys) != "",
@@ -362,15 +343,4 @@ func checkStorageHealth(ctx context.Context, s *Server) SystemServiceHealth {
 		Message: message,
 		Details: details,
 	}
-}
-
-// maskString masks a string for security (shows first and last 4 chars)
-func maskString(s string) string {
-	if s == "" {
-		return ""
-	}
-	if len(s) <= 8 {
-		return "***REDACTED***"
-	}
-	return s[:4] + "***" + s[len(s)-4:]
 }

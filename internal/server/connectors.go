@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -131,6 +132,11 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 	file, err := c.FormFile("bundle")
 	if err != nil {
 		responses.BadRequest(c, "No connector bundle provided", &gin.H{})
+		return
+	}
+
+	if !strings.HasSuffix(strings.ToLower(file.Filename), ".zip") {
+		responses.BadRequest(c, "Connector bundle must be a .zip file", &gin.H{})
 		return
 	}
 

@@ -44,6 +44,8 @@ func applySubprocessHardening(cmd *exec.Cmd) error {
 	}
 	// Start in a new process group so we can signal the whole tree on kill.
 	attr.Setpgid = true
+	// Kill the subprocess if the host process dies to prevent orphans.
+	attr.Pdeathsig = syscall.SIGKILL
 
 	if uid > 0 {
 		effectiveGid := gid

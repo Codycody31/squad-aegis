@@ -18,6 +18,18 @@ import (
 
 const maxHostAPIPayloadSize = 1 << 20 // 1 MiB
 
+// maxConnectorCallTimeout caps the timeout a plugin can request for a
+// connector.Call to prevent goroutine starvation.
+const maxConnectorCallTimeout = 30 * time.Second
+
+// maxDatabaseValueSize limits the size of a single plugin data value to
+// prevent database bloat from malicious or buggy plugins.
+const maxDatabaseValueSize = 64 * 1024 // 64 KiB
+
+// maxConcurrentHostAPICalls caps the number of concurrent in-flight HostAPI
+// calls per plugin instance to prevent goroutine exhaustion.
+const maxConcurrentHostAPICalls = 32
+
 // hostAPIServer wires the in-process *PluginAPIs onto a net/rpc server that
 // the plugin subprocess calls into. There is exactly one hostAPIServer per
 // loaded subprocess plugin instance; the server closes when Stop fires.
@@ -38,6 +50,7 @@ func startHostAPIServer(rpcClient *pluginrpc.PluginRPCClient, apis *PluginAPIs, 
 		pluginID: pluginID,
 		apis:     apis,
 		limiter:  buildHostAPIRateLimiter(),
+		sem:      make(chan struct{}, maxConcurrentHostAPICalls),
 	}
 	if err := rpcServer.RegisterName("HostAPI", dispatcher); err != nil {
 		return nil, 0, fmt.Errorf("failed to register HostAPI service: %w", err)
@@ -87,6 +100,7 @@ type hostAPIDispatcher struct {
 	pluginID string
 	apis     *PluginAPIs
 	limiter  *rate.Limiter
+	sem      chan struct{} // buffered semaphore limiting concurrent calls
 }
 
 // Call is the single dispatch method invoked by subprocess plugins. It
@@ -107,6 +121,15 @@ func (d *hostAPIDispatcher) Call(req pluginrpc.HostAPIRequest, reply *pluginrpc.
 
 	if d.limiter != nil && !d.limiter.Allow() {
 		reply.Error = fmt.Sprintf("host api rate limit exceeded for target %s", req.Target)
+		return nil
+	}
+
+	// Enforce concurrency limit to prevent goroutine exhaustion from slow calls.
+	select {
+	case d.sem <- struct{}{}:
+		defer func() { <-d.sem }()
+	default:
+		reply.Error = "too many concurrent host API calls"
 		return nil
 	}
 
@@ -174,6 +197,32 @@ func sanitizeLogMessage(msg string) string {
 	return msg
 }
 
+// sanitizeLogFields caps individual field key/value sizes and strips control
+// characters to prevent log injection and storage exhaustion.
+func sanitizeLogFields(fields map[string]interface{}) map[string]interface{} {
+	if fields == nil {
+		return nil
+	}
+	const maxKeyLen = 128
+	const maxValueLen = 1024
+	sanitized := make(map[string]interface{}, len(fields))
+	for k, v := range fields {
+		k = sanitizeLogMessage(k)
+		if len(k) > maxKeyLen {
+			k = k[:maxKeyLen]
+		}
+		if s, ok := v.(string); ok {
+			s = sanitizeLogMessage(s)
+			if len(s) > maxValueLen {
+				s = s[:maxValueLen] + "...[truncated]"
+			}
+			v = s
+		}
+		sanitized[k] = v
+	}
+	return sanitized
+}
+
 func (d *hostAPIDispatcher) dispatchLog(method string, payload json.RawMessage) (interface{}, error) {
 	if d.apis.LogAPI == nil {
 		return nil, errors.New("log api is unavailable")
@@ -188,6 +237,7 @@ func (d *hostAPIDispatcher) dispatchLog(method string, payload json.RawMessage) 
 	if len(args.Fields) > 32 {
 		return nil, fmt.Errorf("log fields exceed maximum count of 32")
 	}
+	args.Fields = sanitizeLogFields(args.Fields)
 	switch method {
 	case "Info":
 		d.apis.LogAPI.Info(args.Message, args.Fields)
@@ -249,6 +299,23 @@ type rconRemoveSquadArgs struct {
 	PlayerID string `json:"player_id"`
 }
 
+// validatePlayerID checks that a player ID is a plausible Steam64 numeric
+// string, preventing injection of RCON arguments via crafted IDs.
+func validatePlayerID(playerID string) error {
+	if playerID == "" {
+		return fmt.Errorf("player_id must not be empty")
+	}
+	if len(playerID) > 20 {
+		return fmt.Errorf("player_id exceeds maximum length")
+	}
+	for _, c := range playerID {
+		if c < '0' || c > '9' {
+			return fmt.Errorf("player_id contains invalid character %q", c)
+		}
+	}
+	return nil
+}
+
 func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage) (interface{}, error) {
 	if d.apis.RconAPI == nil {
 		return nil, errors.New("rcon api is unavailable")
@@ -276,10 +343,16 @@ func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage)
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
+			return nil, err
+		}
 		return nil, d.apis.RconAPI.SendWarningToPlayer(args.PlayerID, args.Message)
 	case "KickPlayer":
 		var args rconKickArgs
 		if err := json.Unmarshal(payload, &args); err != nil {
+			return nil, err
+		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
 			return nil, err
 		}
 		return nil, d.apis.RconAPI.KickPlayer(args.PlayerID, args.Reason)
@@ -288,10 +361,16 @@ func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage)
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
+			return nil, err
+		}
 		return nil, d.apis.RconAPI.BanPlayer(args.PlayerID, args.Reason, args.Duration)
 	case "BanWithEvidence":
 		var args rconBanArgs
 		if err := json.Unmarshal(payload, &args); err != nil {
+			return nil, err
+		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
 			return nil, err
 		}
 		banID, err := d.apis.RconAPI.BanWithEvidence(args.PlayerID, args.Reason, args.Duration, args.EventID, args.EventType)
@@ -304,10 +383,16 @@ func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage)
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
+			return nil, err
+		}
 		return nil, d.apis.RconAPI.WarnPlayerWithRule(args.PlayerID, args.Reason, args.RuleID)
 	case "KickPlayerWithRule":
 		var args rconBanArgs
 		if err := json.Unmarshal(payload, &args); err != nil {
+			return nil, err
+		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
 			return nil, err
 		}
 		return nil, d.apis.RconAPI.KickPlayerWithRule(args.PlayerID, args.Reason, args.RuleID)
@@ -316,10 +401,16 @@ func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage)
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
+			return nil, err
+		}
 		return nil, d.apis.RconAPI.BanPlayerWithRule(args.PlayerID, args.Reason, args.Duration, args.RuleID)
 	case "BanWithEvidenceAndRule":
 		var args rconBanArgs
 		if err := json.Unmarshal(payload, &args); err != nil {
+			return nil, err
+		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
 			return nil, err
 		}
 		banID, err := d.apis.RconAPI.BanWithEvidenceAndRule(args.PlayerID, args.Reason, args.Duration, args.EventID, args.EventType, args.RuleID)
@@ -332,6 +423,9 @@ func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage)
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
+			return nil, err
+		}
 		banID, err := d.apis.RconAPI.BanWithEvidenceAndRuleAndMetadata(args.PlayerID, args.Reason, args.Duration, args.EventID, args.EventType, args.RuleID, args.Metadata)
 		if err != nil {
 			return nil, err
@@ -342,10 +436,16 @@ func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage)
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
+			return nil, err
+		}
 		return nil, d.apis.RconAPI.RemovePlayerFromSquad(args.PlayerID)
 	case "RemovePlayerFromSquadById":
 		var args rconRemoveSquadArgs
 		if err := json.Unmarshal(payload, &args); err != nil {
+			return nil, err
+		}
+		if err := validatePlayerID(args.PlayerID); err != nil {
 			return nil, err
 		}
 		return nil, d.apis.RconAPI.RemovePlayerFromSquadById(args.PlayerID)
@@ -436,6 +536,9 @@ func (d *hostAPIDispatcher) dispatchDatabase(method string, payload json.RawMess
 	case "SetPluginData":
 		if err := validatePluginDataKey(args.Key); err != nil {
 			return nil, err
+		}
+		if len(args.Value) > maxDatabaseValueSize {
+			return nil, fmt.Errorf("database value exceeds maximum size of %d bytes", maxDatabaseValueSize)
 		}
 		return nil, d.apis.DatabaseAPI.SetPluginData(args.Key, args.Value)
 	case "DeletePluginData":
@@ -565,9 +668,11 @@ func (d *hostAPIDispatcher) dispatchEvent(method string, payload json.RawMessage
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
 		}
-		// Namespace plugin-emitted events to prevent impersonation of system events
-		if !strings.HasPrefix(args.EventType, "PLUGIN_") {
-			args.EventType = "PLUGIN_" + args.EventType
+		// Namespace plugin-emitted events with the plugin ID to prevent both
+		// impersonation of system events and cross-plugin event spoofing.
+		requiredPrefix := "PLUGIN_" + d.pluginID + "_"
+		if !strings.HasPrefix(args.EventType, requiredPrefix) {
+			args.EventType = requiredPrefix + args.EventType
 		}
 		return nil, d.apis.EventAPI.PublishEvent(args.EventType, args.Data, args.Raw)
 	default:
@@ -659,8 +764,12 @@ func (d *hostAPIDispatcher) dispatchConnector(method string, payload json.RawMes
 		}
 		ctx := context.Background()
 		if args.TimeoutMs > 0 {
+			timeout := time.Duration(args.TimeoutMs) * time.Millisecond
+			if timeout > maxConnectorCallTimeout {
+				timeout = maxConnectorCallTimeout
+			}
 			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, time.Duration(args.TimeoutMs)*time.Millisecond)
+			ctx, cancel = context.WithTimeout(ctx, timeout)
 			defer cancel()
 		}
 		req := &ConnectorInvokeRequest{V: args.V, Data: args.Data}

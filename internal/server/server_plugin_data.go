@@ -205,6 +205,10 @@ func (s *Server) ServerPluginDataDelete(c *gin.Context) {
 		responses.BadRequest(c, "Key parameter is required", nil)
 		return
 	}
+	if len(key) > 255 {
+		responses.BadRequest(c, "Key too long (max 255 characters)", nil)
+		return
+	}
 
 	if s.Dependencies.PluginManager == nil {
 		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)

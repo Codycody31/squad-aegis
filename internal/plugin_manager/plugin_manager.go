@@ -102,9 +102,6 @@ func (pm *PluginManager) Start() error {
 		_ = pluginRuntimeDir()
 		_ = connectorRuntimeDir()
 
-		if !nativePluginsConfigured() {
-			log.Warn().Msg("Native plugins are enabled but neither Plugins.TrustedSigningKeys nor Plugins.AllowUnsafeSideload is set; sideloads will be rejected. Configure a trust store before going to production.")
-		}
 		logSubprocessHardeningPosture()
 	}
 
@@ -599,8 +596,6 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 
 	return nil
 }
-
-// TODO: RestartPluginInstance stops, wipes, and reinitializes a plugin instance
 
 // getDiscordAPI returns the Discord connector API for use by plugins when available.
 func (pm *PluginManager) getDiscordAPI() DiscordAPI {

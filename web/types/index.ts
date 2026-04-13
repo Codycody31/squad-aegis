@@ -181,8 +181,6 @@ export interface SystemConfig {
   log: Record<string, any>;
   plugins?: {
     native_enabled?: boolean;
-    runtime_dir?: string;
-    connector_runtime_dir?: string;
     allow_unsafe_sideload?: boolean;
     max_upload_size?: number;
     trusted_signing_keys_set?: boolean;

@@ -27,6 +27,7 @@ func TestHostAPIDispatcherRateLimiterBlocksExcessCalls(t *testing.T) {
 	disp := &hostAPIDispatcher{
 		apis:    &PluginAPIs{LogAPI: log},
 		limiter: rate.NewLimiter(rate.Every(time.Hour), 2), // 2 burst, 1 token/hour refill
+		sem:     make(chan struct{}, maxConcurrentHostAPICalls),
 	}
 
 	payload, _ := json.Marshal(map[string]interface{}{"message": "hi"})
@@ -58,7 +59,10 @@ func TestHostAPIDispatcherRateLimiterBlocksExcessCalls(t *testing.T) {
 
 func TestHostAPIDispatcherNoLimiterAllowsBurst(t *testing.T) {
 	log := &recordingLogAPI{}
-	disp := &hostAPIDispatcher{apis: &PluginAPIs{LogAPI: log}}
+	disp := &hostAPIDispatcher{
+		apis: &PluginAPIs{LogAPI: log},
+		sem:  make(chan struct{}, maxConcurrentHostAPICalls),
+	}
 
 	payload, _ := json.Marshal(map[string]interface{}{"message": "hi"})
 	req := pluginrpc.HostAPIRequest{Target: "log.Info", Payload: payload}

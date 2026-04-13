@@ -88,9 +88,6 @@ func NewRouter(server *Server) *gin.Engine {
 		c.Next()
 	})
 
-	// Setup user last seen for session
-	router.Use(server.customUserLastSeen)
-
 	// Setup the no route handler
 	router.NoRoute(gin.WrapF(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api") {
@@ -324,7 +321,6 @@ func NewRouter(server *Server) *gin.Engine {
 					pluginGroup.DELETE("/:pluginId", pluginManagePerm, server.ServerPluginDelete)
 					pluginGroup.GET("/:pluginId/logs", pluginManagePerm, server.ServerPluginLogs)
 					pluginGroup.GET("/:pluginId/logs/ws", pluginManagePerm, server.ServerPluginLogsWebSocket)
-					pluginGroup.GET("/:pluginId/metrics", pluginViewPerm, server.ServerPluginMetrics)
 					pluginGroup.GET("/:pluginId/data", pluginManagePerm, server.ServerPluginDataGet)
 					pluginGroup.POST("/:pluginId/data", pluginManagePerm, server.ServerPluginDataSet)
 					pluginGroup.DELETE("/:pluginId/data", pluginManagePerm, server.ServerPluginDataClear)

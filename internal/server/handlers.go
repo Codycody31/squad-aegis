@@ -88,12 +88,6 @@ func (s *Server) customLoggerWithFormatter(param gin.LogFormatterParams) string 
 	)
 }
 
-func (s *Server) customUserLastSeen(c *gin.Context) {
-	// Session last_seen is already updated in authSession; this middleware
-	// only updates user-level last_seen to avoid a redundant DB write.
-	// Currently there is no separate user last_seen column, so this is a
-	// no-op placeholder for future use.
-}
 
 func (s *Server) getUserFromSession(c *gin.Context) *models.User {
 	session, exists := c.Get("session")

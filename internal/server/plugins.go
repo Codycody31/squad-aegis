@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -82,6 +83,11 @@ func (s *Server) PluginUpload(c *gin.Context) {
 	file, err := c.FormFile("bundle")
 	if err != nil {
 		responses.BadRequest(c, "No plugin bundle provided", &gin.H{})
+		return
+	}
+
+	if !strings.HasSuffix(strings.ToLower(file.Filename), ".zip") {
+		responses.BadRequest(c, "Plugin bundle must be a .zip file", &gin.H{})
 		return
 	}
 
@@ -461,10 +467,4 @@ func (s *Server) ServerPluginLogsAll(c *gin.Context) {
 	}
 
 	responses.Success(c, "Server plugin logs fetched successfully", &gin.H{"logs": logs})
-}
-
-// ServerPluginMetrics returns metrics for a plugin instance
-func (s *Server) ServerPluginMetrics(c *gin.Context) {
-	// TODO: Implement plugin-specific metrics retrieval from ClickHouse
-	responses.Success(c, "Plugin metrics fetched successfully", &gin.H{"metrics": &gin.H{}})
 }

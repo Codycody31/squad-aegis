@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"go.codycody31.dev/squad-aegis/pkg/connectorrpc"
 )
 
 // nativeConnectorVerifiedLoader is the subprocess-isolated counterpart of
@@ -40,6 +42,12 @@ func peekNativeConnectorDefinition(runtimePath, expectedSHA256 string, manifest 
 		return ConnectorDefinition{}, fmt.Errorf("failed to fetch connector definition: %w", err)
 	}
 
+	// Guard against adversarial config schemas with unbounded nesting depth.
+	const maxConfigFieldDepth = 10
+	if err := validateConnectorConfigFieldDepth(wire.ConfigSchema.Fields, maxConfigFieldDepth); err != nil {
+		return ConnectorDefinition{}, fmt.Errorf("connector %q: %w", manifest.ConnectorID, err)
+	}
+
 	if wire.ConnectorID != manifest.ConnectorID {
 		return ConnectorDefinition{}, fmt.Errorf("connector subprocess reported id %q but manifest declares %q", wire.ConnectorID, manifest.ConnectorID)
 	}
@@ -60,6 +68,22 @@ func peekNativeConnectorDefinition(runtimePath, expectedSHA256 string, manifest 
 		}
 	}
 	return captured, nil
+}
+
+// validateConnectorConfigFieldDepth mirrors validateConfigFieldDepth for the
+// connectorrpc.ConfigField type, preventing adversarial deeply-nested schemas.
+func validateConnectorConfigFieldDepth(fields []connectorrpc.ConfigField, maxDepth int) error {
+	if maxDepth <= 0 {
+		return fmt.Errorf("config schema exceeds maximum nesting depth")
+	}
+	for _, f := range fields {
+		if len(f.Nested) > 0 {
+			if err := validateConnectorConfigFieldDepth(f.Nested, maxDepth-1); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ConnectorPackageManifest is the signed manifest.json shipped with every

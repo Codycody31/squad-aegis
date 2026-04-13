@@ -396,12 +396,10 @@ func (pm *PluginManager) attachConnectorUnexpectedExitReporter(instance *Connect
 	connectorID := instance.ID
 	reporter.OnUnexpectedExit(func(err error) {
 		pm.connectorMu.Lock()
-		defer pm.connectorMu.Unlock()
-		if live, ok := pm.connectors[connectorID]; ok {
-			live.Status = ConnectorStatusError
-			if err != nil {
-				live.LastError = err.Error()
-			}
+		live, ok := pm.connectors[connectorID]
+		pm.connectorMu.Unlock()
+		if ok {
+			live.setError(err)
 		}
 		log.Warn().
 			Err(err).

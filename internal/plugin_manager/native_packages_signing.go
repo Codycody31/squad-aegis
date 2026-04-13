@@ -9,6 +9,12 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
+// builtinTrustedKeys are always trusted regardless of operator configuration.
+// This is the official Squad Aegis signing public key.
+var builtinTrustedKeys = []string{
+	"ATziv2ugm/CzbnnYSLZGsq/eJfCxHI8mu/Ot19RGmD0=",
+}
+
 // verifyManifestSignature rejects any manifest.pub not in the operator-
 // configured trust store before delegating to the cryptographic verifier.
 // Without this anchor the signed-sideload gate is bypassable, since an
@@ -33,20 +39,24 @@ func verifyManifestSignature(manifestBytes, signatureBytes, publicKeyBytes []byt
 	return plugin_signing.VerifyManifest(manifestBytes, signatureBytes, publicKeyBytes)
 }
 
-// nativePluginsConfigured reports whether the native plugin runtime has any
-// trust anchor configured. Returns true if either at least one trusted
-// signing key is set, or AllowUnsafeSideload is explicitly enabled.
-func nativePluginsConfigured() bool {
-	if config.Config == nil {
+func isTrustedSigningKey(publicKeyBytes []byte) bool {
+	candidate, err := plugin_signing.DecodePublicKeyFile(publicKeyBytes)
+	if err != nil {
 		return false
 	}
-	if config.Config.Plugins.AllowUnsafeSideload {
-		return true
-	}
-	return strings.TrimSpace(config.Config.Plugins.TrustedSigningKeys) != ""
-}
 
-func isTrustedSigningKey(publicKeyBytes []byte) bool {
+	// Check builtin keys first.
+	for _, entry := range builtinTrustedKeys {
+		trusted, err := plugin_signing.DecodePublicKeyString(entry)
+		if err != nil {
+			continue
+		}
+		if subtleConstantTimeEqual(candidate, trusted) {
+			return true
+		}
+	}
+
+	// Check operator-configured keys.
 	if config.Config == nil {
 		return false
 	}
@@ -54,12 +64,6 @@ func isTrustedSigningKey(publicKeyBytes []byte) bool {
 	if raw == "" {
 		return false
 	}
-
-	candidate, err := plugin_signing.DecodePublicKeyFile(publicKeyBytes)
-	if err != nil {
-		return false
-	}
-
 	for _, entry := range strings.Split(raw, ",") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {

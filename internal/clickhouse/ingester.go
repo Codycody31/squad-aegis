@@ -217,8 +217,6 @@ func (i *EventIngester) ingestEventType(eventType event_manager.EventType, event
 		return i.ingestChatMessages(events)
 	case event_manager.EventTypeRconServerInfo:
 		return i.ingestServerInfo(events)
-	// TODO: support ingesting rcon player warned event
-	// TODO: support ingesting possessed and unpossessed admin camera
 	case event_manager.EventTypeLogPlayerConnected:
 		return i.ingestPlayerConnected(events)
 	case event_manager.EventTypeLogPlayerDisconnected:
