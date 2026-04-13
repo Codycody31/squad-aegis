@@ -34,7 +34,6 @@ definePageMeta({
   layout: "sudo",
 });
 
-const runtimeConfig = useRuntimeConfig();
 const authStore = useAuthStore();
 
 if (!authStore.user?.super_admin) {
@@ -95,7 +94,7 @@ const formatRuntimeRequirements = (minHostAPIVersion?: number, requiredCapabilit
 const fetchInstalledPlugins = async () => {
   loadingInstalled.value = true;
   try {
-    const response = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/plugins/installed`);
+    const response = await useAuthFetchImperative<any>("/api/plugins/installed");
     installedPlugins.value = response.data.plugins || [];
   } catch (error: any) {
     console.error("Failed to load installed plugins:", error);
@@ -111,7 +110,7 @@ const fetchInstalledPlugins = async () => {
 
 const fetchSystemPluginsConfig = async () => {
   try {
-    const response = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/system/config`);
+    const response = await useAuthFetchImperative<any>("/api/sudo/system/config");
     const cfg = response.data?.data as SystemConfig | undefined;
     systemPluginsConfig.value = cfg?.plugins ?? null;
   } catch (error: any) {
@@ -133,7 +132,7 @@ const deleteInstalledPlugin = async () => {
   if (!plugin) return;
 
   try {
-    await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/plugins/installed/${plugin.plugin_id}`, {
+    await useAuthFetchImperative(`/api/plugins/installed/${plugin.plugin_id}`, {
       method: "DELETE",
     });
     toast({
@@ -172,7 +171,7 @@ const uploadBundle = async () => {
     const formData = new FormData();
     formData.append("bundle", selectedBundle.value);
 
-    await useAuthFetchImperative(`${runtimeConfig.public.backendApi}/plugins/upload`, {
+    await useAuthFetchImperative("/api/plugins/upload", {
       method: "POST",
       body: formData,
     });

@@ -115,13 +115,13 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 				log.Warn().Str("plugin_id", pkg.PluginID).Msg("Quarantining native plugin: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
 				pkg.InstallState = PluginInstallStateError
 				pkg.LastError = "plugin signature cannot be re-verified against trusted keys"
-				// Quarantine: actively remove the .so so a future trust-store
-				// rotation cannot silently re-activate it. The DB row remains
-				// in error state so operators see why.
 				if pkg.RuntimePath != "" {
 					if safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir()); pathErr == nil {
 						removeRuntimeFile(safePath)
 					}
+				}
+				if err := pm.savePluginPackageToDatabaseContext(context.Background(), &pkg); err != nil {
+					log.Warn().Err(err).Str("plugin_id", pkg.PluginID).Msg("Failed to persist quarantine state to database")
 				}
 			}
 		}

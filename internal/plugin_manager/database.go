@@ -188,10 +188,11 @@ func (pm *PluginManager) ensurePluginInstanceContext(instance *PluginInstance) {
 }
 
 func (pm *PluginManager) storeLoadedPluginInstance(instance *PluginInstance) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 	if pm.plugins[instance.ServerID] == nil {
 		pm.plugins[instance.ServerID] = make(map[uuid.UUID]*PluginInstance)
 	}
-
 	pm.plugins[instance.ServerID][instance.ID] = instance
 }
 
@@ -328,7 +329,9 @@ func (pm *PluginManager) startConnectors() error {
 		instance.Status = ConnectorStatusStopped
 
 		// Store instance
+		pm.connectorMu.Lock()
 		pm.connectors[instance.ID] = &instance
+		pm.connectorMu.Unlock()
 
 		// Initialize and start connector
 		if err := pm.initializeConnectorInstance(&instance); err != nil {

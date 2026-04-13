@@ -117,6 +117,9 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 						removeRuntimeFile(safePath)
 					}
 				}
+				if err := pm.saveConnectorPackageToDatabaseContext(context.Background(), &pkg); err != nil {
+					log.Warn().Err(err).Str("connector_id", pkg.ConnectorID).Msg("Failed to persist quarantine state to database")
+				}
 			}
 		}
 
