@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.4](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.4) - 2026-04-14
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Insidious Fiddler
+
+### Misc
+
+- chore: security policy documentation ([14ed269](https://github.com/Codycody31/squad-aegis/commit/14ed2693ffbe65e1e075931d27cac45cceb4a0f7))
+
 ## [0.9.3](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.3) - 2026-04-03
 
 ### ❤️ Thanks to all contributors! ❤️
