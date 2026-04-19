@@ -116,7 +116,13 @@ func TestApplySubprocessHardeningGIDDefaultsToUID(t *testing.T) {
 	if cred.Gid != 2020 {
 		t.Fatalf("Gid = %d, want 2020 (defaulted to UID)", cred.Gid)
 	}
-	if !cred.NoSetGroups {
-		t.Fatal("NoSetGroups should be true when no supplementary groups are set")
+	if cred.NoSetGroups {
+		t.Fatal("NoSetGroups must stay false so setgroups(2) clears inherited parent supplementary groups")
+	}
+	if cred.Groups == nil {
+		t.Fatal("Groups must be a non-nil (possibly empty) slice so Go invokes setgroups(2)")
+	}
+	if len(cred.Groups) != 0 {
+		t.Fatalf("Groups = %v, want empty slice when no supplementary groups configured", cred.Groups)
 	}
 }

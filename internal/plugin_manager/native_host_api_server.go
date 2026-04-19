@@ -669,11 +669,16 @@ func (d *hostAPIDispatcher) dispatchEvent(method string, payload json.RawMessage
 			return nil, err
 		}
 		// Namespace plugin-emitted events with the plugin ID to prevent both
-		// impersonation of system events and cross-plugin event spoofing.
-		requiredPrefix := "PLUGIN_" + d.pluginID + "_"
-		if !strings.HasPrefix(args.EventType, requiredPrefix) {
-			args.EventType = requiredPrefix + args.EventType
-		}
+		// impersonation of system events and cross-plugin event spoofing. We
+		// prepend unconditionally rather than allowing the plugin-supplied
+		// event type to pass through when it already starts with the expected
+		// prefix: plugin IDs may contain underscores (e.g. "discord_teamkill"),
+		// so a HasPrefix check would let plugin "foo" publish a
+		// "PLUGIN_foo_bar_x" event indistinguishable from plugin "foo_bar"'s
+		// "PLUGIN_foo_bar_x". Always prepending makes the emitting plugin
+		// unambiguous: a plugin that double-namespaces just produces
+		// "PLUGIN_<id>_PLUGIN_<id>_<suffix>", still attributable to <id>.
+		args.EventType = "PLUGIN_" + d.pluginID + "_" + args.EventType
 		return nil, d.apis.EventAPI.PublishEvent(args.EventType, args.Data, args.Raw)
 	default:
 		return nil, fmt.Errorf("unknown event method %q", method)

@@ -56,11 +56,13 @@ func applySubprocessHardening(cmd *exec.Cmd) error {
 		if err != nil {
 			return fmt.Errorf("parse subprocess supplementary groups: %w", err)
 		}
+		if groups == nil {
+			groups = []uint32{}
+		}
 		attr.Credential = &syscall.Credential{
-			Uid:         uint32(uid),
-			Gid:         uint32(effectiveGid),
-			Groups:      groups,
-			NoSetGroups: groups == nil,
+			Uid:    uint32(uid),
+			Gid:    uint32(effectiveGid),
+			Groups: groups,
 		}
 	}
 
@@ -105,8 +107,9 @@ func killProcessGroup(client *goplugin.Client) {
 
 // parseSupplementaryGroups parses a comma-separated list of numeric group
 // IDs into a []uint32 suitable for syscall.Credential.Groups. Empty string
-// returns a nil slice so NoSetGroups can be used to skip the setgroups(2)
-// call entirely.
+// returns a nil slice; callers are expected to substitute an empty
+// (non-nil) slice so setgroups(2) is still invoked — otherwise the
+// subprocess would inherit the parent's supplementary groups.
 func parseSupplementaryGroups(csv string) ([]uint32, error) {
 	trimmed := strings.TrimSpace(csv)
 	if trimmed == "" {
