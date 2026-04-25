@@ -177,6 +177,16 @@ func (s *subprocessConnectorShim) watchHealth(handle *connectorSubprocessHandle,
 				if intentional {
 					return
 				}
+				// Re-check under lock so a concurrent Stop() that flipped
+				// intentional between our first read and now is observed
+				// before we fire the exit callback. Without this, cb() can
+				// block on pm.connectorMu while Stop() blocks on watcherDone.
+				s.mu.Lock()
+				intentional = s.intentional
+				s.mu.Unlock()
+				if intentional {
+					return
+				}
 				if cb != nil {
 					cb(fmt.Errorf("connector subprocess %s exited unexpectedly", s.connectorID))
 				} else {

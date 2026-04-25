@@ -13,6 +13,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	"go.codycody31.dev/squad-aegis/pkg/pluginrpc"
 )
 
@@ -299,21 +300,18 @@ type rconRemoveSquadArgs struct {
 	PlayerID string `json:"player_id"`
 }
 
-// validatePlayerID checks that a player ID is a plausible Steam64 numeric
-// string, preventing injection of RCON arguments via crafted IDs.
+// validatePlayerID checks that a player ID is either a Steam64 numeric string
+// or a 32-char hex EOS ID, preventing injection of RCON arguments via crafted
+// IDs while matching the identifier formats the Squad server actually uses.
 func validatePlayerID(playerID string) error {
-	if playerID == "" {
+	id := strings.TrimSpace(playerID)
+	if id == "" {
 		return fmt.Errorf("player_id must not be empty")
 	}
-	if len(playerID) > 20 {
-		return fmt.Errorf("player_id exceeds maximum length")
+	if utils.IsSteamID(id) || utils.IsEOSID(id) {
+		return nil
 	}
-	for _, c := range playerID {
-		if c < '0' || c > '9' {
-			return fmt.Errorf("player_id contains invalid character %q", c)
-		}
-	}
-	return nil
+	return fmt.Errorf("player_id must be a Steam64 or 32-char hex EOS ID")
 }
 
 func (d *hostAPIDispatcher) dispatchRcon(method string, payload json.RawMessage) (interface{}, error) {

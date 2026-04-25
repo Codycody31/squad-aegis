@@ -663,12 +663,27 @@ func (pm *PluginManager) GetConnectors() []*ConnectorInstance {
 
 	connectors := make([]*ConnectorInstance, 0, len(pm.connectors))
 	for _, instance := range pm.connectors {
-		// Create a copy with masked sensitive fields
-		maskedInstance := *instance
+		// Build a shallow copy field-by-field to avoid copying the sync.Mutex,
+		// and take the lock so Status/LastError are read atomically with writes
+		// from the unexpected-exit reporter.
+		instance.mu.Lock()
+		maskedInstance := &ConnectorInstance{
+			ID:        instance.ID,
+			Config:    instance.Config,
+			Status:    instance.Status,
+			Enabled:   instance.Enabled,
+			Connector: instance.Connector,
+			Context:   instance.Context,
+			Cancel:    instance.Cancel,
+			LastError: instance.LastError,
+			CreatedAt: instance.CreatedAt,
+			UpdatedAt: instance.UpdatedAt,
+		}
+		instance.mu.Unlock()
 		if definition, err := pm.connectorRegistry.GetConnector(instance.ID); err == nil {
 			maskedInstance.Config = definition.ConfigSchema.MaskSensitiveFields(instance.Config)
 		}
-		connectors = append(connectors, &maskedInstance)
+		connectors = append(connectors, maskedInstance)
 	}
 
 	return connectors
@@ -885,6 +900,17 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 		if err := safePluginCall(instance.PluginID, "Start", func() error {
 			return instance.Plugin.Start(instance.Context)
 		}); err != nil {
+			// Start failed after a successful Initialize. Tear down the
+			// plugin so any subprocess/goroutine/RPC listener spawned by
+			// Initialize is released; otherwise the instance is wedged and
+			// the next Enable hits "plugin subprocess already initialized".
+			if stopErr := safePluginCall(instance.PluginID, "Stop", instance.Plugin.Stop); stopErr != nil {
+				log.Warn().
+					Err(stopErr).
+					Str("plugin_id", instance.PluginID).
+					Str("instance_id", instance.ID.String()).
+					Msg("Failed to stop plugin after Start error; subprocess may leak")
+			}
 			instance.setError(PluginStatusError, err.Error())
 			return fmt.Errorf("failed to start plugin: %w", err)
 		}
@@ -897,6 +923,12 @@ func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) erro
 // attachUnexpectedExitReporter wires the instance-level error state into the
 // shim's health watcher so a crashing subprocess automatically marks the
 // instance as errored. No-op if the plugin isn't subprocess-isolated.
+//
+// The callback must not acquire pm.mu: if it did, it would deadlock when an
+// admin caller (Delete/Disable/UpdateLogLevel) holds pm.mu while waiting on
+// Plugin.Stop(), which itself waits on the watcher goroutine to exit. The
+// captured `instance` pointer stays valid for the lifetime of the closure,
+// and instance.setError/setStatus are synchronized via instance.mu.
 func (pm *PluginManager) attachUnexpectedExitReporter(instance *PluginInstance) {
 	reporter, ok := instance.Plugin.(unexpectedExitReporter)
 	if !ok {
@@ -906,16 +938,10 @@ func (pm *PluginManager) attachUnexpectedExitReporter(instance *PluginInstance) 
 	instanceID := instance.ID
 	serverID := instance.ServerID
 	reporter.OnUnexpectedExit(func(err error) {
-		pm.mu.Lock()
-		defer pm.mu.Unlock()
-		if serverPlugins, ok := pm.plugins[serverID]; ok {
-			if live, ok := serverPlugins[instanceID]; ok {
-				if err != nil {
-					live.setError(PluginStatusError, err.Error())
-				} else {
-					live.setStatus(PluginStatusError)
-				}
-			}
+		if err != nil {
+			instance.setError(PluginStatusError, err.Error())
+		} else {
+			instance.setStatus(PluginStatusError)
 		}
 		log.Warn().
 			Err(err).

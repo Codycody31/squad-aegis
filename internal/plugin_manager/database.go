@@ -378,6 +378,16 @@ func (pm *PluginManager) initializeConnectorInstance(instance *ConnectorInstance
 	if err := safePluginCall(instance.ID, "Connector.Start", func() error {
 		return instance.Connector.Start(instance.Context)
 	}); err != nil {
+		// Start failed after a successful Initialize. Tear down the
+		// connector so any subprocess/goroutine/RPC listener spawned by
+		// Initialize is released; otherwise the instance is wedged and the
+		// next Enable hits "connector subprocess already initialized".
+		if stopErr := safePluginCall(instance.ID, "Connector.Stop", instance.Connector.Stop); stopErr != nil {
+			log.Warn().
+				Err(stopErr).
+				Str("connector_id", instance.ID).
+				Msg("Failed to stop connector after Start error; subprocess may leak")
+		}
 		instance.Status = ConnectorStatusError
 		instance.LastError = err.Error()
 		return fmt.Errorf("failed to start connector: %w", err)
@@ -391,6 +401,12 @@ func (pm *PluginManager) initializeConnectorInstance(instance *ConnectorInstance
 // attachConnectorUnexpectedExitReporter wires the instance-level error state
 // into the connector shim's health watcher so a crashing subprocess flips
 // the connector to the error state.
+//
+// The callback must not acquire pm.connectorMu: if it did, it would deadlock
+// when an admin caller (Delete/Disable) holds pm.connectorMu while waiting
+// on Connector.Stop(), which itself waits on the watcher goroutine to exit.
+// The captured `instance` pointer stays valid for the lifetime of the
+// closure, and instance.setError is synchronized via instance.mu.
 func (pm *PluginManager) attachConnectorUnexpectedExitReporter(instance *ConnectorInstance) {
 	reporter, ok := instance.Connector.(unexpectedExitReporter)
 	if !ok {
@@ -398,12 +414,7 @@ func (pm *PluginManager) attachConnectorUnexpectedExitReporter(instance *Connect
 	}
 	connectorID := instance.ID
 	reporter.OnUnexpectedExit(func(err error) {
-		pm.connectorMu.Lock()
-		live, ok := pm.connectors[connectorID]
-		pm.connectorMu.Unlock()
-		if ok {
-			live.setError(err)
-		}
+		instance.setError(err)
 		log.Warn().
 			Err(err).
 			Str("connector_id", connectorID).
