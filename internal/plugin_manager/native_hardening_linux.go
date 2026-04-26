@@ -1,5 +1,11 @@
 //go:build linux
 
+// Per-spawn IPC authentication for native plugin/connector subprocesses is
+// provided by hashicorp/go-plugin's AutoMTLS (a fresh client certificate is
+// minted for every launched subprocess). That replaces the previous net/rpc
+// UID-uniqueness mitigation, so this file no longer tracks live subprocess
+// UIDs — multiple plugins can run under the same dedicated UID without one
+// being able to connect to another's RPC socket.
 package plugin_manager
 
 import (
@@ -7,7 +13,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 
 	goplugin "github.com/hashicorp/go-plugin"
@@ -15,38 +20,6 @@ import (
 
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
-
-// subprocessUIDInUseMu guards subprocessUIDInUse. The map keys are
-// effective UIDs of currently-live plugin/connector subprocesses; values are
-// reference counts (always 1 today, but the type leaves room for the future
-// AllowMultipleInstances case if it is ever lifted to share a UID slot).
-var (
-	subprocessUIDInUseMu sync.Mutex
-	subprocessUIDInUse   = map[uint32]int{}
-)
-
-// claimSubprocessUID reserves an effective UID slot for a new subprocess.
-// Returns an error if the UID is already claimed by another live subprocess.
-// The returned release function must be invoked exactly once when the
-// subprocess exits to free the slot.
-func claimSubprocessUID(uid uint32) (func(), error) {
-	subprocessUIDInUseMu.Lock()
-	defer subprocessUIDInUseMu.Unlock()
-	if _, exists := subprocessUIDInUse[uid]; exists {
-		return nil, fmt.Errorf("subprocess uid %d is already in use by another live native plugin/connector; allocate a distinct SubprocessUID per plugin to keep their net/rpc sockets isolated", uid)
-	}
-	subprocessUIDInUse[uid] = 1
-	released := false
-	return func() {
-		subprocessUIDInUseMu.Lock()
-		defer subprocessUIDInUseMu.Unlock()
-		if released {
-			return
-		}
-		released = true
-		delete(subprocessUIDInUse, uid)
-	}, nil
-}
 
 // applySubprocessHardening configures the SysProcAttr of a plugin/connector
 // subprocess command to drop privileges before exec. It is a no-op when the
@@ -57,18 +30,9 @@ func claimSubprocessUID(uid uint32) (func(), error) {
 // should run the whole Aegis process tree under a systemd unit with
 // NoNewPrivileges=yes (or an equivalent container flag) — the prctl is
 // inherited across exec into subprocess children.
-//
-// IPC authentication caveat: the host<->subprocess channel uses
-// hashicorp/go-plugin over net/rpc (see pkg/pluginrpc, pkg/connectorrpc),
-// which has no per-connection auth. AutoMTLS requires gRPC and is not
-// available here. To prevent one compromised plugin from connecting to
-// another's RPC socket, this function refuses to spawn two live subprocesses
-// under the same effective SubprocessUID. Operators isolating multiple
-// plugins must allocate distinct UIDs.
-func applySubprocessHardening(cmd *exec.Cmd) (func(), error) {
-	noopRelease := func() {}
+func applySubprocessHardening(cmd *exec.Cmd) error {
 	if cmd == nil {
-		return noopRelease, nil
+		return nil
 	}
 	uid := 0
 	gid := 0
@@ -88,7 +52,6 @@ func applySubprocessHardening(cmd *exec.Cmd) (func(), error) {
 	// Kill the subprocess if the host process dies to prevent orphans.
 	attr.Pdeathsig = syscall.SIGKILL
 
-	release := noopRelease
 	if uid > 0 {
 		effectiveGid := gid
 		if effectiveGid <= 0 {
@@ -96,16 +59,11 @@ func applySubprocessHardening(cmd *exec.Cmd) (func(), error) {
 		}
 		groups, err := parseSupplementaryGroups(groupsCSV)
 		if err != nil {
-			return noopRelease, fmt.Errorf("parse subprocess supplementary groups: %w", err)
+			return fmt.Errorf("parse subprocess supplementary groups: %w", err)
 		}
 		if groups == nil {
 			groups = []uint32{}
 		}
-		uidRelease, err := claimSubprocessUID(uint32(uid))
-		if err != nil {
-			return noopRelease, err
-		}
-		release = uidRelease
 		attr.Credential = &syscall.Credential{
 			Uid:    uint32(uid),
 			Gid:    uint32(effectiveGid),
@@ -114,7 +72,7 @@ func applySubprocessHardening(cmd *exec.Cmd) (func(), error) {
 	}
 
 	cmd.SysProcAttr = attr
-	return release, nil
+	return nil
 }
 
 // logSubprocessHardeningPosture prints a single-line summary at startup so

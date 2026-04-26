@@ -15,12 +15,13 @@ import (
 //	}
 //
 // The impl argument must implement pluginrpc.Plugin. Any panic inside a
-// plugin method is recovered by hashicorp/go-plugin's RPC layer and
+// plugin method is recovered by hashicorp/go-plugin's gRPC layer and
 // surfaced to the host as a normal error, so plugins cannot take down the
 // host by crashing in a lifecycle method.
 func Serve(impl Plugin) {
 	goplugin.Serve(&goplugin.ServeConfig{
 		HandshakeConfig: Handshake,
 		Plugins:         PluginMap(impl),
+		GRPCServer:      goplugin.DefaultGRPCServer,
 	})
 }

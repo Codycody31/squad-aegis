@@ -2,7 +2,7 @@
 title: Native Plugins and Connectors
 ---
 
-Squad Aegis native extensions are standalone Go binaries that run as isolated subprocesses. The host launches them via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin), communicates over net/rpc, and tears them down cleanly on shutdown. A crash in your extension cannot corrupt the host.
+Squad Aegis native extensions are standalone Go binaries that run as isolated subprocesses. The host launches them via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin) with AutoMTLS, communicates over gRPC, and tears them down cleanly on shutdown. Each spawned subprocess gets a freshly minted client certificate, so its IPC channel is mutually authenticated with the host. A crash in your extension cannot corrupt the host.
 
 There are two extension types:
 
@@ -32,12 +32,12 @@ graph TB
     end
 
     subgraph plugins["Plugin Subprocesses"]
-        P1["Plugin A<br/>(net/rpc)"]
-        P2["Plugin B<br/>(net/rpc)"]
+        P1["Plugin A<br/>(gRPC + AutoMTLS)"]
+        P2["Plugin B<br/>(gRPC + AutoMTLS)"]
     end
 
     subgraph connectors["Connector Subprocesses"]
-        C1["Connector C<br/>(net/rpc)"]
+        C1["Connector C<br/>(gRPC + AutoMTLS)"]
     end
 
     PM -->|"spawn + RPC"| P1

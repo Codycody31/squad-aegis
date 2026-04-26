@@ -1,8 +1,9 @@
 // Package connectorrpc is the subprocess-isolated SDK for authoring Squad
 // Aegis native connectors. Connectors built against this package run as
-// standalone binaries; the host spawns them via hashicorp/go-plugin and
-// communicates over net/rpc, so a crashing or malicious connector cannot
-// corrupt the host process memory.
+// standalone binaries; the host spawns them via hashicorp/go-plugin with
+// AutoMTLS and communicates over gRPC, so a crashing or malicious connector
+// cannot corrupt the host process memory and its IPC channel is mutually
+// authenticated with a per-spawn certificate.
 //
 // This package mirrors pkg/pluginrpc for the connector surface. See the
 // pluginrpc package doc for the overall design.

@@ -2,11 +2,15 @@ package pluginrpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"net/rpc"
 	"sync"
 
 	goplugin "github.com/hashicorp/go-plugin"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	pluginrpcpb "go.codycody31.dev/squad-aegis/pkg/pluginrpc/proto"
 )
 
 // Plugin is the interface an out-of-process plugin author implements. It is
@@ -27,300 +31,706 @@ type Plugin interface {
 	GetCommandExecutionStatus(executionID string) (*CommandExecutionStatus, error)
 }
 
-// -- RPC server side (runs inside the plugin process) -----------------------
+// -- gRPC server side (runs inside the plugin process) -----------------------
 
-// pluginRPCServer is the net/rpc server exposed to the host. It wraps the
+// pluginGRPCServer is the gRPC server exposed to the host. It wraps the
 // plugin author's Plugin implementation and adapts each RPC method onto it.
-type pluginRPCServer struct {
-	impl   Plugin
-	broker *goplugin.MuxBroker
+type pluginGRPCServer struct {
+	pluginrpcpb.UnimplementedPluginServer
 
-	mu         sync.Mutex
-	runCtx     context.Context
-	runCancel  context.CancelFunc
-	hostAPIs   *HostAPIs
-	hostClient *rpc.Client
+	impl   Plugin
+	broker *goplugin.GRPCBroker
+
+	mu        sync.Mutex
+	runCtx    context.Context
+	runCancel context.CancelFunc
+	hostAPIs  *HostAPIs
+	hostConn  *grpc.ClientConn
 }
 
-// Empty is used as the reply type for methods that return nothing.
-type Empty struct{}
-
-// GetDefinition responds with the plugin definition. The host uses the
-// returned ID/Version to cross-check the manifest.
-func (s *pluginRPCServer) GetDefinition(_ Empty, reply *PluginDefinition) error {
-	*reply = s.impl.GetDefinition()
-	return nil
+// GetDefinition responds with the plugin definition.
+func (s *pluginGRPCServer) GetDefinition(_ context.Context, _ *pluginrpcpb.Empty) (*pluginrpcpb.PluginDefinition, error) {
+	return pluginDefinitionToProto(s.impl.GetDefinition())
 }
 
 // Initialize wires up the HostAPIs proxy via the broker ID and calls the
-// plugin's Initialize method. The hostAPIs client is stored so Stop can
-// close it cleanly.
-func (s *pluginRPCServer) Initialize(args InitializeArgs, _ *Empty) error {
+// plugin's Initialize method.
+func (s *pluginGRPCServer) Initialize(_ context.Context, req *pluginrpcpb.InitializeRequest) (*pluginrpcpb.Empty, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// The host has opened an RPC listener and advertised its broker ID via
-	// the InitializeArgs. Dial back into it so the plugin can make HostAPI
-	// calls (LogAPI.Info, RconAPI.SendCommand, etc.).
-	conn, err := s.broker.Dial(args.HostAPIBrokerID)
+	conn, err := s.broker.Dial(req.GetHostApiBrokerId())
 	if err != nil {
-		return fmt.Errorf("failed to dial host api broker: %w", err)
+		return nil, fmt.Errorf("failed to dial host api broker: %w", err)
 	}
-	s.hostClient = rpc.NewClient(conn)
-	s.hostAPIs = newHostAPIsFromClient(s.hostClient)
+	s.hostConn = conn
+	s.hostAPIs = newHostAPIsFromConn(conn)
 
-	if err := s.impl.Initialize(args.Config, s.hostAPIs); err != nil {
-		_ = s.hostClient.Close()
-		s.hostClient = nil
+	cfg, err := decodeJSONMap(req.GetConfigJson())
+	if err != nil {
+		_ = conn.Close()
+		s.hostConn = nil
 		s.hostAPIs = nil
-		return err
+		return nil, fmt.Errorf("decode config: %w", err)
 	}
-	return nil
+
+	if err := s.impl.Initialize(cfg, s.hostAPIs); err != nil {
+		_ = conn.Close()
+		s.hostConn = nil
+		s.hostAPIs = nil
+		return nil, err
+	}
+	return &pluginrpcpb.Empty{}, nil
 }
 
-// Start runs the plugin's Start method inside a cancellable goroutine so the
-// host can request a Stop via the RPC interface. The returned error is the
-// plugin's Start error, if any.
-func (s *pluginRPCServer) Start(_ Empty, _ *Empty) error {
+// Start runs the plugin's Start method inside a cancellable context.
+func (s *pluginGRPCServer) Start(_ context.Context, _ *pluginrpcpb.Empty) (*pluginrpcpb.Empty, error) {
 	s.mu.Lock()
 	if s.runCtx != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("plugin already started")
+		return nil, fmt.Errorf("plugin already started")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.runCtx = ctx
 	s.runCancel = cancel
 	s.mu.Unlock()
 
-	return s.impl.Start(ctx)
+	if err := s.impl.Start(ctx); err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.Empty{}, nil
 }
 
-// Stop cancels the run context (releasing any goroutines the plugin spawned
-// inside Start) and then calls the plugin's Stop method.
-func (s *pluginRPCServer) Stop(_ Empty, _ *Empty) error {
+// Stop cancels the run context and calls the plugin's Stop method.
+func (s *pluginGRPCServer) Stop(_ context.Context, _ *pluginrpcpb.Empty) (*pluginrpcpb.Empty, error) {
 	s.mu.Lock()
 	cancel := s.runCancel
 	s.runCancel = nil
 	s.runCtx = nil
-	client := s.hostClient
+	conn := s.hostConn
 	s.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
 	}
 	err := s.impl.Stop()
-	if client != nil {
-		_ = client.Close()
+	if conn != nil {
+		_ = conn.Close()
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.Empty{}, nil
 }
 
 // HandleEvent forwards an event to the plugin.
-func (s *pluginRPCServer) HandleEvent(args HandleEventArgs, _ *Empty) error {
-	event := args.Event
-	return s.impl.HandleEvent(&event)
+func (s *pluginGRPCServer) HandleEvent(_ context.Context, ev *pluginrpcpb.PluginEvent) (*pluginrpcpb.Empty, error) {
+	hostEvent, err := protoToPluginEvent(ev)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.impl.HandleEvent(hostEvent); err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.Empty{}, nil
 }
 
 // GetStatus returns the plugin's current lifecycle status.
-func (s *pluginRPCServer) GetStatus(_ Empty, reply *PluginStatus) error {
-	*reply = s.impl.GetStatus()
-	return nil
+func (s *pluginGRPCServer) GetStatus(_ context.Context, _ *pluginrpcpb.Empty) (*pluginrpcpb.StatusResponse, error) {
+	return &pluginrpcpb.StatusResponse{Status: string(s.impl.GetStatus())}, nil
 }
 
 // GetConfig returns the plugin's masked config map.
-func (s *pluginRPCServer) GetConfig(_ Empty, reply *map[string]interface{}) error {
-	*reply = s.impl.GetConfig()
-	return nil
+func (s *pluginGRPCServer) GetConfig(_ context.Context, _ *pluginrpcpb.Empty) (*pluginrpcpb.ConfigJSON, error) {
+	cfg := s.impl.GetConfig()
+	encoded, err := encodeJSONMap(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.ConfigJSON{ConfigJson: encoded}, nil
 }
 
 // UpdateConfig applies a new config to the plugin.
-func (s *pluginRPCServer) UpdateConfig(args map[string]interface{}, _ *Empty) error {
-	return s.impl.UpdateConfig(args)
+func (s *pluginGRPCServer) UpdateConfig(_ context.Context, req *pluginrpcpb.ConfigJSON) (*pluginrpcpb.Empty, error) {
+	cfg, err := decodeJSONMap(req.GetConfigJson())
+	if err != nil {
+		return nil, fmt.Errorf("decode config: %w", err)
+	}
+	if err := s.impl.UpdateConfig(cfg); err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.Empty{}, nil
 }
 
 // GetCommands returns the list of commands the plugin exposes.
-func (s *pluginRPCServer) GetCommands(_ Empty, reply *[]PluginCommand) error {
-	*reply = s.impl.GetCommands()
-	return nil
+func (s *pluginGRPCServer) GetCommands(_ context.Context, _ *pluginrpcpb.Empty) (*pluginrpcpb.CommandList, error) {
+	commands := s.impl.GetCommands()
+	out := &pluginrpcpb.CommandList{Commands: make([]*pluginrpcpb.PluginCommand, 0, len(commands))}
+	for _, cmd := range commands {
+		converted, err := pluginCommandToProto(cmd)
+		if err != nil {
+			return nil, err
+		}
+		out.Commands = append(out.Commands, converted)
+	}
+	return out, nil
 }
 
-// ExecuteCommand runs a command on the plugin and returns the result.
-func (s *pluginRPCServer) ExecuteCommand(args ExecuteCommandArgs, reply *CommandResult) error {
-	result, err := s.impl.ExecuteCommand(args.CommandID, args.Params)
+// ExecuteCommand runs a command on the plugin.
+func (s *pluginGRPCServer) ExecuteCommand(_ context.Context, req *pluginrpcpb.ExecuteCommandRequest) (*pluginrpcpb.CommandResult, error) {
+	params, err := decodeJSONMap(req.GetParamsJson())
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("decode params: %w", err)
 	}
-	if result != nil {
-		*reply = *result
-	}
-	return nil
-}
-
-// GetCommandExecutionStatus returns the status of a previously-launched
-// asynchronous command.
-func (s *pluginRPCServer) GetCommandExecutionStatus(executionID string, reply *CommandExecutionStatus) error {
-	status, err := s.impl.GetCommandExecutionStatus(executionID)
+	result, err := s.impl.ExecuteCommand(req.GetCommandId(), params)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if status != nil {
-		*reply = *status
+	if result == nil {
+		return &pluginrpcpb.CommandResult{}, nil
 	}
-	return nil
+	return commandResultToProto(*result)
 }
 
-// -- RPC client side (runs inside the host) ---------------------------------
+// GetCommandExecutionStatus returns the status of a previously-launched async command.
+func (s *pluginGRPCServer) GetCommandExecutionStatus(_ context.Context, req *pluginrpcpb.ExecutionIDRequest) (*pluginrpcpb.CommandExecutionStatus, error) {
+	status, err := s.impl.GetCommandExecutionStatus(req.GetExecutionId())
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return &pluginrpcpb.CommandExecutionStatus{}, nil
+	}
+	return commandExecutionStatusToProto(*status)
+}
 
-// PluginRPCClient is the host-side stub. It wraps a net/rpc client and
+// -- gRPC client side (runs inside the host) ---------------------------------
+
+// PluginGRPCClient is the host-side stub. It wraps a gRPC client and
 // exposes typed methods the subprocess loader adapts onto
 // plugin_manager.Plugin. Exported so host code in a different package can
 // receive it from goplugin.Client().Dispense().
-type PluginRPCClient struct {
-	client *rpc.Client
-	broker *goplugin.MuxBroker
+type PluginGRPCClient struct {
+	client pluginrpcpb.PluginClient
+	broker *goplugin.GRPCBroker
+	conn   *grpc.ClientConn
 }
 
-// Broker returns the underlying go-plugin MuxBroker so the host loader can
-// start auxiliary RPC services (e.g. HostAPI) on new broker IDs. Returns nil
-// if the client has no broker attached (e.g. in tests).
-func (c *PluginRPCClient) Broker() *goplugin.MuxBroker {
+// Broker returns the underlying go-plugin GRPCBroker so the host loader can
+// start auxiliary services (e.g. HostAPI) on new broker IDs.
+func (c *PluginGRPCClient) Broker() *goplugin.GRPCBroker {
 	return c.broker
 }
 
-// StartHostAPIBroker allocates a new broker ID and begins accepting a single
-// HostAPI connection from the plugin subprocess on that ID. Once the
-// subprocess dials back (from its Initialize impl), the returned rpc.Server
-// serves calls on that connection for the life of the plugin. The returned
-// stop function closes the connection, ending the HostAPI service.
-func (c *PluginRPCClient) StartHostAPIBroker(server *rpc.Server) (uint32, func(), error) {
+// StartHostAPIBroker allocates a new broker ID and serves the supplied
+// gRPC server on it. The plugin subprocess dials this broker ID from its
+// Initialize implementation. The returned stop function shuts down the
+// host-side listener.
+func (c *PluginGRPCClient) StartHostAPIBroker(register func(*grpc.Server)) (uint32, func(), error) {
 	if c.broker == nil {
-		return 0, nil, fmt.Errorf("plugin rpc client has no broker")
+		return 0, nil, fmt.Errorf("plugin grpc client has no broker")
 	}
 	id := c.broker.NextId()
 
-	done := make(chan struct{})
-	var connRef struct {
+	stopCh := make(chan struct{})
+	serverHolder := struct {
 		mu sync.Mutex
-		c  closer
-	}
-	go func() {
-		conn, err := c.broker.Accept(id)
-		if err != nil {
-			return
-		}
-		connRef.mu.Lock()
-		connRef.c = conn
+		s  *grpc.Server
+	}{}
+
+	go c.broker.AcceptAndServe(id, func(opts []grpc.ServerOption) *grpc.Server {
+		s := grpc.NewServer(opts...)
+		register(s)
+		serverHolder.mu.Lock()
+		serverHolder.s = s
 		closed := false
 		select {
-		case <-done:
+		case <-stopCh:
 			closed = true
 		default:
 		}
-		connRef.mu.Unlock()
+		serverHolder.mu.Unlock()
 		if closed {
-			_ = conn.Close()
-			return
+			s.Stop()
+			return s
 		}
-		server.ServeConn(conn)
-	}()
+		return s
+	})
 
 	stop := func() {
 		select {
-		case <-done:
+		case <-stopCh:
 			return
 		default:
-			close(done)
+			close(stopCh)
 		}
-		connRef.mu.Lock()
-		if connRef.c != nil {
-			_ = connRef.c.Close()
+		serverHolder.mu.Lock()
+		s := serverHolder.s
+		serverHolder.mu.Unlock()
+		if s != nil {
+			s.Stop()
 		}
-		connRef.mu.Unlock()
 	}
 	return id, stop, nil
 }
 
-// closer is satisfied by net.Conn without importing the net package here.
-type closer interface {
-	Close() error
-}
-
 // GetDefinition fetches the plugin's static definition.
-func (c *PluginRPCClient) GetDefinition() (PluginDefinition, error) {
-	var def PluginDefinition
-	if err := c.client.Call("Plugin.GetDefinition", Empty{}, &def); err != nil {
+func (c *PluginGRPCClient) GetDefinition() (PluginDefinition, error) {
+	resp, err := c.client.GetDefinition(context.Background(), &pluginrpcpb.Empty{})
+	if err != nil {
 		return PluginDefinition{}, err
 	}
-	return def, nil
+	return protoToPluginDefinition(resp)
 }
 
-// Initialize hands off the config and a broker ID the plugin can use to
-// dial the host API server.
-func (c *PluginRPCClient) Initialize(args InitializeArgs) error {
-	return c.client.Call("Plugin.Initialize", args, &Empty{})
+// Initialize hands off the config and a broker ID the plugin uses to dial
+// the host API server.
+func (c *PluginGRPCClient) Initialize(args InitializeArgs) error {
+	cfg, err := encodeJSONMap(args.Config)
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	_, err = c.client.Initialize(context.Background(), &pluginrpcpb.InitializeRequest{
+		ConfigJson:      cfg,
+		HostApiBrokerId: args.HostAPIBrokerID,
+		InstanceId:      args.InstanceID,
+		ServerId:        args.ServerID,
+		LogLevel:        args.LogLevel,
+	})
+	return err
 }
 
-// Start runs the plugin's Start. Blocks until the plugin returns from Start.
-func (c *PluginRPCClient) Start() error {
-	return c.client.Call("Plugin.Start", Empty{}, &Empty{})
+// Start runs the plugin's Start.
+func (c *PluginGRPCClient) Start() error {
+	_, err := c.client.Start(context.Background(), &pluginrpcpb.Empty{})
+	return err
 }
 
 // Stop asks the plugin to shut down.
-func (c *PluginRPCClient) Stop() error {
-	return c.client.Call("Plugin.Stop", Empty{}, &Empty{})
+func (c *PluginGRPCClient) Stop() error {
+	_, err := c.client.Stop(context.Background(), &pluginrpcpb.Empty{})
+	return err
 }
 
 // HandleEvent delivers an event to the plugin.
-func (c *PluginRPCClient) HandleEvent(event PluginEvent) error {
-	return c.client.Call("Plugin.HandleEvent", HandleEventArgs{Event: event}, &Empty{})
+func (c *PluginGRPCClient) HandleEvent(event PluginEvent) error {
+	pb, err := pluginEventToProto(&event)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.HandleEvent(context.Background(), pb)
+	return err
 }
 
 // GetStatus fetches the plugin's current lifecycle status.
-func (c *PluginRPCClient) GetStatus() (PluginStatus, error) {
-	var status PluginStatus
-	if err := c.client.Call("Plugin.GetStatus", Empty{}, &status); err != nil {
+func (c *PluginGRPCClient) GetStatus() (PluginStatus, error) {
+	resp, err := c.client.GetStatus(context.Background(), &pluginrpcpb.Empty{})
+	if err != nil {
 		return "", err
 	}
-	return status, nil
+	return PluginStatus(resp.GetStatus()), nil
 }
 
 // GetConfig fetches the plugin's masked config.
-func (c *PluginRPCClient) GetConfig() (map[string]interface{}, error) {
-	var cfg map[string]interface{}
-	if err := c.client.Call("Plugin.GetConfig", Empty{}, &cfg); err != nil {
+func (c *PluginGRPCClient) GetConfig() (map[string]interface{}, error) {
+	resp, err := c.client.GetConfig(context.Background(), &pluginrpcpb.Empty{})
+	if err != nil {
 		return nil, err
 	}
-	return cfg, nil
+	return decodeJSONMap(resp.GetConfigJson())
 }
 
 // UpdateConfig sets a new config on the plugin.
-func (c *PluginRPCClient) UpdateConfig(config map[string]interface{}) error {
-	return c.client.Call("Plugin.UpdateConfig", config, &Empty{})
+func (c *PluginGRPCClient) UpdateConfig(config map[string]interface{}) error {
+	encoded, err := encodeJSONMap(config)
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	_, err = c.client.UpdateConfig(context.Background(), &pluginrpcpb.ConfigJSON{ConfigJson: encoded})
+	return err
 }
 
 // GetCommands fetches the plugin's command list.
-func (c *PluginRPCClient) GetCommands() ([]PluginCommand, error) {
-	var commands []PluginCommand
-	if err := c.client.Call("Plugin.GetCommands", Empty{}, &commands); err != nil {
+func (c *PluginGRPCClient) GetCommands() ([]PluginCommand, error) {
+	resp, err := c.client.GetCommands(context.Background(), &pluginrpcpb.Empty{})
+	if err != nil {
 		return nil, err
 	}
-	return commands, nil
+	out := make([]PluginCommand, 0, len(resp.GetCommands()))
+	for _, c := range resp.GetCommands() {
+		converted, err := protoToPluginCommand(c)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, converted)
+	}
+	return out, nil
 }
 
 // ExecuteCommand runs a command on the plugin.
-func (c *PluginRPCClient) ExecuteCommand(commandID string, params map[string]interface{}) (*CommandResult, error) {
-	var result CommandResult
-	if err := c.client.Call("Plugin.ExecuteCommand", ExecuteCommandArgs{CommandID: commandID, Params: params}, &result); err != nil {
+func (c *PluginGRPCClient) ExecuteCommand(commandID string, params map[string]interface{}) (*CommandResult, error) {
+	encoded, err := encodeJSONMap(params)
+	if err != nil {
+		return nil, fmt.Errorf("encode params: %w", err)
+	}
+	resp, err := c.client.ExecuteCommand(context.Background(), &pluginrpcpb.ExecuteCommandRequest{
+		CommandId:  commandID,
+		ParamsJson: encoded,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result, err := protoToCommandResult(resp)
+	if err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// GetCommandExecutionStatus fetches an async command's current status.
-func (c *PluginRPCClient) GetCommandExecutionStatus(executionID string) (*CommandExecutionStatus, error) {
-	var status CommandExecutionStatus
-	if err := c.client.Call("Plugin.GetCommandExecutionStatus", executionID, &status); err != nil {
+// GetCommandExecutionStatus fetches an async command's status.
+func (c *PluginGRPCClient) GetCommandExecutionStatus(executionID string) (*CommandExecutionStatus, error) {
+	resp, err := c.client.GetCommandExecutionStatus(context.Background(), &pluginrpcpb.ExecutionIDRequest{
+		ExecutionId: executionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	status, err := protoToCommandExecutionStatus(resp)
+	if err != nil {
 		return nil, err
 	}
 	return &status, nil
+}
+
+// -- shared encoding helpers -------------------------------------------------
+
+// encodeJSONMap marshals a Go map into bytes for transport. A nil map encodes
+// as an empty byte slice (not a JSON null) so the wire stays compact.
+func encodeJSONMap(m map[string]interface{}) ([]byte, error) {
+	if len(m) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(m)
+}
+
+// decodeJSONMap unmarshals bytes into a Go map. Empty bytes return an empty
+// non-nil map so plugin authors can write `m["key"]` without nil-checking.
+func decodeJSONMap(b []byte) (map[string]interface{}, error) {
+	if len(b) == 0 {
+		return map[string]interface{}{}, nil
+	}
+	out := map[string]interface{}{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func encodeJSONValue(v interface{}) ([]byte, error) {
+	if v == nil {
+		return nil, nil
+	}
+	return json.Marshal(v)
+}
+
+func decodeJSONValue(b []byte) (interface{}, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	var v interface{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func encodeJSONList(values []interface{}) ([]byte, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(values)
+}
+
+func decodeJSONList(b []byte) ([]interface{}, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	out := []interface{}{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// -- proto <-> SDK conversions -----------------------------------------------
+
+func configFieldsToProto(in []ConfigField) ([]*pluginrpcpb.ConfigField, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]*pluginrpcpb.ConfigField, 0, len(in))
+	for _, f := range in {
+		def, err := encodeJSONValue(f.Default)
+		if err != nil {
+			return nil, fmt.Errorf("encode default for field %q: %w", f.Name, err)
+		}
+		opts, err := encodeJSONList(f.Options)
+		if err != nil {
+			return nil, fmt.Errorf("encode options for field %q: %w", f.Name, err)
+		}
+		nested, err := configFieldsToProto(f.Nested)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &pluginrpcpb.ConfigField{
+			Name:        f.Name,
+			Description: f.Description,
+			Required:    f.Required,
+			Type:        string(f.Type),
+			DefaultJson: def,
+			Sensitive:   f.Sensitive,
+			OptionsJson: opts,
+			Nested:      nested,
+		})
+	}
+	return out, nil
+}
+
+func protoToConfigFields(in []*pluginrpcpb.ConfigField) ([]ConfigField, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]ConfigField, 0, len(in))
+	for _, f := range in {
+		def, err := decodeJSONValue(f.GetDefaultJson())
+		if err != nil {
+			return nil, fmt.Errorf("decode default for field %q: %w", f.GetName(), err)
+		}
+		opts, err := decodeJSONList(f.GetOptionsJson())
+		if err != nil {
+			return nil, fmt.Errorf("decode options for field %q: %w", f.GetName(), err)
+		}
+		nested, err := protoToConfigFields(f.GetNested())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ConfigField{
+			Name:        f.GetName(),
+			Description: f.GetDescription(),
+			Required:    f.GetRequired(),
+			Type:        FieldType(f.GetType()),
+			Default:     def,
+			Sensitive:   f.GetSensitive(),
+			Options:     opts,
+			Nested:      nested,
+		})
+	}
+	return out, nil
+}
+
+func configSchemaToProto(s ConfigSchema) (*pluginrpcpb.ConfigSchema, error) {
+	fields, err := configFieldsToProto(s.Fields)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.ConfigSchema{Fields: fields}, nil
+}
+
+func protoToConfigSchema(s *pluginrpcpb.ConfigSchema) (ConfigSchema, error) {
+	if s == nil {
+		return ConfigSchema{}, nil
+	}
+	fields, err := protoToConfigFields(s.GetFields())
+	if err != nil {
+		return ConfigSchema{}, err
+	}
+	return ConfigSchema{Fields: fields}, nil
+}
+
+func pluginDefinitionToProto(def PluginDefinition) (*pluginrpcpb.PluginDefinition, error) {
+	schema, err := configSchemaToProto(def.ConfigSchema)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.PluginDefinition{
+		PluginId:               def.PluginID,
+		AllowMultipleInstances: def.AllowMultipleInstances,
+		LongRunning:            def.LongRunning,
+		RequiredConnectors:     append([]string(nil), def.RequiredConnectors...),
+		OptionalConnectors:     append([]string(nil), def.OptionalConnectors...),
+		ConfigSchema:           schema,
+		Events:                 append([]string(nil), def.Events...),
+	}, nil
+}
+
+func protoToPluginDefinition(p *pluginrpcpb.PluginDefinition) (PluginDefinition, error) {
+	if p == nil {
+		return PluginDefinition{}, nil
+	}
+	schema, err := protoToConfigSchema(p.GetConfigSchema())
+	if err != nil {
+		return PluginDefinition{}, err
+	}
+	return PluginDefinition{
+		PluginID:               p.GetPluginId(),
+		AllowMultipleInstances: p.GetAllowMultipleInstances(),
+		LongRunning:            p.GetLongRunning(),
+		RequiredConnectors:     append([]string(nil), p.GetRequiredConnectors()...),
+		OptionalConnectors:     append([]string(nil), p.GetOptionalConnectors()...),
+		ConfigSchema:           schema,
+		Events:                 append([]string(nil), p.GetEvents()...),
+	}, nil
+}
+
+func pluginEventToProto(ev *PluginEvent) (*pluginrpcpb.PluginEvent, error) {
+	if ev == nil {
+		return &pluginrpcpb.PluginEvent{}, nil
+	}
+	return &pluginrpcpb.PluginEvent{
+		Id:        ev.ID,
+		ServerId:  ev.ServerID,
+		Source:    string(ev.Source),
+		Type:      ev.Type,
+		DataJson:  []byte(ev.Data),
+		Raw:       ev.Raw,
+		Timestamp: timestamppb.New(ev.Timestamp),
+	}, nil
+}
+
+func protoToPluginEvent(p *pluginrpcpb.PluginEvent) (*PluginEvent, error) {
+	if p == nil {
+		return nil, nil
+	}
+	out := &PluginEvent{
+		ID:       p.GetId(),
+		ServerID: p.GetServerId(),
+		Source:   EventSource(p.GetSource()),
+		Type:     p.GetType(),
+		Raw:      p.GetRaw(),
+	}
+	if data := p.GetDataJson(); len(data) > 0 {
+		out.Data = json.RawMessage(append([]byte(nil), data...))
+	}
+	if ts := p.GetTimestamp(); ts != nil {
+		out.Timestamp = ts.AsTime()
+	}
+	return out, nil
+}
+
+func pluginCommandToProto(cmd PluginCommand) (*pluginrpcpb.PluginCommand, error) {
+	params, err := configSchemaToProto(cmd.Parameters)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.PluginCommand{
+		Id:                  cmd.ID,
+		Name:                cmd.Name,
+		Description:         cmd.Description,
+		Category:            cmd.Category,
+		Parameters:          params,
+		ExecutionType:       string(cmd.ExecutionType),
+		RequiredPermissions: append([]string(nil), cmd.RequiredPermissions...),
+		ConfirmMessage:      cmd.ConfirmMessage,
+	}, nil
+}
+
+func protoToPluginCommand(p *pluginrpcpb.PluginCommand) (PluginCommand, error) {
+	if p == nil {
+		return PluginCommand{}, nil
+	}
+	params, err := protoToConfigSchema(p.GetParameters())
+	if err != nil {
+		return PluginCommand{}, err
+	}
+	return PluginCommand{
+		ID:                  p.GetId(),
+		Name:                p.GetName(),
+		Description:         p.GetDescription(),
+		Category:            p.GetCategory(),
+		Parameters:          params,
+		ExecutionType:       CommandExecutionType(p.GetExecutionType()),
+		RequiredPermissions: append([]string(nil), p.GetRequiredPermissions()...),
+		ConfirmMessage:      p.GetConfirmMessage(),
+	}, nil
+}
+
+func commandResultToProto(r CommandResult) (*pluginrpcpb.CommandResult, error) {
+	data, err := encodeJSONMap(r.Data)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.CommandResult{
+		Success:     r.Success,
+		Message:     r.Message,
+		DataJson:    data,
+		ExecutionId: r.ExecutionID,
+		Error:       r.Error,
+	}, nil
+}
+
+func protoToCommandResult(p *pluginrpcpb.CommandResult) (CommandResult, error) {
+	if p == nil {
+		return CommandResult{}, nil
+	}
+	data, err := decodeJSONMap(p.GetDataJson())
+	if err != nil {
+		return CommandResult{}, err
+	}
+	return CommandResult{
+		Success:     p.GetSuccess(),
+		Message:     p.GetMessage(),
+		Data:        data,
+		ExecutionID: p.GetExecutionId(),
+		Error:       p.GetError(),
+	}, nil
+}
+
+func commandExecutionStatusToProto(s CommandExecutionStatus) (*pluginrpcpb.CommandExecutionStatus, error) {
+	out := &pluginrpcpb.CommandExecutionStatus{
+		ExecutionId: s.ExecutionID,
+		CommandId:   s.CommandID,
+		Status:      s.Status,
+		Progress:    int32(s.Progress),
+		Message:     s.Message,
+		StartedAt:   timestamppb.New(s.StartedAt),
+	}
+	if s.Result != nil {
+		r, err := commandResultToProto(*s.Result)
+		if err != nil {
+			return nil, err
+		}
+		out.Result = r
+	}
+	if s.CompletedAt != nil {
+		out.CompletedAt = timestamppb.New(*s.CompletedAt)
+	}
+	return out, nil
+}
+
+func protoToCommandExecutionStatus(p *pluginrpcpb.CommandExecutionStatus) (CommandExecutionStatus, error) {
+	if p == nil {
+		return CommandExecutionStatus{}, nil
+	}
+	out := CommandExecutionStatus{
+		ExecutionID: p.GetExecutionId(),
+		CommandID:   p.GetCommandId(),
+		Status:      p.GetStatus(),
+		Progress:    int(p.GetProgress()),
+		Message:     p.GetMessage(),
+	}
+	if ts := p.GetStartedAt(); ts != nil {
+		out.StartedAt = ts.AsTime()
+	}
+	if ts := p.GetCompletedAt(); ts != nil {
+		t := ts.AsTime()
+		out.CompletedAt = &t
+	}
+	if p.GetResult() != nil {
+		r, err := protoToCommandResult(p.GetResult())
+		if err != nil {
+			return CommandExecutionStatus{}, err
+		}
+		out.Result = &r
+	}
+	return out, nil
 }

@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	goplugin "github.com/hashicorp/go-plugin"
 )
 
 func TestCommandFromVerifiedRuntimeFileExecsBinary(t *testing.T) {
@@ -48,9 +50,21 @@ func TestNativeSubprocessClientConfigsSkipHostEnv(t *testing.T) {
 	if !pluginCfg.SkipHostEnv {
 		t.Fatal("native plugin ClientConfig.SkipHostEnv = false, want true")
 	}
+	if !pluginCfg.AutoMTLS {
+		t.Fatal("native plugin ClientConfig.AutoMTLS = false, want true (per-spawn IPC auth)")
+	}
+	if len(pluginCfg.AllowedProtocols) != 1 || pluginCfg.AllowedProtocols[0] != goplugin.ProtocolGRPC {
+		t.Fatalf("native plugin ClientConfig.AllowedProtocols = %v, want [grpc]", pluginCfg.AllowedProtocols)
+	}
 
 	connectorCfg := nativeConnectorClientConfig(exec.Command("test-connector"))
 	if !connectorCfg.SkipHostEnv {
 		t.Fatal("native connector ClientConfig.SkipHostEnv = false, want true")
+	}
+	if !connectorCfg.AutoMTLS {
+		t.Fatal("native connector ClientConfig.AutoMTLS = false, want true (per-spawn IPC auth)")
+	}
+	if len(connectorCfg.AllowedProtocols) != 1 || connectorCfg.AllowedProtocols[0] != goplugin.ProtocolGRPC {
+		t.Fatalf("native connector ClientConfig.AllowedProtocols = %v, want [grpc]", connectorCfg.AllowedProtocols)
 	}
 }

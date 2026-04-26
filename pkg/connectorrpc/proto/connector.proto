@@ -1,0 +1,72 @@
+// Squad Aegis native connector wire protocol.
+//
+// The host invokes the Connector service on the subprocess. Arbitrary-shape
+// data (config, invoke envelopes) travels as JSON-encoded bytes so the SDK
+// can keep the plugin-facing API as map[string]interface{}.
+syntax = "proto3";
+
+package squadaegis.connectorrpc.v1;
+
+option go_package = "go.codycody31.dev/squad-aegis/pkg/connectorrpc/proto;connectorrpcpb";
+
+service Connector {
+  rpc GetDefinition(Empty) returns (ConnectorDefinition);
+  rpc Initialize(InitializeRequest) returns (Empty);
+  rpc Start(Empty) returns (Empty);
+  rpc Stop(Empty) returns (Empty);
+  rpc GetStatus(Empty) returns (StatusResponse);
+  rpc GetConfig(Empty) returns (ConfigJSON);
+  rpc UpdateConfig(ConfigJSON) returns (Empty);
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+}
+
+message Empty {}
+
+message ConfigField {
+  string name = 1;
+  string description = 2;
+  bool required = 3;
+  string type = 4;
+  bytes default_json = 5;
+  bool sensitive = 6;
+  bytes options_json = 7;
+  repeated ConfigField nested = 8;
+}
+
+message ConfigSchema {
+  repeated ConfigField fields = 1;
+}
+
+message ConnectorDefinition {
+  string connector_id = 1;
+  ConfigSchema config_schema = 2;
+}
+
+message InitializeRequest {
+  // JSON-encoded config map.
+  bytes config_json = 1;
+  string instance_id = 2;
+}
+
+message StatusResponse {
+  string status = 1;
+}
+
+message ConfigJSON {
+  bytes config_json = 1;
+}
+
+message InvokeRequest {
+  string v = 1;
+  // JSON-encoded data map.
+  bytes data_json = 2;
+  int64 timeout_ms = 3;
+}
+
+message InvokeResponse {
+  string v = 1;
+  bool ok = 2;
+  // JSON-encoded data map.
+  bytes data_json = 3;
+  string error = 4;
+}

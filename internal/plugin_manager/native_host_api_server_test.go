@@ -1,6 +1,7 @@
 package plugin_manager
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -9,7 +10,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
-	"go.codycody31.dev/squad-aegis/pkg/pluginrpc"
+	pluginrpcpb "go.codycody31.dev/squad-aegis/pkg/pluginrpc/proto"
 )
 
 // recordingLogAPI is the minimal LogAPI surface for these tests.
@@ -36,27 +37,26 @@ func (r *recordingDiscordAPI) SendEmbed(string, *DiscordEmbed) (string, error) {
 }
 
 func TestHostAPIDispatcherRateLimiterBlocksExcessCalls(t *testing.T) {
-	log := &recordingLogAPI{}
+	logAPI := &recordingLogAPI{}
 	disp := &hostAPIDispatcher{
-		apis:    &PluginAPIs{LogAPI: log},
+		apis:    &PluginAPIs{LogAPI: logAPI},
 		limiter: rate.NewLimiter(rate.Every(time.Hour), 2), // 2 burst, 1 token/hour refill
 		sem:     make(chan struct{}, maxConcurrentHostAPICalls),
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{"message": "hi"})
-	req := pluginrpc.HostAPIRequest{Target: "log.Info", Payload: payload}
+	fields, _ := json.Marshal(map[string]interface{}{})
+	req := &pluginrpcpb.LogRequest{Message: "hi", FieldsJson: fields}
 
 	allowedCount := 0
 	limitedCount := 0
 	for i := 0; i < 5; i++ {
-		var reply pluginrpc.HostAPIResponse
-		if err := disp.Call(req, &reply); err != nil {
-			t.Fatalf("Call() transport error = %v", err)
-		}
-		if strings.Contains(reply.Error, "rate limit exceeded") {
+		_, err := disp.LogInfo(context.Background(), req)
+		if err == nil {
+			allowedCount++
+		} else if strings.Contains(err.Error(), "rate limit exceeded") {
 			limitedCount++
 		} else {
-			allowedCount++
+			t.Fatalf("LogInfo unexpected error: %v", err)
 		}
 	}
 	if allowedCount != 2 {
@@ -65,18 +65,18 @@ func TestHostAPIDispatcherRateLimiterBlocksExcessCalls(t *testing.T) {
 	if limitedCount != 3 {
 		t.Fatalf("limitedCount = %d, want 3", limitedCount)
 	}
-	if log.calls != 2 {
-		t.Fatalf("underlying LogAPI.Info calls = %d, want 2 (rate-limited calls should not reach the API)", log.calls)
+	if logAPI.calls != 2 {
+		t.Fatalf("underlying LogAPI.Info calls = %d, want 2 (rate-limited calls should not reach the API)", logAPI.calls)
 	}
 }
 
 func TestHostAPIDispatcherRejectsMissingDiscordEmbed(t *testing.T) {
 	tests := []struct {
 		name    string
-		payload string
+		payload []byte
 	}{
-		{name: "missing", payload: `{"channel_id":"123"}`},
-		{name: "null", payload: `{"channel_id":"123","embed":null}`},
+		{name: "missing", payload: nil},
+		{name: "empty object", payload: []byte(`{}`)},
 	}
 
 	for _, tt := range tests {
@@ -87,10 +87,10 @@ func TestHostAPIDispatcherRejectsMissingDiscordEmbed(t *testing.T) {
 				apis:     &PluginAPIs{DiscordAPI: discord},
 				sem:      make(chan struct{}, maxConcurrentHostAPICalls),
 			}
-
-			_, err := disp.dispatchDiscord("SendEmbed", json.RawMessage(tt.payload))
+			req := &pluginrpcpb.DiscordMessageRequest{ChannelId: "123", EmbedJson: tt.payload}
+			_, err := disp.DiscordSendEmbed(context.Background(), req)
 			if err == nil || !strings.Contains(err.Error(), "embed is required") {
-				t.Fatalf("dispatchDiscord() error = %v, want embed required error", err)
+				t.Fatalf("DiscordSendEmbed() error = %v, want embed required error", err)
 			}
 			if discord.sendEmbedCalls != 0 {
 				t.Fatalf("SendEmbed calls = %d, want 0", discord.sendEmbedCalls)
@@ -100,26 +100,22 @@ func TestHostAPIDispatcherRejectsMissingDiscordEmbed(t *testing.T) {
 }
 
 func TestHostAPIDispatcherNoLimiterAllowsBurst(t *testing.T) {
-	log := &recordingLogAPI{}
+	logAPI := &recordingLogAPI{}
 	disp := &hostAPIDispatcher{
-		apis: &PluginAPIs{LogAPI: log},
+		apis: &PluginAPIs{LogAPI: logAPI},
 		sem:  make(chan struct{}, maxConcurrentHostAPICalls),
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{"message": "hi"})
-	req := pluginrpc.HostAPIRequest{Target: "log.Info", Payload: payload}
+	fields, _ := json.Marshal(map[string]interface{}{})
+	req := &pluginrpcpb.LogRequest{Message: "hi", FieldsJson: fields}
 
 	for i := 0; i < 20; i++ {
-		var reply pluginrpc.HostAPIResponse
-		if err := disp.Call(req, &reply); err != nil {
-			t.Fatalf("Call() error = %v", err)
-		}
-		if reply.Error != "" {
-			t.Fatalf("Call() reply.Error = %q, want empty (rate limiter disabled)", reply.Error)
+		if _, err := disp.LogInfo(context.Background(), req); err != nil {
+			t.Fatalf("LogInfo() error = %v", err)
 		}
 	}
-	if log.calls != 20 {
-		t.Fatalf("underlying LogAPI.Info calls = %d, want 20", log.calls)
+	if logAPI.calls != 20 {
+		t.Fatalf("underlying LogAPI.Info calls = %d, want 20", logAPI.calls)
 	}
 }
 
@@ -157,7 +153,7 @@ func TestBuildHostAPIRateLimiterRespectsConfig(t *testing.T) {
 			}
 			allowed := 0
 			for i := 0; i < tc.wantAllowed+3; i++ {
-				if limiter.AllowN(nowFromLimiter(limiter), 1) {
+				if limiter.AllowN(time.Now(), 1) {
 					allowed++
 				}
 			}
@@ -166,11 +162,4 @@ func TestBuildHostAPIRateLimiterRespectsConfig(t *testing.T) {
 			}
 		})
 	}
-}
-
-// nowFromLimiter returns the limiter's current time anchor. Needed because
-// rate.Limiter.AllowN uses wall-clock and we want the calls to stack up
-// inside a single test tick.
-func nowFromLimiter(l *rate.Limiter) time.Time {
-	return time.Now()
 }
