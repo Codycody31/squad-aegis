@@ -42,3 +42,15 @@ func TestCommandFromVerifiedRuntimeFileExecsBinary(t *testing.T) {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
+
+func TestNativeSubprocessClientConfigsSkipHostEnv(t *testing.T) {
+	pluginCfg := nativePluginClientConfig(exec.Command("test-plugin"))
+	if !pluginCfg.SkipHostEnv {
+		t.Fatal("native plugin ClientConfig.SkipHostEnv = false, want true")
+	}
+
+	connectorCfg := nativeConnectorClientConfig(exec.Command("test-connector"))
+	if !connectorCfg.SkipHostEnv {
+		t.Fatal("native connector ClientConfig.SkipHostEnv = false, want true")
+	}
+}

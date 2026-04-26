@@ -22,8 +22,12 @@ func (api *connectorAPI) Call(ctx context.Context, connectorID string, req *Conn
 	return api.pm.invokeConnector(ctx, connectorID, req)
 }
 
-// shouldExposeConnectorAPI is true for bundled plugins; native plugins must declare api.connector in their manifest target.
-func (pm *PluginManager) shouldExposeConnectorAPI(pluginID string) bool {
+// shouldExposePluginAPI is true for bundled plugins; native plugins must
+// declare the matching api.* capability in their manifest target.
+func (pm *PluginManager) shouldExposePluginAPI(pluginID string, capability string) bool {
+	if pm == nil || pm.registry == nil {
+		return false
+	}
 	definition, err := pm.registry.GetPlugin(pluginID)
 	if err != nil {
 		return false
@@ -32,12 +36,21 @@ func (pm *PluginManager) shouldExposeConnectorAPI(pluginID string) bool {
 	if enriched.Source != PluginSourceNative {
 		return true
 	}
+	requestedCapability := strings.TrimSpace(capability)
+	if requestedCapability == "" {
+		return false
+	}
 	for _, capability := range enriched.RequiredCapabilities {
-		if strings.TrimSpace(capability) == NativePluginCapabilityAPIConnector {
+		if strings.TrimSpace(capability) == requestedCapability {
 			return true
 		}
 	}
 	return false
+}
+
+// shouldExposeConnectorAPI is true for bundled plugins; native plugins must declare api.connector in their manifest target.
+func (pm *PluginManager) shouldExposeConnectorAPI(pluginID string) bool {
+	return pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIConnector)
 }
 
 // ResolveConnectorInstanceKey maps a canonical or legacy connector reference to the instance key used in pm.connectors.

@@ -408,7 +408,10 @@ func (pm *PluginManager) maskAndEnrichPluginInstance(instance *PluginInstance) *
 		return nil
 	}
 
-	// Build a shallow copy field-by-field to avoid copying the sync.Mutex.
+	// Build a shallow copy field-by-field to avoid copying the sync.Mutex,
+	// and take the lock so Status/LastError are read atomically with writes
+	// from the unexpected-exit reporter.
+	instance.mu.Lock()
 	maskedInstance := &PluginInstance{
 		ID:                instance.ID,
 		ServerID:          instance.ServerID,
@@ -428,6 +431,7 @@ func (pm *PluginManager) maskAndEnrichPluginInstance(instance *PluginInstance) *
 		CreatedAt:         instance.CreatedAt,
 		UpdatedAt:         instance.UpdatedAt,
 	}
+	instance.mu.Unlock()
 	if definition, err := pm.registry.GetPlugin(instance.PluginID); err == nil {
 		enrichedDefinition := pm.enrichPluginDefinition(*definition)
 		maskedInstance.PluginName = enrichedDefinition.Name
@@ -436,7 +440,7 @@ func (pm *PluginManager) maskAndEnrichPluginInstance(instance *PluginInstance) *
 		maskedInstance.Distribution = enrichedDefinition.Distribution
 		maskedInstance.InstallState = enrichedDefinition.InstallState
 		maskedInstance.MinHostAPIVersion = enrichedDefinition.MinHostAPIVersion
-		maskedInstance.Config = enrichedDefinition.ConfigSchema.MaskSensitiveFields(instance.Config)
+		maskedInstance.Config = enrichedDefinition.ConfigSchema.MaskSensitiveFields(maskedInstance.Config)
 		return maskedInstance
 	}
 

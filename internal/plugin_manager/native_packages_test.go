@@ -251,6 +251,48 @@ func TestEnrichPluginDefinitionUsesNativePackageMetadata(t *testing.T) {
 	}
 }
 
+func TestMaskAndEnrichPluginInstanceConcurrentStatusSnapshot(t *testing.T) {
+	t.Parallel()
+
+	pm := &PluginManager{
+		registry:       NewPluginRegistry(),
+		nativePackages: make(map[string]*InstalledPluginPackage),
+	}
+	instance := &PluginInstance{
+		ID:       uuid.New(),
+		ServerID: uuid.New(),
+		PluginID: "com.example.concurrent",
+		Config: map[string]interface{}{
+			"secret": "value",
+		},
+		Status:  PluginStatusRunning,
+		Enabled: true,
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				instance.setError(PluginStatusError, "subprocess exited")
+				instance.clearError(PluginStatusRunning)
+			}
+		}
+	}()
+
+	for i := 0; i < 1000; i++ {
+		if masked := pm.maskAndEnrichPluginInstance(instance); masked == nil {
+			t.Fatal("maskAndEnrichPluginInstance() = nil")
+		}
+	}
+	close(stop)
+	<-done
+}
+
 func TestReadPluginBundleUsesManifestAndLibrary(t *testing.T) {
 	t.Parallel()
 

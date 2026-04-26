@@ -22,6 +22,19 @@ func (r *recordingLogAPI) Warn(string, map[string]interface{})         { r.calls
 func (r *recordingLogAPI) Error(string, error, map[string]interface{}) { r.calls++ }
 func (r *recordingLogAPI) Debug(string, map[string]interface{})        { r.calls++ }
 
+type recordingDiscordAPI struct {
+	sendEmbedCalls int
+}
+
+func (r *recordingDiscordAPI) SendMessage(string, string) (string, error) {
+	return "message-id", nil
+}
+
+func (r *recordingDiscordAPI) SendEmbed(string, *DiscordEmbed) (string, error) {
+	r.sendEmbedCalls++
+	return "message-id", nil
+}
+
 func TestHostAPIDispatcherRateLimiterBlocksExcessCalls(t *testing.T) {
 	log := &recordingLogAPI{}
 	disp := &hostAPIDispatcher{
@@ -54,6 +67,35 @@ func TestHostAPIDispatcherRateLimiterBlocksExcessCalls(t *testing.T) {
 	}
 	if log.calls != 2 {
 		t.Fatalf("underlying LogAPI.Info calls = %d, want 2 (rate-limited calls should not reach the API)", log.calls)
+	}
+}
+
+func TestHostAPIDispatcherRejectsMissingDiscordEmbed(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{name: "missing", payload: `{"channel_id":"123"}`},
+		{name: "null", payload: `{"channel_id":"123","embed":null}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			discord := &recordingDiscordAPI{}
+			disp := &hostAPIDispatcher{
+				pluginID: "com.example.plugin",
+				apis:     &PluginAPIs{DiscordAPI: discord},
+				sem:      make(chan struct{}, maxConcurrentHostAPICalls),
+			}
+
+			_, err := disp.dispatchDiscord("SendEmbed", json.RawMessage(tt.payload))
+			if err == nil || !strings.Contains(err.Error(), "embed is required") {
+				t.Fatalf("dispatchDiscord() error = %v, want embed required error", err)
+			}
+			if discord.sendEmbedCalls != 0 {
+				t.Fatalf("SendEmbed calls = %d, want 0", discord.sendEmbedCalls)
+			}
+		})
 	}
 }
 

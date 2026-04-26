@@ -77,17 +77,7 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 	if err := applySubprocessHardening(cmd); err != nil {
 		return nil, fmt.Errorf("failed to harden plugin subprocess: %w", err)
 	}
-	client := goplugin.NewClient(&goplugin.ClientConfig{
-		HandshakeConfig: pluginrpc.Handshake,
-		Plugins:         pluginrpc.PluginMap(nil),
-		Cmd:             cmd,
-		Managed:         false,
-		Logger: hclog.New(&hclog.LoggerOptions{
-			Name:   "aegis-native-plugin",
-			Level:  hclog.Warn,
-			Output: io.Discard,
-		}),
-	})
+	client := goplugin.NewClient(nativePluginClientConfig(cmd))
 
 	rpcClient, err := client.Client()
 	if err != nil {
@@ -108,6 +98,21 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 	}
 
 	return &pluginSubprocessHandle{client: client, rpc: stub}, nil
+}
+
+func nativePluginClientConfig(cmd *exec.Cmd) *goplugin.ClientConfig {
+	return &goplugin.ClientConfig{
+		HandshakeConfig: pluginrpc.Handshake,
+		Plugins:         pluginrpc.PluginMap(nil),
+		Cmd:             cmd,
+		Managed:         false,
+		SkipHostEnv:     true,
+		Logger: hclog.New(&hclog.LoggerOptions{
+			Name:   "aegis-native-plugin",
+			Level:  hclog.Warn,
+			Output: io.Discard,
+		}),
+	}
 }
 
 // verifyRuntimeBinaryChecksum opens the runtime file with O_NOFOLLOW and

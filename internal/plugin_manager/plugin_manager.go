@@ -997,15 +997,30 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 }
 
 func (pm *PluginManager) createPluginAPIs(ctx context.Context, serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string) *PluginAPIs {
-	apis := &PluginAPIs{
-		ServerAPI:   NewServerAPI(serverID, pm.db, pm.rconManager),
-		DatabaseAPI: NewDatabaseAPI(instanceID, pm.db),
-		RuleAPI:     NewRuleAPI(serverID, pm.db),
-		RconAPI:     NewRconAPI(serverID, pm.db, pm.rconManager, pm.clickhouseClient, pm.banSyncFunc),
-		AdminAPI:    NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID),
-		EventAPI:    NewEventAPI(ctx, serverID, instanceID, pluginName, pm.eventManager),
-		DiscordAPI:  pm.getDiscordAPI(),
-		LogAPI:      NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager),
+	apis := &PluginAPIs{}
+	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIServer) {
+		apis.ServerAPI = NewServerAPI(serverID, pm.db, pm.rconManager)
+	}
+	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIDatabase) {
+		apis.DatabaseAPI = NewDatabaseAPI(instanceID, pm.db)
+	}
+	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIRule) {
+		apis.RuleAPI = NewRuleAPI(serverID, pm.db)
+	}
+	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIRCON) {
+		apis.RconAPI = NewRconAPI(serverID, pm.db, pm.rconManager, pm.clickhouseClient, pm.banSyncFunc)
+	}
+	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIAdmin) {
+		apis.AdminAPI = NewAdminAPI(serverID, pm.db, pm.rconManager, instanceID)
+	}
+	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIEvent) {
+		apis.EventAPI = NewEventAPI(ctx, serverID, instanceID, pluginName, pm.eventManager)
+	}
+	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIDiscord) {
+		apis.DiscordAPI = pm.getDiscordAPI()
+	}
+	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPILog) {
+		apis.LogAPI = NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager)
 	}
 	if pm.shouldExposeConnectorAPI(pluginID) {
 		apis.ConnectorAPI = newConnectorAPI(pm)

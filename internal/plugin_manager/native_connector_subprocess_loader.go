@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -49,17 +50,7 @@ func launchNativeConnectorSubprocess(runtimePath, expectedSHA256 string) (*conne
 	if err := applySubprocessHardening(cmd); err != nil {
 		return nil, fmt.Errorf("failed to harden connector subprocess: %w", err)
 	}
-	client := goplugin.NewClient(&goplugin.ClientConfig{
-		HandshakeConfig: connectorrpc.Handshake,
-		Plugins:         connectorrpc.PluginMap(nil),
-		Cmd:             cmd,
-		Managed:         false,
-		Logger: hclog.New(&hclog.LoggerOptions{
-			Name:   "aegis-native-connector",
-			Level:  hclog.Warn,
-			Output: io.Discard,
-		}),
-	})
+	client := goplugin.NewClient(nativeConnectorClientConfig(cmd))
 
 	rpcClient, err := client.Client()
 	if err != nil {
@@ -80,6 +71,21 @@ func launchNativeConnectorSubprocess(runtimePath, expectedSHA256 string) (*conne
 	}
 
 	return &connectorSubprocessHandle{client: client, rpc: stub}, nil
+}
+
+func nativeConnectorClientConfig(cmd *exec.Cmd) *goplugin.ClientConfig {
+	return &goplugin.ClientConfig{
+		HandshakeConfig: connectorrpc.Handshake,
+		Plugins:         connectorrpc.PluginMap(nil),
+		Cmd:             cmd,
+		Managed:         false,
+		SkipHostEnv:     true,
+		Logger: hclog.New(&hclog.LoggerOptions{
+			Name:   "aegis-native-connector",
+			Level:  hclog.Warn,
+			Output: io.Discard,
+		}),
+	}
 }
 
 // subprocessConnectorShim adapts an out-of-process connector onto the

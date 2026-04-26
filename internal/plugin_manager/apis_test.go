@@ -1,6 +1,7 @@
 package plugin_manager
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"testing"
@@ -42,6 +43,78 @@ func TestNativePluginHostCapabilitiesIncludesScopedPluginAPIs(t *testing.T) {
 
 	if len(want) != 0 {
 		t.Fatalf("NativePluginHostCapabilities() missing expected capabilities: %v", want)
+	}
+}
+
+func TestCreatePluginAPIsScopesNativeManifestCapabilities(t *testing.T) {
+	t.Parallel()
+
+	const pluginID = "com.example.scoped"
+	pm := &PluginManager{
+		registry:          NewPluginRegistry(),
+		connectorRegistry: NewConnectorRegistry(),
+		connectors:        make(map[string]*ConnectorInstance),
+		nativePackages: map[string]*InstalledPluginPackage{
+			pluginID: {
+				PluginID:             pluginID,
+				Name:                 "Scoped Native Plugin",
+				Source:               PluginSourceNative,
+				InstallState:         PluginInstallStateReady,
+				RequiredCapabilities: []string{NativePluginCapabilityAPILog},
+			},
+		},
+	}
+	if err := pm.registry.RegisterPlugin(PluginDefinition{
+		ID:             pluginID,
+		Source:         PluginSourceNative,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("RegisterPlugin() error = %v", err)
+	}
+
+	apis := pm.createPluginAPIs(context.Background(), uuid.New(), uuid.New(), "Scoped Native Plugin", pluginID, "info")
+	if apis.LogAPI == nil {
+		t.Fatal("LogAPI = nil, want exposed api.log capability")
+	}
+	if apis.ServerAPI != nil ||
+		apis.DatabaseAPI != nil ||
+		apis.RuleAPI != nil ||
+		apis.RconAPI != nil ||
+		apis.AdminAPI != nil ||
+		apis.EventAPI != nil ||
+		apis.DiscordAPI != nil ||
+		apis.ConnectorAPI != nil {
+		t.Fatalf("createPluginAPIs() exposed undeclared native capabilities: %+v", apis)
+	}
+}
+
+func TestCreatePluginAPIsKeepsBundledPluginsUnscoped(t *testing.T) {
+	t.Parallel()
+
+	const pluginID = "com.example.bundled"
+	pm := &PluginManager{
+		registry:          NewPluginRegistry(),
+		connectorRegistry: NewConnectorRegistry(),
+		connectors:        make(map[string]*ConnectorInstance),
+	}
+	if err := pm.registry.RegisterPlugin(PluginDefinition{
+		ID:             pluginID,
+		Source:         PluginSourceBundled,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("RegisterPlugin() error = %v", err)
+	}
+
+	apis := pm.createPluginAPIs(context.Background(), uuid.New(), uuid.New(), "Bundled Plugin", pluginID, "info")
+	if apis.ServerAPI == nil ||
+		apis.DatabaseAPI == nil ||
+		apis.RuleAPI == nil ||
+		apis.RconAPI == nil ||
+		apis.AdminAPI == nil ||
+		apis.EventAPI == nil ||
+		apis.LogAPI == nil ||
+		apis.ConnectorAPI == nil {
+		t.Fatalf("createPluginAPIs() scoped a bundled plugin unexpectedly: %+v", apis)
 	}
 }
 

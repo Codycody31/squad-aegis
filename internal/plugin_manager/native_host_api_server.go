@@ -719,6 +719,9 @@ func (d *hostAPIDispatcher) dispatchDiscord(method string, payload json.RawMessa
 		if err != nil {
 			return nil, err
 		}
+		if embed == nil {
+			return nil, errors.New("discord embed is required")
+		}
 		id, err := d.apis.DiscordAPI.SendEmbed(args.ChannelID, embed)
 		if err != nil {
 			return nil, err
