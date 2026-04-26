@@ -377,6 +377,27 @@ const onConnectorBundleSelected = (event: Event) => {
   selectedConnectorBundle.value = input.files?.[0] || null;
 };
 
+// pendingUnsafeConnectorBundle holds a bundle the operator tried to upload
+// that came back from the backend with needs_confirm_unsafe=true. The
+// confirm dialog uses this to show context and re-submit with the
+// confirm_unsafe=true query param when the operator acknowledges the risk.
+const pendingUnsafeConnectorBundle = ref<File | null>(null);
+const pendingUnsafeConnectorMessage = ref<string>("");
+
+const submitConnectorUpload = async (bundle: File, confirmUnsafe: boolean) => {
+  const formData = new FormData();
+  formData.append("bundle", bundle);
+
+  const url = confirmUnsafe
+    ? "/api/connectors/packages/upload?confirm_unsafe=true"
+    : "/api/connectors/packages/upload";
+
+  return useAuthFetchImperative<any>(url, {
+    method: "POST",
+    body: formData,
+  });
+};
+
 const uploadConnectorBundle = async () => {
   if (!selectedConnectorBundle.value) {
     toast({
@@ -388,14 +409,9 @@ const uploadConnectorBundle = async () => {
   }
 
   uploadingPackage.value = true;
+  const bundle = selectedConnectorBundle.value;
   try {
-    const formData = new FormData();
-    formData.append("bundle", selectedConnectorBundle.value);
-
-    const response = await useAuthFetchImperative<any>("/api/connectors/packages/upload", {
-      method: "POST",
-      body: formData,
-    });
+    const response = await submitConnectorUpload(bundle, false);
 
     toast({
       title: "Uploaded",
@@ -405,6 +421,18 @@ const uploadConnectorBundle = async () => {
     selectedConnectorBundle.value = null;
     await Promise.all([loadConnectorPackages(), loadAvailableConnectors()]);
   } catch (error: any) {
+    // Backend signals "this bundle is unsigned and you have to opt in" via
+    // needs_confirm_unsafe in the structured error data. Promote that into
+    // a confirm dialog instead of just a toast (M-17 UX fix).
+    const needsConfirm = !!error?.data?.data?.needs_confirm_unsafe;
+    if (needsConfirm) {
+      pendingUnsafeConnectorBundle.value = bundle;
+      pendingUnsafeConnectorMessage.value =
+        error?.data?.message ||
+        "This connector bundle is unsigned. Confirm to install anyway.";
+      uploadingPackage.value = false;
+      return;
+    }
     console.error("Failed to upload connector bundle:", error);
     toast({
       title: "Error",
@@ -414,6 +442,39 @@ const uploadConnectorBundle = async () => {
   } finally {
     uploadingPackage.value = false;
   }
+};
+
+const confirmUnsafeConnectorUpload = async () => {
+  const bundle = pendingUnsafeConnectorBundle.value;
+  if (!bundle) {
+    return;
+  }
+  uploadingPackage.value = true;
+  try {
+    const response = await submitConnectorUpload(bundle, true);
+    toast({
+      title: "Uploaded",
+      description: response.message || "Connector package uploaded successfully",
+    });
+    selectedConnectorBundle.value = null;
+    pendingUnsafeConnectorBundle.value = null;
+    pendingUnsafeConnectorMessage.value = "";
+    await Promise.all([loadConnectorPackages(), loadAvailableConnectors()]);
+  } catch (error: any) {
+    console.error("Failed to upload unsigned connector bundle:", error);
+    toast({
+      title: "Error",
+      description: error.data?.message || "Failed to upload connector bundle",
+      variant: "destructive",
+    });
+  } finally {
+    uploadingPackage.value = false;
+  }
+};
+
+const cancelUnsafeConnectorUpload = () => {
+  pendingUnsafeConnectorBundle.value = null;
+  pendingUnsafeConnectorMessage.value = "";
 };
 
 const confirmDeleteConnectorPackage = (pkg: ConnectorPackage) => {
@@ -978,6 +1039,40 @@ onMounted(async () => {
         <DialogFooter>
           <Button variant="outline" @click="cancelDeleteConnectorPackage">Cancel</Button>
           <Button variant="destructive" @click="deleteConnectorPackage">Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      :open="pendingUnsafeConnectorBundle !== null"
+      @update:open="(open) => !open && cancelUnsafeConnectorUpload()"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Install unsigned connector?</DialogTitle>
+          <DialogDescription>
+            <p class="mb-2">
+              This connector bundle is <strong>unsigned</strong> or its signature
+              cannot be verified against the configured trust store.
+            </p>
+            <p class="mb-2 text-xs">
+              {{ pendingUnsafeConnectorMessage }}
+            </p>
+            <p class="text-xs">
+              Installing unsigned bundles bypasses signature verification. Only
+              proceed for trusted local builds or sandboxed test environments.
+            </p>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="cancelUnsafeConnectorUpload">Cancel</Button>
+          <Button
+            variant="destructive"
+            :disabled="uploadingPackage"
+            @click="confirmUnsafeConnectorUpload"
+          >
+            {{ uploadingPackage ? "Installing…" : "Install unsigned" }}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

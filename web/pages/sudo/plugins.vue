@@ -156,6 +156,25 @@ const onBundleSelected = (event: Event) => {
   selectedBundle.value = input.files?.[0] || null;
 };
 
+// pendingUnsafeBundle holds an unsigned bundle the operator must explicitly
+// confirm before installation. Backend signals this via needs_confirm_unsafe
+// in the structured error data; we promote that into a confirm dialog
+// rather than silently failing the toast (M-17 UX fix).
+const pendingUnsafeBundle = ref<File | null>(null);
+const pendingUnsafeMessage = ref<string>("");
+
+const submitPluginUpload = async (bundle: File, confirmUnsafe: boolean) => {
+  const formData = new FormData();
+  formData.append("bundle", bundle);
+  const url = confirmUnsafe
+    ? "/api/plugins/upload?confirm_unsafe=true"
+    : "/api/plugins/upload";
+  return useAuthFetchImperative(url, {
+    method: "POST",
+    body: formData,
+  });
+};
+
 const uploadBundle = async () => {
   if (!selectedBundle.value) {
     toast({
@@ -167,14 +186,9 @@ const uploadBundle = async () => {
   }
 
   uploading.value = true;
+  const bundle = selectedBundle.value;
   try {
-    const formData = new FormData();
-    formData.append("bundle", selectedBundle.value);
-
-    await useAuthFetchImperative("/api/plugins/upload", {
-      method: "POST",
-      body: formData,
-    });
+    await submitPluginUpload(bundle, false);
 
     toast({
       title: "Uploaded",
@@ -183,6 +197,15 @@ const uploadBundle = async () => {
     selectedBundle.value = null;
     await fetchInstalledPlugins();
   } catch (error: any) {
+    const needsConfirm = !!error?.data?.data?.needs_confirm_unsafe;
+    if (needsConfirm) {
+      pendingUnsafeBundle.value = bundle;
+      pendingUnsafeMessage.value =
+        error?.data?.message ||
+        "This plugin bundle is unsigned. Confirm to install anyway.";
+      uploading.value = false;
+      return;
+    }
     console.error("Failed to upload plugin bundle:", error);
     toast({
       title: "Error",
@@ -192,6 +215,39 @@ const uploadBundle = async () => {
   } finally {
     uploading.value = false;
   }
+};
+
+const confirmUnsafePluginUpload = async () => {
+  const bundle = pendingUnsafeBundle.value;
+  if (!bundle) {
+    return;
+  }
+  uploading.value = true;
+  try {
+    await submitPluginUpload(bundle, true);
+    toast({
+      title: "Uploaded",
+      description: "Plugin bundle uploaded successfully",
+    });
+    selectedBundle.value = null;
+    pendingUnsafeBundle.value = null;
+    pendingUnsafeMessage.value = "";
+    await fetchInstalledPlugins();
+  } catch (error: any) {
+    console.error("Failed to upload unsigned plugin bundle:", error);
+    toast({
+      title: "Error",
+      description: error.data?.message || "Failed to upload plugin bundle",
+      variant: "destructive",
+    });
+  } finally {
+    uploading.value = false;
+  }
+};
+
+const cancelUnsafePluginUpload = () => {
+  pendingUnsafeBundle.value = null;
+  pendingUnsafeMessage.value = "";
 };
 
 onMounted(async () => {
@@ -378,6 +434,40 @@ onMounted(async () => {
         <DialogFooter>
           <Button variant="outline" @click="cancelDeleteInstalledPlugin">Cancel</Button>
           <Button variant="destructive" @click="deleteInstalledPlugin">Delete</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      :open="pendingUnsafeBundle !== null"
+      @update:open="(open) => !open && cancelUnsafePluginUpload()"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Install unsigned plugin?</DialogTitle>
+          <DialogDescription>
+            <p class="mb-2">
+              This plugin bundle is <strong>unsigned</strong> or its signature
+              cannot be verified against the configured trust store.
+            </p>
+            <p class="mb-2 text-xs">
+              {{ pendingUnsafeMessage }}
+            </p>
+            <p class="text-xs">
+              Installing unsigned bundles bypasses signature verification. Only
+              proceed for trusted local builds or sandboxed test environments.
+            </p>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="cancelUnsafePluginUpload">Cancel</Button>
+          <Button
+            variant="destructive"
+            :disabled="uploading"
+            @click="confirmUnsafePluginUpload"
+          >
+            {{ uploading ? "Installing…" : "Install unsigned" }}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
