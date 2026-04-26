@@ -70,6 +70,16 @@ type Struct struct {
 		// this list is treated as unsigned regardless of signature validity.
 		TrustedSigningKeys string `default:""`
 
+		// RevokedKeyIDsPath points at a JSON file of the form
+		// {"revoked_key_ids": ["ops-key-2025-q4", ...]}. Empty disables the
+		// CRL. The file is re-read every RevokedKeyIDsRefreshSeconds.
+		RevokedKeyIDsPath           string `default:""`
+		RevokedKeyIDsRefreshSeconds int    `default:"300"`
+
+		// SignatureClockSkewSeconds widens the expiry check window so brief
+		// host clock drift does not quarantine a freshly-signed bundle.
+		SignatureClockSkewSeconds int `default:"300"`
+
 		// Subprocess rate limiting: per-instance HostAPI token bucket. A
 		// compromised plugin that floods the host with RconAPI/LogAPI calls
 		// is throttled to HostAPIRatePerSec sustained with HostAPIBurst peak.

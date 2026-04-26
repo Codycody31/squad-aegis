@@ -135,11 +135,14 @@ type InstalledConnectorPackage struct {
 	RuntimePath          string                   `json:"runtime_path,omitempty"`
 	Manifest             ConnectorPackageManifest `json:"manifest"`
 	ManifestJSON         json.RawMessage          `json:"-"`
+	SignedManifestJSON   []byte                   `json:"-"`
 	ManifestSignature    []byte                   `json:"-"`
 	ManifestPublicKey    []byte                   `json:"-"`
 	SignatureVerified    bool                     `json:"signature_verified"`
 	Unsafe               bool                     `json:"unsafe"`
-	Checksum             string                   `json:"checksum"`
+	SignatureKeyID       string                   `json:"signature_key_id,omitempty"`
+	SignatureSignedAt    time.Time                `json:"signature_signed_at,omitempty"`
+	SignatureExpiresAt   time.Time                `json:"signature_expires_at,omitempty"`
 	MinHostAPIVersion    int                      `json:"min_host_api_version"`
 	RequiredCapabilities []string                 `json:"required_capabilities,omitempty"`
 	TargetOS             string                   `json:"target_os"`
@@ -211,6 +214,9 @@ func cloneInstalledConnectorPackage(pkg *InstalledConnectorPackage) *InstalledCo
 	cloned.RequiredCapabilities = cloneRequiredCapabilities(pkg.RequiredCapabilities)
 	if len(pkg.ManifestJSON) > 0 {
 		cloned.ManifestJSON = append(json.RawMessage(nil), pkg.ManifestJSON...)
+	}
+	if len(pkg.SignedManifestJSON) > 0 {
+		cloned.SignedManifestJSON = append([]byte(nil), pkg.SignedManifestJSON...)
 	}
 	if len(pkg.ManifestSignature) > 0 {
 		cloned.ManifestSignature = append([]byte(nil), pkg.ManifestSignature...)
@@ -306,31 +312,18 @@ func (pm *PluginManager) loadNativeConnectorPackage(pkg *InstalledConnectorPacka
 	}
 	pkg.RuntimePath = safePath
 
-	// For signature-verified packages, derive the expected runtime SHA from
-	// the signed manifest target. Unsigned packages have no signature anchor;
-	// the stored checksum remains the only available reference.
-	var expectedSHA string
-	if pkg.SignatureVerified {
-		verifiedTarget, err := selectedConnectorManifestTarget(pkg.Manifest)
-		if err != nil {
-			return fmt.Errorf("connector manifest target selection failed: %w", err)
-		}
-		expectedSHA = strings.TrimSpace(verifiedTarget.SHA256)
-		if expectedSHA == "" {
-			return fmt.Errorf("connector manifest target is missing sha256")
-		}
-		if pkg.Checksum != "" && !strings.EqualFold(pkg.Checksum, expectedSHA) {
-			log.Warn().Str("connector_id", pkg.ConnectorID).Str("expected", expectedSHA).Str("stored", pkg.Checksum).Msg("Quarantining native connector: stored checksum does not match signed manifest target")
-			if pkg.RuntimePath != "" {
-				removeRuntimeFile(safePath)
-			}
-			return fmt.Errorf("connector checksum %q does not match signed manifest target %q", pkg.Checksum, expectedSHA)
-		}
-	} else {
-		expectedSHA = strings.TrimSpace(pkg.Checksum)
-		if expectedSHA == "" {
-			return fmt.Errorf("connector checksum is missing")
-		}
+	// Derive the expected runtime SHA from the manifest target. For signed
+	// packages this hash was anchored by the signature; for unsigned
+	// packages the install pipeline pinned manifest.targets[i].SHA256 to the
+	// library bytes before persisting, so the manifest is always the source
+	// of truth.
+	verifiedTarget, err := selectedConnectorManifestTarget(pkg.Manifest)
+	if err != nil {
+		return fmt.Errorf("connector manifest target selection failed: %w", err)
+	}
+	expectedSHA := strings.TrimSpace(verifiedTarget.SHA256)
+	if expectedSHA == "" {
+		return fmt.Errorf("connector manifest target is missing sha256")
 	}
 
 	// Reconstruct the target snapshot from the stored compatibility fields.
@@ -450,10 +443,12 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 		return nil, fmt.Errorf("failed to create connector runtime directory: %w", err)
 	}
 
-	manifest, selectedTarget, manifestBytes, signatureBytes, publicKeyBytes, libraryBytes, libraryName, err := readConnectorBundle(archive, size)
+	parts, err := readConnectorBundle(archive, size)
 	if err != nil {
 		return nil, err
 	}
+	manifest := parts.Manifest
+	selectedTarget := parts.SelectedTarget
 
 	if err := validateConnectorManifest(&manifest); err != nil {
 		return nil, err
@@ -468,20 +463,34 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 		}
 	}
 
-	checksum := fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
-	if !strings.EqualFold(selectedTarget.SHA256, checksum) {
-		return nil, fmt.Errorf("connector checksum mismatch")
+	libraryHash := fmt.Sprintf("%x", sha256.Sum256(parts.LibraryBytes))
+	if !strings.EqualFold(selectedTarget.SHA256, libraryHash) {
+		return nil, fmt.Errorf("connector library bytes do not match manifest target sha256 (manifest=%s, library=%s)", selectedTarget.SHA256, libraryHash)
 	}
-
-	signatureVerified := false
-	if len(signatureBytes) > 0 {
-		signatureVerified, err = verifyManifestSignature(manifestBytes, signatureBytes, publicKeyBytes)
-		if err != nil {
-			return nil, err
+	for index := range manifest.Targets {
+		if manifest.Targets[index].LibraryPath == selectedTarget.LibraryPath &&
+			manifest.Targets[index].TargetOS == selectedTarget.TargetOS &&
+			manifest.Targets[index].TargetArch == selectedTarget.TargetArch &&
+			manifest.Targets[index].MinHostAPIVersion == selectedTarget.MinHostAPIVersion {
+			manifest.Targets[index].SHA256 = libraryHash
 		}
 	}
+	selectedTarget.SHA256 = libraryHash
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-marshal manifest after sha256 pinning: %w", err)
+	}
+
+	verification, err := verifyManifestSignature(parts.SignedPayload, manifestBytes, parts.SignatureBytes, parts.PublicKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+	signatureVerified := verification.Verified
 
 	if distribution == PluginDistributionSideload && !signatureVerified && !allowUnsafeSideload() {
+		if len(parts.SignatureBytes) > 0 && verification.Payload.KeyID != "" {
+			return nil, fmt.Errorf("connector signature rejected: %s", formatVerificationFailure(verification.Payload))
+		}
 		return nil, fmt.Errorf("unsigned sideloads are disabled")
 	}
 
@@ -491,7 +500,7 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 	}
 
 	connectorDir := filepath.Join(connectorRuntimeDir(), idSegment, versionSegment)
-	runtimeBase := sanitizeRuntimeSegment(filepath.Base(libraryName))
+	runtimeBase := sanitizeRuntimeSegment(filepath.Base(parts.LibraryName))
 	if runtimeBase == "" {
 		runtimeBase = idSegment
 	}
@@ -503,13 +512,15 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 
 	// Same-bytes short circuit before writing.
 	if loadedVersion, loaded := pm.getLoadedNativeConnectorVersion(manifest.ConnectorID); loaded && loadedVersion == manifest.Version {
-		if existing := pm.getNativeConnectorPackage(manifest.ConnectorID); existing != nil && existing.Checksum == checksum {
-			log.Info().Str("connector_id", manifest.ConnectorID).Str("version", manifest.Version).Msg("Skipping native connector re-install: bytes match already-loaded package")
-			return existing, nil
+		if existing := pm.getNativeConnectorPackage(manifest.ConnectorID); existing != nil {
+			if existingTarget, targetErr := selectedConnectorManifestTarget(existing.Manifest); targetErr == nil && strings.EqualFold(existingTarget.SHA256, libraryHash) {
+				log.Info().Str("connector_id", manifest.ConnectorID).Str("version", manifest.Version).Msg("Skipping native connector re-install: bytes match already-loaded package")
+				return existing, nil
+			}
 		}
 	}
 
-	if err := writeRuntimeLibrary(runtimePath, libraryBytes); err != nil {
+	if err := writeRuntimeLibrary(runtimePath, parts.LibraryBytes); err != nil {
 		return nil, err
 	}
 	installCommitted := false
@@ -525,24 +536,27 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 
 	now := time.Now()
 	pkg := &InstalledConnectorPackage{
-		ConnectorID:       manifest.ConnectorID,
-		Name:              manifest.Name,
-		Description:       manifest.Description,
-		Version:           manifest.Version,
-		Source:            PluginSourceNative,
-		Distribution:      distribution,
-		Official:          false,
-		InstallState:      PluginInstallStateReady,
-		RuntimePath:       runtimePath,
-		Manifest:          manifest,
-		ManifestJSON:      append(json.RawMessage(nil), manifestBytes...),
-		ManifestSignature: append([]byte(nil), signatureBytes...),
-		ManifestPublicKey: append([]byte(nil), publicKeyBytes...),
-		SignatureVerified: signatureVerified,
-		Unsafe:            !signatureVerified,
-		Checksum:          checksum,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ConnectorID:        manifest.ConnectorID,
+		Name:               manifest.Name,
+		Description:        manifest.Description,
+		Version:            manifest.Version,
+		Source:             PluginSourceNative,
+		Distribution:       distribution,
+		Official:           false,
+		InstallState:       PluginInstallStateReady,
+		RuntimePath:        runtimePath,
+		Manifest:           manifest,
+		ManifestJSON:       append(json.RawMessage(nil), manifestBytes...),
+		SignedManifestJSON: append([]byte(nil), parts.SignedPayload...),
+		ManifestSignature:  append([]byte(nil), parts.SignatureBytes...),
+		ManifestPublicKey:  append([]byte(nil), parts.PublicKeyBytes...),
+		SignatureVerified:  signatureVerified,
+		Unsafe:             !signatureVerified,
+		SignatureKeyID:     verification.Payload.KeyID,
+		SignatureSignedAt:  verification.Payload.SignedAt,
+		SignatureExpiresAt: verification.Payload.ExpiresAt,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	applyInstalledConnectorTarget(pkg, selectedTarget)
 

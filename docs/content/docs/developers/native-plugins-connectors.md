@@ -675,6 +675,7 @@ Every bundle is a zip archive:
 ```text
 my-extension.zip
 ├── manifest.json
+├── manifest.signed.json  # signed bundles only — see Bundle Signing
 ├── manifest.sig          # signed bundles only
 ├── manifest.pub          # signed bundles only
 └── bin/
@@ -839,14 +840,55 @@ This repository includes signing helpers:
 ./scripts/sign-connector-bundle.sh
 ```
 
-The signing tool expects a base64-encoded Ed25519 private key file. It produces:
+The signing tool expects a base64-encoded Ed25519 private key file plus two operator-supplied flags:
 
-- `manifest.sig` - Ed25519 signature over the canonical manifest JSON
-- `manifest.pub` - the corresponding public key
+- `-key-id` (required) - operator-chosen identifier for the signing key (for example `ops-key-2026-q1`). Recorded in the signed payload and matched against the host CRL when revoking a leaked key.
+- `-valid-for` (default `8760h` / 1 year) - how long the signature should remain valid. Accepts any Go duration.
+
+It produces three sibling files in the bundle:
+
+- `manifest.signed.json` - canonical wrapper carrying the manifest plus `key_id`, `signed_at`, and `expires_at`. This is the byte sequence the signature actually covers.
+- `manifest.sig` - Ed25519 signature over `manifest.signed.json`.
+- `manifest.pub` - the corresponding public key.
+
+`manifest.json` is left untouched in the bundle for human inspection. At verification time Aegis canonicalizes both `manifest.signed.json` and `manifest.json` and rejects the bundle when they disagree, so a tampered display manifest cannot lie to operators.
 
 **Trust configuration:** The public key must be listed in `plugins.trusted_signing_keys` on the Aegis host. A valid signature from an unknown key is rejected.
 
-**Key rotation:** Aegis re-verifies stored signatures at server start. Removing a key from the trust list invalidates all bundles signed with that key.
+**Verification rules.** A bundle is `signature_verified=true` only when:
+
+1. `manifest.pub` is in the trust store.
+2. The signature checks out over the canonical `manifest.signed.json` bytes.
+3. `manifest.signed.json.manifest` matches `manifest.json`.
+4. `now < expires_at + plugins.signature_clock_skew_seconds`.
+5. `key_id` is not in the host CRL.
+
+When any of these fails, `signature_verified` flips to `false` and the host applies the same `allow_unsafe_sideload` gate it would for an unsigned bundle.
+
+### Key Rotation and Revocation
+
+Operators rotate signing keys by **issuing new bundles signed under a fresh `key_id`** and adding the new public key to `plugins.trusted_signing_keys`. The old key can be removed from the trust list once dependent bundles have been re-signed; existing installs that no longer re-verify are quarantined to `error` state at the next host start.
+
+To **revoke a leaked private key** without a code release, point the host at a CRL file:
+
+```yaml
+plugins:
+  revoked_key_ids_path: /etc/squad-aegis/revoked-key-ids.json
+  revoked_key_ids_refresh_seconds: 300
+```
+
+The file format is a flat JSON list:
+
+```json
+{
+  "revoked_key_ids": [
+    "ops-key-2025-q4",
+    "ops-key-2026-q1-leaked"
+  ]
+}
+```
+
+Aegis reads the file at start and re-reads it on the configured interval (minimum 5 seconds, default 300). Any installed plugin or connector whose `key_id` appears in the list is quarantined the next time `loadInstalledPluginPackages`/`loadInstalledConnectorPackages` runs - either at host start or after a fresh upload of the revocation list. Operators must re-sign and re-upload affected bundles under a new `key_id` to restore service.
 
 ---
 

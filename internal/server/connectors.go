@@ -189,14 +189,15 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 	}
 
 	s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "connector:package:upload", gin.H{
-		"connector_id":       pkg.ConnectorID,
-		"version":            pkg.Version,
-		"checksum":           pkg.Checksum,
-		"signature_verified": pkg.SignatureVerified,
-		"install_state":      pkg.InstallState,
-		"filename":           file.Filename,
-		"client_ip":          clientIP,
-		"user_agent":         userAgent,
+		"connector_id":         pkg.ConnectorID,
+		"version":              pkg.Version,
+		"signature_verified":   pkg.SignatureVerified,
+		"signature_key_id":     pkg.SignatureKeyID,
+		"signature_expires_at": pkg.SignatureExpiresAt,
+		"install_state":        pkg.InstallState,
+		"filename":             file.Filename,
+		"client_ip":            clientIP,
+		"user_agent":           userAgent,
 	})
 
 	message := "Connector package uploaded successfully"

@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"go.codycody31.dev/squad-aegis/internal/plugin_signing"
@@ -121,10 +122,16 @@ func primaryManifestLibraryPath(manifest PluginPackageManifest) string {
 func buildPluginArchive(t *testing.T, manifest PluginPackageManifest, libraryName string, libraryRaw []byte, signatureRaw []byte, publicKeyRaw []byte) []byte {
 	t.Helper()
 
-	return buildPluginArchiveWithLibraries(t, manifest, map[string][]byte{libraryName: libraryRaw}, signatureRaw, publicKeyRaw)
+	return buildPluginArchiveWithLibraries(t, manifest, map[string][]byte{libraryName: libraryRaw}, nil, signatureRaw, publicKeyRaw)
 }
 
-func buildPluginArchiveWithLibraries(t *testing.T, manifest PluginPackageManifest, libraries map[string][]byte, signatureRaw []byte, publicKeyRaw []byte) []byte {
+func buildSignedPluginArchive(t *testing.T, manifest PluginPackageManifest, libraryName string, libraryRaw []byte, signedPayload []byte, signatureRaw []byte, publicKeyRaw []byte) []byte {
+	t.Helper()
+
+	return buildPluginArchiveWithLibraries(t, manifest, map[string][]byte{libraryName: libraryRaw}, signedPayload, signatureRaw, publicKeyRaw)
+}
+
+func buildPluginArchiveWithLibraries(t *testing.T, manifest PluginPackageManifest, libraries map[string][]byte, signedPayloadRaw []byte, signatureRaw []byte, publicKeyRaw []byte) []byte {
 	t.Helper()
 
 	if len(libraries) == 0 {
@@ -164,6 +171,15 @@ func buildPluginArchiveWithLibraries(t *testing.T, manifest PluginPackageManifes
 		t.Fatalf("manifestFile.Write() error = %v", err)
 	}
 
+	if len(signedPayloadRaw) > 0 {
+		signedFile, err := writer.Create(pluginSignedManifestFile)
+		if err != nil {
+			t.Fatalf("writer.Create(signed payload) error = %v", err)
+		}
+		if _, err := signedFile.Write(signedPayloadRaw); err != nil {
+			t.Fatalf("signedFile.Write() error = %v", err)
+		}
+	}
 	if len(signatureRaw) > 0 {
 		signatureFile, err := writer.Create(pluginSignatureFile)
 		if err != nil {
@@ -338,25 +354,25 @@ func TestReadPluginBundleUsesManifestAndLibrary(t *testing.T) {
 		t.Fatalf("writer.Close() error = %v", err)
 	}
 
-	manifest, selectedTarget, manifestRaw, _, _, libraryRaw, libraryName, err := readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+	parts, err := readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
 	if err != nil {
 		t.Fatalf("readPluginBundle() error = %v", err)
 	}
 
-	if got, want := manifest.PluginID, "com.example.bundle"; got != want {
+	if got, want := parts.Manifest.PluginID, "com.example.bundle"; got != want {
 		t.Fatalf("manifest.PluginID = %q, want %q", got, want)
 	}
-	if got, want := libraryName, "bin/plugin.so"; got != want {
+	if got, want := parts.LibraryName, "bin/plugin.so"; got != want {
 		t.Fatalf("libraryName = %q, want %q", got, want)
 	}
-	if got, want := string(libraryRaw), "fake-so-contents"; got != want {
+	if got, want := string(parts.LibraryBytes), "fake-so-contents"; got != want {
 		t.Fatalf("libraryRaw = %q, want %q", got, want)
 	}
-	if got, want := selectedTarget.TargetOS, runtime.GOOS; got != want {
+	if got, want := parts.SelectedTarget.TargetOS, runtime.GOOS; got != want {
 		t.Fatalf("selectedTarget.TargetOS = %q, want %q", got, want)
 	}
-	if len(manifestRaw) == 0 {
-		t.Fatal("manifestRaw should not be empty")
+	if len(parts.ManifestBytes) == 0 {
+		t.Fatal("manifestBytes should not be empty")
 	}
 }
 
@@ -388,20 +404,20 @@ func TestReadPluginBundleSelectsMatchingTargetFromMatrix(t *testing.T) {
 	archive := buildPluginArchiveWithLibraries(t, manifest, map[string][]byte{
 		"bin/host-plugin.so":  []byte("host-so"),
 		"bin/arm64-plugin.so": []byte("arm-so"),
-	}, nil, nil)
+	}, nil, nil, nil)
 
-	_, selectedTarget, _, _, _, libraryRaw, libraryName, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
+	parts, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
 		t.Fatalf("readPluginBundle() error = %v", err)
 	}
 
-	if got, want := libraryName, "bin/host-plugin.so"; got != want {
+	if got, want := parts.LibraryName, "bin/host-plugin.so"; got != want {
 		t.Fatalf("libraryName = %q, want %q", got, want)
 	}
-	if got, want := string(libraryRaw), "host-so"; got != want {
+	if got, want := string(parts.LibraryBytes), "host-so"; got != want {
 		t.Fatalf("libraryRaw = %q, want %q", got, want)
 	}
-	if got, want := selectedTarget.LibraryPath, "bin/host-plugin.so"; got != want {
+	if got, want := parts.SelectedTarget.LibraryPath, "bin/host-plugin.so"; got != want {
 		t.Fatalf("selectedTarget.LibraryPath = %q, want %q", got, want)
 	}
 }
@@ -685,7 +701,6 @@ func TestDeleteInstalledPluginPackageCleansUpLoadedPlugin(t *testing.T) {
 				Source:       PluginSourceNative,
 				Distribution: PluginDistributionSideload,
 				InstallState: PluginInstallStateReady,
-				Checksum:     "checksum",
 			},
 		},
 		loadedNativePlugins: map[string]string{
@@ -764,7 +779,6 @@ func TestInstallPluginBundleAfterDeletingLoadedPackageIsCleanInstall(t *testing.
 				Distribution: PluginDistributionSideload,
 				InstallState: PluginInstallStateReady,
 				RuntimePath:  "/tmp/com.example.plugin.so",
-				Checksum:     "old-checksum",
 			},
 		},
 		loadedNativePlugins: map[string]string{
@@ -845,7 +859,7 @@ func TestInstallPluginBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 			if got, want := fmt.Sprint(args[7].Value), string(PluginInstallStatePendingRestart); got != want {
 				t.Fatalf("persisted install state = %q, want %q", got, want)
 			}
-			if got, want := fmt.Sprint(args[17].Value), nativePluginPendingRestartMessage; got != want {
+			if got, want := fmt.Sprint(args[16].Value), nativePluginPendingRestartMessage; got != want {
 				t.Fatalf("persisted last error = %q, want %q", got, want)
 			}
 			return driver.RowsAffected(1), nil
@@ -889,7 +903,6 @@ func TestInstallPluginBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 				Distribution: PluginDistributionSideload,
 				InstallState: PluginInstallStateReady,
 				RuntimePath:  oldRuntimePath,
-				Checksum:     "old-checksum",
 			},
 		},
 		loadedNativePlugins: map[string]string{
@@ -980,7 +993,7 @@ func TestReadPluginBundleRejectsUnsafePath(t *testing.T) {
 		t.Fatalf("writer.Close() error = %v", err)
 	}
 
-	_, _, _, _, _, _, _, err = readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+	_, err = readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
 	if err == nil {
 		t.Fatal("readPluginBundle() error = nil, want error")
 	}
@@ -1008,7 +1021,7 @@ func TestReadPluginBundleRejectsSymlink(t *testing.T) {
 		t.Fatalf("writer.Close() error = %v", err)
 	}
 
-	_, _, _, _, _, _, _, err = readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+	_, err = readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
 	if err == nil {
 		t.Fatal("readPluginBundle() error = nil, want error")
 	}
@@ -1023,12 +1036,12 @@ func TestReadPluginBundleRejectsSignatureWithoutPublicKey(t *testing.T) {
 	manifest := testManifest("com.example.signature-only")
 	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), []byte("fake-so-contents"), []byte("signature-only"), nil)
 
-	_, _, _, _, _, _, _, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
+	_, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
 	if err == nil {
 		t.Fatal("readPluginBundle() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "must include manifest.sig and manifest.pub together") {
-		t.Fatalf("readPluginBundle() error = %q, want manifest.sig and manifest.pub together", err)
+	if !strings.Contains(err.Error(), "must include") || !strings.Contains(err.Error(), "manifest.sig") {
+		t.Fatalf("readPluginBundle() error = %q, want manifest.signed.json/manifest.sig/manifest.pub together rejection", err)
 	}
 }
 
@@ -1040,7 +1053,7 @@ func TestReadPluginBundleRejectsOversizedUncompressedLibrary(t *testing.T) {
 	manifest := testManifest("com.example.oversized-library")
 	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), bytes.Repeat([]byte("a"), 1025), nil, nil)
 
-	_, _, _, _, _, _, _, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
+	_, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
 	if err == nil {
 		t.Fatal("readPluginBundle() error = nil, want error")
 	}
@@ -1055,16 +1068,17 @@ func TestReadPluginBundleRejectsExcessTotalUncompressedSize(t *testing.T) {
 	})
 
 	manifest := testManifest("com.example.total-limit")
-	archive := buildPluginArchive(
+	archive := buildSignedPluginArchive(
 		t,
 		manifest,
 		primaryManifestLibraryPath(manifest),
 		bytes.Repeat([]byte("a"), 700*1024),
+		bytes.Repeat([]byte("d"), 700*1024),
 		bytes.Repeat([]byte("b"), 600*1024),
 		bytes.Repeat([]byte("c"), 500*1024),
 	)
 
-	_, _, _, _, _, _, _, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
+	_, err := readPluginBundle(bytes.NewReader(archive), int64(len(archive)))
 	if err == nil {
 		t.Fatal("readPluginBundle() error = nil, want error")
 	}
@@ -1138,20 +1152,29 @@ func TestVerifyManifestSignatureAcceptsCanonicalizedManifest(t *testing.T) {
 	setPluginTestConfig(t, func(cfg *config.Struct) {
 		cfg.Plugins.TrustedSigningKeys = trustedKey
 	})
+	resetRevokedKeyIDsForTest()
 
 	manifestRaw := []byte(`{"version":"1.0.0","plugin_id":"com.example.signed","nested":{"b":2,"a":1}}`)
-	signatureRaw, publicKeyRaw, err := plugin_signing.SignManifest(manifestRaw, privateKey)
+	signedAt := time.Now().UTC()
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestRaw, "ops-key", signedAt, signedAt.Add(time.Hour))
 	if err != nil {
-		t.Fatalf("plugin_signing.SignManifest() error = %v", err)
+		t.Fatalf("BuildSignedPayload() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
+	if err != nil {
+		t.Fatalf("SignSignedPayload() error = %v", err)
 	}
 
 	reorderedManifestRaw := []byte(`{"nested":{"a":1,"b":2},"plugin_id":"com.example.signed","version":"1.0.0"}`)
-	ok, err := verifyManifestSignature(reorderedManifestRaw, signatureRaw, publicKeyRaw)
+	verification, err := verifyManifestSignature(signedPayload, reorderedManifestRaw, signatureRaw, publicKeyRaw)
 	if err != nil {
 		t.Fatalf("verifyManifestSignature() error = %v", err)
 	}
-	if !ok {
+	if !verification.Verified {
 		t.Fatal("verifyManifestSignature() = false, want true")
+	}
+	if verification.Payload.KeyID != "ops-key" {
+		t.Fatalf("verification.Payload.KeyID = %q, want %q", verification.Payload.KeyID, "ops-key")
 	}
 }
 
@@ -1165,21 +1188,95 @@ func TestVerifyManifestSignatureRejectsUntrustedKey(t *testing.T) {
 	})
 
 	manifestRaw := []byte(`{"plugin_id":"com.example.signed"}`)
-	signatureRaw, publicKeyRaw, err := plugin_signing.SignManifest(manifestRaw, privateKey)
+	signedAt := time.Now().UTC()
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestRaw, "ops-key", signedAt, signedAt.Add(time.Hour))
 	if err != nil {
-		t.Fatalf("plugin_signing.SignManifest() error = %v", err)
+		t.Fatalf("BuildSignedPayload() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
+	if err != nil {
+		t.Fatalf("SignSignedPayload() error = %v", err)
 	}
 
-	// Untrusted key should yield (false, nil) — i.e. "not verified" — rather
-	// than a hard error. This way the AllowUnsafeSideload gate can apply
-	// uniformly to "unsigned" and "signed by wrong key" without inverting
-	// the security gradient.
-	ok, err := verifyManifestSignature(manifestRaw, signatureRaw, publicKeyRaw)
+	// Untrusted key should yield verified=false with no error — i.e. "not
+	// verified" — rather than a hard error. This way the AllowUnsafeSideload
+	// gate can apply uniformly to "unsigned" and "signed by wrong key"
+	// without inverting the security gradient.
+	verification, err := verifyManifestSignature(signedPayload, manifestRaw, signatureRaw, publicKeyRaw)
 	if err != nil {
 		t.Fatalf("verifyManifestSignature() error = %v, want nil for untrusted-key", err)
 	}
-	if ok {
-		t.Fatal("verifyManifestSignature() = true, want false for untrusted-key")
+	if verification.Verified {
+		t.Fatal("verifyManifestSignature() verified = true, want false for untrusted-key")
+	}
+}
+
+func TestVerifyManifestSignatureRejectsExpiredSignature(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey() error = %v", err)
+	}
+	trustedKey, err := plugin_signing.EncodePublicKeyString(publicKey)
+	if err != nil {
+		t.Fatalf("EncodePublicKeyString() error = %v", err)
+	}
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.TrustedSigningKeys = trustedKey
+	})
+	resetRevokedKeyIDsForTest()
+
+	manifestRaw := []byte(`{"plugin_id":"com.example.expired","version":"1.0.0"}`)
+	signedAt := time.Now().UTC().Add(-48 * time.Hour)
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestRaw, "ops-key", signedAt, signedAt.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("BuildSignedPayload() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
+	if err != nil {
+		t.Fatalf("SignSignedPayload() error = %v", err)
+	}
+
+	verification, err := verifyManifestSignature(signedPayload, manifestRaw, signatureRaw, publicKeyRaw)
+	if err != nil {
+		t.Fatalf("verifyManifestSignature() error = %v", err)
+	}
+	if verification.Verified {
+		t.Fatal("verifyManifestSignature() verified = true, want false for expired signature")
+	}
+}
+
+func TestVerifyManifestSignatureRejectsRevokedKeyID(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey() error = %v", err)
+	}
+	trustedKey, err := plugin_signing.EncodePublicKeyString(publicKey)
+	if err != nil {
+		t.Fatalf("EncodePublicKeyString() error = %v", err)
+	}
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.TrustedSigningKeys = trustedKey
+	})
+	resetRevokedKeyIDsForTest("ops-key-leaked")
+	t.Cleanup(func() { resetRevokedKeyIDsForTest() })
+
+	manifestRaw := []byte(`{"plugin_id":"com.example.revoked","version":"1.0.0"}`)
+	signedAt := time.Now().UTC()
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestRaw, "ops-key-leaked", signedAt, signedAt.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("BuildSignedPayload() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
+	if err != nil {
+		t.Fatalf("SignSignedPayload() error = %v", err)
+	}
+
+	verification, err := verifyManifestSignature(signedPayload, manifestRaw, signatureRaw, publicKeyRaw)
+	if err != nil {
+		t.Fatalf("verifyManifestSignature() error = %v", err)
+	}
+	if verification.Verified {
+		t.Fatal("verifyManifestSignature() verified = true, want false for revoked key_id")
 	}
 }
 
@@ -1262,8 +1359,10 @@ func TestLoadInstalledPluginPackagesClearsStaleNativeRuntimeState(t *testing.T) 
 			return &testSQLRows{
 				columns: []string{
 					"plugin_id", "name", "description", "version", "source", "distribution", "official", "install_state",
-					"runtime_path", "manifest_json", "signature_verified", "unsafe", "checksum", "min_host_api_version",
+					"runtime_path", "manifest_json", "signature_verified", "unsafe", "min_host_api_version",
 					"required_capabilities", "target_os", "target_arch", "last_error", "created_at", "updated_at",
+					"manifest_signature", "manifest_public_key", "signed_manifest_json", "signature_key_id",
+					"signature_signed_at", "signature_expires_at",
 				},
 			}, nil
 		},
@@ -1409,7 +1508,10 @@ func TestValidateRuntimePathWithinRootRejectsEscape(t *testing.T) {
 
 // TestLoadNativePluginPackageRejectsOnDiskChecksumMismatch regression-tests
 // H7: if the on-disk library is swapped between install and load, the loader
-// must refuse to dlopen it.
+// must refuse to dlopen it. The expected SHA is now derived from the
+// manifest target (which the install pipeline anchors to the verified
+// library bytes), so this test stages a manifest target SHA that no longer
+// matches the on-disk file.
 func TestLoadNativePluginPackageRejectsOnDiskChecksumMismatch(t *testing.T) {
 	requireLinuxNativePlugins(t)
 
@@ -1435,12 +1537,13 @@ func TestLoadNativePluginPackageRejectsOnDiskChecksumMismatch(t *testing.T) {
 		loadedNativePlugins: make(map[string]string),
 	}
 
-	// Checksum recorded at install time for DIFFERENT content.
+	manifest := testManifest("com.example.tamper")
+	manifest.Targets[0].SHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte("original-contents")))
 	pkg := &InstalledPluginPackage{
 		PluginID:    "com.example.tamper",
 		Version:     "1.0.0",
 		RuntimePath: runtimePath,
-		Checksum:    fmt.Sprintf("%x", sha256.Sum256([]byte("original-contents"))),
+		Manifest:    manifest,
 	}
 
 	err := pm.loadNativePluginPackage(pkg)
@@ -1478,7 +1581,7 @@ func TestInstallPluginBundleRejectsZipWithTooManyEntries(t *testing.T) {
 		t.Fatalf("writer.Close() error = %v", err)
 	}
 
-	_, _, _, _, _, _, _, err := readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+	_, err := readPluginBundle(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
 	if err == nil {
 		t.Fatal("readPluginBundle() error = nil, want entry-count rejection")
 	}
@@ -1489,7 +1592,8 @@ func TestInstallPluginBundleRejectsZipWithTooManyEntries(t *testing.T) {
 
 // TestInstallPluginBundleAcceptsTrustedSignedBundle regression-tests the
 // trusted-key happy path: a signed bundle with manifest.pub in
-// trusted_signing_keys must install with SignatureVerified=true.
+// trusted_signing_keys must install with SignatureVerified=true and
+// preserve the signed-payload metadata (key_id, signed_at, expires_at).
 func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
 	requireLinuxNativePlugins(t)
 
@@ -1508,6 +1612,7 @@ func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
 		cfg.Plugins.AllowUnsafeSideload = false
 		cfg.Plugins.TrustedSigningKeys = trustedKey
 	})
+	resetRevokedKeyIDsForTest()
 
 	libraryBytes := []byte("fake-so-contents")
 	manifest := testManifest("com.example.signed")
@@ -1517,12 +1622,18 @@ func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	signatureRaw, publicKeyRaw, err := plugin_signing.SignManifest(manifestRaw, privateKey)
+	signedAt := time.Now().UTC()
+	expiresAt := signedAt.Add(24 * time.Hour)
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestRaw, "ops-key", signedAt, expiresAt)
 	if err != nil {
-		t.Fatalf("SignManifest() error = %v", err)
+		t.Fatalf("BuildSignedPayload() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
+	if err != nil {
+		t.Fatalf("SignSignedPayload() error = %v", err)
 	}
 
-	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), libraryBytes, signatureRaw, publicKeyRaw)
+	archive := buildSignedPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), libraryBytes, signedPayload, signatureRaw, publicKeyRaw)
 
 	previousLoader := nativePluginVerifiedLoader
 	nativePluginVerifiedLoader = func(string, string, PluginPackageManifest, PluginPackageTarget) (PluginDefinition, error) {
@@ -1568,5 +1679,268 @@ func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
 	}
 	if pkg.InstallState != PluginInstallStateReady {
 		t.Fatalf("pkg.InstallState = %q, want ready", pkg.InstallState)
+	}
+	if pkg.SignatureKeyID != "ops-key" {
+		t.Fatalf("pkg.SignatureKeyID = %q, want %q", pkg.SignatureKeyID, "ops-key")
+	}
+	if !pkg.SignatureExpiresAt.Equal(expiresAt) {
+		t.Fatalf("pkg.SignatureExpiresAt = %v, want %v", pkg.SignatureExpiresAt, expiresAt)
+	}
+}
+
+// TestInstallPluginBundleRejectsExpiredSignature regression-tests that a
+// signed bundle whose signature has expired is rejected at install time
+// when AllowUnsafeSideload is off.
+func TestInstallPluginBundleRejectsExpiredSignature(t *testing.T) {
+	requireLinuxNativePlugins(t)
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey() error = %v", err)
+	}
+	trustedKey, err := plugin_signing.EncodePublicKeyString(publicKey)
+	if err != nil {
+		t.Fatalf("EncodePublicKeyString() error = %v", err)
+	}
+
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = t.TempDir()
+		cfg.Plugins.AllowUnsafeSideload = false
+		cfg.Plugins.TrustedSigningKeys = trustedKey
+	})
+	resetRevokedKeyIDsForTest()
+
+	libraryBytes := []byte("fake-so-contents")
+	manifest := testManifest("com.example.expired")
+	manifest.Targets[0].SHA256 = fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
+
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	signedAt := time.Now().UTC().Add(-48 * time.Hour)
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestRaw, "ops-key", signedAt, signedAt.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("BuildSignedPayload() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
+	if err != nil {
+		t.Fatalf("SignSignedPayload() error = %v", err)
+	}
+
+	archive := buildSignedPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), libraryBytes, signedPayload, signatureRaw, publicKeyRaw)
+
+	pm := &PluginManager{
+		registry:            NewPluginRegistry(),
+		plugins:             make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
+		nativePackages:      make(map[string]*InstalledPluginPackage),
+		loadedNativePlugins: make(map[string]string),
+	}
+
+	_, err = pm.installPluginBundle(context.Background(), bytes.NewReader(archive), int64(len(archive)), "expired.zip", PluginDistributionSideload)
+	if err == nil {
+		t.Fatal("installPluginBundle() error = nil, want expired-signature rejection")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("installPluginBundle() error = %q, want expiration rejection", err)
+	}
+}
+
+// TestInstallPluginBundleRejectsRevokedKeyID regression-tests that a
+// signed bundle whose key_id is in the CRL is rejected at install time
+// when AllowUnsafeSideload is off.
+func TestInstallPluginBundleRejectsRevokedKeyID(t *testing.T) {
+	requireLinuxNativePlugins(t)
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey() error = %v", err)
+	}
+	trustedKey, err := plugin_signing.EncodePublicKeyString(publicKey)
+	if err != nil {
+		t.Fatalf("EncodePublicKeyString() error = %v", err)
+	}
+
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = t.TempDir()
+		cfg.Plugins.AllowUnsafeSideload = false
+		cfg.Plugins.TrustedSigningKeys = trustedKey
+	})
+	resetRevokedKeyIDsForTest("ops-key-leaked")
+	t.Cleanup(func() { resetRevokedKeyIDsForTest() })
+
+	libraryBytes := []byte("fake-so-contents")
+	manifest := testManifest("com.example.revoked")
+	manifest.Targets[0].SHA256 = fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
+
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	signedAt := time.Now().UTC()
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestRaw, "ops-key-leaked", signedAt, signedAt.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("BuildSignedPayload() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
+	if err != nil {
+		t.Fatalf("SignSignedPayload() error = %v", err)
+	}
+
+	archive := buildSignedPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), libraryBytes, signedPayload, signatureRaw, publicKeyRaw)
+
+	pm := &PluginManager{
+		registry:            NewPluginRegistry(),
+		plugins:             make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
+		nativePackages:      make(map[string]*InstalledPluginPackage),
+		loadedNativePlugins: make(map[string]string),
+	}
+
+	_, err = pm.installPluginBundle(context.Background(), bytes.NewReader(archive), int64(len(archive)), "revoked.zip", PluginDistributionSideload)
+	if err == nil {
+		t.Fatal("installPluginBundle() error = nil, want revoked-key rejection")
+	}
+	if !strings.Contains(err.Error(), "revoked") {
+		t.Fatalf("installPluginBundle() error = %q, want revoked-key rejection", err)
+	}
+}
+
+// TestLoadInstalledPluginPackagesQuarantinesRevokedKeyOnBoot regression-tests
+// that a previously-trusted package whose key_id is now in the CRL is
+// quarantined at boot rather than silently re-loaded.
+func TestLoadInstalledPluginPackagesQuarantinesRevokedKeyOnBoot(t *testing.T) {
+	requireLinuxNativePlugins(t)
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey() error = %v", err)
+	}
+	trustedKey, err := plugin_signing.EncodePublicKeyString(publicKey)
+	if err != nil {
+		t.Fatalf("EncodePublicKeyString() error = %v", err)
+	}
+
+	runtimeDir := t.TempDir()
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = runtimeDir
+		cfg.Plugins.TrustedSigningKeys = trustedKey
+	})
+	resetRevokedKeyIDsForTest("ops-key-leaked")
+	t.Cleanup(func() { resetRevokedKeyIDsForTest() })
+
+	pluginSubdir := filepath.Join(runtimeDir, "com.example.crl", "1.0.0")
+	if err := os.MkdirAll(pluginSubdir, 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	runtimePath := filepath.Join(pluginSubdir, "com.example.crl.so")
+	libraryBytes := []byte("crl-runtime")
+	if err := os.WriteFile(runtimePath, libraryBytes, 0o640); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manifest := testManifest("com.example.crl")
+	manifest.Targets[0].SHA256 = fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	signedAt := time.Now().UTC()
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestRaw, "ops-key-leaked", signedAt, signedAt.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("BuildSignedPayload() error = %v", err)
+	}
+	signatureRaw, publicKeyRaw, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
+	if err != nil {
+		t.Fatalf("SignSignedPayload() error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	var lastSavedState string
+	var lastSavedError string
+
+	db := openTestSQLDB(t, &testSQLDriver{
+		queryContext: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
+			if !strings.Contains(query, "FROM plugin_packages") {
+				return nil, fmt.Errorf("unexpected query: %s", query)
+			}
+			return &testSQLRows{
+				columns: []string{
+					"plugin_id", "name", "description", "version", "source", "distribution", "official", "install_state",
+					"runtime_path", "manifest_json", "signature_verified", "unsafe", "min_host_api_version",
+					"required_capabilities", "target_os", "target_arch", "last_error", "created_at", "updated_at",
+					"manifest_signature", "manifest_public_key", "signed_manifest_json", "signature_key_id",
+					"signature_signed_at", "signature_expires_at",
+				},
+				values: [][]driver.Value{{
+					"com.example.crl",
+					manifest.Name,
+					manifest.Description,
+					manifest.Version,
+					string(PluginSourceNative),
+					string(PluginDistributionSideload),
+					false,
+					string(PluginInstallStateReady),
+					runtimePath,
+					manifestRaw,
+					true,
+					false,
+					int64(NativePluginHostAPIVersion),
+					[]byte("[]"),
+					manifest.Targets[0].TargetOS,
+					manifest.Targets[0].TargetArch,
+					"",
+					now,
+					now,
+					string(signatureRaw),
+					string(publicKeyRaw),
+					string(signedPayload),
+					"ops-key-leaked",
+					signedAt,
+					signedAt.Add(time.Hour),
+				}},
+			}, nil
+		},
+		execContext: func(query string, args []driver.NamedValue) (driver.Result, error) {
+			if !strings.Contains(query, "INSERT INTO plugin_packages") {
+				return nil, fmt.Errorf("unexpected exec: %s", query)
+			}
+			lastSavedState = fmt.Sprint(args[7].Value)
+			lastSavedError = fmt.Sprint(args[16].Value)
+			return driver.RowsAffected(1), nil
+		},
+	})
+
+	pm := &PluginManager{
+		db:                  db,
+		registry:            NewPluginRegistry(),
+		nativePackages:      make(map[string]*InstalledPluginPackage),
+		loadedNativePlugins: make(map[string]string),
+	}
+
+	if err := pm.loadInstalledPluginPackages(); err != nil {
+		t.Fatalf("loadInstalledPluginPackages() error = %v", err)
+	}
+
+	pkg := pm.getNativePackage("com.example.crl")
+	if pkg == nil {
+		t.Fatal("getNativePackage() = nil, want quarantined package")
+	}
+	if pkg.InstallState != PluginInstallStateError {
+		t.Fatalf("pkg.InstallState = %q, want %q", pkg.InstallState, PluginInstallStateError)
+	}
+	if pkg.SignatureVerified {
+		t.Fatal("pkg.SignatureVerified = true, want false after CRL revocation")
+	}
+	if !strings.Contains(pkg.LastError, "revoked") {
+		t.Fatalf("pkg.LastError = %q, want revoked", pkg.LastError)
+	}
+	if lastSavedState != string(PluginInstallStateError) {
+		t.Fatalf("persisted install state = %q, want %q", lastSavedState, PluginInstallStateError)
+	}
+	if !strings.Contains(lastSavedError, "revoked") {
+		t.Fatalf("persisted last error = %q, want revoked", lastSavedError)
 	}
 }

@@ -141,6 +141,7 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 	checksum := fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
 
 	manifest := testManifest("com.example.pending")
+	manifest.Targets[0].SHA256 = checksum
 	manifestRaw, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
@@ -169,7 +170,6 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 					"manifest_json",
 					"signature_verified",
 					"unsafe",
-					"checksum",
 					"min_host_api_version",
 					"required_capabilities",
 					"target_os",
@@ -179,6 +179,10 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 					"updated_at",
 					"manifest_signature",
 					"manifest_public_key",
+					"signed_manifest_json",
+					"signature_key_id",
+					"signature_signed_at",
+					"signature_expires_at",
 				},
 				values: [][]driver.Value{{
 					"com.example.pending",
@@ -193,7 +197,6 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 					manifestRaw,
 					true,
 					false,
-					checksum,
 					int64(NativePluginHostAPIVersion),
 					[]byte("[]"),
 					manifest.Targets[0].TargetOS,
@@ -203,6 +206,10 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 					now,
 					"",
 					"",
+					"",
+					"",
+					nil,
+					nil,
 				}},
 			}, nil
 		},
@@ -215,7 +222,7 @@ func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *t
 			if got, want := fmt.Sprint(args[7].Value), string(PluginInstallStateReady); got != want {
 				t.Fatalf("persisted install state = %q, want %q", got, want)
 			}
-			if got, want := fmt.Sprint(args[17].Value), ""; got != want {
+			if got, want := fmt.Sprint(args[16].Value), ""; got != want {
 				t.Fatalf("persisted last error = %q, want empty string", got)
 			}
 

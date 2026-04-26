@@ -182,7 +182,7 @@ func TestInstallConnectorBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 			if got, want := fmt.Sprint(args[7].Value), string(PluginInstallStatePendingRestart); got != want {
 				t.Fatalf("persisted install state = %q, want %q", got, want)
 			}
-			if got, want := fmt.Sprint(args[17].Value), nativeConnectorPendingRestartMessage; got != want {
+			if got, want := fmt.Sprint(args[16].Value), nativeConnectorPendingRestartMessage; got != want {
 				t.Fatalf("persisted last error = %q, want %q", got, want)
 			}
 			return driver.RowsAffected(1), nil
@@ -220,7 +220,6 @@ func TestInstallConnectorBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 				Distribution: PluginDistributionSideload,
 				InstallState: PluginInstallStateReady,
 				RuntimePath:  oldRuntimePath,
-				Checksum:     "old-checksum",
 				Manifest: ConnectorPackageManifest{
 					ConnectorID: "com.example.connector",
 				},

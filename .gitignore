@@ -31,4 +31,4 @@ go.work.sum
 
 dist/
 /plugins/
-/connectors/
+/connectors/.claude/

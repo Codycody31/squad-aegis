@@ -513,14 +513,6 @@ func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[
 
 	storageKey := definition.ConnectorInstanceStorageKey()
 
-	pm.connectorMu.Lock()
-	defer pm.connectorMu.Unlock()
-
-	// Check if connector already exists
-	if _, exists := pm.connectors[storageKey]; exists {
-		return nil, fmt.Errorf("connector %s already exists", storageKey)
-	}
-
 	// Validate config for creation (ensures sensitive required fields are provided)
 	if err := definition.ConfigSchema.ValidateForCreation(config); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
@@ -550,19 +542,42 @@ func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[
 		UpdatedAt: time.Now(),
 	}
 
-	// Store instance
+	// Reserve the connector slot under connectorMu (uniqueness check + insert)
+	// before doing any subprocess RPC, then release the lock so other
+	// connector reads/lookups can proceed while Initialize/Start runs.
+	// Holding connectorMu across Initialize would block every other
+	// connector operation for seconds, and on a wedged subprocess for up
+	// to 30s.
+	pm.connectorMu.Lock()
+	if _, exists := pm.connectors[storageKey]; exists {
+		pm.connectorMu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("connector %s already exists", storageKey)
+	}
 	pm.connectors[storageKey] = instance
+	pm.connectorMu.Unlock()
 
-	// Save to database
+	// Save to database with the lock released. The connector is in the map
+	// in Stopped state, so concurrent invokeConnector calls will see it but
+	// reject because Status != Running.
 	if err := pm.saveConnectorToDatabase(instance); err != nil {
-		delete(pm.connectors, storageKey)
+		pm.connectorMu.Lock()
+		if current, ok := pm.connectors[storageKey]; ok && current == instance {
+			delete(pm.connectors, storageKey)
+		}
+		pm.connectorMu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("failed to save connector to database: %w", err)
 	}
 
-	// Initialize and start connector
+	// Initialize and start connector without holding connectorMu so the
+	// subprocess RPC does not stall every concurrent connector operation.
 	if err := pm.initializeConnectorInstance(instance); err != nil {
-		delete(pm.connectors, storageKey)
+		pm.connectorMu.Lock()
+		if current, ok := pm.connectors[storageKey]; ok && current == instance {
+			delete(pm.connectors, storageKey)
+		}
+		pm.connectorMu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("failed to initialize connector instance: %w", err)
 	}
@@ -650,15 +665,19 @@ func (pm *PluginManager) DeleteConnectorInstance(connectorID string) error {
 		return fmt.Errorf("connector %s not found", connectorID)
 	}
 
+	// Snapshot the instance under connectorMu, then release before the Stop
+	// RPC (which can take up to 30s on a wedged subprocess). Holding
+	// connectorMu across that call would block every other connector
+	// operation.
 	pm.connectorMu.Lock()
-	defer pm.connectorMu.Unlock()
-
 	instance, exists := pm.connectors[storageKey]
 	if !exists {
+		pm.connectorMu.Unlock()
 		return fmt.Errorf("connector %s not found", connectorID)
 	}
+	pm.connectorMu.Unlock()
 
-	// Stop connector
+	// Stop connector (may RPC into subprocess; performed without connectorMu held).
 	if err := pm.stopConnectorInstance(instance); err != nil {
 		log.Error().
 			Str("connectorID", storageKey).
@@ -666,7 +685,8 @@ func (pm *PluginManager) DeleteConnectorInstance(connectorID string) error {
 			Msg("Failed to stop connector instance during deletion")
 	}
 
-	// Remove from database
+	// Remove from database. Done before re-acquiring the lock so the DB
+	// round trip does not block concurrent connector readers.
 	_, err := pm.db.Exec("DELETE FROM connectors WHERE id = $1", storageKey)
 	if err != nil {
 		log.Error().
@@ -676,8 +696,13 @@ func (pm *PluginManager) DeleteConnectorInstance(connectorID string) error {
 		return fmt.Errorf("failed to delete connector from database: %w", err)
 	}
 
-	// Remove from memory
-	delete(pm.connectors, storageKey)
+	// Re-acquire the lock briefly to commit the removal. If a concurrent
+	// caller has already replaced this entry, leave the new instance alone.
+	pm.connectorMu.Lock()
+	if current, ok := pm.connectors[storageKey]; ok && current == instance {
+		delete(pm.connectors, storageKey)
+	}
+	pm.connectorMu.Unlock()
 
 	log.Info().
 		Str("connectorID", storageKey).

@@ -25,9 +25,10 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 
 	rows, err := pm.db.QueryContext(ctx, `
 		SELECT connector_id, name, description, version, source, distribution, official, install_state,
-		       runtime_path, manifest_json, signature_verified, unsafe, checksum, min_host_api_version,
+		       runtime_path, manifest_json, signature_verified, unsafe, min_host_api_version,
 		       required_capabilities, target_os, target_arch, last_error, created_at, updated_at,
-		       manifest_signature, manifest_public_key
+		       manifest_signature, manifest_public_key, signed_manifest_json, signature_key_id,
+		       signature_signed_at, signature_expires_at
 		FROM connector_packages
 		ORDER BY created_at
 	`)
@@ -44,6 +45,10 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 		var requiredCapabilitiesJSON []byte
 		var manifestSignature sql.NullString
 		var manifestPublicKey sql.NullString
+		var signedManifestJSON sql.NullString
+		var signatureKeyID sql.NullString
+		var signatureSignedAt sql.NullTime
+		var signatureExpiresAt sql.NullTime
 
 		if err := rows.Scan(
 			&pkg.ConnectorID,
@@ -58,7 +63,6 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 			&manifestJSON,
 			&pkg.SignatureVerified,
 			&pkg.Unsafe,
-			&pkg.Checksum,
 			&pkg.MinHostAPIVersion,
 			&requiredCapabilitiesJSON,
 			&pkg.TargetOS,
@@ -68,6 +72,10 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 			&pkg.UpdatedAt,
 			&manifestSignature,
 			&manifestPublicKey,
+			&signedManifestJSON,
+			&signatureKeyID,
+			&signatureSignedAt,
+			&signatureExpiresAt,
 		); err != nil {
 			return fmt.Errorf("failed to scan connector package row: %w", err)
 		}
@@ -78,6 +86,18 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 		}
 		if manifestPublicKey.Valid {
 			pkg.ManifestPublicKey = []byte(manifestPublicKey.String)
+		}
+		if signedManifestJSON.Valid {
+			pkg.SignedManifestJSON = []byte(signedManifestJSON.String)
+		}
+		if signatureKeyID.Valid {
+			pkg.SignatureKeyID = signatureKeyID.String
+		}
+		if signatureSignedAt.Valid {
+			pkg.SignatureSignedAt = signatureSignedAt.Time
+		}
+		if signatureExpiresAt.Valid {
+			pkg.SignatureExpiresAt = signatureExpiresAt.Time
 		}
 		if len(requiredCapabilitiesJSON) > 0 {
 			if err := json.Unmarshal(requiredCapabilitiesJSON, &pkg.RequiredCapabilities); err != nil {
@@ -97,29 +117,30 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 			}
 		}
 
-		hasSignatureMaterial := len(pkg.ManifestSignature) > 0 && len(pkg.ManifestPublicKey) > 0 && len(manifestJSON) > 0
+		hasSignatureMaterial := len(pkg.ManifestSignature) > 0 && len(pkg.ManifestPublicKey) > 0 && len(pkg.SignedManifestJSON) > 0 && len(manifestJSON) > 0
 		previouslyTrusted := pkg.SignatureVerified && hasSignatureMaterial
-		reverified := false
+		var verification signatureVerification
 		if hasSignatureMaterial {
-			ok, verifyErr := verifyManifestSignature(manifestJSON, pkg.ManifestSignature, pkg.ManifestPublicKey)
+			var verifyErr error
+			verification, verifyErr = verifyManifestSignature(pkg.SignedManifestJSON, manifestJSON, pkg.ManifestSignature, pkg.ManifestPublicKey)
 			if verifyErr != nil {
 				log.Warn().Err(verifyErr).Str("connector_id", pkg.ConnectorID).Msg("Stored connector signature no longer verifies against trust store")
 			}
-			reverified = ok
+			if verification.Payload.KeyID != "" {
+				pkg.SignatureKeyID = verification.Payload.KeyID
+				pkg.SignatureSignedAt = verification.Payload.SignedAt
+				pkg.SignatureExpiresAt = verification.Payload.ExpiresAt
+			}
 		}
-		pkg.SignatureVerified = reverified
-		pkg.Unsafe = !reverified
-		// A connector previously stored as trusted that no longer re-verifies
-		// indicates the operator's trust store revoked the signing key. Keep
-		// the package quarantined regardless of allowUnsafeSideload so a
-		// revoked key cannot be silently re-loaded by flipping the sideload
-		// flag. Operators must re-upload to un-quarantine.
-		mustQuarantine := !reverified && (previouslyTrusted || !allowUnsafeSideload())
+		pkg.SignatureVerified = verification.Verified
+		pkg.Unsafe = !verification.Verified
+		mustQuarantine := !verification.Verified && (previouslyTrusted || !allowUnsafeSideload())
 		if mustQuarantine {
 			if pkg.InstallState == PluginInstallStateReady || pkg.InstallState == PluginInstallStatePendingRestart {
 				if previouslyTrusted {
-					log.Warn().Str("connector_id", pkg.ConnectorID).Msg("Quarantining native connector: trusted key revoked, package quarantined")
-					pkg.LastError = "connector signature key has been revoked from the trust store"
+					reason := formatVerificationFailure(verification.Payload)
+					log.Warn().Str("connector_id", pkg.ConnectorID).Str("reason", reason).Msg("Quarantining native connector: previously trusted signature no longer verifies")
+					pkg.LastError = reason
 				} else {
 					log.Warn().Str("connector_id", pkg.ConnectorID).Msg("Quarantining native connector: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
 					pkg.LastError = "connector signature cannot be re-verified against trusted keys"
@@ -206,17 +227,28 @@ func (pm *PluginManager) saveConnectorPackageToDatabaseContext(ctx context.Conte
 		}
 	}
 
+	var signatureSignedAt sql.NullTime
+	var signatureExpiresAt sql.NullTime
+	if !pkg.SignatureSignedAt.IsZero() {
+		signatureSignedAt = sql.NullTime{Time: pkg.SignatureSignedAt, Valid: true}
+	}
+	if !pkg.SignatureExpiresAt.IsZero() {
+		signatureExpiresAt = sql.NullTime{Time: pkg.SignatureExpiresAt, Valid: true}
+	}
+
 	_, err := pm.db.ExecContext(ctx, `
 		INSERT INTO connector_packages (
 			connector_id, name, description, version, source, distribution, official, install_state,
-			runtime_path, manifest_json, signature_verified, unsafe, checksum, min_host_api_version,
+			runtime_path, manifest_json, signature_verified, unsafe, min_host_api_version,
 			required_capabilities, target_os, target_arch, last_error, created_at, updated_at,
-			manifest_signature, manifest_public_key
+			manifest_signature, manifest_public_key, signed_manifest_json, signature_key_id,
+			signature_signed_at, signature_expires_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
-			$9, $10, $11, $12, $13, $14,
-			$15, $16, $17, $18, $19, $20,
-			$21, $22
+			$9, $10, $11, $12, $13,
+			$14, $15, $16, $17, $18, $19,
+			$20, $21, $22, $23,
+			$24, $25
 		)
 		ON CONFLICT (connector_id) DO UPDATE SET
 			name = EXCLUDED.name,
@@ -230,7 +262,6 @@ func (pm *PluginManager) saveConnectorPackageToDatabaseContext(ctx context.Conte
 			manifest_json = EXCLUDED.manifest_json,
 			signature_verified = EXCLUDED.signature_verified,
 			unsafe = EXCLUDED.unsafe,
-			checksum = EXCLUDED.checksum,
 			min_host_api_version = EXCLUDED.min_host_api_version,
 			required_capabilities = EXCLUDED.required_capabilities,
 			target_os = EXCLUDED.target_os,
@@ -238,7 +269,11 @@ func (pm *PluginManager) saveConnectorPackageToDatabaseContext(ctx context.Conte
 			last_error = EXCLUDED.last_error,
 			updated_at = EXCLUDED.updated_at,
 			manifest_signature = EXCLUDED.manifest_signature,
-			manifest_public_key = EXCLUDED.manifest_public_key
+			manifest_public_key = EXCLUDED.manifest_public_key,
+			signed_manifest_json = EXCLUDED.signed_manifest_json,
+			signature_key_id = EXCLUDED.signature_key_id,
+			signature_signed_at = EXCLUDED.signature_signed_at,
+			signature_expires_at = EXCLUDED.signature_expires_at
 	`,
 		pkg.ConnectorID,
 		pkg.Name,
@@ -252,7 +287,6 @@ func (pm *PluginManager) saveConnectorPackageToDatabaseContext(ctx context.Conte
 		string(manifestJSON),
 		pkg.SignatureVerified,
 		pkg.Unsafe,
-		pkg.Checksum,
 		pkg.MinHostAPIVersion,
 		string(mustMarshalRequiredCapabilities(pkg.RequiredCapabilities)),
 		pkg.TargetOS,
@@ -262,6 +296,10 @@ func (pm *PluginManager) saveConnectorPackageToDatabaseContext(ctx context.Conte
 		pkg.UpdatedAt,
 		string(pkg.ManifestSignature),
 		string(pkg.ManifestPublicKey),
+		string(pkg.SignedManifestJSON),
+		pkg.SignatureKeyID,
+		signatureSignedAt,
+		signatureExpiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert connector package: %w", err)

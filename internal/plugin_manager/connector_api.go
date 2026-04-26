@@ -86,31 +86,37 @@ func (pm *PluginManager) shouldExposeConnectorAPI(pluginID string) bool {
 }
 
 // ResolveConnectorInstanceKey maps a canonical or legacy connector reference to the instance key used in pm.connectors.
+//
+// Resolution is split so the registry lookup happens outside connectorMu (it
+// has its own lock), and the connectors-map probes happen inside a single
+// connectorMu.RLock critical section. Two short separate locks cost more in
+// contention without buying us anything: a concurrent CreateConnectorInstance
+// could insert between probes and we'd miss it either way, so we make a single
+// snapshot decision instead.
 func (pm *PluginManager) ResolveConnectorInstanceKey(ref string) (string, bool) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return "", false
 	}
 
-	pm.connectorMu.RLock()
-	if _, ok := pm.connectors[ref]; ok {
-		pm.connectorMu.RUnlock()
-		return ref, true
-	}
-	pm.connectorMu.RUnlock()
+	// Resolve the canonical definition first (registry lock is independent of
+	// connectorMu, and registry lookups are pure in-memory map probes).
+	def, defErr := pm.connectorRegistry.GetConnector(ref)
 
-	def, err := pm.connectorRegistry.GetConnector(ref)
-	if err != nil {
-		return "", false
+	// Build the list of candidate keys to probe. We always probe the raw ref
+	// first so a direct hit on a freshly-inserted key wins even if the
+	// registry lookup failed (e.g. native install before registration).
+	candidates := []string{ref}
+	if defErr == nil && def != nil {
+		candidates = append(candidates, def.ConnectorInstanceStorageKey())
+		candidates = append(candidates, def.LegacyIDs...)
 	}
 
 	pm.connectorMu.RLock()
 	defer pm.connectorMu.RUnlock()
 
-	keys := []string{def.ConnectorInstanceStorageKey()}
-	keys = append(keys, def.LegacyIDs...)
-	seen := make(map[string]struct{})
-	for _, k := range keys {
+	seen := make(map[string]struct{}, len(candidates))
+	for _, k := range candidates {
 		k = strings.TrimSpace(k)
 		if k == "" {
 			continue

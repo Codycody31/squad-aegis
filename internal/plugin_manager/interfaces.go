@@ -132,11 +132,14 @@ type InstalledPluginPackage struct {
 	RuntimePath          string                `json:"runtime_path,omitempty"`
 	Manifest             PluginPackageManifest `json:"manifest"`
 	ManifestJSON         json.RawMessage       `json:"-"`
+	SignedManifestJSON   []byte                `json:"-"`
 	ManifestSignature    []byte                `json:"-"`
 	ManifestPublicKey    []byte                `json:"-"`
 	SignatureVerified    bool                  `json:"signature_verified"`
 	Unsafe               bool                  `json:"unsafe"`
-	Checksum             string                `json:"checksum"`
+	SignatureKeyID       string                `json:"signature_key_id,omitempty"`
+	SignatureSignedAt    time.Time             `json:"signature_signed_at,omitempty"`
+	SignatureExpiresAt   time.Time             `json:"signature_expires_at,omitempty"`
 	MinHostAPIVersion    int                   `json:"min_host_api_version"`
 	RequiredCapabilities []string              `json:"required_capabilities,omitempty"`
 	TargetOS             string                `json:"target_os"`

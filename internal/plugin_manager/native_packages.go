@@ -21,6 +21,7 @@ import (
 
 const (
 	pluginManifestFile          = "manifest.json"
+	pluginSignedManifestFile    = plugin_signing.SignedManifestPayloadFile
 	pluginSignatureFile         = plugin_signing.ManifestSignatureFile
 	pluginPublicKeyFile         = plugin_signing.ManifestPublicKeyFile
 	defaultPluginMaxUploadSize  = 50 * 1024 * 1024
@@ -303,6 +304,9 @@ func cloneInstalledPluginPackage(pkg *InstalledPluginPackage) *InstalledPluginPa
 	if len(pkg.ManifestJSON) > 0 {
 		cloned.ManifestJSON = append(json.RawMessage(nil), pkg.ManifestJSON...)
 	}
+	if len(pkg.SignedManifestJSON) > 0 {
+		cloned.SignedManifestJSON = append([]byte(nil), pkg.SignedManifestJSON...)
+	}
 	if len(pkg.ManifestSignature) > 0 {
 		cloned.ManifestSignature = append([]byte(nil), pkg.ManifestSignature...)
 	}
@@ -529,7 +533,6 @@ func (pm *PluginManager) ListInstalledPluginPackages() []*InstalledPluginPackage
 			Manifest:             PluginPackageManifest{},
 			SignatureVerified:    true,
 			Unsafe:               false,
-			Checksum:             "",
 			MinHostAPIVersion:    enrichedDefinition.MinHostAPIVersion,
 			RequiredCapabilities: cloneRequiredCapabilities(enrichedDefinition.RequiredCapabilities),
 			TargetOS:             enrichedDefinition.TargetOS,
@@ -576,10 +579,12 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		return nil, fmt.Errorf("failed to create plugin runtime directory: %w", err)
 	}
 
-	manifest, selectedTarget, manifestBytes, signatureBytes, publicKeyBytes, libraryBytes, libraryName, err := readPluginBundle(archive, size)
+	parts, err := readPluginBundle(archive, size)
 	if err != nil {
 		return nil, err
 	}
+	manifest := parts.Manifest
+	selectedTarget := parts.SelectedTarget
 
 	if err := validatePluginManifest(manifest); err != nil {
 		return nil, err
@@ -595,20 +600,37 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		}
 	}
 
-	checksum := fmt.Sprintf("%x", sha256.Sum256(libraryBytes))
-	if !strings.EqualFold(selectedTarget.SHA256, checksum) {
-		return nil, fmt.Errorf("plugin checksum mismatch")
+	libraryHash := fmt.Sprintf("%x", sha256.Sum256(parts.LibraryBytes))
+	if !strings.EqualFold(selectedTarget.SHA256, libraryHash) {
+		return nil, fmt.Errorf("plugin library bytes do not match manifest target sha256 (manifest=%s, library=%s)", selectedTarget.SHA256, libraryHash)
 	}
-
-	signatureVerified := false
-	if len(signatureBytes) > 0 {
-		signatureVerified, err = verifyManifestSignature(manifestBytes, signatureBytes, publicKeyBytes)
-		if err != nil {
-			return nil, err
+	// Pin the manifest target hash to the library bytes we just verified so
+	// the runtime SHA check downstream of this install can derive the
+	// expected hash purely from the manifest target.
+	for index := range manifest.Targets {
+		if manifest.Targets[index].LibraryPath == selectedTarget.LibraryPath &&
+			manifest.Targets[index].TargetOS == selectedTarget.TargetOS &&
+			manifest.Targets[index].TargetArch == selectedTarget.TargetArch &&
+			manifest.Targets[index].MinHostAPIVersion == selectedTarget.MinHostAPIVersion {
+			manifest.Targets[index].SHA256 = libraryHash
 		}
 	}
+	selectedTarget.SHA256 = libraryHash
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-marshal manifest after sha256 pinning: %w", err)
+	}
+
+	verification, err := verifyManifestSignature(parts.SignedPayload, manifestBytes, parts.SignatureBytes, parts.PublicKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+	signatureVerified := verification.Verified
 
 	if distribution == PluginDistributionSideload && !signatureVerified && !allowUnsafeSideload() {
+		if len(parts.SignatureBytes) > 0 && verification.Payload.KeyID != "" {
+			return nil, fmt.Errorf("plugin signature rejected: %s", formatVerificationFailure(verification.Payload))
+		}
 		return nil, fmt.Errorf("unsigned sideloads are disabled")
 	}
 
@@ -618,7 +640,7 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	}
 
 	pluginDir := filepath.Join(pluginRuntimeDir(), pluginIDSegment, versionSegment)
-	runtimeBase := sanitizeRuntimeSegment(filepath.Base(libraryName))
+	runtimeBase := sanitizeRuntimeSegment(filepath.Base(parts.LibraryName))
 	if runtimeBase == "" {
 		runtimeBase = pluginIDSegment
 	}
@@ -629,17 +651,18 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	}
 
 	// Same-bytes short-circuit: if a package with this plugin ID + version
-	// is already loaded with the same checksum, return the existing entry
-	// without rewriting the runtime file. The bytes on disk are already
-	// guaranteed by the previous install.
+	// is already loaded and its manifest target SHA matches the new bytes,
+	// return the existing entry without rewriting the runtime file.
 	if loadedVersion, loaded := pm.getLoadedNativePluginVersion(manifest.PluginID); loaded && loadedVersion == manifest.Version {
-		if existing := pm.getNativePackage(manifest.PluginID); existing != nil && existing.Checksum == checksum {
-			log.Info().Str("plugin_id", manifest.PluginID).Str("version", manifest.Version).Msg("Skipping native plugin re-install: bytes match already-loaded package")
-			return existing, nil
+		if existing := pm.getNativePackage(manifest.PluginID); existing != nil {
+			if existingTarget, targetErr := selectedManifestTarget(existing.Manifest); targetErr == nil && strings.EqualFold(existingTarget.SHA256, libraryHash) {
+				log.Info().Str("plugin_id", manifest.PluginID).Str("version", manifest.Version).Msg("Skipping native plugin re-install: bytes match already-loaded package")
+				return existing, nil
+			}
 		}
 	}
 
-	if err := writeRuntimeLibrary(runtimePath, libraryBytes); err != nil {
+	if err := writeRuntimeLibrary(runtimePath, parts.LibraryBytes); err != nil {
 		return nil, err
 	}
 	// Track whether the install completed atomically. On any error after
@@ -658,24 +681,27 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 
 	now := time.Now()
 	pkg := &InstalledPluginPackage{
-		PluginID:          manifest.PluginID,
-		Name:              manifest.Name,
-		Description:       manifest.Description,
-		Version:           manifest.Version,
-		Source:            PluginSourceNative,
-		Distribution:      distribution,
-		Official:          false,
-		InstallState:      PluginInstallStateReady,
-		RuntimePath:       runtimePath,
-		Manifest:          manifest,
-		ManifestJSON:      append(json.RawMessage(nil), manifestBytes...),
-		ManifestSignature: append([]byte(nil), signatureBytes...),
-		ManifestPublicKey: append([]byte(nil), publicKeyBytes...),
-		SignatureVerified: signatureVerified,
-		Unsafe:            !signatureVerified,
-		Checksum:          checksum,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		PluginID:             manifest.PluginID,
+		Name:                 manifest.Name,
+		Description:          manifest.Description,
+		Version:              manifest.Version,
+		Source:               PluginSourceNative,
+		Distribution:         distribution,
+		Official:             false,
+		InstallState:         PluginInstallStateReady,
+		RuntimePath:          runtimePath,
+		Manifest:             manifest,
+		ManifestJSON:         append(json.RawMessage(nil), manifestBytes...),
+		SignedManifestJSON:   append([]byte(nil), parts.SignedPayload...),
+		ManifestSignature:    append([]byte(nil), parts.SignatureBytes...),
+		ManifestPublicKey:    append([]byte(nil), parts.PublicKeyBytes...),
+		SignatureVerified:    signatureVerified,
+		Unsafe:               !signatureVerified,
+		SignatureKeyID:       verification.Payload.KeyID,
+		SignatureSignedAt:    verification.Payload.SignedAt,
+		SignatureExpiresAt:   verification.Payload.ExpiresAt,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	applyInstalledPackageTarget(pkg, selectedTarget)
 
@@ -832,34 +858,18 @@ func (pm *PluginManager) loadNativePluginPackage(pkg *InstalledPluginPackage) er
 	}
 	pkg.RuntimePath = safePath
 
-	// For signature-verified packages, derive the expected runtime SHA from
-	// the signed manifest target so the runtime hash is bound to the
-	// signature, not to the unsigned plugin_packages.checksum column which a
-	// DB-tampering attacker could rewrite to match a swapped runtime file.
-	// Unsigned packages have no signature anchor; the stored checksum is the
-	// only available reference and remains the source of truth.
-	var expectedSHA string
-	if pkg.SignatureVerified {
-		verifiedTarget, err := selectedManifestTarget(pkg.Manifest)
-		if err != nil {
-			return fmt.Errorf("plugin manifest target selection failed: %w", err)
-		}
-		expectedSHA = strings.TrimSpace(verifiedTarget.SHA256)
-		if expectedSHA == "" {
-			return fmt.Errorf("plugin manifest target is missing sha256")
-		}
-		if pkg.Checksum != "" && !strings.EqualFold(pkg.Checksum, expectedSHA) {
-			log.Warn().Str("plugin_id", pkg.PluginID).Str("expected", expectedSHA).Str("stored", pkg.Checksum).Msg("Quarantining native plugin: stored checksum does not match signed manifest target")
-			if pkg.RuntimePath != "" {
-				removeRuntimeFile(safePath)
-			}
-			return fmt.Errorf("plugin checksum %q does not match signed manifest target %q", pkg.Checksum, expectedSHA)
-		}
-	} else {
-		expectedSHA = strings.TrimSpace(pkg.Checksum)
-		if expectedSHA == "" {
-			return fmt.Errorf("plugin checksum is missing")
-		}
+	// Derive the expected runtime SHA from the manifest target. For signed
+	// packages this hash was anchored by the signature; for unsigned
+	// packages the install pipeline pinned manifest.targets[i].SHA256 to the
+	// library bytes before persisting, so the manifest is always the source
+	// of truth.
+	verifiedTarget, err := selectedManifestTarget(pkg.Manifest)
+	if err != nil {
+		return fmt.Errorf("plugin manifest target selection failed: %w", err)
+	}
+	expectedSHA := strings.TrimSpace(verifiedTarget.SHA256)
+	if expectedSHA == "" {
+		return fmt.Errorf("plugin manifest target is missing sha256")
 	}
 
 	// Rebuild the target snapshot from the package's compatibility fields

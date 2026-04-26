@@ -127,14 +127,15 @@ func (s *Server) PluginUpload(c *gin.Context) {
 	}
 
 	s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:upload", gin.H{
-		"plugin_id":          pkg.PluginID,
-		"version":            pkg.Version,
-		"checksum":           pkg.Checksum,
-		"signature_verified": pkg.SignatureVerified,
-		"install_state":      pkg.InstallState,
-		"filename":           file.Filename,
-		"client_ip":          clientIP,
-		"user_agent":         userAgent,
+		"plugin_id":            pkg.PluginID,
+		"version":              pkg.Version,
+		"signature_verified":   pkg.SignatureVerified,
+		"signature_key_id":     pkg.SignatureKeyID,
+		"signature_expires_at": pkg.SignatureExpiresAt,
+		"install_state":        pkg.InstallState,
+		"filename":             file.Filename,
+		"client_ip":            clientIP,
+		"user_agent":           userAgent,
 	})
 
 	message := "Plugin uploaded successfully"

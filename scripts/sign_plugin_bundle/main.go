@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"go.codycody31.dev/squad-aegis/internal/plugin_signing"
 )
@@ -19,15 +20,17 @@ func main() {
 	bundleDir := flag.String("bundle-dir", "", "directory containing manifest.json and the plugin .so")
 	privateKeyPath := flag.String("private-key", "", "path to the base64-encoded ed25519 private key file")
 	outputZip := flag.String("output", "", "path to the signed zip bundle to create")
+	keyID := flag.String("key-id", "", "operator-chosen identifier for the signing key (e.g. ops-key-2026-q1); recorded in the signed payload and matched against the host CRL")
+	validFor := flag.Duration("valid-for", 365*24*time.Hour, "how long the signature should be valid (Go duration format, e.g. 8760h)")
 	flag.Parse()
 
-	if err := run(*bundleDir, *privateKeyPath, *outputZip); err != nil {
+	if err := run(*bundleDir, *privateKeyPath, *outputZip, *keyID, *validFor); err != nil {
 		fmt.Fprintf(os.Stderr, "sign plugin bundle: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(bundleDir, privateKeyPath, outputZip string) error {
+func run(bundleDir, privateKeyPath, outputZip, keyID string, validFor time.Duration) error {
 	if strings.TrimSpace(bundleDir) == "" {
 		return fmt.Errorf("bundle-dir is required")
 	}
@@ -36,6 +39,12 @@ func run(bundleDir, privateKeyPath, outputZip string) error {
 	}
 	if strings.TrimSpace(outputZip) == "" {
 		return fmt.Errorf("output is required")
+	}
+	if strings.TrimSpace(keyID) == "" {
+		return fmt.Errorf("key-id is required")
+	}
+	if validFor <= 0 {
+		return fmt.Errorf("valid-for must be positive")
 	}
 
 	manifestPath := filepath.Join(bundleDir, "manifest.json")
@@ -59,11 +68,23 @@ func run(bundleDir, privateKeyPath, outputZip string) error {
 		return fmt.Errorf("private key has %d bytes, want %d", len(privateKey), ed25519.PrivateKeySize)
 	}
 
-	signatureFile, publicKeyFile, err := plugin_signing.SignManifest(manifestBytes, privateKey)
+	signedAt := time.Now().UTC()
+	expiresAt := signedAt.Add(validFor)
+
+	signedPayload, err := plugin_signing.BuildSignedPayload(manifestBytes, keyID, signedAt, expiresAt)
+	if err != nil {
+		return fmt.Errorf("failed to build signed payload: %w", err)
+	}
+
+	signatureFile, publicKeyFile, err := plugin_signing.SignSignedPayload(signedPayload, privateKey)
 	if err != nil {
 		return err
 	}
 
+	signedPayloadPath := filepath.Join(bundleDir, plugin_signing.SignedManifestPayloadFile)
+	if err := os.WriteFile(signedPayloadPath, signedPayload, 0o644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", plugin_signing.SignedManifestPayloadFile, err)
+	}
 	signaturePath := filepath.Join(bundleDir, plugin_signing.ManifestSignatureFile)
 	if err := os.WriteFile(signaturePath, signatureFile, 0o644); err != nil {
 		return fmt.Errorf("failed to write manifest.sig: %w", err)
@@ -86,22 +107,28 @@ func run(bundleDir, privateKeyPath, outputZip string) error {
 	}
 
 	fmt.Printf("Signed bundle created: %s\n", outputZip)
+	fmt.Printf("Signed payload file: %s\n", signedPayloadPath)
 	fmt.Printf("Signature file: %s\n", signaturePath)
 	fmt.Printf("Public key file: %s\n", publicKeyPath)
+	fmt.Printf("Key ID: %s\n", keyID)
+	fmt.Printf("Signed at: %s\n", signedAt.Format(time.RFC3339))
+	fmt.Printf("Expires at: %s\n", expiresAt.Format(time.RFC3339))
 
 	return nil
 }
 
 // collectBundleFiles walks bundleDir and selects only the files that belong
-// in a signed bundle: manifest.json, manifest.sig, manifest.pub at the root,
-// and any *.so under bin/. It refuses any file whose name suggests it might
-// be a private key or credential to defend against an operator accidentally
-// dropping a private key inside the bundle dir before zipping.
+// in a signed bundle: manifest.json, manifest.signed.json, manifest.sig,
+// manifest.pub at the root, and any *.so under bin/. It refuses any file
+// whose name suggests it might be a private key or credential to defend
+// against an operator accidentally dropping a private key inside the bundle
+// dir before zipping.
 func collectBundleFiles(bundleDir string) ([]string, error) {
 	allowedRoots := map[string]struct{}{
-		"manifest.json":                      {},
-		plugin_signing.ManifestSignatureFile: {},
-		plugin_signing.ManifestPublicKeyFile: {},
+		"manifest.json":                         {},
+		plugin_signing.SignedManifestPayloadFile: {},
+		plugin_signing.ManifestSignatureFile:    {},
+		plugin_signing.ManifestPublicKeyFile:    {},
 	}
 
 	var files []string
@@ -132,7 +159,7 @@ func collectBundleFiles(bundleDir string) ([]string, error) {
 			return fmt.Errorf("refusing to bundle %s: filename looks like a secret/private key. Move it outside %s before signing", rel, bundleDir)
 		}
 
-		// Allow manifest/sig/pubkey only at archive root.
+		// Allow manifest/signed/sig/pubkey only at archive root.
 		if _, ok := allowedRoots[base]; ok {
 			if strings.ContainsRune(rel, '/') {
 				return fmt.Errorf("refusing to bundle %s: %s must live at the bundle root", rel, base)
@@ -154,7 +181,7 @@ func collectBundleFiles(bundleDir string) ([]string, error) {
 
 		// Anything else is rejected. Operators must explicitly stage what
 		// they want signed.
-		return fmt.Errorf("refusing to bundle %s: only manifest.json, %s, %s, and files under bin/ are accepted", rel, plugin_signing.ManifestSignatureFile, plugin_signing.ManifestPublicKeyFile)
+		return fmt.Errorf("refusing to bundle %s: only manifest.json, %s, %s, %s, and files under bin/ are accepted", rel, plugin_signing.SignedManifestPayloadFile, plugin_signing.ManifestSignatureFile, plugin_signing.ManifestPublicKeyFile)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect bundle files: %w", err)

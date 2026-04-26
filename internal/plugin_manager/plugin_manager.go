@@ -103,6 +103,7 @@ func (pm *PluginManager) Start() error {
 		_ = connectorRuntimeDir()
 
 		logSubprocessHardeningPosture()
+		startRevokedKeyIDsRefresher(pm.ctx)
 	}
 
 	if err := pm.loadInstalledPluginPackages(); err != nil {
@@ -130,7 +131,14 @@ func (pm *PluginManager) Start() error {
 	return nil
 }
 
-// Stop stops the plugin manager
+// Stop stops the plugin manager.
+//
+// Intentionally holds pm.mu / pm.connectorMu for the entire shutdown sweep.
+// At this point pm.cancel() has already fired, so any pending lifecycle
+// operations should bail out early; serializing the shutdown under the
+// registry locks prevents new admin operations from racing with the
+// per-instance Stop RPCs and prevents a delete handler from removing an
+// entry the sweep is mid-iterating.
 func (pm *PluginManager) Stop() error {
 	log.Info().Msg("Stopping plugin manager")
 
@@ -224,10 +232,7 @@ func (pm *PluginManager) RegisterConnector(definition ConnectorDefinition) error
 
 // CreatePluginInstance creates and starts a new plugin instance
 func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID string, notes string, config map[string]interface{}) (*PluginInstance, error) {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
-	// Get plugin definition
+	// Get plugin definition (registry has its own lock; no pm.mu needed here)
 	definition, err := pm.registry.GetPlugin(pluginID)
 	if err != nil {
 		return nil, fmt.Errorf("plugin not found: %w", err)
@@ -246,18 +251,9 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 	// Fill defaults
 	config = enrichedDefinition.ConfigSchema.FillDefaults(config)
 
-	// Check if multiple instances are allowed
-	if !enrichedDefinition.AllowMultipleInstances {
-		if serverPlugins, exists := pm.plugins[serverID]; exists {
-			for _, instance := range serverPlugins {
-				if instance.PluginID == pluginID {
-					return nil, fmt.Errorf("plugin %s does not allow multiple instances on server %s", pluginID, serverID.String())
-				}
-			}
-		}
-	}
-
-	// Validate required connectors
+	// Validate required connectors are running. ResolveConnectorInstanceKey
+	// and the snapshot read take the connectorMu briefly and release it before
+	// any RPC happens.
 	for _, connectorID := range enrichedDefinition.RequiredConnectors {
 		storageKey, ok := pm.ResolveConnectorInstanceKey(connectorID)
 		if !ok {
@@ -271,13 +267,16 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 		}
 	}
 
-	// Create plugin instance
+	// Reserve the instance slot under pm.mu (multi-instance check + insert)
+	// before doing any subprocess RPC so we can detect concurrent creates,
+	// then release pm.mu while running Initialize/Start. Holding pm.mu across
+	// an Initialize RPC (which can take seconds and on failure up to 30s)
+	// would block every other plugin operation.
 	plugin, err := pm.registry.CreatePluginInstance(pluginID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plugin instance: %w", err)
 	}
 
-	// Create instance record
 	instanceID := uuid.New()
 	ctx, cancel := context.WithCancel(pm.ctx)
 
@@ -303,24 +302,51 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 		UpdatedAt:         time.Now(),
 	}
 
-	// Initialize server plugins map if needed
+	pm.mu.Lock()
+	if !enrichedDefinition.AllowMultipleInstances {
+		if serverPlugins, exists := pm.plugins[serverID]; exists {
+			for _, existing := range serverPlugins {
+				if existing.PluginID == pluginID {
+					pm.mu.Unlock()
+					cancel()
+					return nil, fmt.Errorf("plugin %s does not allow multiple instances on server %s", pluginID, serverID.String())
+				}
+			}
+		}
+	}
 	if pm.plugins[serverID] == nil {
 		pm.plugins[serverID] = make(map[uuid.UUID]*PluginInstance)
 	}
-
-	// Store instance
 	pm.plugins[serverID][instanceID] = instance
+	pm.mu.Unlock()
 
-	// Save to database
+	// Save to database (no pm.mu held; instance is reserved in the map but
+	// Status is Stopped so no one can route events to it yet).
 	if err := pm.savePluginInstanceToDatabase(instance); err != nil {
-		delete(pm.plugins[serverID], instanceID)
+		pm.mu.Lock()
+		if serverPlugins, ok := pm.plugins[serverID]; ok {
+			delete(serverPlugins, instanceID)
+			if len(serverPlugins) == 0 {
+				delete(pm.plugins, serverID)
+			}
+		}
+		pm.mu.Unlock()
 		cancel()
 		return nil, fmt.Errorf("failed to save plugin instance to database: %w", err)
 	}
 
-	// Initialize and start plugin
+	// Initialize and start plugin without holding pm.mu. The call may RPC
+	// into a subprocess and take seconds; blocking pm.mu would stall every
+	// other plugin/event operation.
 	if err := pm.initializePluginInstance(instance); err != nil {
-		delete(pm.plugins[serverID], instanceID)
+		pm.mu.Lock()
+		if serverPlugins, ok := pm.plugins[serverID]; ok {
+			delete(serverPlugins, instanceID)
+			if len(serverPlugins) == 0 {
+				delete(pm.plugins, serverID)
+			}
+		}
+		pm.mu.Unlock()
 		cancel()
 		if dbErr := pm.deletePluginInstanceFromDatabase(instanceID); dbErr != nil {
 			log.Error().Err(dbErr).Str("instanceID", instanceID.String()).Msg("Failed to clean up plugin instance from database after init failure")
@@ -381,20 +407,23 @@ func (pm *PluginManager) GetPluginInstance(serverID, instanceID uuid.UUID) (*Plu
 
 // DeletePluginInstance removes and stops a plugin instance
 func (pm *PluginManager) DeletePluginInstance(serverID, instanceID uuid.UUID) error {
+	// Snapshot the instance under pm.mu, then release before the Stop RPC
+	// (which may take up to 30s on a misbehaving plugin). Holding pm.mu
+	// across that call would block every other plugin operation.
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
 	serverPlugins, exists := pm.plugins[serverID]
 	if !exists {
+		pm.mu.Unlock()
 		return fmt.Errorf("no plugins found for server %s", serverID.String())
 	}
-
 	instance, exists := serverPlugins[instanceID]
 	if !exists {
+		pm.mu.Unlock()
 		return fmt.Errorf("plugin instance %s not found", instanceID.String())
 	}
+	pm.mu.Unlock()
 
-	// Stop plugin
+	// Stop plugin (may RPC into subprocess; performed without pm.mu held).
 	if err := pm.stopPluginInstance(instance); err != nil {
 		log.Error().
 			Str("serverID", serverID.String()).
@@ -403,7 +432,8 @@ func (pm *PluginManager) DeletePluginInstance(serverID, instanceID uuid.UUID) er
 			Msg("Failed to stop plugin instance during deletion")
 	}
 
-	// Remove from database
+	// Remove from database. Done before re-acquiring pm.mu so we don't block
+	// readers on a slow database round trip either.
 	if err := pm.deletePluginInstanceFromDatabase(instanceID); err != nil {
 		log.Error().
 			Str("instanceID", instanceID.String()).
@@ -412,11 +442,19 @@ func (pm *PluginManager) DeletePluginInstance(serverID, instanceID uuid.UUID) er
 		return fmt.Errorf("failed to delete plugin instance from database: %w", err)
 	}
 
-	// Remove from memory
-	delete(serverPlugins, instanceID)
-	if len(serverPlugins) == 0 {
-		delete(pm.plugins, serverID)
+	// Re-acquire the lock briefly to commit the removal. If a concurrent
+	// caller has already removed or replaced this entry we still treat the
+	// delete as successful (the instance is gone and the DB row is gone).
+	pm.mu.Lock()
+	if serverPlugins, ok := pm.plugins[serverID]; ok {
+		if current, ok := serverPlugins[instanceID]; ok && current == instance {
+			delete(serverPlugins, instanceID)
+			if len(serverPlugins) == 0 {
+				delete(pm.plugins, serverID)
+			}
+		}
 	}
+	pm.mu.Unlock()
 
 	log.Info().
 		Str("serverID", serverID.String()).
@@ -429,41 +467,62 @@ func (pm *PluginManager) DeletePluginInstance(serverID, instanceID uuid.UUID) er
 
 // UpdatePluginConfig updates a plugin's configuration
 func (pm *PluginManager) UpdatePluginConfig(serverID, instanceID uuid.UUID, config map[string]interface{}) error {
+	// Snapshot the instance and validate the new config under pm.mu, then
+	// release before calling Plugin.UpdateConfig (an RPC on native plugins).
+	// Holding pm.mu across that call would block every other plugin
+	// operation for seconds.
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
 	if err != nil {
+		pm.mu.Unlock()
 		return err
 	}
 
-	// Get plugin definition to validate config
 	definition, err := pm.registry.GetPlugin(instance.PluginID)
 	if err != nil {
+		pm.mu.Unlock()
 		return fmt.Errorf("plugin definition not found: %w", err)
 	}
 
-	// Merge new config with existing, handling sensitive fields properly
 	mergedConfig := definition.ConfigSchema.MergeConfigUpdates(instance.Config, config)
-
-	// Validate the merged config
 	if err := definition.ConfigSchema.Validate(mergedConfig); err != nil {
+		pm.mu.Unlock()
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
-	// Only call UpdateConfig on the plugin if it's initialized (enabled and running)
-	// Disabled/stopped plugins haven't been initialized so their apis/dependencies are nil
-	if instance.Status != PluginStatusDisabled && instance.Status != PluginStatusStopped {
-		if err := instance.Plugin.UpdateConfig(mergedConfig); err != nil {
+	plugin := instance.Plugin
+	// Status is read under pm.mu so the live/initialized check is consistent
+	// with the snapshot of `plugin` above.
+	statusAtSnapshot := instance.Status
+	pm.mu.Unlock()
+
+	// Only call UpdateConfig on the plugin if it's initialized (enabled and
+	// running). Disabled/stopped plugins haven't been initialized so their
+	// apis/dependencies are nil. The call may take seconds on a subprocess
+	// plugin; running it without pm.mu held lets other operations proceed.
+	if plugin != nil && statusAtSnapshot != PluginStatusDisabled && statusAtSnapshot != PluginStatusStopped {
+		if err := plugin.UpdateConfig(mergedConfig); err != nil {
 			return fmt.Errorf("failed to update plugin config: %w", err)
 		}
 	}
 
-	// Update instance record
+	// Re-acquire the lock to commit the new config. If the instance was
+	// deleted or replaced while we were doing RPC, discard our changes so a
+	// stale config doesn't overwrite a fresh entry.
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	current, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
+	if err != nil {
+		return fmt.Errorf("plugin instance %s was modified concurrently; config update discarded", instanceID.String())
+	}
+	if current != instance {
+		return fmt.Errorf("plugin instance %s was replaced concurrently; config update discarded", instanceID.String())
+	}
+
 	instance.Config = mergedConfig
 	instance.UpdatedAt = time.Now()
 
-	// Save to database
 	if err := pm.updatePluginInstanceInDatabase(instance); err != nil {
 		return fmt.Errorf("failed to update plugin instance in database: %w", err)
 	}
@@ -473,48 +532,55 @@ func (pm *PluginManager) UpdatePluginConfig(serverID, instanceID uuid.UUID, conf
 
 // UpdatePluginLogLevel updates a plugin's log level
 func (pm *PluginManager) UpdatePluginLogLevel(serverID, instanceID uuid.UUID, logLevel string) error {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
 	// Validate log level
 	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	if !validLevels[logLevel] {
 		return fmt.Errorf("invalid log level: %s (must be one of: debug, info, warn, error)", logLevel)
 	}
 
+	// Snapshot the instance under pm.mu, persist the new level, then release
+	// the lock before stop+init RPCs which can take up to 30s on a misbehaving
+	// plugin. Holding pm.mu across those RPCs would block every other plugin
+	// operation.
+	pm.mu.Lock()
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
 	if err != nil {
+		pm.mu.Unlock()
 		return err
 	}
 
-	// Update instance record
 	instance.LogLevel = logLevel
 	instance.UpdatedAt = time.Now()
 
-	// Save to database
 	if err := pm.updatePluginInstanceInDatabase(instance); err != nil {
+		pm.mu.Unlock()
 		return fmt.Errorf("failed to update plugin instance in database: %w", err)
 	}
 
-	// Restart plugin to apply new log level
-	if instance.Enabled && instance.Status == PluginStatusRunning {
-		if err := pm.stopPluginInstance(instance); err != nil {
-			log.Error().
-				Str("serverID", serverID.String()).
-				Str("instanceID", instanceID.String()).
-				Err(err).
-				Msg("Failed to stop plugin instance after log level update")
-		}
+	needsRestart := instance.Enabled && instance.Status == PluginStatusRunning
+	pm.mu.Unlock()
 
-		if err := pm.initializePluginInstance(instance); err != nil {
-			log.Error().
-				Str("serverID", serverID.String()).
-				Str("instanceID", instanceID.String()).
-				Err(err).
-				Msg("Failed to restart plugin instance after log level update")
-			instance.setError(PluginStatusError, err.Error())
-			return fmt.Errorf("failed to restart plugin instance: %w", err)
-		}
+	if !needsRestart {
+		return nil
+	}
+
+	// Restart plugin to apply new log level (no pm.mu held during RPC).
+	if err := pm.stopPluginInstance(instance); err != nil {
+		log.Error().
+			Str("serverID", serverID.String()).
+			Str("instanceID", instanceID.String()).
+			Err(err).
+			Msg("Failed to stop plugin instance after log level update")
+	}
+
+	if err := pm.initializePluginInstance(instance); err != nil {
+		log.Error().
+			Str("serverID", serverID.String()).
+			Str("instanceID", instanceID.String()).
+			Err(err).
+			Msg("Failed to restart plugin instance after log level update")
+		instance.setError(PluginStatusError, err.Error())
+		return fmt.Errorf("failed to restart plugin instance: %w", err)
 	}
 
 	return nil
@@ -522,30 +588,41 @@ func (pm *PluginManager) UpdatePluginLogLevel(serverID, instanceID uuid.UUID, lo
 
 // EnablePluginInstance enables a plugin instance
 func (pm *PluginManager) EnablePluginInstance(serverID, instanceID uuid.UUID) error {
+	// Mark the instance as enabled under pm.mu, then release before
+	// initializePluginInstance which RPCs into the subprocess. Holding pm.mu
+	// across that call would block every other plugin operation.
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
 	if err != nil {
+		pm.mu.Unlock()
 		return err
 	}
 
 	if instance.Enabled {
+		pm.mu.Unlock()
 		return nil // Already enabled
 	}
 
 	instance.Enabled = true
 	instance.UpdatedAt = time.Now()
+	needsInit := instance.Status == PluginStatusDisabled
+	pm.mu.Unlock()
 
-	// Initialize and start if needed
-	if instance.Status == PluginStatusDisabled {
+	if needsInit {
 		if err := pm.initializePluginInstance(instance); err != nil {
+			// Roll the Enabled flag back so the operator's next attempt is a
+			// clean enable rather than an enable-of-already-enabled no-op.
+			pm.mu.Lock()
 			instance.Enabled = false
+			pm.mu.Unlock()
 			return fmt.Errorf("failed to initialize plugin instance: %w", err)
 		}
 	}
 
-	// Save to database
+	// Persist the enable. Take the lock briefly so the DB write is
+	// consistent with any concurrent UpdatedAt bumps.
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 	if err := pm.updatePluginInstanceInDatabase(instance); err != nil {
 		return fmt.Errorf("failed to update plugin instance in database: %w", err)
 	}
@@ -555,19 +632,23 @@ func (pm *PluginManager) EnablePluginInstance(serverID, instanceID uuid.UUID) er
 
 // DisablePluginInstance disables a plugin instance
 func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) error {
+	// Snapshot the instance under pm.mu, then release before stopPluginInstance
+	// which can take up to 30s on a misbehaving plugin. Holding pm.mu across
+	// that call would block every other plugin operation.
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
 	if err != nil {
+		pm.mu.Unlock()
 		return err
 	}
 
 	if !instance.Enabled {
+		pm.mu.Unlock()
 		return nil // Already disabled
 	}
+	pm.mu.Unlock()
 
-	// Stop plugin
+	// Stop plugin (may RPC into subprocess; performed without pm.mu held).
 	if err := pm.stopPluginInstance(instance); err != nil {
 		log.Error().
 			Str("serverID", serverID.String()).
@@ -585,11 +666,21 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 			Msg("Plugin instance was forcefully killed due to shutdown timeout during disable")
 	}
 
+	// Re-acquire the lock to commit the disable. If the instance was deleted
+	// or replaced while we were doing RPC, treat it as already-gone.
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	current, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
+	if err != nil || current != instance {
+		// Instance is gone or was replaced; nothing more to do.
+		return nil
+	}
+
 	instance.Enabled = false
 	instance.setStatus(PluginStatusDisabled)
 	instance.UpdatedAt = time.Now()
 
-	// Save to database
 	if err := pm.updatePluginInstanceInDatabase(instance); err != nil {
 		return fmt.Errorf("failed to update plugin instance in database: %w", err)
 	}
@@ -598,6 +689,12 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 }
 
 // getDiscordAPI returns the Discord connector API for use by plugins when available.
+//
+// connectorMu.RLock is held across instance.Connector.GetAPI() because that
+// call is in-process for the only Discord connector implementation (it returns
+// a cached *discord.DiscordAPI pointer); subprocess-isolated connectors return
+// nil from GetAPI and route through the JSON Invoke surface instead, so this
+// path can never RPC.
 func (pm *PluginManager) getDiscordAPI() DiscordAPI {
 	storageKey, ok := pm.ResolveConnectorInstanceKey("com.squad-aegis.connectors.discord")
 	if !ok {
@@ -605,9 +702,9 @@ func (pm *PluginManager) getDiscordAPI() DiscordAPI {
 	}
 
 	pm.connectorMu.RLock()
-	defer pm.connectorMu.RUnlock()
-
 	instance := pm.connectors[storageKey]
+	pm.connectorMu.RUnlock()
+
 	if instance == nil {
 		return nil
 	}
@@ -933,10 +1030,24 @@ type unexpectedExitReporter interface {
 	OnUnexpectedExit(func(error))
 }
 
+// initializePluginInstance ensures the plugin's in-process runtime is wired
+// up and then drives Initialize/Start RPCs. Callers running outside pm.mu
+// should still ensure runtime is created in a serialized way: this function
+// performs ensurePluginInstanceRuntime (which may write instance.Plugin) by
+// taking pm.mu briefly so concurrent readers under pm.mu.RLock cannot race
+// with the write. The RPCs themselves run with no manager-wide lock held so
+// a misbehaving subprocess does not stall every other plugin operation.
 func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) error {
-	if err := pm.ensurePluginInstanceRuntime(instance); err != nil {
-		instance.setError(PluginStatusError, err.Error())
-		return err
+	// Serialize the (rare) instance.Plugin assignment with concurrent map
+	// readers. ensurePluginInstanceRuntime is a pure in-memory operation
+	// (registry lookups + struct field writes) so this critical section is
+	// short and never blocks on I/O.
+	pm.mu.Lock()
+	runtimeErr := pm.ensurePluginInstanceRuntime(instance)
+	pm.mu.Unlock()
+	if runtimeErr != nil {
+		instance.setError(PluginStatusError, runtimeErr.Error())
+		return runtimeErr
 	}
 
 	instance.setStatus(PluginStatusStarting)
@@ -1105,9 +1216,6 @@ func (pm *PluginManager) eventDistributionLoop() {
 }
 
 func (pm *PluginManager) distributeEventToPlugins(event *event_manager.Event) {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-
 	// Convert event to plugin event
 	rawString := ""
 	if event.RawData != nil {
@@ -1126,14 +1234,23 @@ func (pm *PluginManager) distributeEventToPlugins(event *event_manager.Event) {
 		Timestamp: event.Timestamp,
 	}
 
-	// Distribute to plugins on the specific server
+	// Snapshot the set of instances that handle this event under pm.mu, then
+	// release the lock before dispatching. instance.Plugin.GetDefinition() is
+	// cached for native plugins and a plain struct return for bundled plugins,
+	// so it does not block on I/O — but holding pm.mu across the dispatch goroutine
+	// spawn is unnecessary and would extend the read-lock lifetime under load.
+	type dispatch struct {
+		instance *PluginInstance
+	}
+	var targets []dispatch
+
+	pm.mu.RLock()
 	if serverPlugins, exists := pm.plugins[event.ServerID]; exists {
 		for _, instance := range serverPlugins {
-			if instance.Status != PluginStatusRunning || !instance.Enabled {
+			if instance.Status != PluginStatusRunning || !instance.Enabled || instance.Plugin == nil {
 				continue
 			}
 
-			// Check if plugin handles this event type
 			definition := instance.Plugin.GetDefinition()
 			handles := false
 			for _, e := range definition.Events {
@@ -1144,9 +1261,14 @@ func (pm *PluginManager) distributeEventToPlugins(event *event_manager.Event) {
 			}
 
 			if handles {
-				go pm.handlePluginEvent(instance, pluginEvent)
+				targets = append(targets, dispatch{instance: instance})
 			}
 		}
+	}
+	pm.mu.RUnlock()
+
+	for _, t := range targets {
+		go pm.handlePluginEvent(t.instance, pluginEvent)
 	}
 }
 
@@ -1455,13 +1577,17 @@ func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, befo
 			}
 		}
 
-		// Get plugin information
+		// Get plugin information. instance.Plugin.GetDefinition() is safe to
+		// call under pm.mu.RLock here: native shims serve it from a cached
+		// field captured at peek time and bundled plugins return a plain
+		// struct literal, so no I/O happens while the read lock is held.
 		pm.mu.RLock()
 		if serverPlugins, exists := pm.plugins[serverID]; exists {
 			if instance, exists := serverPlugins[logItem.PluginInstanceID]; exists {
 				if instance.Plugin != nil {
-					logItem.PluginName = instance.Plugin.GetDefinition().Name
-					logItem.PluginID = instance.Plugin.GetDefinition().ID
+					definition := instance.Plugin.GetDefinition()
+					logItem.PluginName = definition.Name
+					logItem.PluginID = definition.ID
 				} else {
 					logItem.PluginName = instance.PluginID
 					logItem.PluginID = instance.PluginID
@@ -1489,43 +1615,55 @@ func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, befo
 
 // GetPluginCommands returns available commands for a plugin instance
 func (pm *PluginManager) GetPluginCommands(serverID, instanceID uuid.UUID) ([]PluginCommand, error) {
+	// Snapshot the plugin pointer under pm.mu, then release before
+	// GetCommands which RPCs into the subprocess for native plugins.
+	// Holding pm.mu across that call would block every other plugin
+	// operation.
 	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
 	if err != nil {
+		pm.mu.RUnlock()
 		return nil, err
 	}
+	plugin := instance.Plugin
+	pm.mu.RUnlock()
 
-	if instance.Plugin == nil {
+	if plugin == nil {
 		return nil, fmt.Errorf("plugin instance not initialized")
 	}
 
-	// Get commands from plugin
-	commands := instance.Plugin.GetCommands()
+	commands := plugin.GetCommands()
 	return commands, nil
 }
 
 // ExecutePluginCommand executes a command on a plugin instance
 func (pm *PluginManager) ExecutePluginCommand(serverID, instanceID uuid.UUID, commandID string, params map[string]interface{}) (*CommandResult, error) {
+	// Snapshot the plugin pointer + status under pm.mu, then release the
+	// lock before any subprocess RPC. GetCommands and ExecuteCommand both
+	// RPC into the subprocess on native plugins, so holding pm.mu would
+	// block every other plugin operation for the duration.
 	pm.mu.RLock()
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
-	pm.mu.RUnlock()
-
 	if err != nil {
+		pm.mu.RUnlock()
 		return nil, err
 	}
+	plugin := instance.Plugin
+	statusAtSnapshot := instance.Status
+	enabledAtSnapshot := instance.Enabled
+	pluginID := instance.PluginID
+	pm.mu.RUnlock()
 
-	if instance.Plugin == nil {
+	if plugin == nil {
 		return nil, fmt.Errorf("plugin instance not initialized")
 	}
 
-	if instance.Status != PluginStatusRunning || !instance.Enabled {
+	if statusAtSnapshot != PluginStatusRunning || !enabledAtSnapshot {
 		return nil, fmt.Errorf("plugin instance is not running")
 	}
 
 	// Validate command exists
-	commands := instance.Plugin.GetCommands()
+	commands := plugin.GetCommands()
 	var command *PluginCommand
 	for i := range commands {
 		if commands[i].ID == commandID {
@@ -1555,7 +1693,7 @@ func (pm *PluginManager) ExecutePluginCommand(serverID, instanceID uuid.UUID, co
 				log.Error().
 					Str("serverID", serverID.String()).
 					Str("instanceID", instanceID.String()).
-					Str("pluginID", instance.PluginID).
+					Str("pluginID", pluginID).
 					Str("commandID", commandID).
 					Interface("panic", r).
 					Msg("Plugin panicked while executing command")
@@ -1564,7 +1702,7 @@ func (pm *PluginManager) ExecutePluginCommand(serverID, instanceID uuid.UUID, co
 			}
 		}()
 
-		result, execErr = instance.Plugin.ExecuteCommand(commandID, params)
+		result, execErr = plugin.ExecuteCommand(commandID, params)
 	}()
 
 	if execErr != nil {
@@ -1576,20 +1714,23 @@ func (pm *PluginManager) ExecutePluginCommand(serverID, instanceID uuid.UUID, co
 
 // GetCommandExecutionStatus gets the status of an async command execution
 func (pm *PluginManager) GetCommandExecutionStatus(serverID, instanceID uuid.UUID, executionID string) (*CommandExecutionStatus, error) {
+	// Snapshot the plugin pointer under pm.mu, then release before the
+	// GetCommandExecutionStatus RPC. Holding pm.mu across that call would
+	// block every other plugin operation.
 	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
 	if err != nil {
+		pm.mu.RUnlock()
 		return nil, err
 	}
+	plugin := instance.Plugin
+	pm.mu.RUnlock()
 
-	if instance.Plugin == nil {
+	if plugin == nil {
 		return nil, fmt.Errorf("plugin instance not initialized")
 	}
 
-	// Get execution status from plugin
-	status, err := instance.Plugin.GetCommandExecutionStatus(executionID)
+	status, err := plugin.GetCommandExecutionStatus(executionID)
 	if err != nil {
 		return nil, err
 	}
