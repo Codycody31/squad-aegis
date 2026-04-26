@@ -33,8 +33,8 @@ const (
 
 // nativePluginVerifiedLoader is a hookable loader that fetches the static
 // definition of a native plugin package. In production it spawns a
-// hashicorp/go-plugin subprocess, pulls the definition out over net/rpc,
-// then kills the peek subprocess. The returned definition's CreateInstance
+// hashicorp/go-plugin subprocess (gRPC + AutoMTLS), pulls the definition
+// out over the wire, then kills the peek subprocess. The returned definition's CreateInstance
 // factory spawns a fresh subprocess per instance — so a buggy or malicious
 // plugin can only ever corrupt its own process image, never the host's.
 // Tests override this hook to inject canned definitions without spawning

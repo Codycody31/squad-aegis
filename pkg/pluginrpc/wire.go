@@ -1,13 +1,14 @@
 // Package pluginrpc is the subprocess-isolated SDK for authoring Squad Aegis
 // native plugins. Plugins built against this package run as standalone
-// binaries; the host spawns them via hashicorp/go-plugin and communicates
-// over net/rpc, so a crashing or malicious plugin cannot corrupt the host
-// process's memory.
+// binaries; the host spawns them via hashicorp/go-plugin with AutoMTLS and
+// communicates over gRPC, so a crashing or malicious plugin cannot corrupt
+// the host process's memory and its IPC channel is mutually authenticated
+// with a per-spawn certificate.
 //
-// This package is intentionally self-contained: it imports nothing from
-// internal/ so that external plugin authors can vendor it independently.
-// The wire types mirror the host's runtime types at the JSON level and are
-// converted in both directions on the host side.
+// This package is intentionally self-contained beyond the generated proto
+// stubs in pkg/pluginrpc/proto so external plugin authors can vendor it
+// independently. The exported Go types here are stable; the wire-level
+// proto schema is an internal implementation detail.
 package pluginrpc
 
 import (
@@ -214,31 +215,4 @@ type InitializeArgs struct {
 	InstanceID      string                 `json:"instance_id,omitempty"`
 	ServerID        string                 `json:"server_id,omitempty"`
 	LogLevel        string                 `json:"log_level,omitempty"`
-}
-
-// HostAPIRequest is the generic envelope the plugin sends back to the host
-// when invoking a host API method. Target is a dotted "api.Method" string
-// (for example "log.Info" or "rcon.SendCommand"), Payload is the JSON-encoded
-// arguments specific to that method.
-type HostAPIRequest struct {
-	Target  string          `json:"target"`
-	Payload json.RawMessage `json:"payload"`
-}
-
-// HostAPIResponse is the reply envelope. Payload is the JSON-encoded result;
-// Error is the stringified error if the call failed.
-type HostAPIResponse struct {
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Error   string          `json:"error,omitempty"`
-}
-
-// ExecuteCommandArgs carries the command invocation payload.
-type ExecuteCommandArgs struct {
-	CommandID string                 `json:"command_id"`
-	Params    map[string]interface{} `json:"params,omitempty"`
-}
-
-// HandleEventArgs wraps a PluginEvent for the RPC call.
-type HandleEventArgs struct {
-	Event PluginEvent `json:"event"`
 }

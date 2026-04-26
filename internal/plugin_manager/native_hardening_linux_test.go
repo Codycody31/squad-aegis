@@ -52,11 +52,9 @@ func TestApplySubprocessHardeningDefaultIsSetpgidOnly(t *testing.T) {
 	t.Cleanup(func() { config.Config = prev })
 
 	cmd := exec.Command("/bin/true")
-	release, err := applySubprocessHardening(cmd)
-	if err != nil {
+	if err := applySubprocessHardening(cmd); err != nil {
 		t.Fatalf("applySubprocessHardening() error = %v", err)
 	}
-	t.Cleanup(release)
 	if cmd.SysProcAttr == nil {
 		t.Fatal("SysProcAttr is nil after hardening")
 	}
@@ -78,11 +76,9 @@ func TestApplySubprocessHardeningSetsCredentialWhenUIDConfigured(t *testing.T) {
 	t.Cleanup(func() { config.Config = prev })
 
 	cmd := exec.Command("/bin/true")
-	release, err := applySubprocessHardening(cmd)
-	if err != nil {
+	if err := applySubprocessHardening(cmd); err != nil {
 		t.Fatalf("applySubprocessHardening() error = %v", err)
 	}
-	t.Cleanup(release)
 	cred := cmd.SysProcAttr.Credential
 	if cred == nil {
 		t.Fatal("Credential is nil, want populated")
@@ -110,11 +106,9 @@ func TestApplySubprocessHardeningGIDDefaultsToUID(t *testing.T) {
 	t.Cleanup(func() { config.Config = prev })
 
 	cmd := exec.Command("/bin/true")
-	release, err := applySubprocessHardening(cmd)
-	if err != nil {
+	if err := applySubprocessHardening(cmd); err != nil {
 		t.Fatalf("applySubprocessHardening() error = %v", err)
 	}
-	t.Cleanup(release)
 	cred := cmd.SysProcAttr.Credential
 	if cred == nil {
 		t.Fatal("Credential is nil")

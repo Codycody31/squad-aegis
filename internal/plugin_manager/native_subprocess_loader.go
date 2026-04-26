@@ -46,12 +46,11 @@ func commandFromVerifiedRuntimeFile(verifiedFile *os.File) *exec.Cmd {
 	return cmd
 }
 
-// pluginSubprocessHandle holds the live subprocess + the RPC client stub.
+// pluginSubprocessHandle holds the live subprocess + the gRPC client stub.
 // A handle must be released via Kill() when the plugin is unloaded.
 type pluginSubprocessHandle struct {
-	client     *goplugin.Client
-	rpc        *pluginrpc.PluginRPCClient
-	releaseUID func()
+	client *goplugin.Client
+	rpc    *pluginrpc.PluginGRPCClient
 }
 
 // Kill terminates the subprocess. Safe to call multiple times.
@@ -61,9 +60,6 @@ func (h *pluginSubprocessHandle) Kill() {
 	}
 	killProcessGroup(h.client)
 	h.client.Kill()
-	if h.releaseUID != nil {
-		h.releaseUID()
-	}
 }
 
 // launchNativePluginSubprocess verifies the runtime binary's checksum and
@@ -78,8 +74,7 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 	defer verifiedFile.Close()
 
 	cmd := commandFromVerifiedRuntimeFile(verifiedFile)
-	releaseUID, err := applySubprocessHardening(cmd)
-	if err != nil {
+	if err := applySubprocessHardening(cmd); err != nil {
 		return nil, fmt.Errorf("failed to harden plugin subprocess: %w", err)
 	}
 	client := goplugin.NewClient(nativePluginClientConfig(cmd))
@@ -87,34 +82,33 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 	rpcClient, err := client.Client()
 	if err != nil {
 		client.Kill()
-		releaseUID()
 		return nil, fmt.Errorf("failed to establish plugin rpc: %w", err)
 	}
 
 	raw, err := rpcClient.Dispense(pluginrpc.PluginName)
 	if err != nil {
 		client.Kill()
-		releaseUID()
 		return nil, fmt.Errorf("failed to dispense plugin: %w", err)
 	}
 
-	stub, ok := raw.(*pluginrpc.PluginRPCClient)
+	stub, ok := raw.(*pluginrpc.PluginGRPCClient)
 	if !ok {
 		client.Kill()
-		releaseUID()
 		return nil, fmt.Errorf("plugin rpc dispenser returned unexpected type %T", raw)
 	}
 
-	return &pluginSubprocessHandle{client: client, rpc: stub, releaseUID: releaseUID}, nil
+	return &pluginSubprocessHandle{client: client, rpc: stub}, nil
 }
 
 func nativePluginClientConfig(cmd *exec.Cmd) *goplugin.ClientConfig {
 	return &goplugin.ClientConfig{
-		HandshakeConfig: pluginrpc.Handshake,
-		Plugins:         pluginrpc.PluginMap(nil),
-		Cmd:             cmd,
-		Managed:         false,
-		SkipHostEnv:     true,
+		HandshakeConfig:  pluginrpc.Handshake,
+		Plugins:          pluginrpc.PluginMap(nil),
+		Cmd:              cmd,
+		Managed:          false,
+		SkipHostEnv:      true,
+		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
+		AutoMTLS:         true,
 		Logger: hclog.New(&hclog.LoggerOptions{
 			Name:   "aegis-native-plugin",
 			Level:  hclog.Warn,
@@ -249,7 +243,7 @@ func (s *subprocessPluginShim) GetDefinition() PluginDefinition {
 }
 
 // Initialize spawns the subprocess (if not already running), wires up the
-// HostAPI RPC server on a fresh broker ID, and calls the plugin's Initialize
+// HostAPI gRPC server on a fresh broker ID, and calls the plugin's Initialize
 // RPC. If any step fails the subprocess is killed and the error is returned.
 func (s *subprocessPluginShim) Initialize(config map[string]interface{}, apis *PluginAPIs) error {
 	s.mu.Lock()

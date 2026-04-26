@@ -3,20 +3,22 @@ package pluginrpc
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/rpc"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	pluginrpcpb "go.codycody31.dev/squad-aegis/pkg/pluginrpc/proto"
 )
 
 // HostAPIs is the plugin-facing surface for calling back into the Aegis host.
-// It is constructed inside the plugin process after the RPC server receives
+// It is constructed inside the plugin process after the gRPC server receives
 // Initialize with a broker ID, and is passed to the plugin's Initialize
-// method. Every method ultimately dispatches to a generic RPC call on the
-// host's HostAPI dispatcher, which invokes the concrete in-host API method
-// by name.
+// method. Every method ultimately dispatches to a concrete RPC on the host's
+// HostAPI gRPC service.
 type HostAPIs struct {
-	bridge *hostAPIBridge
+	client pluginrpcpb.HostAPIClient
 
 	LogAPI       *LogAPI
 	RconAPI      *RconAPI
@@ -29,435 +31,444 @@ type HostAPIs struct {
 	ConnectorAPI *ConnectorAPI
 }
 
-// newHostAPIsFromClient builds a HostAPIs around a net/rpc client pointing at
-// the host's HostAPI RPC server. Called once inside Initialize.
-func newHostAPIsFromClient(client *rpc.Client) *HostAPIs {
-	bridge := &hostAPIBridge{client: client}
-	return &HostAPIs{
-		bridge:       bridge,
-		LogAPI:       &LogAPI{bridge: bridge},
-		RconAPI:      &RconAPI{bridge: bridge},
-		ServerAPI:    &ServerAPI{bridge: bridge},
-		DatabaseAPI:  &DatabaseAPI{bridge: bridge},
-		RuleAPI:      &RuleAPI{bridge: bridge},
-		AdminAPI:     &AdminAPI{bridge: bridge},
-		EventAPI:     &EventAPI{bridge: bridge},
-		DiscordAPI:   &DiscordAPI{bridge: bridge},
-		ConnectorAPI: &ConnectorAPI{bridge: bridge},
-	}
-}
-
-// hostAPIBridge marshals typed arguments into HostAPIRequest envelopes and
-// unmarshals the response envelope back into typed output. It is the single
-// RPC chokepoint for every plugin → host call.
-type hostAPIBridge struct {
-	client *rpc.Client
-}
-
-func (b *hostAPIBridge) call(target string, args interface{}, out interface{}) error {
-	payload, err := json.Marshal(args)
-	if err != nil {
-		return fmt.Errorf("pluginrpc: marshal host api %s args: %w", target, err)
-	}
-	req := HostAPIRequest{Target: target, Payload: payload}
-	var resp HostAPIResponse
-	if err := b.client.Call("HostAPI.Call", req, &resp); err != nil {
-		return fmt.Errorf("pluginrpc: host api %s call: %w", target, err)
-	}
-	if resp.Error != "" {
-		return errors.New(resp.Error)
-	}
-	if out != nil && len(resp.Payload) > 0 {
-		if err := json.Unmarshal(resp.Payload, out); err != nil {
-			return fmt.Errorf("pluginrpc: unmarshal host api %s reply: %w", target, err)
-		}
-	}
-	return nil
+// newHostAPIsFromConn builds a HostAPIs around a gRPC client connection
+// pointing at the host's HostAPI gRPC server. Called once inside Initialize.
+func newHostAPIsFromConn(conn *grpc.ClientConn) *HostAPIs {
+	client := pluginrpcpb.NewHostAPIClient(conn)
+	apis := &HostAPIs{client: client}
+	apis.LogAPI = &LogAPI{client: client}
+	apis.RconAPI = &RconAPI{client: client}
+	apis.ServerAPI = &ServerAPI{client: client}
+	apis.DatabaseAPI = &DatabaseAPI{client: client}
+	apis.RuleAPI = &RuleAPI{client: client}
+	apis.AdminAPI = &AdminAPI{client: client}
+	apis.EventAPI = &EventAPI{client: client}
+	apis.DiscordAPI = &DiscordAPI{client: client}
+	apis.ConnectorAPI = &ConnectorAPI{client: client}
+	return apis
 }
 
 // -- LogAPI ------------------------------------------------------------------
 
 // LogAPI writes structured log entries into the host's logger.
-type LogAPI struct{ bridge *hostAPIBridge }
+type LogAPI struct{ client pluginrpcpb.HostAPIClient }
 
-type logArgs struct {
-	Message string                 `json:"message"`
-	Fields  map[string]interface{} `json:"fields,omitempty"`
-	Error   string                 `json:"error,omitempty"`
+func (l *LogAPI) buildRequest(message string, fields map[string]interface{}, errMsg string) (*pluginrpcpb.LogRequest, error) {
+	encoded, err := encodeJSONMap(fields)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginrpcpb.LogRequest{
+		Message:    message,
+		FieldsJson: encoded,
+		Error:      errMsg,
+	}, nil
 }
 
 // Info writes an info-level log entry.
 func (l *LogAPI) Info(message string, fields map[string]interface{}) {
-	_ = l.bridge.call("log.Info", logArgs{Message: message, Fields: fields}, nil)
+	req, err := l.buildRequest(message, fields, "")
+	if err != nil {
+		return
+	}
+	_, _ = l.client.LogInfo(context.Background(), req)
 }
 
 // Warn writes a warn-level log entry.
 func (l *LogAPI) Warn(message string, fields map[string]interface{}) {
-	_ = l.bridge.call("log.Warn", logArgs{Message: message, Fields: fields}, nil)
+	req, err := l.buildRequest(message, fields, "")
+	if err != nil {
+		return
+	}
+	_, _ = l.client.LogWarn(context.Background(), req)
 }
 
 // Error writes an error-level log entry. The err.Error() string is forwarded
 // on the wire; the host re-attaches it to the log record.
 func (l *LogAPI) Error(message string, err error, fields map[string]interface{}) {
-	args := logArgs{Message: message, Fields: fields}
+	errMsg := ""
 	if err != nil {
-		args.Error = err.Error()
+		errMsg = err.Error()
 	}
-	_ = l.bridge.call("log.Error", args, nil)
+	req, buildErr := l.buildRequest(message, fields, errMsg)
+	if buildErr != nil {
+		return
+	}
+	_, _ = l.client.LogError(context.Background(), req)
 }
 
 // Debug writes a debug-level log entry.
 func (l *LogAPI) Debug(message string, fields map[string]interface{}) {
-	_ = l.bridge.call("log.Debug", logArgs{Message: message, Fields: fields}, nil)
+	req, err := l.buildRequest(message, fields, "")
+	if err != nil {
+		return
+	}
+	_, _ = l.client.LogDebug(context.Background(), req)
 }
 
 // -- RconAPI -----------------------------------------------------------------
 
 // RconAPI exposes the restricted RCON surface available to plugins.
-type RconAPI struct{ bridge *hostAPIBridge }
+type RconAPI struct{ client pluginrpcpb.HostAPIClient }
 
-type rconCommandArgs struct {
-	Command string `json:"command"`
-}
-
-type rconCommandReply struct {
-	Response string `json:"response"`
+func newRconBanRequest(playerID, reason string, duration time.Duration, eventID, eventType string, ruleID *string, metadata map[string]interface{}) (*pluginrpcpb.RconBanRequest, error) {
+	encoded, err := encodeJSONMap(metadata)
+	if err != nil {
+		return nil, err
+	}
+	req := &pluginrpcpb.RconBanRequest{
+		PlayerId:     playerID,
+		Reason:       reason,
+		DurationNs:   int64(duration),
+		EventId:      eventID,
+		EventType:    eventType,
+		MetadataJson: encoded,
+	}
+	if ruleID != nil {
+		req.RuleId = *ruleID
+		req.RuleIdSet = true
+	}
+	return req, nil
 }
 
 // SendCommand runs an RCON command against the server the plugin is scoped to.
 func (r *RconAPI) SendCommand(command string) (string, error) {
-	var reply rconCommandReply
-	if err := r.bridge.call("rcon.SendCommand", rconCommandArgs{Command: command}, &reply); err != nil {
+	resp, err := r.client.RconSendCommand(context.Background(), &pluginrpcpb.RconCommandRequest{Command: command})
+	if err != nil {
 		return "", err
 	}
-	return reply.Response, nil
-}
-
-type rconBroadcastArgs struct {
-	Message string `json:"message"`
+	return resp.GetResponse(), nil
 }
 
 // Broadcast sends a chat broadcast to every player on the server.
 func (r *RconAPI) Broadcast(message string) error {
-	return r.bridge.call("rcon.Broadcast", rconBroadcastArgs{Message: message}, nil)
-}
-
-type rconWarnPlayerArgs struct {
-	PlayerID string `json:"player_id"`
-	Message  string `json:"message"`
+	_, err := r.client.RconBroadcast(context.Background(), &pluginrpcpb.RconBroadcastRequest{Message: message})
+	return err
 }
 
 // SendWarningToPlayer sends an in-game warning to a single player.
 func (r *RconAPI) SendWarningToPlayer(playerID, message string) error {
-	return r.bridge.call("rcon.SendWarningToPlayer", rconWarnPlayerArgs{PlayerID: playerID, Message: message}, nil)
-}
-
-type rconKickArgs struct {
-	PlayerID string `json:"player_id"`
-	Reason   string `json:"reason"`
+	_, err := r.client.RconSendWarningToPlayer(context.Background(), &pluginrpcpb.RconWarnPlayerRequest{
+		PlayerId: playerID,
+		Message:  message,
+	})
+	return err
 }
 
 // KickPlayer kicks a player from the server.
 func (r *RconAPI) KickPlayer(playerID, reason string) error {
-	return r.bridge.call("rcon.KickPlayer", rconKickArgs{PlayerID: playerID, Reason: reason}, nil)
-}
-
-type rconBanArgs struct {
-	PlayerID  string                 `json:"player_id"`
-	Reason    string                 `json:"reason"`
-	Duration  time.Duration          `json:"duration"`
-	EventID   string                 `json:"event_id,omitempty"`
-	EventType string                 `json:"event_type,omitempty"`
-	RuleID    *string                `json:"rule_id,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	_, err := r.client.RconKickPlayer(context.Background(), &pluginrpcpb.RconKickRequest{
+		PlayerId: playerID,
+		Reason:   reason,
+	})
+	return err
 }
 
 // BanPlayer bans a player for the given duration.
 func (r *RconAPI) BanPlayer(playerID, reason string, duration time.Duration) error {
-	return r.bridge.call("rcon.BanPlayer", rconBanArgs{PlayerID: playerID, Reason: reason, Duration: duration}, nil)
-}
-
-type banResultReply struct {
-	BanID string `json:"ban_id"`
+	req, err := newRconBanRequest(playerID, reason, duration, "", "", nil, nil)
+	if err != nil {
+		return err
+	}
+	_, err = r.client.RconBanPlayer(context.Background(), req)
+	return err
 }
 
 // BanWithEvidence bans a player and attaches an event ID as evidence.
 func (r *RconAPI) BanWithEvidence(playerID, reason string, duration time.Duration, eventID, eventType string) (string, error) {
-	var reply banResultReply
-	if err := r.bridge.call("rcon.BanWithEvidence", rconBanArgs{PlayerID: playerID, Reason: reason, Duration: duration, EventID: eventID, EventType: eventType}, &reply); err != nil {
+	req, err := newRconBanRequest(playerID, reason, duration, eventID, eventType, nil, nil)
+	if err != nil {
 		return "", err
 	}
-	return reply.BanID, nil
+	resp, err := r.client.RconBanWithEvidence(context.Background(), req)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetBanId(), nil
 }
 
 // WarnPlayerWithRule sends a warning and logs the violation against a rule.
 func (r *RconAPI) WarnPlayerWithRule(playerID, message string, ruleID *string) error {
-	return r.bridge.call("rcon.WarnPlayerWithRule", rconBanArgs{PlayerID: playerID, Reason: message, RuleID: ruleID}, nil)
+	req, err := newRconBanRequest(playerID, message, 0, "", "", ruleID, nil)
+	if err != nil {
+		return err
+	}
+	_, err = r.client.RconWarnPlayerWithRule(context.Background(), req)
+	return err
 }
 
 // KickPlayerWithRule kicks a player and logs the violation against a rule.
 func (r *RconAPI) KickPlayerWithRule(playerID, reason string, ruleID *string) error {
-	return r.bridge.call("rcon.KickPlayerWithRule", rconBanArgs{PlayerID: playerID, Reason: reason, RuleID: ruleID}, nil)
+	req, err := newRconBanRequest(playerID, reason, 0, "", "", ruleID, nil)
+	if err != nil {
+		return err
+	}
+	_, err = r.client.RconKickPlayerWithRule(context.Background(), req)
+	return err
 }
 
 // BanPlayerWithRule bans a player and logs the violation against a rule.
 func (r *RconAPI) BanPlayerWithRule(playerID, reason string, duration time.Duration, ruleID *string) error {
-	return r.bridge.call("rcon.BanPlayerWithRule", rconBanArgs{PlayerID: playerID, Reason: reason, Duration: duration, RuleID: ruleID}, nil)
+	req, err := newRconBanRequest(playerID, reason, duration, "", "", ruleID, nil)
+	if err != nil {
+		return err
+	}
+	_, err = r.client.RconBanPlayerWithRule(context.Background(), req)
+	return err
 }
 
 // BanWithEvidenceAndRule bans a player, attaches evidence, and logs against a rule.
 func (r *RconAPI) BanWithEvidenceAndRule(playerID, reason string, duration time.Duration, eventID, eventType string, ruleID *string) (string, error) {
-	var reply banResultReply
-	if err := r.bridge.call("rcon.BanWithEvidenceAndRule", rconBanArgs{PlayerID: playerID, Reason: reason, Duration: duration, EventID: eventID, EventType: eventType, RuleID: ruleID}, &reply); err != nil {
+	req, err := newRconBanRequest(playerID, reason, duration, eventID, eventType, ruleID, nil)
+	if err != nil {
 		return "", err
 	}
-	return reply.BanID, nil
+	resp, err := r.client.RconBanWithEvidenceAndRule(context.Background(), req)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetBanId(), nil
 }
 
 // BanWithEvidenceAndRuleAndMetadata extends BanWithEvidenceAndRule with additional metadata.
 func (r *RconAPI) BanWithEvidenceAndRuleAndMetadata(playerID, reason string, duration time.Duration, eventID, eventType string, ruleID *string, metadata map[string]interface{}) (string, error) {
-	var reply banResultReply
-	if err := r.bridge.call("rcon.BanWithEvidenceAndRuleAndMetadata", rconBanArgs{PlayerID: playerID, Reason: reason, Duration: duration, EventID: eventID, EventType: eventType, RuleID: ruleID, Metadata: metadata}, &reply); err != nil {
+	req, err := newRconBanRequest(playerID, reason, duration, eventID, eventType, ruleID, metadata)
+	if err != nil {
 		return "", err
 	}
-	return reply.BanID, nil
-}
-
-type rconRemoveSquadArgs struct {
-	PlayerID string `json:"player_id"`
+	resp, err := r.client.RconBanWithEvidenceAndRuleAndMetadata(context.Background(), req)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetBanId(), nil
 }
 
 // RemovePlayerFromSquad removes a player from their squad (by various IDs).
 func (r *RconAPI) RemovePlayerFromSquad(playerID string) error {
-	return r.bridge.call("rcon.RemovePlayerFromSquad", rconRemoveSquadArgs{PlayerID: playerID}, nil)
+	_, err := r.client.RconRemovePlayerFromSquad(context.Background(), &pluginrpcpb.RconRemoveSquadRequest{PlayerId: playerID})
+	return err
 }
 
 // RemovePlayerFromSquadById removes a player from their squad by player ID.
 func (r *RconAPI) RemovePlayerFromSquadById(playerID string) error {
-	return r.bridge.call("rcon.RemovePlayerFromSquadById", rconRemoveSquadArgs{PlayerID: playerID}, nil)
+	_, err := r.client.RconRemovePlayerFromSquadById(context.Background(), &pluginrpcpb.RconRemoveSquadRequest{PlayerId: playerID})
+	return err
 }
 
 // -- ServerAPI ---------------------------------------------------------------
 
 // ServerAPI exposes read-only server metadata.
-type ServerAPI struct{ bridge *hostAPIBridge }
+type ServerAPI struct{ client pluginrpcpb.HostAPIClient }
 
 // GetServerID returns the UUID (as a string) of the server the plugin is scoped to.
 func (s *ServerAPI) GetServerID() (string, error) {
-	var reply string
-	if err := s.bridge.call("server.GetServerID", struct{}{}, &reply); err != nil {
+	resp, err := s.client.ServerGetServerID(context.Background(), &pluginrpcpb.Empty{})
+	if err != nil {
 		return "", err
 	}
-	return reply, nil
+	return resp.GetValue(), nil
 }
 
-// GetServerInfo returns basic server information. Returned type is a raw map
-// so the plugin SDK doesn't need to model every host struct.
-func (s *ServerAPI) GetServerInfo() (map[string]interface{}, error) {
-	var reply map[string]interface{}
-	if err := s.bridge.call("server.GetServerInfo", struct{}{}, &reply); err != nil {
+func (s *ServerAPI) callJSONMap(fn func(context.Context, *pluginrpcpb.Empty, ...grpc.CallOption) (*pluginrpcpb.JSONResponse, error)) (map[string]interface{}, error) {
+	resp, err := fn(context.Background(), &pluginrpcpb.Empty{})
+	if err != nil {
 		return nil, err
 	}
-	return reply, nil
+	return decodeJSONMap(resp.GetDataJson())
+}
+
+func (s *ServerAPI) callJSONList(fn func(context.Context, *pluginrpcpb.Empty, ...grpc.CallOption) (*pluginrpcpb.JSONResponse, error)) ([]map[string]interface{}, error) {
+	resp, err := fn(context.Background(), &pluginrpcpb.Empty{})
+	if err != nil {
+		return nil, err
+	}
+	return decodeJSONListOfMaps(resp.GetDataJson())
+}
+
+// GetServerInfo returns basic server information.
+func (s *ServerAPI) GetServerInfo() (map[string]interface{}, error) {
+	return s.callJSONMap(s.client.ServerGetServerInfo)
 }
 
 // GetPlayers returns the current player list as a list of maps.
 func (s *ServerAPI) GetPlayers() ([]map[string]interface{}, error) {
-	var reply []map[string]interface{}
-	if err := s.bridge.call("server.GetPlayers", struct{}{}, &reply); err != nil {
-		return nil, err
-	}
-	return reply, nil
+	return s.callJSONList(s.client.ServerGetPlayers)
 }
 
 // GetAdmins returns the current admin list as a list of maps.
 func (s *ServerAPI) GetAdmins() ([]map[string]interface{}, error) {
-	var reply []map[string]interface{}
-	if err := s.bridge.call("server.GetAdmins", struct{}{}, &reply); err != nil {
-		return nil, err
-	}
-	return reply, nil
+	return s.callJSONList(s.client.ServerGetAdmins)
 }
 
 // GetSquads returns the current squad list as a list of maps.
 func (s *ServerAPI) GetSquads() ([]map[string]interface{}, error) {
-	var reply []map[string]interface{}
-	if err := s.bridge.call("server.GetSquads", struct{}{}, &reply); err != nil {
-		return nil, err
-	}
-	return reply, nil
+	return s.callJSONList(s.client.ServerGetSquads)
 }
 
 // -- DatabaseAPI -------------------------------------------------------------
 
 // DatabaseAPI provides plugin-scoped key/value storage.
-type DatabaseAPI struct{ bridge *hostAPIBridge }
-
-type dbArgs struct {
-	Key   string `json:"key"`
-	Value string `json:"value,omitempty"`
-}
-
-type dbReply struct {
-	Value string `json:"value"`
-}
+type DatabaseAPI struct{ client pluginrpcpb.HostAPIClient }
 
 // GetPluginData retrieves a plugin-scoped value by key.
 func (d *DatabaseAPI) GetPluginData(key string) (string, error) {
-	var reply dbReply
-	if err := d.bridge.call("database.GetPluginData", dbArgs{Key: key}, &reply); err != nil {
+	resp, err := d.client.DatabaseGetPluginData(context.Background(), &pluginrpcpb.DatabaseRequest{Key: key})
+	if err != nil {
 		return "", err
 	}
-	return reply.Value, nil
+	return resp.GetValue(), nil
 }
 
 // SetPluginData stores a plugin-scoped value.
 func (d *DatabaseAPI) SetPluginData(key, value string) error {
-	return d.bridge.call("database.SetPluginData", dbArgs{Key: key, Value: value}, nil)
+	_, err := d.client.DatabaseSetPluginData(context.Background(), &pluginrpcpb.DatabaseRequest{Key: key, Value: value})
+	return err
 }
 
 // DeletePluginData removes a plugin-scoped value.
 func (d *DatabaseAPI) DeletePluginData(key string) error {
-	return d.bridge.call("database.DeletePluginData", dbArgs{Key: key}, nil)
+	_, err := d.client.DatabaseDeletePluginData(context.Background(), &pluginrpcpb.DatabaseRequest{Key: key})
+	return err
 }
 
 // -- RuleAPI -----------------------------------------------------------------
 
 // RuleAPI provides read-only access to server rules.
-type RuleAPI struct{ bridge *hostAPIBridge }
-
-type listRulesArgs struct {
-	ParentRuleID *string `json:"parent_rule_id,omitempty"`
-}
+type RuleAPI struct{ client pluginrpcpb.HostAPIClient }
 
 // ListServerRules returns rules for the current server, optionally scoped to
 // a parent rule ID.
 func (r *RuleAPI) ListServerRules(parentRuleID *string) ([]map[string]interface{}, error) {
-	var reply []map[string]interface{}
-	if err := r.bridge.call("rule.ListServerRules", listRulesArgs{ParentRuleID: parentRuleID}, &reply); err != nil {
+	req := &pluginrpcpb.ListRulesRequest{}
+	if parentRuleID != nil {
+		req.ParentRuleId = *parentRuleID
+		req.ParentRuleIdSet = true
+	}
+	resp, err := r.client.RuleListServerRules(context.Background(), req)
+	if err != nil {
 		return nil, err
 	}
-	return reply, nil
-}
-
-type listRuleActionsArgs struct {
-	RuleID string `json:"rule_id"`
+	return decodeJSONListOfMaps(resp.GetDataJson())
 }
 
 // ListServerRuleActions returns escalation actions configured for a rule.
 func (r *RuleAPI) ListServerRuleActions(ruleID string) ([]map[string]interface{}, error) {
-	var reply []map[string]interface{}
-	if err := r.bridge.call("rule.ListServerRuleActions", listRuleActionsArgs{RuleID: ruleID}, &reply); err != nil {
+	resp, err := r.client.RuleListServerRuleActions(context.Background(), &pluginrpcpb.ListRuleActionsRequest{RuleId: ruleID})
+	if err != nil {
 		return nil, err
 	}
-	return reply, nil
+	return decodeJSONListOfMaps(resp.GetDataJson())
 }
 
 // -- AdminAPI ----------------------------------------------------------------
 
 // AdminAPI provides admin management functionality to plugins.
-type AdminAPI struct{ bridge *hostAPIBridge }
-
-type addTempAdminArgs struct {
-	PlayerID  string     `json:"player_id"`
-	RoleName  string     `json:"role_name"`
-	Notes     string     `json:"notes"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-}
+type AdminAPI struct{ client pluginrpcpb.HostAPIClient }
 
 // AddTemporaryAdmin grants a player a temporary admin role.
 func (a *AdminAPI) AddTemporaryAdmin(playerID, roleName, notes string, expiresAt *time.Time) error {
-	return a.bridge.call("admin.AddTemporaryAdmin", addTempAdminArgs{PlayerID: playerID, RoleName: roleName, Notes: notes, ExpiresAt: expiresAt}, nil)
-}
-
-type removeTempAdminArgs struct {
-	PlayerID string `json:"player_id"`
-	RoleName string `json:"role_name,omitempty"`
-	Notes    string `json:"notes"`
+	req := &pluginrpcpb.AddTempAdminRequest{
+		PlayerId: playerID,
+		RoleName: roleName,
+		Notes:    notes,
+	}
+	if expiresAt != nil {
+		req.ExpiresAt = timestamppb.New(*expiresAt)
+	}
+	_, err := a.client.AdminAddTemporaryAdmin(context.Background(), req)
+	return err
 }
 
 // RemoveTemporaryAdmin removes all temporary admin grants for a player.
 func (a *AdminAPI) RemoveTemporaryAdmin(playerID, notes string) error {
-	return a.bridge.call("admin.RemoveTemporaryAdmin", removeTempAdminArgs{PlayerID: playerID, Notes: notes}, nil)
+	_, err := a.client.AdminRemoveTemporaryAdmin(context.Background(), &pluginrpcpb.RemoveTempAdminRequest{
+		PlayerId: playerID,
+		Notes:    notes,
+	})
+	return err
 }
 
 // RemoveTemporaryAdminRole removes a specific temporary admin role from a player.
 func (a *AdminAPI) RemoveTemporaryAdminRole(playerID, roleName, notes string) error {
-	return a.bridge.call("admin.RemoveTemporaryAdminRole", removeTempAdminArgs{PlayerID: playerID, RoleName: roleName, Notes: notes}, nil)
-}
-
-type playerIDArgs struct {
-	PlayerID string `json:"player_id"`
+	_, err := a.client.AdminRemoveTemporaryAdminRole(context.Background(), &pluginrpcpb.RemoveTempAdminRequest{
+		PlayerId: playerID,
+		RoleName: roleName,
+		Notes:    notes,
+	})
+	return err
 }
 
 // GetPlayerAdminStatus checks a player's admin status and roles.
 func (a *AdminAPI) GetPlayerAdminStatus(playerID string) (map[string]interface{}, error) {
-	var reply map[string]interface{}
-	if err := a.bridge.call("admin.GetPlayerAdminStatus", playerIDArgs{PlayerID: playerID}, &reply); err != nil {
+	resp, err := a.client.AdminGetPlayerAdminStatus(context.Background(), &pluginrpcpb.PlayerIDRequest{PlayerId: playerID})
+	if err != nil {
 		return nil, err
 	}
-	return reply, nil
+	return decodeJSONMap(resp.GetDataJson())
 }
 
 // ListTemporaryAdmins lists all plugin-managed temporary admins.
 func (a *AdminAPI) ListTemporaryAdmins() ([]map[string]interface{}, error) {
-	var reply []map[string]interface{}
-	if err := a.bridge.call("admin.ListTemporaryAdmins", struct{}{}, &reply); err != nil {
+	resp, err := a.client.AdminListTemporaryAdmins(context.Background(), &pluginrpcpb.Empty{})
+	if err != nil {
 		return nil, err
 	}
-	return reply, nil
+	return decodeJSONListOfMaps(resp.GetDataJson())
 }
 
 // -- EventAPI ----------------------------------------------------------------
 
 // EventAPI lets plugins publish custom events into the host event bus.
-type EventAPI struct{ bridge *hostAPIBridge }
+type EventAPI struct{ client pluginrpcpb.HostAPIClient }
 
-type publishEventArgs struct {
-	EventType string                 `json:"event_type"`
-	Data      map[string]interface{} `json:"data,omitempty"`
-	Raw       string                 `json:"raw,omitempty"`
-}
-
-// PublishEvent publishes a custom plugin event. Note that SubscribeToEvents
-// is intentionally NOT exposed to subprocess plugins — events are delivered
-// to the plugin via the HandleEvent RPC call instead.
+// PublishEvent publishes a custom plugin event. SubscribeToEvents is
+// intentionally NOT exposed to subprocess plugins; events are delivered to
+// the plugin via the HandleEvent RPC call instead.
 func (e *EventAPI) PublishEvent(eventType string, data map[string]interface{}, raw string) error {
-	return e.bridge.call("event.PublishEvent", publishEventArgs{EventType: eventType, Data: data, Raw: raw}, nil)
+	encoded, err := encodeJSONMap(data)
+	if err != nil {
+		return fmt.Errorf("encode event data: %w", err)
+	}
+	_, err = e.client.EventPublishEvent(context.Background(), &pluginrpcpb.PublishEventRequest{
+		EventType: eventType,
+		DataJson:  encoded,
+		Raw:       raw,
+	})
+	return err
 }
 
 // -- DiscordAPI --------------------------------------------------------------
 
 // DiscordAPI sends messages through the host's configured Discord connector.
-type DiscordAPI struct{ bridge *hostAPIBridge }
-
-type discordMessageArgs struct {
-	ChannelID string                 `json:"channel_id"`
-	Content   string                 `json:"content,omitempty"`
-	Embed     map[string]interface{} `json:"embed,omitempty"`
-}
-
-type discordMessageReply struct {
-	MessageID string `json:"message_id"`
-}
+type DiscordAPI struct{ client pluginrpcpb.HostAPIClient }
 
 // SendMessage sends a plain text message to a Discord channel.
 func (d *DiscordAPI) SendMessage(channelID, content string) (string, error) {
-	var reply discordMessageReply
-	if err := d.bridge.call("discord.SendMessage", discordMessageArgs{ChannelID: channelID, Content: content}, &reply); err != nil {
+	resp, err := d.client.DiscordSendMessage(context.Background(), &pluginrpcpb.DiscordMessageRequest{
+		ChannelId: channelID,
+		Content:   content,
+	})
+	if err != nil {
 		return "", err
 	}
-	return reply.MessageID, nil
+	return resp.GetMessageId(), nil
 }
 
 // SendEmbed sends a Discord embed message to a channel. The embed is passed
 // as a generic map so the wire format does not need to model every embed field.
 func (d *DiscordAPI) SendEmbed(channelID string, embed map[string]interface{}) (string, error) {
-	var reply discordMessageReply
-	if err := d.bridge.call("discord.SendEmbed", discordMessageArgs{ChannelID: channelID, Embed: embed}, &reply); err != nil {
+	encoded, err := encodeJSONMap(embed)
+	if err != nil {
+		return "", fmt.Errorf("encode discord embed: %w", err)
+	}
+	resp, err := d.client.DiscordSendEmbed(context.Background(), &pluginrpcpb.DiscordMessageRequest{
+		ChannelId: channelID,
+		EmbedJson: encoded,
+	})
+	if err != nil {
 		return "", err
 	}
-	return reply.MessageID, nil
+	return resp.GetMessageId(), nil
 }
 
 // -- ConnectorAPI ------------------------------------------------------------
@@ -477,33 +488,56 @@ type ConnectorInvokeResponse struct {
 }
 
 // ConnectorAPI lets plugins invoke connectors by ID with a JSON envelope.
-type ConnectorAPI struct{ bridge *hostAPIBridge }
-
-type connectorCallArgs struct {
-	ConnectorID string                 `json:"connector_id"`
-	V           string                 `json:"v"`
-	Data        map[string]interface{} `json:"data,omitempty"`
-	TimeoutMs   int64                  `json:"timeout_ms,omitempty"`
-}
+type ConnectorAPI struct{ client pluginrpcpb.HostAPIClient }
 
 // Call invokes a connector by ID with a JSON envelope. The context deadline
 // is translated into a millisecond timeout on the wire.
 func (c *ConnectorAPI) Call(ctx context.Context, connectorID string, req *ConnectorInvokeRequest) (*ConnectorInvokeResponse, error) {
-	args := connectorCallArgs{ConnectorID: connectorID}
+	pbReq := &pluginrpcpb.ConnectorCallRequest{ConnectorId: connectorID}
 	if req != nil {
-		args.V = req.V
-		args.Data = req.Data
+		pbReq.V = req.V
+		encoded, err := encodeJSONMap(req.Data)
+		if err != nil {
+			return nil, fmt.Errorf("encode connector data: %w", err)
+		}
+		pbReq.DataJson = encoded
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
 		if remaining < 0 {
 			return nil, context.DeadlineExceeded
 		}
-		args.TimeoutMs = remaining.Milliseconds()
+		pbReq.TimeoutMs = remaining.Milliseconds()
 	}
-	var reply ConnectorInvokeResponse
-	if err := c.bridge.call("connector.Call", args, &reply); err != nil {
+	resp, err := c.client.ConnectorCall(ctx, pbReq)
+	if err != nil {
 		return nil, err
 	}
-	return &reply, nil
+	out := &ConnectorInvokeResponse{
+		V:     resp.GetV(),
+		OK:    resp.GetOk(),
+		Error: resp.GetError(),
+	}
+	if data := resp.GetDataJson(); len(data) > 0 {
+		decoded, err := decodeJSONMap(data)
+		if err != nil {
+			return nil, fmt.Errorf("decode connector response data: %w", err)
+		}
+		out.Data = decoded
+	}
+	return out, nil
+}
+
+// decodeJSONListOfMaps unmarshals JSON bytes into a []map[string]interface{}.
+// Empty bytes return nil. The stricter typing keeps the public Go SDK API
+// unchanged from the previous net/rpc implementation.
+func decodeJSONListOfMaps(b []byte) ([]map[string]interface{}, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	out := []map[string]interface{}{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

@@ -24,6 +24,7 @@ make test            # Run tests with coverage
 make lint            # Run golangci-lint
 make format          # Format code with gofumpt
 make generate        # Run code generation
+make generate-proto  # Regenerate native plugin/connector gRPC stubs (pkg/pluginrpc/proto, pkg/connectorrpc/proto)
 make vendor          # Update vendor directory
 ```
 

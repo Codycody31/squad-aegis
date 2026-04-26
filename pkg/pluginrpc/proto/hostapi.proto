@@ -1,0 +1,201 @@
+// HostAPI is the plugin-to-host service. The plugin subprocess dials the
+// host on the broker ID supplied via Plugin.Initialize and then invokes
+// methods on this service. All host-side authorization (rate limiting,
+// payload caps, connector scope, Discord channel allowlist, etc.) lives in
+// the host's implementation of this service.
+syntax = "proto3";
+
+package squadaegis.pluginrpc.v1;
+
+option go_package = "go.codycody31.dev/squad-aegis/pkg/pluginrpc/proto;pluginrpcpb";
+
+import "google/protobuf/timestamp.proto";
+import "pkg/pluginrpc/proto/plugin.proto";
+
+service HostAPI {
+  // -- Log -------------------------------------------------------------
+  rpc LogInfo(LogRequest) returns (Empty);
+  rpc LogWarn(LogRequest) returns (Empty);
+  rpc LogError(LogRequest) returns (Empty);
+  rpc LogDebug(LogRequest) returns (Empty);
+
+  // -- Rcon ------------------------------------------------------------
+  rpc RconSendCommand(RconCommandRequest) returns (RconCommandResponse);
+  rpc RconBroadcast(RconBroadcastRequest) returns (Empty);
+  rpc RconSendWarningToPlayer(RconWarnPlayerRequest) returns (Empty);
+  rpc RconKickPlayer(RconKickRequest) returns (Empty);
+  rpc RconBanPlayer(RconBanRequest) returns (Empty);
+  rpc RconBanWithEvidence(RconBanRequest) returns (BanResultResponse);
+  rpc RconWarnPlayerWithRule(RconBanRequest) returns (Empty);
+  rpc RconKickPlayerWithRule(RconBanRequest) returns (Empty);
+  rpc RconBanPlayerWithRule(RconBanRequest) returns (Empty);
+  rpc RconBanWithEvidenceAndRule(RconBanRequest) returns (BanResultResponse);
+  rpc RconBanWithEvidenceAndRuleAndMetadata(RconBanRequest) returns (BanResultResponse);
+  rpc RconRemovePlayerFromSquad(RconRemoveSquadRequest) returns (Empty);
+  rpc RconRemovePlayerFromSquadById(RconRemoveSquadRequest) returns (Empty);
+
+  // -- Server ----------------------------------------------------------
+  rpc ServerGetServerID(Empty) returns (StringResponse);
+  rpc ServerGetServerInfo(Empty) returns (JSONResponse);
+  rpc ServerGetPlayers(Empty) returns (JSONResponse);
+  rpc ServerGetAdmins(Empty) returns (JSONResponse);
+  rpc ServerGetSquads(Empty) returns (JSONResponse);
+
+  // -- Database --------------------------------------------------------
+  rpc DatabaseGetPluginData(DatabaseRequest) returns (DatabaseResponse);
+  rpc DatabaseSetPluginData(DatabaseRequest) returns (Empty);
+  rpc DatabaseDeletePluginData(DatabaseRequest) returns (Empty);
+
+  // -- Rule ------------------------------------------------------------
+  rpc RuleListServerRules(ListRulesRequest) returns (JSONResponse);
+  rpc RuleListServerRuleActions(ListRuleActionsRequest) returns (JSONResponse);
+
+  // -- Admin -----------------------------------------------------------
+  rpc AdminAddTemporaryAdmin(AddTempAdminRequest) returns (Empty);
+  rpc AdminRemoveTemporaryAdmin(RemoveTempAdminRequest) returns (Empty);
+  rpc AdminRemoveTemporaryAdminRole(RemoveTempAdminRequest) returns (Empty);
+  rpc AdminGetPlayerAdminStatus(PlayerIDRequest) returns (JSONResponse);
+  rpc AdminListTemporaryAdmins(Empty) returns (JSONResponse);
+
+  // -- Event -----------------------------------------------------------
+  rpc EventPublishEvent(PublishEventRequest) returns (Empty);
+
+  // -- Discord ---------------------------------------------------------
+  rpc DiscordSendMessage(DiscordMessageRequest) returns (DiscordMessageResponse);
+  rpc DiscordSendEmbed(DiscordMessageRequest) returns (DiscordMessageResponse);
+
+  // -- Connector -------------------------------------------------------
+  rpc ConnectorCall(ConnectorCallRequest) returns (ConnectorCallResponse);
+}
+
+// JSONResponse carries arbitrary JSON-encoded data. Used for replies whose
+// shape is host-defined (player lists, server info, etc.).
+message JSONResponse {
+  bytes data_json = 1;
+}
+
+message StringResponse {
+  string value = 1;
+}
+
+message LogRequest {
+  string message = 1;
+  // JSON-encoded fields map.
+  bytes fields_json = 2;
+  string error = 3;
+}
+
+message RconCommandRequest {
+  string command = 1;
+}
+
+message RconCommandResponse {
+  string response = 1;
+}
+
+message RconBroadcastRequest {
+  string message = 1;
+}
+
+message RconWarnPlayerRequest {
+  string player_id = 1;
+  string message = 2;
+}
+
+message RconKickRequest {
+  string player_id = 1;
+  string reason = 2;
+}
+
+message RconBanRequest {
+  string player_id = 1;
+  string reason = 2;
+  // duration in nanoseconds (matches time.Duration).
+  int64 duration_ns = 3;
+  string event_id = 4;
+  string event_type = 5;
+  // rule_id is optional. Empty string means nil.
+  string rule_id = 6;
+  bool rule_id_set = 7;
+  // JSON-encoded metadata map.
+  bytes metadata_json = 8;
+}
+
+message BanResultResponse {
+  string ban_id = 1;
+}
+
+message RconRemoveSquadRequest {
+  string player_id = 1;
+}
+
+message DatabaseRequest {
+  string key = 1;
+  string value = 2;
+}
+
+message DatabaseResponse {
+  string value = 1;
+}
+
+message ListRulesRequest {
+  // parent_rule_id is optional; empty string + parent_rule_id_set=false means nil.
+  string parent_rule_id = 1;
+  bool parent_rule_id_set = 2;
+}
+
+message ListRuleActionsRequest {
+  string rule_id = 1;
+}
+
+message AddTempAdminRequest {
+  string player_id = 1;
+  string role_name = 2;
+  string notes = 3;
+  // expires_at unset means nil.
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+message RemoveTempAdminRequest {
+  string player_id = 1;
+  string role_name = 2;
+  string notes = 3;
+}
+
+message PlayerIDRequest {
+  string player_id = 1;
+}
+
+message PublishEventRequest {
+  string event_type = 1;
+  // JSON-encoded data map.
+  bytes data_json = 2;
+  string raw = 3;
+}
+
+message DiscordMessageRequest {
+  string channel_id = 1;
+  string content = 2;
+  // JSON-encoded embed map.
+  bytes embed_json = 3;
+}
+
+message DiscordMessageResponse {
+  string message_id = 1;
+}
+
+message ConnectorCallRequest {
+  string connector_id = 1;
+  string v = 2;
+  // JSON-encoded data map.
+  bytes data_json = 3;
+  int64 timeout_ms = 4;
+}
+
+message ConnectorCallResponse {
+  string v = 1;
+  bool ok = 2;
+  // JSON-encoded data map.
+  bytes data_json = 3;
+  string error = 4;
+}
