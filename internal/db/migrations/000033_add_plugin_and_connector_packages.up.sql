@@ -129,6 +129,10 @@ BEGIN
     WHERE managed_by_plugin_instance_id IS NULL
       AND notes LIKE 'Plugin: % - %';
     IF orphan_count > 0 THEN
-        RAISE NOTICE 'server_admins backfill: % rows match the Plugin: <Name> - %% notes pattern but could not be linked to a plugin instance. Review and reconcile via the plugin admin UI.', orphan_count, '%';
+        -- In PL/pgSQL RAISE format strings, %% emits a literal %; only %
+        -- consumes a positional argument. So this format takes exactly one
+        -- argument (orphan_count). The trailing '%' that previously drove
+        -- "too many parameters specified for RAISE" has been removed.
+        RAISE NOTICE 'server_admins backfill: % rows match the Plugin: <Name> - %% notes pattern but could not be linked to a plugin instance. Review and reconcile via the plugin admin UI.', orphan_count;
     END IF;
 END $$;
