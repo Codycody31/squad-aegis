@@ -1203,15 +1203,32 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 		return nil
 	}
 
-	// Even when the instance is not Running (Error, Stopped, etc), we still
-	// need to release the per-instance HostAPI broker, log subscription, and
-	// child context. The broker only goes away when Plugin.Stop() / Kill()
-	// is called, so an early-return on non-Running would leak it.
-	// For a crashed plugin we go straight to Kill(); for any other state we
-	// attempt graceful Stop first with a timeout fallback to Kill.
+	// States where Plugin.Stop() must NOT be called:
+	//
+	//   - Stopped: the plugin already cleaned itself up (or was never
+	//     running). Calling Stop again on most in-process plugins is a
+	//     no-op, but bundled plugins that touch p.apis.LogAPI in Stop will
+	//     panic if Initialize was never called (see team_balancer.Stop).
+	//
+	//   - Disabled: the plugin row exists in the registry but Initialize
+	//     was never called for this lifecycle. p.apis is nil, p.swapExecutor
+	//     is nil, etc. — Stop would dereference uninitialized fields.
+	//
+	// In both cases there is no per-instance broker, no subscription, and
+	// no goroutine to release. Just reset the cancelled context so a
+	// subsequent Enable can allocate a fresh one (M-07).
+	if currentStatus == PluginStatusStopped || currentStatus == PluginStatusDisabled {
+		pm.resetPluginInstanceContext(instance)
+		return nil
+	}
+
+	// Crashed plugins: the broker may still be alive on the subprocess
+	// shim, but the in-process plugin's own state may be inconsistent.
+	// Subprocess plugins get SIGKILL (cheap, releases the broker without
+	// touching plugin code). In-process plugins get a panic-recovered
+	// Stop call so a Stop that itself panics does not take down the host.
 	if currentStatus == PluginStatusError {
-		killer, ok := instance.Plugin.(killablePlugin)
-		if ok {
+		if killer, ok := instance.Plugin.(killablePlugin); ok {
 			if err := killer.Kill(); err != nil {
 				log.Warn().
 					Str("pluginID", instance.PluginID).
@@ -1220,8 +1237,6 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 					Msg("Failed to SIGKILL plugin subprocess on crashed-state cleanup")
 			}
 		} else {
-			// In-process plugins: best-effort Stop, ignore errors since the
-			// plugin already crashed and we just need to release host-side state.
 			_ = safePluginCall(instance.PluginID, "Stop", instance.Plugin.Stop)
 		}
 		instance.setStatus(PluginStatusStopped)
@@ -1236,14 +1251,18 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 		instance.Cancel()
 	}
 
-	// Stop plugin with 30-second timeout
+	// Stop plugin with 30-second timeout. The Plugin.Stop() call runs
+	// inside safePluginCall so a panicking in-process plugin (e.g. nil
+	// p.apis dereferenced because Initialize never completed) cannot crash
+	// the host process — instead the panic is converted to an error and
+	// we still release host-side state below.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	stopChan := make(chan error, 1)
 
 	go func() {
-		stopChan <- instance.Plugin.Stop()
+		stopChan <- safePluginCall(instance.PluginID, "Stop", instance.Plugin.Stop)
 	}()
 
 	select {

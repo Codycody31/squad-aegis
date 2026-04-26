@@ -439,6 +439,21 @@ type killableConnector interface {
 }
 
 func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) error {
+	if instance.Connector == nil {
+		instance.setStatus(ConnectorStatusStopped)
+		pm.resetConnectorInstanceContext(instance)
+		return nil
+	}
+
+	// Skip Stop() entirely for connectors that never reached Initialize:
+	// in-process connectors that hold nil pointers in their Stop path would
+	// panic on cleanup (mirrors the plugin-side guard in stopPluginInstance).
+	currentStatus := instance.getStatus()
+	if currentStatus == ConnectorStatusStopped || currentStatus == ConnectorStatusDisabled {
+		pm.resetConnectorInstanceContext(instance)
+		return nil
+	}
+
 	instance.setStatus(ConnectorStatusStopping)
 
 	// Cancel context
@@ -446,14 +461,16 @@ func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) erro
 		instance.Cancel()
 	}
 
-	// Stop connector with 30-second timeout
+	// Stop connector with 30-second timeout. The Stop call runs inside
+	// safePluginCall so a panicking in-process connector cannot take down
+	// the host process during shutdown.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	stopChan := make(chan error, 1)
 
 	go func() {
-		stopChan <- instance.Connector.Stop()
+		stopChan <- safePluginCall(instance.ID, "Connector.Stop", instance.Connector.Stop)
 	}()
 
 	select {
