@@ -63,8 +63,6 @@ func NewRouter(server *Server) *gin.Engine {
 	router.SetTrustedProxies(nil) //nolint:errcheck
 
 	if config.Config.Log.ShowGin {
-		// General Middleware
-		router.Use(gin.Logger())
 		router.Use(gin.LoggerWithFormatter(server.customLoggerWithFormatter))
 	}
 

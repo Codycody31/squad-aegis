@@ -656,6 +656,11 @@ type publishEventArgs struct {
 	Raw       string                 `json:"raw,omitempty"`
 }
 
+const (
+	maxPublishEventDataSize = 64 * 1024
+	maxPublishEventRawSize  = 8 * 1024
+)
+
 func (d *hostAPIDispatcher) dispatchEvent(method string, payload json.RawMessage) (interface{}, error) {
 	if d.apis.EventAPI == nil {
 		return nil, errors.New("event api is unavailable")
@@ -665,6 +670,18 @@ func (d *hostAPIDispatcher) dispatchEvent(method string, payload json.RawMessage
 		var args publishEventArgs
 		if err := json.Unmarshal(payload, &args); err != nil {
 			return nil, err
+		}
+		if len(args.Data) > 0 {
+			encoded, err := json.Marshal(args.Data)
+			if err != nil {
+				return nil, fmt.Errorf("failed to encode event data: %w", err)
+			}
+			if len(encoded) > maxPublishEventDataSize {
+				return nil, fmt.Errorf("event data exceeds maximum size of %d bytes", maxPublishEventDataSize)
+			}
+		}
+		if len(args.Raw) > maxPublishEventRawSize {
+			return nil, fmt.Errorf("event raw exceeds maximum size of %d bytes", maxPublishEventRawSize)
 		}
 		// Namespace plugin-emitted events with the plugin ID to prevent both
 		// impersonation of system events and cross-plugin event spoofing. We
@@ -695,6 +712,31 @@ type discordMessageReply struct {
 	MessageID string `json:"message_id"`
 }
 
+// discordChannelAllowlister is implemented by DiscordAPI wrappers that scope
+// a plugin instance to an operator-configured set of channel IDs (per-instance
+// _aegis_discord_channels). A nil/empty result preserves the legacy behavior
+// of allowing any channel the bot can see.
+type discordChannelAllowlister interface {
+	allowedDiscordChannels() []string
+}
+
+func (d *hostAPIDispatcher) checkDiscordChannel(channelID string) error {
+	allow, ok := d.apis.DiscordAPI.(discordChannelAllowlister)
+	if !ok {
+		return nil
+	}
+	allowed := allow.allowedDiscordChannels()
+	if len(allowed) == 0 {
+		return nil
+	}
+	for _, id := range allowed {
+		if id == channelID {
+			return nil
+		}
+	}
+	return fmt.Errorf("discord channel %s is not in this plugin instance's allowlist", channelID)
+}
+
 func (d *hostAPIDispatcher) dispatchDiscord(method string, payload json.RawMessage) (interface{}, error) {
 	if d.apis.DiscordAPI == nil {
 		return nil, errors.New("discord api is unavailable")
@@ -707,6 +749,9 @@ func (d *hostAPIDispatcher) dispatchDiscord(method string, payload json.RawMessa
 	}
 	switch method {
 	case "SendMessage":
+		if err := d.checkDiscordChannel(args.ChannelID); err != nil {
+			return nil, err
+		}
 		log.Info().Str("plugin_id", d.pluginID).Str("channel_id", args.ChannelID).Msg("Plugin sending Discord message")
 		id, err := d.apis.DiscordAPI.SendMessage(args.ChannelID, args.Content)
 		if err != nil {
@@ -714,6 +759,9 @@ func (d *hostAPIDispatcher) dispatchDiscord(method string, payload json.RawMessa
 		}
 		return discordMessageReply{MessageID: id}, nil
 	case "SendEmbed":
+		if err := d.checkDiscordChannel(args.ChannelID); err != nil {
+			return nil, err
+		}
 		log.Info().Str("plugin_id", d.pluginID).Str("channel_id", args.ChannelID).Msg("Plugin sending Discord embed")
 		embed, err := mapToDiscordEmbed(args.Embed)
 		if err != nil {

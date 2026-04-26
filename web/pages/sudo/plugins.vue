@@ -30,15 +30,9 @@ import { toast } from "~/components/ui/toast";
 import type { PluginPackage, SystemConfig } from "~/types";
 
 definePageMeta({
-  middleware: "auth",
+  middleware: ["auth", "sudo"],
   layout: "sudo",
 });
-
-const authStore = useAuthStore();
-
-if (!authStore.user?.super_admin) {
-  navigateTo("/dashboard");
-}
 
 const loadingInstalled = ref(true);
 const uploading = ref(false);
@@ -76,8 +70,14 @@ const getStateVariant = (state: string) => {
 };
 
 const getSourceLabel = (plugin: Pick<PluginPackage, "source" | "distribution" | "official">) => {
-  if (plugin.source === "bundled") return "Bundled";
-  return "Sideload Native";
+  switch (plugin.source) {
+    case "bundled":
+      return "Bundled";
+    case "native":
+      return "Sideload Native";
+    default:
+      return plugin.source || "Unknown";
+  }
 };
 
 const formatRuntimeRequirements = (minHostAPIVersion?: number, requiredCapabilities?: string[]) => {
@@ -88,7 +88,7 @@ const formatRuntimeRequirements = (minHostAPIVersion?: number, requiredCapabilit
   if (requiredCapabilities?.length) {
     parts.push(requiredCapabilities.join(", "));
   }
-  return parts.join(" • ") || "-";
+  return parts.join(" · ") || "-";
 };
 
 const fetchInstalledPlugins = async () => {
@@ -205,7 +205,7 @@ onMounted(async () => {
       <div>
         <h1 class="text-3xl font-bold">Plugin Packages</h1>
         <p class="text-muted-foreground">
-          Manage bundled plugins and sideload native (.so) or WASM plugin bundles that can later be enabled per server.
+          Manage bundled plugins and sideload native executable plugin bundles that can later be enabled per server.
         </p>
       </div>
       <div class="flex gap-2">
@@ -272,7 +272,7 @@ onMounted(async () => {
       <CardHeader>
         <CardTitle>Upload Native Bundle</CardTitle>
         <CardDescription>
-          Upload a `.zip` plugin bundle containing `manifest.json`, one or more Linux `.so` libraries, and optionally the `manifest.sig` plus `manifest.pub` signature pair.
+          Upload a `.zip` plugin bundle containing `manifest.json`, one or more Linux executable binaries, and optionally the `manifest.sig` plus `manifest.pub` signature pair.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
@@ -372,7 +372,7 @@ onMounted(async () => {
             Delete the plugin package
             <span class="font-medium">"{{ deleteTarget?.name }}"</span>?
             Existing server plugin instances using this plugin must be removed first.
-            The plugin's <code>.so</code> file will be removed from disk.
+            The plugin's executable binary will be removed from disk.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

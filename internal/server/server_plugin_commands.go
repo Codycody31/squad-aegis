@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -9,6 +10,28 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
+
+var sensitiveParamSubstrings = []string{"password", "secret", "token", "key", "api_key"}
+
+func redactSensitiveParams(params map[string]interface{}) map[string]interface{} {
+	redacted := make(map[string]interface{}, len(params))
+	for k, v := range params {
+		lower := strings.ToLower(k)
+		isSensitive := false
+		for _, needle := range sensitiveParamSubstrings {
+			if strings.Contains(lower, needle) {
+				isSensitive = true
+				break
+			}
+		}
+		if isSensitive {
+			redacted[k] = "***REDACTED***"
+		} else {
+			redacted[k] = v
+		}
+	}
+	return redacted
+}
 
 // ServerPluginCommandsList returns available commands for a plugin instance
 func (s *Server) ServerPluginCommandsList(c *gin.Context) {
@@ -147,7 +170,7 @@ func (s *Server) ServerPluginCommandExecute(c *gin.Context) {
 
 	auditData := map[string]interface{}{
 		"commandId": commandID,
-		"params":    requestBody.Params,
+		"params":    redactSensitiveParams(requestBody.Params),
 	}
 	if result.ExecutionID != "" {
 		auditData["executionId"] = result.ExecutionID

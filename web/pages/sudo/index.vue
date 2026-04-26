@@ -7,17 +7,12 @@ import { Progress } from "~/components/ui/progress";
 import type { MetricsOverview, SystemHealth } from "~/types";
 
 definePageMeta({
-  middleware: "auth",
+  middleware: ["auth", "sudo"],
   layout: "sudo",
 });
 
 const runtimeConfig = useRuntimeConfig();
 const authStore = useAuthStore();
-
-// Redirect if not superadmin
-if (!authStore.user?.super_admin) {
-  navigateTo("/dashboard");
-}
 
 const loading = ref(true);
 const metricsOverview = ref<MetricsOverview | null>(null);

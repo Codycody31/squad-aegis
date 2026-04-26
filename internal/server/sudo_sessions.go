@@ -227,6 +227,10 @@ func (s *Server) DeleteSession(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:session:delete", gin.H{
+		"session_id": sessionID.String(),
+	})
+
 	responses.SimpleSuccess(c, "Session deleted successfully")
 }
 
@@ -262,6 +266,11 @@ func (s *Server) DeleteUserSessions(c *gin.Context) {
 
 	rowsAffected, _ := result.RowsAffected()
 
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:session:delete_user", gin.H{
+		"user_id":       userID.String(),
+		"deleted_count": rowsAffected,
+	})
+
 	responses.Success(c, "User sessions deleted successfully", &gin.H{
 		"deleted_count": rowsAffected,
 	})
@@ -282,6 +291,10 @@ func (s *Server) CleanupExpiredSessions(c *gin.Context) {
 	}
 
 	rowsAffected, _ := result.RowsAffected()
+
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:session:cleanup_expired", gin.H{
+		"deleted_count": rowsAffected,
+	})
 
 	responses.Success(c, "Expired sessions cleaned up successfully", &gin.H{
 		"deleted_count": rowsAffected,

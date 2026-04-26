@@ -148,7 +148,9 @@ func writeRuntimeLibrary(runtimePath string, libraryBytes []byte) error {
 
 // validateRuntimePathWithinRoot rejects a runtime_path that does not resolve
 // inside root, guarding against DB tampering that would otherwise make the
-// loader open arbitrary files on the host.
+// loader open arbitrary files on the host. Symlinks in either path are
+// resolved with filepath.EvalSymlinks so an intermediate symlink cannot
+// smuggle the final target outside the runtime root.
 func validateRuntimePathWithinRoot(runtimePath, root string) (string, error) {
 	if strings.TrimSpace(runtimePath) == "" {
 		return "", fmt.Errorf("runtime path is empty")
@@ -169,15 +171,51 @@ func validateRuntimePathWithinRoot(runtimePath, root string) (string, error) {
 	}
 	absPath = filepath.Clean(absPath)
 
-	rel, err := filepath.Rel(absRoot, absPath)
+	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
 	if err != nil {
-		return "", fmt.Errorf("runtime path %s is not under %s", absPath, absRoot)
+		return "", fmt.Errorf("failed to resolve runtime root symlinks: %w", err)
 	}
-	if rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("runtime path %s escapes runtime root %s", absPath, absRoot)
+	resolvedRoot = filepath.Clean(resolvedRoot)
+
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("failed to resolve runtime path symlinks: %w", err)
+		}
+		// Path does not exist yet (install-time write). Walk up to the
+		// nearest existing ancestor, resolve its symlinks, then rejoin the
+		// missing tail so containment is still checked.
+		ancestor := absPath
+		for {
+			parent := filepath.Dir(ancestor)
+			if parent == ancestor {
+				return "", fmt.Errorf("failed to resolve runtime path: no existing ancestor")
+			}
+			ancestor = parent
+			resolved, ancestorErr := filepath.EvalSymlinks(ancestor)
+			if ancestorErr == nil {
+				rel, relErr := filepath.Rel(ancestor, absPath)
+				if relErr != nil {
+					return "", fmt.Errorf("failed to compute runtime path relative to ancestor: %w", relErr)
+				}
+				resolvedPath = filepath.Clean(filepath.Join(resolved, rel))
+				break
+			}
+			if !os.IsNotExist(ancestorErr) {
+				return "", fmt.Errorf("failed to resolve runtime path ancestor symlinks: %w", ancestorErr)
+			}
+		}
 	}
 
-	return absPath, nil
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("runtime path %s is not under %s", resolvedPath, resolvedRoot)
+	}
+	if rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("runtime path %s escapes runtime root %s", resolvedPath, resolvedRoot)
+	}
+
+	return resolvedPath, nil
 }
 
 func allowUnsafeSideload() bool {
@@ -794,6 +832,36 @@ func (pm *PluginManager) loadNativePluginPackage(pkg *InstalledPluginPackage) er
 	}
 	pkg.RuntimePath = safePath
 
+	// For signature-verified packages, derive the expected runtime SHA from
+	// the signed manifest target so the runtime hash is bound to the
+	// signature, not to the unsigned plugin_packages.checksum column which a
+	// DB-tampering attacker could rewrite to match a swapped runtime file.
+	// Unsigned packages have no signature anchor; the stored checksum is the
+	// only available reference and remains the source of truth.
+	var expectedSHA string
+	if pkg.SignatureVerified {
+		verifiedTarget, err := selectedManifestTarget(pkg.Manifest)
+		if err != nil {
+			return fmt.Errorf("plugin manifest target selection failed: %w", err)
+		}
+		expectedSHA = strings.TrimSpace(verifiedTarget.SHA256)
+		if expectedSHA == "" {
+			return fmt.Errorf("plugin manifest target is missing sha256")
+		}
+		if pkg.Checksum != "" && !strings.EqualFold(pkg.Checksum, expectedSHA) {
+			log.Warn().Str("plugin_id", pkg.PluginID).Str("expected", expectedSHA).Str("stored", pkg.Checksum).Msg("Quarantining native plugin: stored checksum does not match signed manifest target")
+			if pkg.RuntimePath != "" {
+				removeRuntimeFile(safePath)
+			}
+			return fmt.Errorf("plugin checksum %q does not match signed manifest target %q", pkg.Checksum, expectedSHA)
+		}
+	} else {
+		expectedSHA = strings.TrimSpace(pkg.Checksum)
+		if expectedSHA == "" {
+			return fmt.Errorf("plugin checksum is missing")
+		}
+	}
+
 	// Rebuild the target snapshot from the package's compatibility fields
 	// so the peek/merge step has everything it needs. We don't serialize the
 	// full manifest.targets array onto InstalledPluginPackage — the selected
@@ -805,7 +873,7 @@ func (pm *PluginManager) loadNativePluginPackage(pkg *InstalledPluginPackage) er
 		TargetArch:           pkg.TargetArch,
 	}
 
-	definition, err := nativePluginVerifiedLoader(safePath, pkg.Checksum, pkg.Manifest, target)
+	definition, err := nativePluginVerifiedLoader(safePath, expectedSHA, pkg.Manifest, target)
 	if err != nil {
 		return err
 	}

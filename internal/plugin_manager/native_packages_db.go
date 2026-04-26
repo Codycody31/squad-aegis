@@ -99,9 +99,13 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 		}
 
 		// Recompute trust from stored signature material. The stored
-		// signature_verified flag is not authoritative on its own.
+		// signature_verified flag is not authoritative on its own. A package
+		// is "previously trusted" only if it actually has signature material
+		// to re-verify; otherwise the flag is stale state we cannot act on.
+		hasSignatureMaterial := len(pkg.ManifestSignature) > 0 && len(pkg.ManifestPublicKey) > 0 && len(manifestJSON) > 0
+		previouslyTrusted := pkg.SignatureVerified && hasSignatureMaterial
 		reverified := false
-		if len(pkg.ManifestSignature) > 0 && len(pkg.ManifestPublicKey) > 0 && len(manifestJSON) > 0 {
+		if hasSignatureMaterial {
 			ok, verifyErr := verifyManifestSignature(manifestJSON, pkg.ManifestSignature, pkg.ManifestPublicKey)
 			if verifyErr != nil {
 				log.Warn().Err(verifyErr).Str("plugin_id", pkg.PluginID).Msg("Stored plugin signature no longer verifies against trust store")
@@ -110,12 +114,23 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 		}
 		pkg.SignatureVerified = reverified
 		pkg.Unsafe = !reverified
-		if !reverified && !allowUnsafeSideload() {
+		// A package previously stored as trusted that no longer re-verifies
+		// indicates the operator's trust store revoked the signing key. Keep
+		// the package quarantined regardless of allowUnsafeSideload so a
+		// revoked key cannot be silently re-loaded by flipping the sideload
+		// flag. Operators must re-upload to un-quarantine.
+		mustQuarantine := !reverified && (previouslyTrusted || !allowUnsafeSideload())
+		if mustQuarantine {
 			if pkg.InstallState == PluginInstallStateReady || pkg.InstallState == PluginInstallStatePendingRestart {
-				log.Warn().Str("plugin_id", pkg.PluginID).Msg("Quarantining native plugin: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
+				if previouslyTrusted {
+					log.Warn().Str("plugin_id", pkg.PluginID).Msg("Quarantining native plugin: trusted key revoked, package quarantined")
+					pkg.LastError = "plugin signature key has been revoked from the trust store"
+				} else {
+					log.Warn().Str("plugin_id", pkg.PluginID).Msg("Quarantining native plugin: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
+					pkg.LastError = "plugin signature cannot be re-verified against trusted keys"
+				}
 				pkg.InstallState = PluginInstallStateError
-				pkg.LastError = "plugin signature cannot be re-verified against trusted keys"
-				if pkg.RuntimePath != "" {
+				if !previouslyTrusted && pkg.RuntimePath != "" {
 					if safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir()); pathErr == nil {
 						removeRuntimeFile(safePath)
 					}

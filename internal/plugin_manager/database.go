@@ -422,6 +422,13 @@ func (pm *PluginManager) attachConnectorUnexpectedExitReporter(instance *Connect
 	})
 }
 
+// killableConnector is implemented by subprocess-isolated connectors that can
+// SIGKILL their backing process when a graceful Stop() hangs. In-process
+// connectors do not implement this and are skipped.
+type killableConnector interface {
+	Kill() error
+}
+
 func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) error {
 	instance.Status = ConnectorStatusStopping
 
@@ -453,6 +460,14 @@ func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) erro
 		log.Warn().
 			Str("connectorID", instance.ID).
 			Msg("Connector shutdown timed out after 30 seconds, forcefully killing it")
+		if killer, ok := instance.Connector.(killableConnector); ok {
+			if killErr := killer.Kill(); killErr != nil {
+				log.Warn().
+					Str("connectorID", instance.ID).
+					Err(killErr).
+					Msg("Failed to SIGKILL connector subprocess after stop timeout")
+			}
+		}
 		instance.Status = ConnectorStatusStopped
 		instance.LastError = "Connector shutdown timed out after 30 seconds"
 		return nil
@@ -566,48 +581,57 @@ func (pm *PluginManager) UpdateConnectorConfig(connectorID string, config map[st
 		return fmt.Errorf("connector %s not found", connectorID)
 	}
 
+	// Snapshot the instance and validate under the lock, then release before
+	// the subprocess RPC so concurrent connector operations are not stalled
+	// for seconds at a time.
 	pm.connectorMu.Lock()
-	err := func() error {
-		defer pm.connectorMu.Unlock()
-
-		instance, exists := pm.connectors[storageKey]
-		if !exists {
-			return fmt.Errorf("connector %s not found", connectorID)
-		}
-
-		definition, err := pm.connectorRegistry.GetConnector(connectorID)
-		if err != nil {
-			return fmt.Errorf("connector definition not found: %w", err)
-		}
-
-		mergedConfig := definition.ConfigSchema.MergeConfigUpdates(instance.Config, config)
-
-		if err := definition.ConfigSchema.Validate(mergedConfig); err != nil {
-			return fmt.Errorf("config validation failed: %w", err)
-		}
-
-		if err := instance.Connector.UpdateConfig(mergedConfig); err != nil {
-			return fmt.Errorf("failed to update connector config: %w", err)
-		}
-
-		if instance.Connector.GetStatus() != ConnectorStatusRunning {
-			if err := instance.Connector.Start(instance.Context); err != nil {
-				return fmt.Errorf("failed to restart connector after config update: %w", err)
-			}
-		}
-
-		instance.Config = mergedConfig
-		instance.UpdatedAt = time.Now()
-
-		if err := pm.saveConnectorToDatabase(instance); err != nil {
-			return fmt.Errorf("failed to update connector in database: %w", err)
-		}
-
-		return nil
-	}()
-	if err != nil {
-		return err
+	instance, exists := pm.connectors[storageKey]
+	if !exists {
+		pm.connectorMu.Unlock()
+		return fmt.Errorf("connector %s not found", connectorID)
 	}
+
+	definition, err := pm.connectorRegistry.GetConnector(connectorID)
+	if err != nil {
+		pm.connectorMu.Unlock()
+		return fmt.Errorf("connector definition not found: %w", err)
+	}
+
+	mergedConfig := definition.ConfigSchema.MergeConfigUpdates(instance.Config, config)
+	if err := definition.ConfigSchema.Validate(mergedConfig); err != nil {
+		pm.connectorMu.Unlock()
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	connector := instance.Connector
+	instanceCtx := instance.Context
+	pm.connectorMu.Unlock()
+
+	if err := connector.UpdateConfig(mergedConfig); err != nil {
+		return fmt.Errorf("failed to update connector config: %w", err)
+	}
+
+	if connector.GetStatus() != ConnectorStatusRunning {
+		if err := connector.Start(instanceCtx); err != nil {
+			return fmt.Errorf("failed to restart connector after config update: %w", err)
+		}
+	}
+
+	// Re-acquire the lock to commit the new config. If the instance was
+	// deleted or replaced while we were doing RPC, discard our changes.
+	pm.connectorMu.Lock()
+	current, stillExists := pm.connectors[storageKey]
+	if !stillExists || current != instance {
+		pm.connectorMu.Unlock()
+		return fmt.Errorf("connector %s was modified concurrently; config update discarded", connectorID)
+	}
+	instance.Config = mergedConfig
+	instance.UpdatedAt = time.Now()
+	if err := pm.saveConnectorToDatabase(instance); err != nil {
+		pm.connectorMu.Unlock()
+		return fmt.Errorf("failed to update connector in database: %w", err)
+	}
+	pm.connectorMu.Unlock()
 
 	if err := pm.restartDependentPlugins(storageKey); err != nil {
 		log.Error().

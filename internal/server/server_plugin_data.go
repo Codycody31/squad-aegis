@@ -161,6 +161,11 @@ func (s *Server) ServerPluginDataSet(c *gin.Context) {
 		return
 	}
 
+	if len(requestBody.Value) > 1<<20 {
+		responses.BadRequest(c, "Value too large (max 1 MiB)", nil)
+		return
+	}
+
 	query := `INSERT INTO plugin_data (plugin_instance_id, key, value, created_at, updated_at)
 		VALUES ($1, $2, $3, NOW(), NOW())
 		ON CONFLICT (plugin_instance_id, key)

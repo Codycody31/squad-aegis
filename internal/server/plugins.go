@@ -70,10 +70,12 @@ func (s *Server) PluginListInstalled(c *gin.Context) {
 
 // PluginUpload installs a plugin package uploaded by a super admin.
 func (s *Server) PluginUpload(c *gin.Context) {
-	if !s.requireSuperAdmin(c) {
+	if !s.requirePluginManager(c) {
 		return
 	}
-	if !s.requirePluginManager(c) {
+
+	if config.Config.Plugins.AllowUnsafeSideload && c.Query("confirm_unsafe") != "true" {
+		responses.BadRequest(c, "unsigned bundle: re-submit with ?confirm_unsafe=true to acknowledge the security risk", nil)
 		return
 	}
 
@@ -107,13 +109,18 @@ func (s *Server) PluginUpload(c *gin.Context) {
 	}
 	defer openedFile.Close()
 
+	clientIP := c.ClientIP()
+	userAgent := c.GetHeader("User-Agent")
+
 	pkg, err := s.Dependencies.PluginManager.InstallPluginPackageFromBundle(c.Request.Context(), openedFile, file.Size, file.Filename)
 	if err != nil {
 		log.Error().Err(err).Str("filename", file.Filename).Msg("Failed to install uploaded plugin bundle")
 		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:upload_failed", gin.H{
-			"filename": file.Filename,
-			"size":     file.Size,
-			"error":    err.Error(),
+			"filename":   file.Filename,
+			"size":       file.Size,
+			"error":      err.Error(),
+			"client_ip":  clientIP,
+			"user_agent": userAgent,
 		})
 		responses.BadRequest(c, "Failed to install uploaded plugin bundle", nil)
 		return
@@ -126,6 +133,8 @@ func (s *Server) PluginUpload(c *gin.Context) {
 		"signature_verified": pkg.SignatureVerified,
 		"install_state":      pkg.InstallState,
 		"filename":           file.Filename,
+		"client_ip":          clientIP,
+		"user_agent":         userAgent,
 	})
 
 	message := "Plugin uploaded successfully"
@@ -138,9 +147,6 @@ func (s *Server) PluginUpload(c *gin.Context) {
 
 // PluginInstalledDelete removes an installed native plugin package.
 func (s *Server) PluginInstalledDelete(c *gin.Context) {
-	if !s.requireSuperAdmin(c) {
-		return
-	}
 	if !s.requirePluginManager(c) {
 		return
 	}

@@ -625,6 +625,69 @@ func (pm *PluginManager) getDiscordAPI() DiscordAPI {
 	return api
 }
 
+// instanceDiscordAPI wraps a DiscordAPI with a per-instance channel
+// allowlist sourced from the operator-managed instance config key
+// `_aegis_discord_channels`. The wrapper exposes allowedDiscordChannels()
+// so the host-side dispatcher can enforce the allowlist before invoking
+// the underlying connector API.
+type instanceDiscordAPI struct {
+	DiscordAPI
+	pm         *PluginManager
+	serverID   uuid.UUID
+	instanceID uuid.UUID
+}
+
+func (pm *PluginManager) wrapDiscordAPIWithAllowlist(inner DiscordAPI, serverID, instanceID uuid.UUID) DiscordAPI {
+	if inner == nil {
+		return nil
+	}
+	return &instanceDiscordAPI{DiscordAPI: inner, pm: pm, serverID: serverID, instanceID: instanceID}
+}
+
+func (w *instanceDiscordAPI) allowedDiscordChannels() []string {
+	if w == nil || w.pm == nil {
+		return nil
+	}
+	w.pm.mu.RLock()
+	defer w.pm.mu.RUnlock()
+	serverPlugins, ok := w.pm.plugins[w.serverID]
+	if !ok {
+		return nil
+	}
+	instance, ok := serverPlugins[w.instanceID]
+	if !ok || instance == nil {
+		return nil
+	}
+	raw, ok := instance.Config["_aegis_discord_channels"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, s := range v {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 // ListAvailablePlugins returns all available plugin definitions
 func (pm *PluginManager) ListAvailablePlugins() []PluginDefinition {
 	definitions := pm.registry.ListPlugins()
@@ -718,15 +781,19 @@ func (pm *PluginManager) pluginDependsOnConnectorRef(definition *PluginDefinitio
 
 // restartDependentPlugins restarts all plugins that depend on a specific connector
 func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
+	type dependent struct {
+		serverID   uuid.UUID
+		instanceID uuid.UUID
+		instance   *PluginInstance
+	}
+
+	// Snapshot dependents under the registry lock, then release it before
+	// performing N×30s plugin restart RPCs. Holding pm.mu across the restart
+	// loop would block every other plugin operation for the duration.
 	pm.mu.Lock()
-	defer pm.mu.Unlock()
-
-	var restartErrors []error
-
-	// Iterate through all servers and their plugins
+	var dependents []dependent
 	for serverID, serverPlugins := range pm.plugins {
 		for instanceID, instance := range serverPlugins {
-			// Get plugin definition to check required connectors
 			definition, err := pm.registry.GetPlugin(instance.PluginID)
 			if err != nil {
 				log.Error().
@@ -737,61 +804,58 @@ func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
 					Msg("Failed to get plugin definition while checking connector dependencies")
 				continue
 			}
-
-			dependsOnConnector := pm.pluginDependsOnConnectorRef(definition, connectorID)
-
-			if !dependsOnConnector {
-				continue // Skip plugins that don't depend on this connector
+			if !pm.pluginDependsOnConnectorRef(definition, connectorID) {
+				continue
 			}
-
-			// Only restart if the plugin is currently enabled and running
 			if !instance.Enabled || instance.Status != PluginStatusRunning {
 				continue
 			}
-
-			log.Info().
-				Str("serverID", serverID.String()).
-				Str("instanceID", instanceID.String()).
-				Str("pluginID", instance.PluginID).
-				Str("connectorID", connectorID).
-				Msg("Restarting plugin due to connector update")
-
-			// Stop the plugin
-			if err := pm.stopPluginInstance(instance); err != nil {
-				log.Error().
-					Str("serverID", serverID.String()).
-					Str("instanceID", instanceID.String()).
-					Str("pluginID", instance.PluginID).
-					Str("connectorID", connectorID).
-					Err(err).
-					Msg("Failed to stop plugin instance during connector update restart")
-				restartErrors = append(restartErrors, fmt.Errorf("failed to stop plugin %s: %w", instanceID.String(), err))
-				continue
-			}
-
-			// Restart the plugin (reinitialize and start)
-			if err := pm.initializePluginInstance(instance); err != nil {
-				log.Error().
-					Str("serverID", serverID.String()).
-					Str("instanceID", instanceID.String()).
-					Str("pluginID", instance.PluginID).
-					Str("connectorID", connectorID).
-					Err(err).
-					Msg("Failed to restart plugin instance after connector update")
-				restartErrors = append(restartErrors, fmt.Errorf("failed to restart plugin %s: %w", instanceID.String(), err))
-				continue
-			}
-
-			log.Info().
-				Str("serverID", serverID.String()).
-				Str("instanceID", instanceID.String()).
-				Str("pluginID", instance.PluginID).
-				Str("connectorID", connectorID).
-				Msg("Successfully restarted plugin after connector update")
+			dependents = append(dependents, dependent{serverID: serverID, instanceID: instanceID, instance: instance})
 		}
 	}
+	pm.mu.Unlock()
 
-	// Return combined errors if any occurred
+	var restartErrors []error
+	for _, d := range dependents {
+		log.Info().
+			Str("serverID", d.serverID.String()).
+			Str("instanceID", d.instanceID.String()).
+			Str("pluginID", d.instance.PluginID).
+			Str("connectorID", connectorID).
+			Msg("Restarting plugin due to connector update")
+
+		if err := pm.stopPluginInstance(d.instance); err != nil {
+			log.Error().
+				Str("serverID", d.serverID.String()).
+				Str("instanceID", d.instanceID.String()).
+				Str("pluginID", d.instance.PluginID).
+				Str("connectorID", connectorID).
+				Err(err).
+				Msg("Failed to stop plugin instance during connector update restart")
+			restartErrors = append(restartErrors, fmt.Errorf("failed to stop plugin %s: %w", d.instanceID.String(), err))
+			continue
+		}
+
+		if err := pm.initializePluginInstance(d.instance); err != nil {
+			log.Error().
+				Str("serverID", d.serverID.String()).
+				Str("instanceID", d.instanceID.String()).
+				Str("pluginID", d.instance.PluginID).
+				Str("connectorID", connectorID).
+				Err(err).
+				Msg("Failed to restart plugin instance after connector update")
+			restartErrors = append(restartErrors, fmt.Errorf("failed to restart plugin %s: %w", d.instanceID.String(), err))
+			continue
+		}
+
+		log.Info().
+			Str("serverID", d.serverID.String()).
+			Str("instanceID", d.instanceID.String()).
+			Str("pluginID", d.instance.PluginID).
+			Str("connectorID", connectorID).
+			Msg("Successfully restarted plugin after connector update")
+	}
+
 	if len(restartErrors) > 0 {
 		return fmt.Errorf("encountered %d errors while restarting dependent plugins: %v", len(restartErrors), restartErrors)
 	}
@@ -1017,13 +1081,13 @@ func (pm *PluginManager) createPluginAPIs(ctx context.Context, serverID, instanc
 		apis.EventAPI = NewEventAPI(ctx, serverID, instanceID, pluginName, pm.eventManager)
 	}
 	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPIDiscord) {
-		apis.DiscordAPI = pm.getDiscordAPI()
+		apis.DiscordAPI = pm.wrapDiscordAPIWithAllowlist(pm.getDiscordAPI(), serverID, instanceID)
 	}
 	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPILog) {
 		apis.LogAPI = NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager)
 	}
 	if pm.shouldExposeConnectorAPI(pluginID) {
-		apis.ConnectorAPI = newConnectorAPI(pm)
+		apis.ConnectorAPI = newConnectorAPI(pm, pluginID)
 	}
 	return apis
 }

@@ -24,8 +24,9 @@ var nativeConnectorSubprocessLauncher = launchNativeConnectorSubprocess
 
 // connectorSubprocessHandle holds the live subprocess + the RPC stub.
 type connectorSubprocessHandle struct {
-	client *goplugin.Client
-	rpc    *connectorrpc.ConnectorRPCClient
+	client     *goplugin.Client
+	rpc        *connectorrpc.ConnectorRPCClient
+	releaseUID func()
 }
 
 // Kill terminates the subprocess. Safe to call multiple times.
@@ -35,6 +36,9 @@ func (h *connectorSubprocessHandle) Kill() {
 	}
 	killProcessGroup(h.client)
 	h.client.Kill()
+	if h.releaseUID != nil {
+		h.releaseUID()
+	}
 }
 
 // launchNativeConnectorSubprocess verifies the checksum and spawns the
@@ -47,7 +51,8 @@ func launchNativeConnectorSubprocess(runtimePath, expectedSHA256 string) (*conne
 	defer verifiedFile.Close()
 
 	cmd := commandFromVerifiedRuntimeFile(verifiedFile)
-	if err := applySubprocessHardening(cmd); err != nil {
+	releaseUID, err := applySubprocessHardening(cmd)
+	if err != nil {
 		return nil, fmt.Errorf("failed to harden connector subprocess: %w", err)
 	}
 	client := goplugin.NewClient(nativeConnectorClientConfig(cmd))
@@ -55,22 +60,25 @@ func launchNativeConnectorSubprocess(runtimePath, expectedSHA256 string) (*conne
 	rpcClient, err := client.Client()
 	if err != nil {
 		client.Kill()
+		releaseUID()
 		return nil, fmt.Errorf("failed to establish connector rpc: %w", err)
 	}
 
 	raw, err := rpcClient.Dispense(connectorrpc.PluginName)
 	if err != nil {
 		client.Kill()
+		releaseUID()
 		return nil, fmt.Errorf("failed to dispense connector: %w", err)
 	}
 
 	stub, ok := raw.(*connectorrpc.ConnectorRPCClient)
 	if !ok {
 		client.Kill()
+		releaseUID()
 		return nil, fmt.Errorf("connector rpc dispenser returned unexpected type %T", raw)
 	}
 
-	return &connectorSubprocessHandle{client: client, rpc: stub}, nil
+	return &connectorSubprocessHandle{client: client, rpc: stub, releaseUID: releaseUID}, nil
 }
 
 func nativeConnectorClientConfig(cmd *exec.Cmd) *goplugin.ClientConfig {

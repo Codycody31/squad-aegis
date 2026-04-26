@@ -11,15 +11,47 @@ import (
 const maxConnectorInvokeDataJSONBytes = 256 * 1024
 
 type connectorAPI struct {
-	pm *PluginManager
+	pm       *PluginManager
+	pluginID string
 }
 
-func newConnectorAPI(pm *PluginManager) ConnectorAPI {
-	return &connectorAPI{pm: pm}
+func newConnectorAPI(pm *PluginManager, pluginID string) ConnectorAPI {
+	return &connectorAPI{pm: pm, pluginID: pluginID}
 }
 
 func (api *connectorAPI) Call(ctx context.Context, connectorID string, req *ConnectorInvokeRequest) (*ConnectorInvokeResponse, error) {
+	if err := api.pm.checkPluginConnectorScope(api.pluginID, connectorID); err != nil {
+		return &ConnectorInvokeResponse{V: ConnectorWireProtocolV1, OK: false, Error: err.Error()}, nil
+	}
 	return api.pm.invokeConnector(ctx, connectorID, req)
+}
+
+// checkPluginConnectorScope rejects calls to connectors the plugin did not
+// declare in RequiredConnectors or OptionalConnectors. References are
+// canonicalized via ResolveConnectorInstanceKey so a plugin that declared a
+// LegacyID can still reach the connector under its current ID.
+func (pm *PluginManager) checkPluginConnectorScope(pluginID, connectorID string) error {
+	definition, err := pm.registry.GetPlugin(pluginID)
+	if err != nil {
+		return fmt.Errorf("plugin %s definition not found: %w", pluginID, err)
+	}
+	requestedKey, ok := pm.ResolveConnectorInstanceKey(connectorID)
+	if !ok {
+		requestedKey = strings.TrimSpace(connectorID)
+	}
+	declared := make([]string, 0, len(definition.RequiredConnectors)+len(definition.OptionalConnectors))
+	declared = append(declared, definition.RequiredConnectors...)
+	declared = append(declared, definition.OptionalConnectors...)
+	for _, ref := range declared {
+		key, ok := pm.ResolveConnectorInstanceKey(ref)
+		if !ok {
+			key = strings.TrimSpace(ref)
+		}
+		if key != "" && key == requestedKey {
+			return nil
+		}
+	}
+	return fmt.Errorf("plugin %s did not declare connector %s in RequiredConnectors or OptionalConnectors", pluginID, connectorID)
 }
 
 // shouldExposePluginAPI is true for bundled plugins; native plugins must

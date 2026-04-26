@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
 // ConnectorListAvailable returns all available connector definitions
@@ -53,6 +54,10 @@ func (s *Server) ConnectorCreate(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "connector:create", gin.H{
+		"connector_id": request.ConnectorID,
+	})
+
 	responses.Success(c, "Connector created successfully", &gin.H{"connector": instance})
 }
 
@@ -83,6 +88,10 @@ func (s *Server) ConnectorUpdate(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "connector:update", gin.H{
+		"connector_id": connectorID,
+	})
+
 	responses.Success(c, "Connector updated successfully", nil)
 }
 
@@ -104,10 +113,14 @@ func (s *Server) ConnectorDelete(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "connector:delete", gin.H{
+		"connector_id": connectorID,
+	})
+
 	responses.Success(c, "Connector deleted successfully", nil)
 }
 
-// ConnectorPackageListInstalled lists globally installed sideloaded connector packages (native .so).
+// ConnectorPackageListInstalled lists globally installed sideloaded connector packages (native executable bundle).
 func (s *Server) ConnectorPackageListInstalled(c *gin.Context) {
 	if !s.requirePluginManager(c) {
 		return
@@ -117,12 +130,14 @@ func (s *Server) ConnectorPackageListInstalled(c *gin.Context) {
 	responses.Success(c, "Installed connector packages fetched successfully", &gin.H{"connectors": packages})
 }
 
-// ConnectorPackageUpload installs a sideloaded connector package (zip: manifest + .so) uploaded by a super admin.
+// ConnectorPackageUpload installs a sideloaded connector package (zip: manifest + native executable bundle) uploaded by a super admin.
 func (s *Server) ConnectorPackageUpload(c *gin.Context) {
-	if !s.requireSuperAdmin(c) {
+	if !s.requirePluginManager(c) {
 		return
 	}
-	if !s.requirePluginManager(c) {
+
+	if config.Config.Plugins.AllowUnsafeSideload && c.Query("confirm_unsafe") != "true" {
+		responses.BadRequest(c, "unsigned bundle: re-submit with ?confirm_unsafe=true to acknowledge the security risk", nil)
 		return
 	}
 
@@ -156,13 +171,18 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 	}
 	defer openedFile.Close()
 
+	clientIP := c.ClientIP()
+	userAgent := c.GetHeader("User-Agent")
+
 	pkg, err := s.Dependencies.PluginManager.InstallConnectorPackageFromBundle(c.Request.Context(), openedFile, file.Size, file.Filename)
 	if err != nil {
 		log.Error().Err(err).Str("filename", file.Filename).Msg("Failed to install uploaded connector bundle")
 		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "connector:package:upload_failed", gin.H{
-			"filename": file.Filename,
-			"size":     file.Size,
-			"error":    err.Error(),
+			"filename":   file.Filename,
+			"size":       file.Size,
+			"error":      err.Error(),
+			"client_ip":  clientIP,
+			"user_agent": userAgent,
 		})
 		responses.BadRequest(c, "Failed to install uploaded connector bundle", nil)
 		return
@@ -175,6 +195,8 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 		"signature_verified": pkg.SignatureVerified,
 		"install_state":      pkg.InstallState,
 		"filename":           file.Filename,
+		"client_ip":          clientIP,
+		"user_agent":         userAgent,
 	})
 
 	message := "Connector package uploaded successfully"
@@ -187,9 +209,6 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 
 // ConnectorPackageInstalledDelete removes an installed sideloaded connector package.
 func (s *Server) ConnectorPackageInstalledDelete(c *gin.Context) {
-	if !s.requireSuperAdmin(c) {
-		return
-	}
 	if !s.requirePluginManager(c) {
 		return
 	}

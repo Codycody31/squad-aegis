@@ -69,7 +69,7 @@ type ConnectorPackage = {
 };
 
 definePageMeta({
-  middleware: ["auth"],
+  middleware: ["auth", "sudo"],
 });
 
 const authStore = useAuthStore();
@@ -307,19 +307,14 @@ const deleteConnector = async () => {
 // Configure connector
 const configureConnector = (connector: any) => {
   currentConnector.value = connector;
-  // Copy config and initialize with schema-aware defaults
-  const config = JSON.parse(JSON.stringify(connector.config || {}));
+  const baseConfig = (connector.config || {}) as Record<string, unknown>;
   const connectorDef = connectorDefForInstance(connector.id);
-  
-  if (connectorDef?.config_schema?.fields) {
-    initializeConfigFromSchema(config, connectorDef.config_schema.fields);
-  }
-  
-  connectorConfig.value = config;
+
+  connectorConfig.value = connectorDef?.config_schema?.fields
+    ? initializeConfigFromSchema(baseConfig, connectorDef.config_schema.fields)
+    : { ...baseConfig };
   showConfigDialog.value = true;
 };
-
-// initializeConfigFromSchema imported from ~/composables/useConfigSchema
 
 // Save connector configuration
 const saveConnectorConfig = async () => {
@@ -356,9 +351,7 @@ const onConnectorSelect = (connectorId: any) => {
   selectedConnector.value = connectorId || "";
   const connector = availableConnectors.value.find(c => c.id === connectorId);
   if (connector?.config_schema?.fields) {
-    // Initialize config with schema-aware defaults
-    connectorConfig.value = {};
-    initializeConfigFromSchema(connectorConfig.value, connector.config_schema.fields);
+    connectorConfig.value = initializeConfigFromSchema({}, connector.config_schema.fields);
   }
 };
 
@@ -563,6 +556,11 @@ onMounted(async () => {
                   />
                   <Label :for="`config-${field.name}`">{{ field.name }}</Label>
                 </div>
+
+                <!-- Unsupported field type fallback -->
+                <p v-else class="text-xs text-yellow-700 dark:text-yellow-400">
+                  Unsupported field type "{{ field.type }}". This connector cannot be configured from the UI; edit it via API or contact your administrator.
+                </p>
               </div>
             </div>
           </div>
@@ -626,15 +624,14 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Sideloaded connector packages (.so) -->
+    <!-- Sideloaded connector packages -->
     <Card class="mb-4 sm:mb-6">
       <CardHeader class="pb-2 sm:pb-3">
         <CardTitle class="text-base sm:text-lg">Sideloaded connector packages</CardTitle>
         <CardDescription class="text-xs sm:text-sm">
-          Upload a signed <code class="rounded bg-muted px-1 text-xs">.zip</code> with
-          <code class="rounded bg-muted px-1 text-xs">manifest.json</code> and either a Linux
-          <code class="rounded bg-muted px-1 text-xs">.so</code> package with entry
-          <code class="rounded bg-muted px-1 text-xs">GetAegisConnector</code>. Then add a connector instance above if the connector needs config.
+          Upload a signed <code class="rounded bg-muted px-1 text-xs">.zip</code> bundle containing
+          <code class="rounded bg-muted px-1 text-xs">manifest.json</code> and one or more Linux
+          subprocess connector executables. Then add a connector instance above if the connector needs config.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
@@ -929,6 +926,11 @@ onMounted(async () => {
               />
               <Label :for="`edit-config-${field.name}`">{{ field.name }}</Label>
             </div>
+
+            <!-- Unsupported field type fallback -->
+            <p v-else class="text-xs text-yellow-700 dark:text-yellow-400">
+              Unsupported field type "{{ field.type }}". This connector cannot be configured from the UI; edit it via API or contact your administrator.
+            </p>
           </div>
         </div>
 
@@ -970,7 +972,7 @@ onMounted(async () => {
             Delete the sideloaded connector package
             <span class="font-medium">"{{ deletePackageTarget?.name || deletePackageTarget?.connector_id }}"</span>?
             Remove any running connector instance for this id first. The package's
-            <code>.so</code> file will be removed from disk.
+            executable binary will be removed from disk.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

@@ -84,12 +84,13 @@ type Struct struct {
 
 		// Subprocess privilege drop (unix only). Set a non-zero UID/GID to
 		// launch native plugin/connector subprocesses under a different
-		// user/group. Subprocesses always run with NoNewPrivs=true so they
-		// cannot gain additional capabilities after exec. Groups is a
-		// comma-separated list of supplementary group IDs.
-		SubprocessUID        int    `default:"0"`
-		SubprocessGID        int    `default:"0"`
-		SubprocessGroups     string `default:""`
-		SubprocessNoNewPrivs bool   `default:"true"`
+		// user/group. Groups is a comma-separated list of supplementary
+		// group IDs. To prevent subprocesses from gaining new privileges
+		// across exec, run the Aegis process itself under a systemd unit
+		// with NoNewPrivileges=yes (or an equivalent container flag); the
+		// prctl is inherited into subprocess children.
+		SubprocessUID    int    `default:"0"`
+		SubprocessGID    int    `default:"0"`
+		SubprocessGroups string `default:""`
 	}
 }

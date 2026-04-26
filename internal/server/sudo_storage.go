@@ -257,6 +257,10 @@ func (s *Server) DeleteStorageFile(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:storage:delete", gin.H{
+		"path": path,
+	})
+
 	responses.SimpleSuccess(c, "File deleted successfully")
 }
 
@@ -297,6 +301,12 @@ func (s *Server) BulkDeleteStorageFiles(c *gin.Context) {
 			deleted++
 		}
 	}
+
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:storage:delete", gin.H{
+		"paths":   req.Paths,
+		"deleted": deleted,
+		"failed":  failed,
+	})
 
 	responses.Success(c, "Bulk delete completed", &gin.H{
 		"deleted": deleted,

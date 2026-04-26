@@ -42,8 +42,18 @@ func (rl *ipRateLimiter) getLimiter(ip string) *rate.Limiter {
 	entry, exists := rl.limiters[ip]
 	if !exists {
 		// Cap map size to prevent memory exhaustion from many unique IPs.
+		// Evict the least-recently-seen entry so a high-cardinality spray
+		// cannot lock out legitimate traffic.
 		if len(rl.limiters) >= maxTrackedIPs {
-			return rate.NewLimiter(0, 0) // deny when at capacity
+			var oldestIP string
+			var oldestSeen time.Time
+			for k, v := range rl.limiters {
+				if oldestIP == "" || v.lastSeen.Before(oldestSeen) {
+					oldestIP = k
+					oldestSeen = v.lastSeen
+				}
+			}
+			delete(rl.limiters, oldestIP)
 		}
 		limiter := rate.NewLimiter(rl.rate, rl.burst)
 		rl.limiters[ip] = &rateLimiterEntry{limiter: limiter, lastSeen: time.Now()}

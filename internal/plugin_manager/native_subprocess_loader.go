@@ -49,8 +49,9 @@ func commandFromVerifiedRuntimeFile(verifiedFile *os.File) *exec.Cmd {
 // pluginSubprocessHandle holds the live subprocess + the RPC client stub.
 // A handle must be released via Kill() when the plugin is unloaded.
 type pluginSubprocessHandle struct {
-	client *goplugin.Client
-	rpc    *pluginrpc.PluginRPCClient
+	client     *goplugin.Client
+	rpc        *pluginrpc.PluginRPCClient
+	releaseUID func()
 }
 
 // Kill terminates the subprocess. Safe to call multiple times.
@@ -60,6 +61,9 @@ func (h *pluginSubprocessHandle) Kill() {
 	}
 	killProcessGroup(h.client)
 	h.client.Kill()
+	if h.releaseUID != nil {
+		h.releaseUID()
+	}
 }
 
 // launchNativePluginSubprocess verifies the runtime binary's checksum and
@@ -74,7 +78,8 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 	defer verifiedFile.Close()
 
 	cmd := commandFromVerifiedRuntimeFile(verifiedFile)
-	if err := applySubprocessHardening(cmd); err != nil {
+	releaseUID, err := applySubprocessHardening(cmd)
+	if err != nil {
 		return nil, fmt.Errorf("failed to harden plugin subprocess: %w", err)
 	}
 	client := goplugin.NewClient(nativePluginClientConfig(cmd))
@@ -82,22 +87,25 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 	rpcClient, err := client.Client()
 	if err != nil {
 		client.Kill()
+		releaseUID()
 		return nil, fmt.Errorf("failed to establish plugin rpc: %w", err)
 	}
 
 	raw, err := rpcClient.Dispense(pluginrpc.PluginName)
 	if err != nil {
 		client.Kill()
+		releaseUID()
 		return nil, fmt.Errorf("failed to dispense plugin: %w", err)
 	}
 
 	stub, ok := raw.(*pluginrpc.PluginRPCClient)
 	if !ok {
 		client.Kill()
+		releaseUID()
 		return nil, fmt.Errorf("plugin rpc dispenser returned unexpected type %T", raw)
 	}
 
-	return &pluginSubprocessHandle{client: client, rpc: stub}, nil
+	return &pluginSubprocessHandle{client: client, rpc: stub, releaseUID: releaseUID}, nil
 }
 
 func nativePluginClientConfig(cmd *exec.Cmd) *goplugin.ClientConfig {
@@ -131,9 +139,15 @@ func verifyRuntimeBinaryChecksum(runtimePath, expectedSHA256 string) (*os.File, 
 	}
 
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
+	maxBytes := pluginMaxUploadSize()
+	n, err := io.CopyN(hasher, file, maxBytes+1)
+	if err != nil && err != io.EOF {
 		file.Close()
 		return nil, fmt.Errorf("failed to hash plugin runtime binary: %w", err)
+	}
+	if n > maxBytes {
+		file.Close()
+		return nil, fmt.Errorf("plugin runtime binary exceeds maximum allowed size of %d bytes", maxBytes)
 	}
 	actual := fmt.Sprintf("%x", hasher.Sum(nil))
 	if !strings.EqualFold(expected, actual) {

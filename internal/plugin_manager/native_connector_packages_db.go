@@ -97,8 +97,10 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 			}
 		}
 
+		hasSignatureMaterial := len(pkg.ManifestSignature) > 0 && len(pkg.ManifestPublicKey) > 0 && len(manifestJSON) > 0
+		previouslyTrusted := pkg.SignatureVerified && hasSignatureMaterial
 		reverified := false
-		if len(pkg.ManifestSignature) > 0 && len(pkg.ManifestPublicKey) > 0 && len(manifestJSON) > 0 {
+		if hasSignatureMaterial {
 			ok, verifyErr := verifyManifestSignature(manifestJSON, pkg.ManifestSignature, pkg.ManifestPublicKey)
 			if verifyErr != nil {
 				log.Warn().Err(verifyErr).Str("connector_id", pkg.ConnectorID).Msg("Stored connector signature no longer verifies against trust store")
@@ -107,12 +109,23 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 		}
 		pkg.SignatureVerified = reverified
 		pkg.Unsafe = !reverified
-		if !reverified && !allowUnsafeSideload() {
+		// A connector previously stored as trusted that no longer re-verifies
+		// indicates the operator's trust store revoked the signing key. Keep
+		// the package quarantined regardless of allowUnsafeSideload so a
+		// revoked key cannot be silently re-loaded by flipping the sideload
+		// flag. Operators must re-upload to un-quarantine.
+		mustQuarantine := !reverified && (previouslyTrusted || !allowUnsafeSideload())
+		if mustQuarantine {
 			if pkg.InstallState == PluginInstallStateReady || pkg.InstallState == PluginInstallStatePendingRestart {
-				log.Warn().Str("connector_id", pkg.ConnectorID).Msg("Quarantining native connector: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
+				if previouslyTrusted {
+					log.Warn().Str("connector_id", pkg.ConnectorID).Msg("Quarantining native connector: trusted key revoked, package quarantined")
+					pkg.LastError = "connector signature key has been revoked from the trust store"
+				} else {
+					log.Warn().Str("connector_id", pkg.ConnectorID).Msg("Quarantining native connector: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
+					pkg.LastError = "connector signature cannot be re-verified against trusted keys"
+				}
 				pkg.InstallState = PluginInstallStateError
-				pkg.LastError = "connector signature cannot be re-verified against trusted keys"
-				if pkg.RuntimePath != "" {
+				if !previouslyTrusted && pkg.RuntimePath != "" {
 					if safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, connectorRuntimeDir()); pathErr == nil {
 						removeRuntimeFile(safePath)
 					}

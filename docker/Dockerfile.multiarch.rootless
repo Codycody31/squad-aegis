@@ -7,7 +7,7 @@ RUN rm -rfv node_modules .nuxt .output dist .vite
 RUN pnpm install --frozen-lockfile
 RUN pnpm run generate
 
-FROM --platform=$TARGETPLATFORM golang:1.24 AS go-build
+FROM --platform=$TARGETPLATFORM golang:1.25 AS go-build
 ARG TARGETOS TARGETARCH
 ENV CGO_ENABLED=1 \
     GOOS=$TARGETOS \

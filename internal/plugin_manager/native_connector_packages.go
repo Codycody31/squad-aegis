@@ -306,6 +306,33 @@ func (pm *PluginManager) loadNativeConnectorPackage(pkg *InstalledConnectorPacka
 	}
 	pkg.RuntimePath = safePath
 
+	// For signature-verified packages, derive the expected runtime SHA from
+	// the signed manifest target. Unsigned packages have no signature anchor;
+	// the stored checksum remains the only available reference.
+	var expectedSHA string
+	if pkg.SignatureVerified {
+		verifiedTarget, err := selectedConnectorManifestTarget(pkg.Manifest)
+		if err != nil {
+			return fmt.Errorf("connector manifest target selection failed: %w", err)
+		}
+		expectedSHA = strings.TrimSpace(verifiedTarget.SHA256)
+		if expectedSHA == "" {
+			return fmt.Errorf("connector manifest target is missing sha256")
+		}
+		if pkg.Checksum != "" && !strings.EqualFold(pkg.Checksum, expectedSHA) {
+			log.Warn().Str("connector_id", pkg.ConnectorID).Str("expected", expectedSHA).Str("stored", pkg.Checksum).Msg("Quarantining native connector: stored checksum does not match signed manifest target")
+			if pkg.RuntimePath != "" {
+				removeRuntimeFile(safePath)
+			}
+			return fmt.Errorf("connector checksum %q does not match signed manifest target %q", pkg.Checksum, expectedSHA)
+		}
+	} else {
+		expectedSHA = strings.TrimSpace(pkg.Checksum)
+		if expectedSHA == "" {
+			return fmt.Errorf("connector checksum is missing")
+		}
+	}
+
 	// Reconstruct the target snapshot from the stored compatibility fields.
 	target := PluginPackageTarget{
 		MinHostAPIVersion:    pkg.MinHostAPIVersion,
@@ -314,7 +341,7 @@ func (pm *PluginManager) loadNativeConnectorPackage(pkg *InstalledConnectorPacka
 		TargetArch:           pkg.TargetArch,
 	}
 
-	definition, err := nativeConnectorVerifiedLoader(safePath, pkg.Checksum, pkg.Manifest, target)
+	definition, err := nativeConnectorVerifiedLoader(safePath, expectedSHA, pkg.Manifest, target)
 	if err != nil {
 		return err
 	}

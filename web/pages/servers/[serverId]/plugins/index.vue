@@ -340,23 +340,17 @@ const deletePlugin = async (plugin: any) => {
 const configurePlugin = (plugin: any) => {
     currentPlugin.value = plugin;
 
-    // Deep copy and convert values to proper types
-    const config = JSON.parse(JSON.stringify(plugin.config || {}));
+    const baseConfig = (plugin.config || {}) as Record<string, unknown>;
     const pluginDef = availablePlugins.value.find(
         (p) => p.id === plugin.plugin_id,
     );
 
-    if (pluginDef?.config_schema?.fields) {
-        // Initialize config with schema-aware defaults
-        initializeConfigFromSchema(config, pluginDef.config_schema.fields);
-    }
-
-    pluginConfig.value = config;
+    pluginConfig.value = pluginDef?.config_schema?.fields
+        ? initializeConfigFromSchema(baseConfig, pluginDef.config_schema.fields)
+        : { ...baseConfig };
     pluginLogLevel.value = plugin.log_level || "info";
     showConfigDialog.value = true;
 };
-
-// initializeConfigFromSchema imported from ~/composables/useConfigSchema
 
 // Save plugin configuration
 const savePluginConfig = async () => {
@@ -398,10 +392,8 @@ const onPluginSelect = (pluginId: any) => {
     selectedPlugin.value = pluginId || "";
     const plugin = availablePlugins.value.find((p) => p.id === pluginId);
     if (plugin?.config_schema?.fields) {
-        // Initialize config with schema-aware defaults
-        pluginConfig.value = {};
-        initializeConfigFromSchema(
-            pluginConfig.value,
+        pluginConfig.value = initializeConfigFromSchema(
+            {},
             plugin.config_schema.fields,
         );
     }
@@ -413,10 +405,8 @@ const onComboboxPluginSelect = (plugin: any) => {
     showPluginDropdown.value = false;
 
     if (plugin?.config_schema?.fields) {
-        // Initialize config with schema-aware defaults
-        pluginConfig.value = {};
-        initializeConfigFromSchema(
-            pluginConfig.value,
+        pluginConfig.value = initializeConfigFromSchema(
+            {},
             plugin.config_schema.fields,
         );
     }
@@ -707,10 +697,9 @@ const addArrayObjectItem = (fieldName: string, nestedFields: any[]) => {
         pluginConfig.value[fieldName] = [];
     }
 
-    const newItem: Record<string, any> = {};
-    initializeConfigFromSchema(newItem, nestedFields);
-
-    pluginConfig.value[fieldName].push(newItem);
+    pluginConfig.value[fieldName].push(
+        initializeConfigFromSchema({}, nestedFields),
+    );
 };
 
 const removeArrayObjectItem = (fieldName: string, index: number) => {

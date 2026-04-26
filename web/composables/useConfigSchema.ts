@@ -1,85 +1,93 @@
+import type { ConfigSchemaField } from "~/types";
+
 /**
- * Initialize config values based on a schema definition.
- * Mutates the config object in place, coercing types and applying defaults.
+ * Returns a new config object with values coerced to the types declared by the
+ * schema and any missing fields populated from `field.default`.
  */
 export function initializeConfigFromSchema(
-  config: Record<string, any>,
-  fields: any[],
-): void {
-  fields.forEach((field: any) => {
+  config: Record<string, unknown>,
+  fields: ConfigSchemaField[],
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...config };
+
+  fields.forEach((field) => {
+    const current = result[field.name];
+
     if (field.type === "bool") {
-      if (config[field.name] !== undefined) {
-        if (typeof config[field.name] === "string") {
-          config[field.name] =
-            config[field.name] === "true" || config[field.name] === "1";
+      if (current !== undefined) {
+        if (typeof current === "string") {
+          result[field.name] = current === "true" || current === "1";
         } else {
-          config[field.name] = Boolean(config[field.name]);
+          result[field.name] = Boolean(current);
         }
       } else {
-        config[field.name] =
+        result[field.name] =
           field.default !== undefined ? Boolean(field.default) : false;
       }
-    } else if (field.sensitive && config[field.name] === "***MASKED***") {
-      config[field.name] = "";
+    } else if (field.sensitive && current === "***MASKED***") {
+      result[field.name] = "";
     } else if (field.type === "arraystring") {
-      if (config[field.name] && !Array.isArray(config[field.name])) {
-        if (typeof config[field.name] === "string") {
-          config[field.name] = config[field.name]
+      if (current && !Array.isArray(current)) {
+        if (typeof current === "string") {
+          result[field.name] = current
             .split(",")
-            .map((s: string) => s.trim())
-            .filter((s: string) => s.length > 0);
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
         }
-      } else if (!config[field.name]) {
-        config[field.name] = field.default || [];
+      } else if (!current) {
+        result[field.name] = field.default ?? [];
       }
     } else if (field.type === "arrayint") {
-      if (config[field.name] && !Array.isArray(config[field.name])) {
-        if (typeof config[field.name] === "string") {
-          config[field.name] = config[field.name]
+      if (current && !Array.isArray(current)) {
+        if (typeof current === "string") {
+          result[field.name] = current
             .split(",")
-            .map((s: string) => parseInt(s.trim()))
-            .filter((n: number) => !isNaN(n));
+            .map((s) => parseInt(s.trim()))
+            .filter((n) => !isNaN(n));
         }
-      } else if (!config[field.name]) {
-        config[field.name] = field.default || [];
+      } else if (!current) {
+        result[field.name] = field.default ?? [];
       }
     } else if (field.type === "arraybool") {
-      if (!config[field.name]) {
-        config[field.name] = field.default || [];
+      if (!current) {
+        result[field.name] = field.default ?? [];
       }
     } else if (field.type === "arrayobject") {
-      if (!config[field.name]) {
-        config[field.name] = field.default || [];
-      }
-      // Initialize nested objects in array
-      if (
-        Array.isArray(config[field.name]) &&
-        field.nested &&
-        field.nested.length > 0
-      ) {
-        config[field.name].forEach((item: any) => {
-          if (typeof item === "object" && item !== null) {
-            initializeConfigFromSchema(item, field.nested);
-          }
-        });
+      const seeded = current ?? field.default ?? [];
+      if (Array.isArray(seeded) && field.nested && field.nested.length > 0) {
+        result[field.name] = seeded.map((item) =>
+          typeof item === "object" && item !== null
+            ? initializeConfigFromSchema(
+                item as Record<string, unknown>,
+                field.nested!,
+              )
+            : item,
+        );
+      } else {
+        result[field.name] = seeded;
       }
     } else if (field.type === "object") {
-      if (!config[field.name]) {
-        config[field.name] = field.default || {};
-      }
+      const seeded =
+        (current as Record<string, unknown> | undefined) ??
+        (field.default as Record<string, unknown> | undefined) ??
+        {};
       if (field.nested && field.nested.length > 0) {
-        initializeConfigFromSchema(config[field.name], field.nested);
+        result[field.name] = initializeConfigFromSchema(seeded, field.nested);
+      } else {
+        result[field.name] = seeded;
       }
     } else if (field.type === "int") {
-      if (config[field.name] === undefined) {
-        config[field.name] =
+      if (current === undefined) {
+        result[field.name] =
           field.default !== undefined ? field.default : 0;
       }
     } else if (field.type === "string") {
-      if (config[field.name] === undefined) {
-        config[field.name] =
+      if (current === undefined) {
+        result[field.name] =
           field.default !== undefined ? field.default : "";
       }
     }
   });
+
+  return result;
 }
