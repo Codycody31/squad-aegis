@@ -1675,49 +1675,16 @@ func (api *logAPI) shouldStoreLog(logLevel string) bool {
 	return getLogLevelPriority(logLevel) >= getLogLevelPriority(api.logLevel)
 }
 
-// Helper function to write log to ClickHouse
-func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fields map[string]interface{}) {
-	if api.clickhouseClient == nil {
-		return
-	}
-
-	// Marshal fields to JSON
-	fieldsJSON := "{}"
-	if len(fields) > 0 {
-		if jsonBytes, err := json.Marshal(fields); err == nil {
-			fieldsJSON = string(jsonBytes)
-		}
-	}
-
+// recordPluginLog persists a plugin log entry. The ClickHouse insert is
+// gated by a non-nil client + the configured log level threshold, but the
+// live PluginLogEventData publish runs unconditionally so non-ClickHouse
+// deployments still see live plugin logs in the UI/SSE stream (M-08).
+func (api *logAPI) recordPluginLog(level, message string, errorMsg *string, fields map[string]interface{}) {
 	timestamp := time.Now().UTC()
 
-	// Only store to ClickHouse if log level is high enough
-	if api.shouldStoreLog(level) {
-		// Insert into ClickHouse
-		insertQuery := `
-			INSERT INTO squad_aegis.plugin_logs (
-				timestamp, server_id, plugin_instance_id,
-				level, message, error_message, fields
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
-		`
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if err := api.clickhouseClient.Exec(ctx, insertQuery,
-			timestamp,
-			api.serverID,
-			api.instanceID,
-			level,
-			message,
-			errorMsg,
-			fieldsJSON,
-		); err != nil {
-			log.Error().Err(err).Msg("Failed to write plugin log to ClickHouse")
-		}
-	}
-
-	// Always publish event to event manager (for live viewing)
+	// Always publish to event manager FIRST, regardless of ClickHouse state,
+	// so live log streams work on every deployment (M-08 fix). This was
+	// previously gated behind the nil-client early-return below.
 	if api.eventManager != nil {
 		eventData := event_manager.PluginLogEventData{
 			PluginInstanceID: api.instanceID.String(),
@@ -1729,9 +1696,53 @@ func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fi
 			ErrorMessage:     errorMsg,
 			Fields:           fields,
 		}
-
 		api.eventManager.PublishEvent(api.serverID, eventData, nil)
 	}
+
+	if api.clickhouseClient == nil {
+		return
+	}
+
+	// Only store to ClickHouse if log level is high enough.
+	if !api.shouldStoreLog(level) {
+		return
+	}
+
+	fieldsJSON := "{}"
+	if len(fields) > 0 {
+		if jsonBytes, err := json.Marshal(fields); err == nil {
+			fieldsJSON = string(jsonBytes)
+		}
+	}
+
+	insertQuery := `
+		INSERT INTO squad_aegis.plugin_logs (
+			timestamp, server_id, plugin_instance_id,
+			level, message, error_message, fields
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := api.clickhouseClient.Exec(ctx, insertQuery,
+		timestamp,
+		api.serverID,
+		api.instanceID,
+		level,
+		message,
+		errorMsg,
+		fieldsJSON,
+	); err != nil {
+		log.Error().Err(err).Msg("Failed to write plugin log to ClickHouse")
+	}
+}
+
+// writeToClickHouse is kept as a thin wrapper for backwards-compat with any
+// internal callers; it now delegates to recordPluginLog so the live event
+// publish is guaranteed even when ClickHouse is unconfigured.
+func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fields map[string]interface{}) {
+	api.recordPluginLog(level, message, errorMsg, fields)
 }
 
 func (api *logAPI) Info(message string, fields map[string]interface{}) {

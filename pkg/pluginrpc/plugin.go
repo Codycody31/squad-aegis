@@ -274,9 +274,19 @@ func (c *PluginGRPCClient) StartHostAPIBroker(register func(*grpc.Server)) (uint
 	return id, stop, nil
 }
 
+// ctxOrBackground returns ctx if non-nil, else context.Background().
+// Used so internal callers that haven't been threaded a context yet do not
+// panic on a nil context.
+func ctxOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
 // GetDefinition fetches the plugin's static definition.
-func (c *PluginGRPCClient) GetDefinition() (PluginDefinition, error) {
-	resp, err := c.client.GetDefinition(context.Background(), &pluginrpcpb.Empty{})
+func (c *PluginGRPCClient) GetDefinition(ctx context.Context) (PluginDefinition, error) {
+	resp, err := c.client.GetDefinition(ctxOrBackground(ctx), &pluginrpcpb.Empty{})
 	if err != nil {
 		return PluginDefinition{}, err
 	}
@@ -284,13 +294,14 @@ func (c *PluginGRPCClient) GetDefinition() (PluginDefinition, error) {
 }
 
 // Initialize hands off the config and a broker ID the plugin uses to dial
-// the host API server.
-func (c *PluginGRPCClient) Initialize(args InitializeArgs) error {
+// the host API server. The provided ctx is propagated to the gRPC call so
+// host shutdown / per-call cancellation aborts a hung Initialize.
+func (c *PluginGRPCClient) Initialize(ctx context.Context, args InitializeArgs) error {
 	cfg, err := encodeJSONMap(args.Config)
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-	_, err = c.client.Initialize(context.Background(), &pluginrpcpb.InitializeRequest{
+	_, err = c.client.Initialize(ctxOrBackground(ctx), &pluginrpcpb.InitializeRequest{
 		ConfigJson:      cfg,
 		HostApiBrokerId: args.HostAPIBrokerID,
 		InstanceId:      args.InstanceID,
@@ -300,31 +311,33 @@ func (c *PluginGRPCClient) Initialize(args InitializeArgs) error {
 	return err
 }
 
-// Start runs the plugin's Start.
-func (c *PluginGRPCClient) Start() error {
-	_, err := c.client.Start(context.Background(), &pluginrpcpb.Empty{})
+// Start runs the plugin's Start. The provided ctx propagates to the RPC.
+func (c *PluginGRPCClient) Start(ctx context.Context) error {
+	_, err := c.client.Start(ctxOrBackground(ctx), &pluginrpcpb.Empty{})
 	return err
 }
 
-// Stop asks the plugin to shut down.
-func (c *PluginGRPCClient) Stop() error {
-	_, err := c.client.Stop(context.Background(), &pluginrpcpb.Empty{})
+// Stop asks the plugin to shut down. ctx propagates so host shutdown can
+// bound the wait; the host-side hard-kill catches genuinely hung plugins.
+func (c *PluginGRPCClient) Stop(ctx context.Context) error {
+	_, err := c.client.Stop(ctxOrBackground(ctx), &pluginrpcpb.Empty{})
 	return err
 }
 
-// HandleEvent delivers an event to the plugin.
-func (c *PluginGRPCClient) HandleEvent(event PluginEvent) error {
+// HandleEvent delivers an event to the plugin. ctx propagates so a per-event
+// cancellation can abort a wedged plugin handler.
+func (c *PluginGRPCClient) HandleEvent(ctx context.Context, event PluginEvent) error {
 	pb, err := pluginEventToProto(&event)
 	if err != nil {
 		return err
 	}
-	_, err = c.client.HandleEvent(context.Background(), pb)
+	_, err = c.client.HandleEvent(ctxOrBackground(ctx), pb)
 	return err
 }
 
 // GetStatus fetches the plugin's current lifecycle status.
-func (c *PluginGRPCClient) GetStatus() (PluginStatus, error) {
-	resp, err := c.client.GetStatus(context.Background(), &pluginrpcpb.Empty{})
+func (c *PluginGRPCClient) GetStatus(ctx context.Context) (PluginStatus, error) {
+	resp, err := c.client.GetStatus(ctxOrBackground(ctx), &pluginrpcpb.Empty{})
 	if err != nil {
 		return "", err
 	}
@@ -332,8 +345,8 @@ func (c *PluginGRPCClient) GetStatus() (PluginStatus, error) {
 }
 
 // GetConfig fetches the plugin's masked config.
-func (c *PluginGRPCClient) GetConfig() (map[string]interface{}, error) {
-	resp, err := c.client.GetConfig(context.Background(), &pluginrpcpb.Empty{})
+func (c *PluginGRPCClient) GetConfig(ctx context.Context) (map[string]interface{}, error) {
+	resp, err := c.client.GetConfig(ctxOrBackground(ctx), &pluginrpcpb.Empty{})
 	if err != nil {
 		return nil, err
 	}
@@ -341,18 +354,18 @@ func (c *PluginGRPCClient) GetConfig() (map[string]interface{}, error) {
 }
 
 // UpdateConfig sets a new config on the plugin.
-func (c *PluginGRPCClient) UpdateConfig(config map[string]interface{}) error {
+func (c *PluginGRPCClient) UpdateConfig(ctx context.Context, config map[string]interface{}) error {
 	encoded, err := encodeJSONMap(config)
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-	_, err = c.client.UpdateConfig(context.Background(), &pluginrpcpb.ConfigJSON{ConfigJson: encoded})
+	_, err = c.client.UpdateConfig(ctxOrBackground(ctx), &pluginrpcpb.ConfigJSON{ConfigJson: encoded})
 	return err
 }
 
 // GetCommands fetches the plugin's command list.
-func (c *PluginGRPCClient) GetCommands() ([]PluginCommand, error) {
-	resp, err := c.client.GetCommands(context.Background(), &pluginrpcpb.Empty{})
+func (c *PluginGRPCClient) GetCommands(ctx context.Context) ([]PluginCommand, error) {
+	resp, err := c.client.GetCommands(ctxOrBackground(ctx), &pluginrpcpb.Empty{})
 	if err != nil {
 		return nil, err
 	}
@@ -368,12 +381,12 @@ func (c *PluginGRPCClient) GetCommands() ([]PluginCommand, error) {
 }
 
 // ExecuteCommand runs a command on the plugin.
-func (c *PluginGRPCClient) ExecuteCommand(commandID string, params map[string]interface{}) (*CommandResult, error) {
+func (c *PluginGRPCClient) ExecuteCommand(ctx context.Context, commandID string, params map[string]interface{}) (*CommandResult, error) {
 	encoded, err := encodeJSONMap(params)
 	if err != nil {
 		return nil, fmt.Errorf("encode params: %w", err)
 	}
-	resp, err := c.client.ExecuteCommand(context.Background(), &pluginrpcpb.ExecuteCommandRequest{
+	resp, err := c.client.ExecuteCommand(ctxOrBackground(ctx), &pluginrpcpb.ExecuteCommandRequest{
 		CommandId:  commandID,
 		ParamsJson: encoded,
 	})
@@ -388,8 +401,8 @@ func (c *PluginGRPCClient) ExecuteCommand(commandID string, params map[string]in
 }
 
 // GetCommandExecutionStatus fetches an async command's status.
-func (c *PluginGRPCClient) GetCommandExecutionStatus(executionID string) (*CommandExecutionStatus, error) {
-	resp, err := c.client.GetCommandExecutionStatus(context.Background(), &pluginrpcpb.ExecutionIDRequest{
+func (c *PluginGRPCClient) GetCommandExecutionStatus(ctx context.Context, executionID string) (*CommandExecutionStatus, error) {
+	resp, err := c.client.GetCommandExecutionStatus(ctxOrBackground(ctx), &pluginrpcpb.ExecutionIDRequest{
 		ExecutionId: executionID,
 	})
 	if err != nil {
@@ -496,9 +509,26 @@ func configFieldsToProto(in []ConfigField) ([]*pluginrpcpb.ConfigField, error) {
 	return out, nil
 }
 
+// MaxConfigFieldDepth is the maximum permitted depth of nested ConfigField
+// trees decoded from the wire. Bounded to prevent stack-blowing payloads and
+// pathological recursive validation on the host.
+const MaxConfigFieldDepth = 10
+
 func protoToConfigFields(in []*pluginrpcpb.ConfigField) ([]ConfigField, error) {
+	return protoToConfigFieldsAtDepth(in, MaxConfigFieldDepth)
+}
+
+// protoToConfigFieldsAtDepth performs the conversion bounded by remaining
+// depth allowance. Recursion stops with a clear error before unmarshaling any
+// child whose depth would exceed the limit. The depth check fires BEFORE
+// recursion so a malicious schema cannot blow the host stack between the call
+// and the post-condition validator.
+func protoToConfigFieldsAtDepth(in []*pluginrpcpb.ConfigField, remainingDepth int) ([]ConfigField, error) {
 	if len(in) == 0 {
 		return nil, nil
+	}
+	if remainingDepth <= 0 {
+		return nil, fmt.Errorf("config schema exceeds maximum nesting depth of %d", MaxConfigFieldDepth)
 	}
 	out := make([]ConfigField, 0, len(in))
 	for _, f := range in {
@@ -510,7 +540,7 @@ func protoToConfigFields(in []*pluginrpcpb.ConfigField) ([]ConfigField, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decode options for field %q: %w", f.GetName(), err)
 		}
-		nested, err := protoToConfigFields(f.GetNested())
+		nested, err := protoToConfigFieldsAtDepth(f.GetNested(), remainingDepth-1)
 		if err != nil {
 			return nil, err
 		}

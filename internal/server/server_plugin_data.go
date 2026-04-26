@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
@@ -210,8 +211,12 @@ func (s *Server) ServerPluginDataDelete(c *gin.Context) {
 		responses.BadRequest(c, "Key parameter is required", nil)
 		return
 	}
-	if len(key) > 255 {
-		responses.BadRequest(c, "Key too long (max 255 characters)", nil)
+	// Use the shared HostAPI limit so a key written through the gRPC
+	// surface (256-byte ceiling) can also be read/deleted through the HTTP
+	// surface. Previously the HTTP cap of 255 left such keys undeletable
+	// (M-30).
+	if len(key) > plugin_manager.MaxPluginDataKeyLen {
+		responses.BadRequest(c, fmt.Sprintf("Key too long (max %d characters)", plugin_manager.MaxPluginDataKeyLen), nil)
 		return
 	}
 

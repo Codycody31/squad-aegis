@@ -159,7 +159,7 @@ func (pm *PluginManager) markPluginInstanceUnavailable(instance *PluginInstance,
 	if instance.PluginName == "" {
 		instance.PluginName = instance.PluginID
 	}
-	if instance.LastError == "" {
+	if instance.getError() == "" {
 		instance.mu.Lock()
 		instance.LastError = fmt.Sprintf("plugin definition unavailable: %v", cause)
 		instance.mu.Unlock()
@@ -173,8 +173,20 @@ func (pm *PluginManager) markPluginInstanceUnavailable(instance *PluginInstance,
 }
 
 func (pm *PluginManager) ensurePluginInstanceContext(instance *PluginInstance) {
+	// Treat a cancelled context as needing a fresh allocation. Without this,
+	// after Disable->Stop has cancelled the context, the next Enable would
+	// pass through this function (Context+Cancel non-nil) and reuse the
+	// already-cancelled context. Event-subscription goroutines that select
+	// on api.ctx.Done() would then exit immediately on re-enable (M-07).
 	if instance.Context != nil && instance.Cancel != nil {
-		return
+		select {
+		case <-instance.Context.Done():
+			// Cancelled — fall through to allocate a fresh context below.
+			instance.Context = nil
+			instance.Cancel = nil
+		default:
+			return
+		}
 	}
 
 	baseCtx := pm.ctx
@@ -326,7 +338,7 @@ func (pm *PluginManager) startConnectors() error {
 		instance.Connector = connector
 		instance.Context = ctx
 		instance.Cancel = cancel
-		instance.Status = ConnectorStatusStopped
+		instance.setStatus(ConnectorStatusStopped)
 
 		// Store instance
 		pm.connectorMu.Lock()
@@ -340,8 +352,7 @@ func (pm *PluginManager) startConnectors() error {
 				Err(err).
 				Msg("Failed to initialize connector instance")
 
-			instance.Status = ConnectorStatusError
-			instance.LastError = err.Error()
+			instance.setStatusError(ConnectorStatusError, err.Error())
 			continue
 		}
 
@@ -358,15 +369,14 @@ func (pm *PluginManager) startConnectors() error {
 }
 
 func (pm *PluginManager) initializeConnectorInstance(instance *ConnectorInstance) error {
-	instance.Status = ConnectorStatusStarting
+	instance.setStatus(ConnectorStatusStarting)
 
 	// Initialize connector (panic-safe so a crashing native connector cannot
 	// take down the manager).
 	if err := safePluginCall(instance.ID, "Connector.Initialize", func() error {
 		return instance.Connector.Initialize(instance.Config)
 	}); err != nil {
-		instance.Status = ConnectorStatusError
-		instance.LastError = err.Error()
+		instance.setStatusError(ConnectorStatusError, err.Error())
 		return fmt.Errorf("failed to initialize connector: %w", err)
 	}
 
@@ -388,13 +398,12 @@ func (pm *PluginManager) initializeConnectorInstance(instance *ConnectorInstance
 				Str("connector_id", instance.ID).
 				Msg("Failed to stop connector after Start error; subprocess may leak")
 		}
-		instance.Status = ConnectorStatusError
-		instance.LastError = err.Error()
+		instance.setStatusError(ConnectorStatusError, err.Error())
 		return fmt.Errorf("failed to start connector: %w", err)
 	}
 
-	instance.Status = ConnectorStatusRunning
-	instance.LastError = ""
+	instance.setStatus(ConnectorStatusRunning)
+	instance.clearError()
 	return nil
 }
 
@@ -430,7 +439,7 @@ type killableConnector interface {
 }
 
 func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) error {
-	instance.Status = ConnectorStatusStopping
+	instance.setStatus(ConnectorStatusStopping)
 
 	// Cancel context
 	if instance.Cancel != nil {
@@ -450,11 +459,11 @@ func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) erro
 	select {
 	case err := <-stopChan:
 		if err != nil {
-			instance.Status = ConnectorStatusError
-			instance.LastError = err.Error()
+			instance.setStatusError(ConnectorStatusError, err.Error())
 			return fmt.Errorf("failed to stop connector: %w", err)
 		}
-		instance.Status = ConnectorStatusStopped
+		instance.setStatus(ConnectorStatusStopped)
+		pm.resetConnectorInstanceContext(instance)
 		return nil
 	case <-ctx.Done():
 		log.Warn().
@@ -468,10 +477,25 @@ func (pm *PluginManager) stopConnectorInstance(instance *ConnectorInstance) erro
 					Msg("Failed to SIGKILL connector subprocess after stop timeout")
 			}
 		}
-		instance.Status = ConnectorStatusStopped
-		instance.LastError = "Connector shutdown timed out after 30 seconds"
+		instance.setStatusError(ConnectorStatusStopped, "Connector shutdown timed out after 30 seconds")
+		pm.resetConnectorInstanceContext(instance)
 		return nil
 	}
+}
+
+// resetConnectorInstanceContext releases the per-connector child context after
+// a stop so the next Enable allocates a fresh one. Without this, re-enabled
+// connectors would inherit a cancelled context and any context-driven goroutines
+// would exit immediately (see plugin_manager.resetPluginInstanceContext).
+func (pm *PluginManager) resetConnectorInstanceContext(instance *ConnectorInstance) {
+	if instance == nil {
+		return
+	}
+	if instance.Cancel != nil {
+		instance.Cancel()
+	}
+	instance.Context = nil
+	instance.Cancel = nil
 }
 
 func (pm *PluginManager) saveConnectorToDatabase(instance *ConnectorInstance) error {
@@ -557,6 +581,12 @@ func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[
 	pm.connectors[storageKey] = instance
 	pm.connectorMu.Unlock()
 
+	// Take per-connector lifecycleMu so a concurrent Delete cannot tear out
+	// the connector mid-init: it would block here until create's Initialize
+	// has either succeeded or failed.
+	instance.lifecycleMu.Lock()
+	defer instance.lifecycleMu.Unlock()
+
 	// Save to database with the lock released. The connector is in the map
 	// in Stopped state, so concurrent invokeConnector calls will see it but
 	// reject because Status != Running.
@@ -622,6 +652,21 @@ func (pm *PluginManager) UpdateConnectorConfig(connectorID string, config map[st
 	instanceCtx := instance.Context
 	pm.connectorMu.Unlock()
 
+	// Take lifecycleMu so a concurrent Delete cannot race the in-flight
+	// UpdateConfig+Start, leaving the connector running after the row has
+	// been deleted from the registry/DB (M-15).
+	instance.lifecycleMu.Lock()
+	defer instance.lifecycleMu.Unlock()
+
+	// Re-verify the instance is still in the registry; if Delete won the
+	// race, abandon the update.
+	pm.connectorMu.RLock()
+	stillRegistered := pm.connectors[storageKey] == instance
+	pm.connectorMu.RUnlock()
+	if !stillRegistered {
+		return fmt.Errorf("connector %s was deleted concurrently; config update discarded", connectorID)
+	}
+
 	if err := connector.UpdateConfig(mergedConfig); err != nil {
 		return fmt.Errorf("failed to update connector config: %w", err)
 	}
@@ -676,6 +721,12 @@ func (pm *PluginManager) DeleteConnectorInstance(connectorID string) error {
 		return fmt.Errorf("connector %s not found", connectorID)
 	}
 	pm.connectorMu.Unlock()
+
+	// Take per-connector lifecycleMu so Delete cannot race a still-running
+	// Create's Initialize. Without this, Delete could remove the row while
+	// Create is mid-spawn, leaving an orphan subprocess running.
+	instance.lifecycleMu.Lock()
+	defer instance.lifecycleMu.Unlock()
 
 	// Stop connector (may RPC into subprocess; performed without connectorMu held).
 	if err := pm.stopConnectorInstance(instance); err != nil {

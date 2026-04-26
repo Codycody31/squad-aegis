@@ -74,10 +74,10 @@ func (s *Server) PluginUpload(c *gin.Context) {
 		return
 	}
 
-	if config.Config.Plugins.AllowUnsafeSideload && c.Query("confirm_unsafe") != "true" {
-		responses.BadRequest(c, "unsigned bundle: re-submit with ?confirm_unsafe=true to acknowledge the security risk", nil)
-		return
-	}
+	// confirm_unsafe is only consulted when the bundle turns out to be
+	// unsigned. Signed bundles install through the standard path even in
+	// unsafe-sideload mode (M-17). The decision happens after parsing.
+	confirmUnsafe := c.Query("confirm_unsafe") == "true"
 
 	maxUploadSize := pluginUploadMaxBytes()
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize+1024)
@@ -112,7 +112,7 @@ func (s *Server) PluginUpload(c *gin.Context) {
 	clientIP := c.ClientIP()
 	userAgent := c.GetHeader("User-Agent")
 
-	pkg, err := s.Dependencies.PluginManager.InstallPluginPackageFromBundle(c.Request.Context(), openedFile, file.Size, file.Filename)
+	pkg, err := s.Dependencies.PluginManager.InstallPluginPackageFromBundleWithUnsafeConfirm(c.Request.Context(), openedFile, file.Size, file.Filename, confirmUnsafe)
 	if err != nil {
 		log.Error().Err(err).Str("filename", file.Filename).Msg("Failed to install uploaded plugin bundle")
 		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:upload_failed", gin.H{
@@ -122,7 +122,14 @@ func (s *Server) PluginUpload(c *gin.Context) {
 			"client_ip":  clientIP,
 			"user_agent": userAgent,
 		})
-		responses.BadRequest(c, "Failed to install uploaded plugin bundle", nil)
+		// Surface the confirm_unsafe hint specifically so the UI can prompt
+		// the operator to retry; signed-bundle failures and other parser
+		// errors are reported as generic install failures.
+		if errors.Is(err, plugin_manager.ErrUnsignedBundleNeedsConfirm) {
+			responses.BadRequest(c, err.Error(), &gin.H{"error": err.Error(), "needs_confirm_unsafe": true})
+			return
+		}
+		responses.BadRequest(c, "Failed to install uploaded plugin bundle", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -435,6 +442,39 @@ func (s *Server) ServerPluginLogs(c *gin.Context) {
 	}
 
 	responses.Success(c, "Plugin logs fetched successfully", &gin.H{"logs": logs})
+}
+
+// ServerPluginMetrics returns metrics for a plugin instance.
+//
+// Restored compatibility route (M-24): the previous implementation returned
+// an empty metrics object; clients still rely on the route returning 200 +
+// the same shape, so we keep the surface stable while plugin metrics are
+// reworked. Use the dedicated logs endpoints for per-plugin runtime data.
+func (s *Server) ServerPluginMetrics(c *gin.Context) {
+	if !s.requirePluginManager(c) {
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	instanceID, err := uuid.Parse(c.Param("pluginId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify the plugin instance exists and belongs to this server before
+	// returning success so a 404 path is preserved for invalid IDs.
+	if _, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID); err != nil {
+		responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Plugin metrics fetched successfully", &gin.H{"metrics": &gin.H{}})
 }
 
 // ServerPluginLogsAll returns aggregated logs for all plugin instances for a server

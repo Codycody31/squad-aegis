@@ -169,7 +169,7 @@ func (pm *PluginManager) Stop() error {
 			}
 
 			// Check if plugin was forcefully killed due to timeout
-			if instance.LastError == "Plugin shutdown timed out after 30 seconds" {
+			if instance.getError() == "Plugin shutdown timed out after 30 seconds" {
 				log.Warn().
 					Str("serverID", serverID.String()).
 					Str("instanceID", instanceID.String()).
@@ -198,7 +198,7 @@ func (pm *PluginManager) Stop() error {
 		}
 
 		// Check if connector was forcefully killed due to timeout
-		if instance.LastError == "Connector shutdown timed out after 30 seconds" {
+		if instance.getError() == "Connector shutdown timed out after 30 seconds" {
 			log.Warn().
 				Str("connectorID", connectorID).
 				Msg("Connector instance was forcefully killed due to shutdown timeout")
@@ -262,7 +262,7 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 		pm.connectorMu.RLock()
 		co := pm.connectors[storageKey]
 		pm.connectorMu.RUnlock()
-		if co == nil || co.Status != ConnectorStatusRunning {
+		if co == nil || co.getStatus() != ConnectorStatusRunning {
 			return nil, fmt.Errorf("required connector %s is not running", connectorID)
 		}
 	}
@@ -320,6 +320,12 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 	pm.plugins[serverID][instanceID] = instance
 	pm.mu.Unlock()
 
+	// Take per-instance lifecycleMu for the rest of Create. Delete will block
+	// on the same mutex if it observes our just-published instance, so it
+	// cannot race past us and remove the row before our subprocess starts.
+	instance.lifecycleMu.Lock()
+	defer instance.lifecycleMu.Unlock()
+
 	// Save to database (no pm.mu held; instance is reserved in the map but
 	// Status is Stopped so no one can route events to it yet).
 	if err := pm.savePluginInstanceToDatabase(instance); err != nil {
@@ -337,7 +343,9 @@ func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID strin
 
 	// Initialize and start plugin without holding pm.mu. The call may RPC
 	// into a subprocess and take seconds; blocking pm.mu would stall every
-	// other plugin/event operation.
+	// other plugin/event operation. lifecycleMu (held above) serializes us
+	// against Delete so a concurrent Delete waits until our subprocess is
+	// either started or its init has failed.
 	if err := pm.initializePluginInstance(instance); err != nil {
 		pm.mu.Lock()
 		if serverPlugins, ok := pm.plugins[serverID]; ok {
@@ -423,6 +431,12 @@ func (pm *PluginManager) DeletePluginInstance(serverID, instanceID uuid.UUID) er
 	}
 	pm.mu.Unlock()
 
+	// Take per-instance lifecycleMu so Delete cannot race a still-running
+	// Create's init: we wait until create has either spawned the subprocess
+	// or its init has failed, then we Stop()/Kill() the live process.
+	instance.lifecycleMu.Lock()
+	defer instance.lifecycleMu.Unlock()
+
 	// Stop plugin (may RPC into subprocess; performed without pm.mu held).
 	if err := pm.stopPluginInstance(instance); err != nil {
 		log.Error().
@@ -491,9 +505,9 @@ func (pm *PluginManager) UpdatePluginConfig(serverID, instanceID uuid.UUID, conf
 	}
 
 	plugin := instance.Plugin
-	// Status is read under pm.mu so the live/initialized check is consistent
-	// with the snapshot of `plugin` above.
-	statusAtSnapshot := instance.Status
+	// Status is read under instance.mu so the live/initialized check is
+	// consistent with concurrent writes from the unexpected-exit reporter.
+	statusAtSnapshot := instance.getStatus()
 	pm.mu.Unlock()
 
 	// Only call UpdateConfig on the plugin if it's initialized (enabled and
@@ -557,10 +571,30 @@ func (pm *PluginManager) UpdatePluginLogLevel(serverID, instanceID uuid.UUID, lo
 		return fmt.Errorf("failed to update plugin instance in database: %w", err)
 	}
 
-	needsRestart := instance.Enabled && instance.Status == PluginStatusRunning
+	needsRestart := instance.Enabled && instance.getStatus() == PluginStatusRunning
 	pm.mu.Unlock()
 
 	if !needsRestart {
+		return nil
+	}
+
+	// Take lifecycleMu so a concurrent Delete cannot tear the instance out
+	// from under us while the restart is in flight. If Delete is in progress
+	// we wait, then re-check that the instance is still in the registry.
+	instance.lifecycleMu.Lock()
+	defer instance.lifecycleMu.Unlock()
+
+	// Re-verify the instance is still the live registry entry. If a Delete
+	// won the lifecycleMu race, abandon the restart so we don't respawn a
+	// deleted plugin.
+	pm.mu.RLock()
+	current, lookupErr := pm.getPluginInstanceUnsafe(serverID, instanceID)
+	pm.mu.RUnlock()
+	if lookupErr != nil || current != instance {
+		log.Info().
+			Str("serverID", serverID.String()).
+			Str("instanceID", instanceID.String()).
+			Msg("Plugin instance was deleted during log-level restart; abandoning restart")
 		return nil
 	}
 
@@ -588,24 +622,30 @@ func (pm *PluginManager) UpdatePluginLogLevel(serverID, instanceID uuid.UUID, lo
 
 // EnablePluginInstance enables a plugin instance
 func (pm *PluginManager) EnablePluginInstance(serverID, instanceID uuid.UUID) error {
-	// Mark the instance as enabled under pm.mu, then release before
-	// initializePluginInstance which RPCs into the subprocess. Holding pm.mu
-	// across that call would block every other plugin operation.
+	// Snapshot the instance under pm.mu, then release before initializePluginInstance
+	// which RPCs into the subprocess.
 	pm.mu.Lock()
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
 	if err != nil {
 		pm.mu.Unlock()
 		return err
 	}
+	pm.mu.Unlock()
 
+	// Take per-instance lifecycleMu so a concurrent Disable cannot interleave
+	// with this Enable's init. Without this, Disable can early-return on
+	// status==Stopped while Enable is still spawning the subprocess.
+	instance.lifecycleMu.Lock()
+	defer instance.lifecycleMu.Unlock()
+
+	pm.mu.Lock()
 	if instance.Enabled {
 		pm.mu.Unlock()
 		return nil // Already enabled
 	}
-
 	instance.Enabled = true
 	instance.UpdatedAt = time.Now()
-	needsInit := instance.Status == PluginStatusDisabled
+	needsInit := instance.getStatus() == PluginStatusDisabled
 	pm.mu.Unlock()
 
 	if needsInit {
@@ -633,15 +673,22 @@ func (pm *PluginManager) EnablePluginInstance(serverID, instanceID uuid.UUID) er
 // DisablePluginInstance disables a plugin instance
 func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) error {
 	// Snapshot the instance under pm.mu, then release before stopPluginInstance
-	// which can take up to 30s on a misbehaving plugin. Holding pm.mu across
-	// that call would block every other plugin operation.
+	// which can take up to 30s on a misbehaving plugin.
 	pm.mu.Lock()
 	instance, err := pm.getPluginInstanceUnsafe(serverID, instanceID)
 	if err != nil {
 		pm.mu.Unlock()
 		return err
 	}
+	pm.mu.Unlock()
 
+	// Take per-instance lifecycleMu so this Disable cannot race with a still-
+	// running Enable's init or another Disable. Without this, two callers
+	// could both observe Enabled=true and both try to stop the plugin.
+	instance.lifecycleMu.Lock()
+	defer instance.lifecycleMu.Unlock()
+
+	pm.mu.Lock()
 	if !instance.Enabled {
 		pm.mu.Unlock()
 		return nil // Already disabled
@@ -658,7 +705,7 @@ func (pm *PluginManager) DisablePluginInstance(serverID, instanceID uuid.UUID) e
 	}
 
 	// Check if plugin was forcefully killed due to timeout
-	if instance.LastError == "Plugin shutdown timed out after 30 seconds" {
+	if instance.getError() == "Plugin shutdown timed out after 30 seconds" {
 		log.Warn().
 			Str("serverID", serverID.String()).
 			Str("instanceID", instanceID.String()).
@@ -709,7 +756,7 @@ func (pm *PluginManager) getDiscordAPI() DiscordAPI {
 		return nil
 	}
 
-	if instance.Status != ConnectorStatusRunning {
+	if instance.getStatus() != ConnectorStatusRunning {
 		return nil
 	}
 
@@ -904,7 +951,7 @@ func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
 			if !pm.pluginDependsOnConnectorRef(definition, connectorID) {
 				continue
 			}
-			if !instance.Enabled || instance.Status != PluginStatusRunning {
+			if !instance.Enabled || instance.getStatus() != PluginStatusRunning {
 				continue
 			}
 			dependents = append(dependents, dependent{serverID: serverID, instanceID: instanceID, instance: instance})
@@ -914,6 +961,24 @@ func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
 
 	var restartErrors []error
 	for _, d := range dependents {
+		// Take per-instance lifecycleMu so Delete cannot tear this dependent
+		// out while we're restarting it. If Delete won the race, the lookup
+		// after acquiring the mutex returns a different pointer and we skip.
+		d.instance.lifecycleMu.Lock()
+
+		pm.mu.RLock()
+		current, lookupErr := pm.getPluginInstanceUnsafe(d.serverID, d.instanceID)
+		pm.mu.RUnlock()
+		if lookupErr != nil || current != d.instance {
+			log.Info().
+				Str("serverID", d.serverID.String()).
+				Str("instanceID", d.instanceID.String()).
+				Str("connectorID", connectorID).
+				Msg("Plugin instance was deleted before connector-update restart; skipping")
+			d.instance.lifecycleMu.Unlock()
+			continue
+		}
+
 		log.Info().
 			Str("serverID", d.serverID.String()).
 			Str("instanceID", d.instanceID.String()).
@@ -930,6 +995,7 @@ func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
 				Err(err).
 				Msg("Failed to stop plugin instance during connector update restart")
 			restartErrors = append(restartErrors, fmt.Errorf("failed to stop plugin %s: %w", d.instanceID.String(), err))
+			d.instance.lifecycleMu.Unlock()
 			continue
 		}
 
@@ -942,6 +1008,7 @@ func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
 				Err(err).
 				Msg("Failed to restart plugin instance after connector update")
 			restartErrors = append(restartErrors, fmt.Errorf("failed to restart plugin %s: %w", d.instanceID.String(), err))
+			d.instance.lifecycleMu.Unlock()
 			continue
 		}
 
@@ -951,6 +1018,7 @@ func (pm *PluginManager) restartDependentPlugins(connectorID string) error {
 			Str("pluginID", d.instance.PluginID).
 			Str("connectorID", connectorID).
 			Msg("Successfully restarted plugin after connector update")
+		d.instance.lifecycleMu.Unlock()
 	}
 
 	if len(restartErrors) > 0 {
@@ -1128,11 +1196,36 @@ func (pm *PluginManager) attachUnexpectedExitReporter(instance *PluginInstance) 
 }
 
 func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
-	if instance.Status != PluginStatusRunning {
-		return nil // Not running, nothing to do
-	}
+	currentStatus := instance.getStatus()
 	if instance.Plugin == nil {
 		instance.setStatus(PluginStatusStopped)
+		pm.resetPluginInstanceContext(instance)
+		return nil
+	}
+
+	// Even when the instance is not Running (Error, Stopped, etc), we still
+	// need to release the per-instance HostAPI broker, log subscription, and
+	// child context. The broker only goes away when Plugin.Stop() / Kill()
+	// is called, so an early-return on non-Running would leak it.
+	// For a crashed plugin we go straight to Kill(); for any other state we
+	// attempt graceful Stop first with a timeout fallback to Kill.
+	if currentStatus == PluginStatusError {
+		killer, ok := instance.Plugin.(killablePlugin)
+		if ok {
+			if err := killer.Kill(); err != nil {
+				log.Warn().
+					Str("pluginID", instance.PluginID).
+					Str("instanceID", instance.ID.String()).
+					Err(err).
+					Msg("Failed to SIGKILL plugin subprocess on crashed-state cleanup")
+			}
+		} else {
+			// In-process plugins: best-effort Stop, ignore errors since the
+			// plugin already crashed and we just need to release host-side state.
+			_ = safePluginCall(instance.PluginID, "Stop", instance.Plugin.Stop)
+		}
+		instance.setStatus(PluginStatusStopped)
+		pm.resetPluginInstanceContext(instance)
 		return nil
 	}
 
@@ -1160,15 +1253,44 @@ func (pm *PluginManager) stopPluginInstance(instance *PluginInstance) error {
 			return fmt.Errorf("failed to stop plugin: %w", err)
 		}
 		instance.setStatus(PluginStatusStopped)
+		pm.resetPluginInstanceContext(instance)
 		return nil
 	case <-ctx.Done():
 		log.Warn().
 			Str("pluginID", instance.PluginID).
 			Str("instanceID", instance.ID.String()).
 			Msg("Plugin shutdown timed out after 30 seconds, forcefully killing it")
+		// Hard-kill so a wedged Stop RPC cannot keep the HostAPI broker and
+		// subprocess alive after disable/delete/shutdown.
+		if killer, ok := instance.Plugin.(killablePlugin); ok {
+			if killErr := killer.Kill(); killErr != nil {
+				log.Warn().
+					Str("pluginID", instance.PluginID).
+					Str("instanceID", instance.ID.String()).
+					Err(killErr).
+					Msg("Failed to SIGKILL plugin subprocess after stop timeout")
+			}
+		}
 		instance.setError(PluginStatusStopped, "Plugin shutdown timed out after 30 seconds")
+		pm.resetPluginInstanceContext(instance)
 		return nil
 	}
+}
+
+// resetPluginInstanceContext releases the per-instance child context after a
+// stop so the next Enable allocates a fresh one. Without this, ensurePluginInstanceContext
+// short-circuits because Context+Cancel are non-nil even though Context is
+// already cancelled, which makes event-subscription goroutines exit immediately
+// on re-enable (M-07).
+func (pm *PluginManager) resetPluginInstanceContext(instance *PluginInstance) {
+	if instance == nil {
+		return
+	}
+	if instance.Cancel != nil {
+		instance.Cancel()
+	}
+	instance.Context = nil
+	instance.Cancel = nil
 }
 
 func (pm *PluginManager) createPluginAPIs(ctx context.Context, serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string) *PluginAPIs {
@@ -1247,7 +1369,7 @@ func (pm *PluginManager) distributeEventToPlugins(event *event_manager.Event) {
 	pm.mu.RLock()
 	if serverPlugins, exists := pm.plugins[event.ServerID]; exists {
 		for _, instance := range serverPlugins {
-			if instance.Status != PluginStatusRunning || !instance.Enabled || instance.Plugin == nil {
+			if instance.getStatus() != PluginStatusRunning || !instance.Enabled || instance.Plugin == nil {
 				continue
 			}
 
@@ -1295,6 +1417,8 @@ func (pm *PluginManager) handlePluginEvent(instance *PluginInstance, event *Plug
 			Err(err).
 			Msg("Plugin failed to handle event")
 
+		// Record the error without overwriting Status (the plugin may still
+		// be live; only HandleEvent failed).
 		instance.mu.Lock()
 		instance.LastError = err.Error()
 		instance.mu.Unlock()
@@ -1649,7 +1773,7 @@ func (pm *PluginManager) ExecutePluginCommand(serverID, instanceID uuid.UUID, co
 		return nil, err
 	}
 	plugin := instance.Plugin
-	statusAtSnapshot := instance.Status
+	statusAtSnapshot := instance.getStatus()
 	enabledAtSnapshot := instance.Enabled
 	pluginID := instance.PluginID
 	pm.mu.RUnlock()

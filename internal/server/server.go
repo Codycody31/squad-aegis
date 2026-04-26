@@ -319,6 +319,10 @@ func NewRouter(server *Server) *gin.Engine {
 					pluginGroup.DELETE("/:pluginId", pluginManagePerm, server.ServerPluginDelete)
 					pluginGroup.GET("/:pluginId/logs", pluginManagePerm, server.ServerPluginLogs)
 					pluginGroup.GET("/:pluginId/logs/ws", pluginManagePerm, server.ServerPluginLogsWebSocket)
+					// Restored compatibility route (M-24): the prior plugin
+					// metrics endpoint returned an empty object but clients
+					// rely on the route resolving with 200.
+					pluginGroup.GET("/:pluginId/metrics", pluginViewPerm, server.ServerPluginMetrics)
 					pluginGroup.GET("/:pluginId/data", pluginManagePerm, server.ServerPluginDataGet)
 					pluginGroup.POST("/:pluginId/data", pluginManagePerm, server.ServerPluginDataSet)
 					pluginGroup.DELETE("/:pluginId/data", pluginManagePerm, server.ServerPluginDataClear)

@@ -153,15 +153,17 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 					log.Warn().Str("plugin_id", pkg.PluginID).Str("reason", reason).Msg("Quarantining native plugin: previously trusted signature no longer verifies")
 					pkg.LastError = reason
 				} else {
-					log.Warn().Str("plugin_id", pkg.PluginID).Msg("Quarantining native plugin: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
+					// Quarantine the row but DO NOT remove the runtime file.
+					// Operators should re-upload to clear quarantine; binaries
+					// remain on disk until they explicitly delete the package.
+					// Removing the .so on every quarantine triggered the
+					// down/up migration cycle hazard described in M-23 and
+					// turned a recoverable trust-state mismatch into manual
+					// re-upload work for the operator.
+					log.Warn().Str("plugin_id", pkg.PluginID).Msg("Quarantining native plugin: stored signature cannot be re-verified against trusted keys; runtime file preserved for re-upload")
 					pkg.LastError = "plugin signature cannot be re-verified against trusted keys"
 				}
 				pkg.InstallState = PluginInstallStateError
-				if !previouslyTrusted && pkg.RuntimePath != "" {
-					if safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir()); pathErr == nil {
-						removeRuntimeFile(safePath)
-					}
-				}
 				if err := pm.savePluginPackageToDatabaseContext(context.Background(), &pkg); err != nil {
 					log.Warn().Err(err).Str("plugin_id", pkg.PluginID).Msg("Failed to persist quarantine state to database")
 				}
@@ -188,6 +190,24 @@ func (pm *PluginManager) loadInstalledPluginPackages() error {
 
 		shouldPersistReadyState := false
 		if pkg.InstallState == PluginInstallStatePendingRestart {
+			// Promote any pending side-file written during a same-version
+			// upgrade while running plugin instances kept the runtime path
+			// pinned (M-12). Atomic rename means a partial host crash
+			// cannot leave us with mixed bytes.
+			if pkg.RuntimePath != "" {
+				pendingPath := pkg.RuntimePath + ".pending"
+				if _, statErr := os.Stat(pendingPath); statErr == nil {
+					if safePending, pathErr := validateRuntimePathWithinRoot(pendingPath, pluginRuntimeDir()); pathErr == nil {
+						if safeRuntime, runtimePathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, pluginRuntimeDir()); runtimePathErr == nil {
+							if renameErr := os.Rename(safePending, safeRuntime); renameErr == nil {
+								log.Info().Str("plugin_id", pkg.PluginID).Str("path", safeRuntime).Msg("Promoted pending native plugin runtime file")
+							} else {
+								log.Warn().Err(renameErr).Str("plugin_id", pkg.PluginID).Str("from", safePending).Str("to", safeRuntime).Msg("Failed to promote pending native plugin runtime file")
+							}
+						}
+					}
+				}
+			}
 			pkg.InstallState = PluginInstallStateReady
 			pkg.LastError = ""
 			pkg.UpdatedAt = time.Now()

@@ -142,15 +142,13 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 					log.Warn().Str("connector_id", pkg.ConnectorID).Str("reason", reason).Msg("Quarantining native connector: previously trusted signature no longer verifies")
 					pkg.LastError = reason
 				} else {
-					log.Warn().Str("connector_id", pkg.ConnectorID).Msg("Quarantining native connector: stored signature cannot be re-verified against trusted keys; runtime file will be removed")
+					// Quarantine but preserve runtime file so re-upload can
+					// recover it. See M-23 and the matching plugin loader
+					// path in native_packages_db.go.
+					log.Warn().Str("connector_id", pkg.ConnectorID).Msg("Quarantining native connector: stored signature cannot be re-verified against trusted keys; runtime file preserved for re-upload")
 					pkg.LastError = "connector signature cannot be re-verified against trusted keys"
 				}
 				pkg.InstallState = PluginInstallStateError
-				if !previouslyTrusted && pkg.RuntimePath != "" {
-					if safePath, pathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, connectorRuntimeDir()); pathErr == nil {
-						removeRuntimeFile(safePath)
-					}
-				}
 				if err := pm.saveConnectorPackageToDatabaseContext(context.Background(), &pkg); err != nil {
 					log.Warn().Err(err).Str("connector_id", pkg.ConnectorID).Msg("Failed to persist quarantine state to database")
 				}

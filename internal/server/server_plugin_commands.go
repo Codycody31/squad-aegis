@@ -9,19 +9,55 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 )
 
 var sensitiveParamSubstrings = []string{"password", "secret", "token", "key", "api_key"}
 
-func redactSensitiveParams(params map[string]interface{}) map[string]interface{} {
+// schemaSensitiveFieldSet returns the set of param names declared sensitive=true
+// in the command schema. Nested objects are walked recursively; the path is
+// joined with "." so a nested sensitive field is matched when its full path
+// is the param key.
+func schemaSensitiveFieldSet(schema plug_config_schema.ConfigSchema) map[string]bool {
+	out := make(map[string]bool)
+	walkSchemaSensitive(schema.Fields, "", out)
+	return out
+}
+
+func walkSchemaSensitive(fields []plug_config_schema.ConfigField, prefix string, out map[string]bool) {
+	for _, f := range fields {
+		path := f.Name
+		if prefix != "" {
+			path = prefix + "." + f.Name
+		}
+		if f.Sensitive {
+			out[path] = true
+			out[strings.ToLower(path)] = true
+		}
+		if len(f.Nested) > 0 {
+			walkSchemaSensitive(f.Nested, path, out)
+		}
+	}
+}
+
+// redactSensitiveParams returns a copy of params with sensitive fields masked.
+// A field is treated as sensitive when its name (or fully-qualified path)
+// appears in the schema with sensitive=true, OR when it matches one of the
+// substring fallbacks (password/secret/token/...). The schema-driven path
+// honors the plugin author's declared metadata and catches sensitive fields
+// whose names do not contain a sensitive substring.
+func redactSensitiveParams(params map[string]interface{}, schema plug_config_schema.ConfigSchema) map[string]interface{} {
+	sensitiveSet := schemaSensitiveFieldSet(schema)
 	redacted := make(map[string]interface{}, len(params))
 	for k, v := range params {
 		lower := strings.ToLower(k)
-		isSensitive := false
-		for _, needle := range sensitiveParamSubstrings {
-			if strings.Contains(lower, needle) {
-				isSensitive = true
-				break
+		isSensitive := sensitiveSet[k] || sensitiveSet[lower]
+		if !isSensitive {
+			for _, needle := range sensitiveParamSubstrings {
+				if strings.Contains(lower, needle) {
+					isSensitive = true
+					break
+				}
 			}
 		}
 		if isSensitive {
@@ -170,7 +206,7 @@ func (s *Server) ServerPluginCommandExecute(c *gin.Context) {
 
 	auditData := map[string]interface{}{
 		"commandId": commandID,
-		"params":    redactSensitiveParams(requestBody.Params),
+		"params":    redactSensitiveParams(requestBody.Params, targetCommand.Parameters),
 	}
 	if result.ExecutionID != "" {
 		auditData["executionId"] = result.ExecutionID

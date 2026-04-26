@@ -135,7 +135,9 @@ func (s *subprocessConnectorShim) Initialize(config map[string]interface{}) erro
 	if err != nil {
 		return fmt.Errorf("failed to spawn connector subprocess: %w", err)
 	}
-	if err := handle.rpc.Initialize(connectorrpc.InitializeArgs{Config: config}); err != nil {
+	initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer initCancel()
+	if err := handle.rpc.Initialize(initCtx, connectorrpc.InitializeArgs{Config: config}); err != nil {
 		handle.Kill()
 		return err
 	}
@@ -196,16 +198,16 @@ func (s *subprocessConnectorShim) watchHealth(handle *connectorSubprocessHandle,
 	}
 }
 
-// Start runs the connector's Start RPC.
+// Start runs the connector's Start RPC. ctx propagates to the subprocess
+// so host shutdown / per-instance cancellation aborts a hung Start.
 func (s *subprocessConnectorShim) Start(ctx context.Context) error {
-	_ = ctx
 	s.mu.Lock()
 	handle := s.handle
 	s.mu.Unlock()
 	if handle == nil {
 		return errors.New("connector subprocess is not initialized")
 	}
-	if err := handle.rpc.Start(); err != nil {
+	if err := handle.rpc.Start(ctx); err != nil {
 		s.mu.Lock()
 		s.status = ConnectorStatusError
 		s.mu.Unlock()
@@ -242,7 +244,9 @@ func (s *subprocessConnectorShim) Stop() error {
 
 	var stopErr error
 	if handle != nil && handle.rpc != nil {
-		stopErr = handle.rpc.Stop()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		stopErr = handle.rpc.Stop(stopCtx)
+		stopCancel()
 	}
 	if handle != nil {
 		handle.Kill()
@@ -252,6 +256,45 @@ func (s *subprocessConnectorShim) Stop() error {
 	}
 	return stopErr
 }
+
+// Kill SIGKILLs the connector subprocess without attempting a graceful Stop
+// RPC. Used by the host as the SIGKILL fallback at
+// PluginManager.stopConnectorInstance when graceful Stop times out, so a
+// wedged connector cannot keep its host-side gRPC pipes alive after
+// disable/delete/shutdown. Safe to call multiple times and idempotent with
+// Stop().
+func (s *subprocessConnectorShim) Kill() error {
+	s.mu.Lock()
+	handle := s.handle
+	stopWatcher := s.stopWatcher
+	watcherDone := s.watcherDone
+	s.handle = nil
+	s.stopWatcher = nil
+	s.watcherDone = nil
+	s.intentional = true
+	s.status = ConnectorStatusStopped
+	s.mu.Unlock()
+
+	if stopWatcher != nil {
+		select {
+		case <-stopWatcher:
+		default:
+			close(stopWatcher)
+		}
+	}
+
+	if handle != nil {
+		handle.Kill()
+	}
+	if watcherDone != nil {
+		<-watcherDone
+	}
+	return nil
+}
+
+// Compile-time guard: subprocessConnectorShim satisfies killableConnector so
+// PluginManager.stopConnectorInstance can SIGKILL a wedged connector.
+var _ killableConnector = (*subprocessConnectorShim)(nil)
 
 // GetStatus returns the cached status.
 func (s *subprocessConnectorShim) GetStatus() ConnectorStatus {
@@ -268,7 +311,9 @@ func (s *subprocessConnectorShim) GetConfig() map[string]interface{} {
 	if handle == nil {
 		return map[string]interface{}{}
 	}
-	cfg, err := handle.rpc.GetConfig()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cfg, err := handle.rpc.GetConfig(ctx)
 	if err != nil {
 		log.Warn().Err(err).Str("connector_id", s.connectorID).Msg("Failed to fetch connector config via subprocess RPC")
 		return map[string]interface{}{}
@@ -284,7 +329,9 @@ func (s *subprocessConnectorShim) UpdateConfig(config map[string]interface{}) er
 	if handle == nil {
 		return errors.New("connector subprocess is not initialized")
 	}
-	return handle.rpc.UpdateConfig(config)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return handle.rpc.UpdateConfig(ctx, config)
 }
 
 // GetAPI is unsupported for subprocess connectors; plugins should use the
@@ -316,7 +363,9 @@ func (s *subprocessConnectorShim) Invoke(ctx context.Context, req *ConnectorInvo
 		}
 		timeoutMs = remaining.Milliseconds()
 	}
-	resp, err := handle.rpc.Invoke(wireReq, timeoutMs)
+	// Forward ctx so the caller's deadline propagates to the gRPC call as
+	// well as the in-band timeoutMs the connector subprocess uses.
+	resp, err := handle.rpc.Invoke(ctx, wireReq, timeoutMs)
 	if err != nil {
 		return nil, err
 	}

@@ -39,7 +39,10 @@ func peekNativeConnectorDefinition(runtimePath, expectedSHA256 string, manifest 
 	}
 	defer handle.Kill()
 
-	wire, err := handle.rpc.GetDefinition()
+	// Bound the peek so a wedged connector cannot keep installMu held.
+	peekCtx, peekCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer peekCancel()
+	wire, err := handle.rpc.GetDefinition(peekCtx)
 	if err != nil {
 		return ConnectorDefinition{}, fmt.Errorf("failed to fetch connector definition: %w", err)
 	}
@@ -424,7 +427,18 @@ func (pm *PluginManager) InstallConnectorPackageFromBundle(ctx context.Context, 
 	return pm.installConnectorBundle(ctx, archive, size, originalName, PluginDistributionSideload)
 }
 
+// InstallConnectorPackageFromBundleWithUnsafeConfirm gates installation of an
+// unsigned sideloaded connector on confirm_unsafe (M-17). Signed bundles
+// install without confirm_unsafe even when unsafe sideload is enabled.
+func (pm *PluginManager) InstallConnectorPackageFromBundleWithUnsafeConfirm(ctx context.Context, archive io.ReaderAt, size int64, originalName string, confirmUnsafe bool) (*InstalledConnectorPackage, error) {
+	return pm.installConnectorBundleWithFlags(ctx, archive, size, originalName, PluginDistributionSideload, confirmUnsafe)
+}
+
 func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.ReaderAt, size int64, originalName string, distribution PluginDistribution) (*InstalledConnectorPackage, error) {
+	return pm.installConnectorBundleWithFlags(ctx, archive, size, originalName, distribution, true)
+}
+
+func (pm *PluginManager) installConnectorBundleWithFlags(ctx context.Context, archive io.ReaderAt, size int64, originalName string, distribution PluginDistribution, confirmUnsafe bool) (*InstalledConnectorPackage, error) {
 	pm.installMu.Lock()
 	defer pm.installMu.Unlock()
 
@@ -492,6 +506,13 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 			return nil, fmt.Errorf("connector signature rejected: %s", formatVerificationFailure(verification.Payload))
 		}
 		return nil, fmt.Errorf("unsigned sideloads are disabled")
+	}
+
+	// Operator-facing confirm gate (M-17): only require confirm_unsafe when
+	// the parsed bundle is genuinely unsigned/unverified. Signed connectors
+	// install without confirm_unsafe even with unsafe sideload enabled.
+	if distribution == PluginDistributionSideload && !signatureVerified && allowUnsafeSideload() && !confirmUnsafe {
+		return nil, ErrUnsignedBundleNeedsConfirm
 	}
 
 	idSegment, versionSegment, err := pluginRuntimeSegments(manifest.ConnectorID, manifest.Version)

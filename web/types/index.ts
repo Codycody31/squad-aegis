@@ -297,7 +297,10 @@ export interface PluginPackage {
   manifest: PluginPackageManifest;
   signature_verified: boolean;
   unsafe: boolean;
-  checksum: string;
+  // Backend dropped the checksum column; signature metadata replaces it.
+  signature_key_id?: string;
+  signature_signed_at?: string;
+  signature_expires_at?: string;
   min_host_api_version: number;
   required_capabilities?: string[];
   target_os: string;

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -8,7 +9,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
-	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
 
 // ConnectorListAvailable returns all available connector definitions
@@ -50,7 +50,9 @@ func (s *Server) ConnectorCreate(c *gin.Context) {
 	instance, err := s.Dependencies.PluginManager.CreateConnectorInstance(request.ConnectorID, request.Config)
 	if err != nil {
 		log.Error().Err(err).Str("connector_id", request.ConnectorID).Msg("Failed to create connector")
-		responses.BadRequest(c, "Failed to create connector", nil)
+		// Restore the structured `data.error` payload (M-25) so clients get
+		// validation/dependency reasons, not just a generic message.
+		responses.BadRequest(c, "Failed to create connector", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -84,7 +86,7 @@ func (s *Server) ConnectorUpdate(c *gin.Context) {
 
 	if err := s.Dependencies.PluginManager.UpdateConnectorConfig(connectorID, request.Config); err != nil {
 		log.Error().Err(err).Str("connector_id", connectorID).Msg("Failed to update connector")
-		responses.BadRequest(c, "Failed to update connector", nil)
+		responses.BadRequest(c, "Failed to update connector", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -109,7 +111,7 @@ func (s *Server) ConnectorDelete(c *gin.Context) {
 
 	if err := s.Dependencies.PluginManager.DeleteConnectorInstance(connectorID); err != nil {
 		log.Error().Err(err).Str("connector_id", connectorID).Msg("Failed to delete connector")
-		responses.BadRequest(c, "Failed to delete connector", nil)
+		responses.BadRequest(c, "Failed to delete connector", &gin.H{"error": err.Error()})
 		return
 	}
 
@@ -136,10 +138,10 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 		return
 	}
 
-	if config.Config.Plugins.AllowUnsafeSideload && c.Query("confirm_unsafe") != "true" {
-		responses.BadRequest(c, "unsigned bundle: re-submit with ?confirm_unsafe=true to acknowledge the security risk", nil)
-		return
-	}
+	// confirm_unsafe is only consulted when the bundle is parsed and turns
+	// out to be unsigned (M-17). Signed bundles install through the standard
+	// path even in unsafe-sideload mode.
+	confirmUnsafe := c.Query("confirm_unsafe") == "true"
 
 	maxUploadSize := pluginUploadMaxBytes()
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize+1024)
@@ -174,7 +176,7 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 	clientIP := c.ClientIP()
 	userAgent := c.GetHeader("User-Agent")
 
-	pkg, err := s.Dependencies.PluginManager.InstallConnectorPackageFromBundle(c.Request.Context(), openedFile, file.Size, file.Filename)
+	pkg, err := s.Dependencies.PluginManager.InstallConnectorPackageFromBundleWithUnsafeConfirm(c.Request.Context(), openedFile, file.Size, file.Filename, confirmUnsafe)
 	if err != nil {
 		log.Error().Err(err).Str("filename", file.Filename).Msg("Failed to install uploaded connector bundle")
 		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "connector:package:upload_failed", gin.H{
@@ -184,7 +186,11 @@ func (s *Server) ConnectorPackageUpload(c *gin.Context) {
 			"client_ip":  clientIP,
 			"user_agent": userAgent,
 		})
-		responses.BadRequest(c, "Failed to install uploaded connector bundle", nil)
+		if errors.Is(err, plugin_manager.ErrUnsignedBundleNeedsConfirm) {
+			responses.BadRequest(c, err.Error(), &gin.H{"error": err.Error(), "needs_confirm_unsafe": true})
+			return
+		}
+		responses.BadRequest(c, "Failed to install uploaded connector bundle", &gin.H{"error": err.Error()})
 		return
 	}
 

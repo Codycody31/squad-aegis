@@ -158,9 +158,17 @@ type ConnectorGRPCClient struct {
 	conn   *grpc.ClientConn
 }
 
+// ctxOrBackground returns ctx if non-nil, else context.Background().
+func ctxOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
+}
+
 // GetDefinition fetches the static connector definition.
-func (c *ConnectorGRPCClient) GetDefinition() (ConnectorDefinition, error) {
-	resp, err := c.client.GetDefinition(context.Background(), &connectorrpcpb.Empty{})
+func (c *ConnectorGRPCClient) GetDefinition(ctx context.Context) (ConnectorDefinition, error) {
+	resp, err := c.client.GetDefinition(ctxOrBackground(ctx), &connectorrpcpb.Empty{})
 	if err != nil {
 		return ConnectorDefinition{}, err
 	}
@@ -168,12 +176,12 @@ func (c *ConnectorGRPCClient) GetDefinition() (ConnectorDefinition, error) {
 }
 
 // Initialize runs the connector's Initialize.
-func (c *ConnectorGRPCClient) Initialize(args InitializeArgs) error {
+func (c *ConnectorGRPCClient) Initialize(ctx context.Context, args InitializeArgs) error {
 	encoded, err := encodeJSONMap(args.Config)
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-	_, err = c.client.Initialize(context.Background(), &connectorrpcpb.InitializeRequest{
+	_, err = c.client.Initialize(ctxOrBackground(ctx), &connectorrpcpb.InitializeRequest{
 		ConfigJson: encoded,
 		InstanceId: args.InstanceID,
 	})
@@ -181,20 +189,20 @@ func (c *ConnectorGRPCClient) Initialize(args InitializeArgs) error {
 }
 
 // Start runs the connector's Start.
-func (c *ConnectorGRPCClient) Start() error {
-	_, err := c.client.Start(context.Background(), &connectorrpcpb.Empty{})
+func (c *ConnectorGRPCClient) Start(ctx context.Context) error {
+	_, err := c.client.Start(ctxOrBackground(ctx), &connectorrpcpb.Empty{})
 	return err
 }
 
 // Stop runs the connector's Stop.
-func (c *ConnectorGRPCClient) Stop() error {
-	_, err := c.client.Stop(context.Background(), &connectorrpcpb.Empty{})
+func (c *ConnectorGRPCClient) Stop(ctx context.Context) error {
+	_, err := c.client.Stop(ctxOrBackground(ctx), &connectorrpcpb.Empty{})
 	return err
 }
 
 // GetStatus fetches the current status.
-func (c *ConnectorGRPCClient) GetStatus() (ConnectorStatus, error) {
-	resp, err := c.client.GetStatus(context.Background(), &connectorrpcpb.Empty{})
+func (c *ConnectorGRPCClient) GetStatus(ctx context.Context) (ConnectorStatus, error) {
+	resp, err := c.client.GetStatus(ctxOrBackground(ctx), &connectorrpcpb.Empty{})
 	if err != nil {
 		return "", err
 	}
@@ -202,8 +210,8 @@ func (c *ConnectorGRPCClient) GetStatus() (ConnectorStatus, error) {
 }
 
 // GetConfig fetches the current config.
-func (c *ConnectorGRPCClient) GetConfig() (map[string]interface{}, error) {
-	resp, err := c.client.GetConfig(context.Background(), &connectorrpcpb.Empty{})
+func (c *ConnectorGRPCClient) GetConfig(ctx context.Context) (map[string]interface{}, error) {
+	resp, err := c.client.GetConfig(ctxOrBackground(ctx), &connectorrpcpb.Empty{})
 	if err != nil {
 		return nil, err
 	}
@@ -211,22 +219,24 @@ func (c *ConnectorGRPCClient) GetConfig() (map[string]interface{}, error) {
 }
 
 // UpdateConfig sets a new config on the connector.
-func (c *ConnectorGRPCClient) UpdateConfig(config map[string]interface{}) error {
+func (c *ConnectorGRPCClient) UpdateConfig(ctx context.Context, config map[string]interface{}) error {
 	encoded, err := encodeJSONMap(config)
 	if err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-	_, err = c.client.UpdateConfig(context.Background(), &connectorrpcpb.ConfigJSON{ConfigJson: encoded})
+	_, err = c.client.UpdateConfig(ctxOrBackground(ctx), &connectorrpcpb.ConfigJSON{ConfigJson: encoded})
 	return err
 }
 
-// Invoke runs a connector invocation.
-func (c *ConnectorGRPCClient) Invoke(req ConnectorInvokeRequest, timeoutMs int64) (*ConnectorInvokeResponse, error) {
+// Invoke runs a connector invocation. The provided ctx is forwarded so the
+// caller's deadline propagates over gRPC, in addition to the explicit
+// timeoutMs that the connector subprocess uses for its own bounding.
+func (c *ConnectorGRPCClient) Invoke(ctx context.Context, req ConnectorInvokeRequest, timeoutMs int64) (*ConnectorInvokeResponse, error) {
 	encoded, err := encodeJSONMap(req.Data)
 	if err != nil {
 		return nil, fmt.Errorf("encode invoke data: %w", err)
 	}
-	resp, err := c.client.Invoke(context.Background(), &connectorrpcpb.InvokeRequest{
+	resp, err := c.client.Invoke(ctxOrBackground(ctx), &connectorrpcpb.InvokeRequest{
 		V:         req.V,
 		DataJson:  encoded,
 		TimeoutMs: timeoutMs,
@@ -339,9 +349,19 @@ func configFieldsToProto(in []ConfigField) ([]*connectorrpcpb.ConfigField, error
 	return out, nil
 }
 
+// MaxConfigFieldDepth bounds nested config tree depth for connector wire input.
+const MaxConfigFieldDepth = 10
+
 func protoToConfigFields(in []*connectorrpcpb.ConfigField) ([]ConfigField, error) {
+	return protoToConfigFieldsAtDepth(in, MaxConfigFieldDepth)
+}
+
+func protoToConfigFieldsAtDepth(in []*connectorrpcpb.ConfigField, remainingDepth int) ([]ConfigField, error) {
 	if len(in) == 0 {
 		return nil, nil
+	}
+	if remainingDepth <= 0 {
+		return nil, fmt.Errorf("config schema exceeds maximum nesting depth of %d", MaxConfigFieldDepth)
 	}
 	out := make([]ConfigField, 0, len(in))
 	for _, f := range in {
@@ -353,7 +373,7 @@ func protoToConfigFields(in []*connectorrpcpb.ConfigField) ([]ConfigField, error
 		if err != nil {
 			return nil, fmt.Errorf("decode options for field %q: %w", f.GetName(), err)
 		}
-		nested, err := protoToConfigFields(f.GetNested())
+		nested, err := protoToConfigFieldsAtDepth(f.GetNested(), remainingDepth-1)
 		if err != nil {
 			return nil, err
 		}

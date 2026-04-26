@@ -24,6 +24,12 @@ const maxHostAPIPayloadSize = 1 << 20 // 1 MiB
 // connector.Call to prevent goroutine starvation.
 const maxConnectorCallTimeout = 30 * time.Second
 
+// MaxPluginDataKeyLen is the shared upper bound for plugin-data keys across
+// the HTTP control surface and the gRPC HostAPI database surface (M-30).
+// Without a single source of truth, a 256-byte key written via HostAPI was
+// rejected by the operator UI's 255-byte limit, leaving keys undeletable.
+const MaxPluginDataKeyLen = 256
+
 // maxDatabaseValueSize limits the size of a single plugin data value to
 // prevent database bloat from malicious or buggy plugins.
 const maxDatabaseValueSize = 64 * 1024 // 64 KiB
@@ -251,7 +257,8 @@ func (d *hostAPIDispatcher) LogDebug(_ context.Context, req *pluginrpcpb.LogRequ
 
 // validatePlayerID checks that a player ID is either a Steam64 numeric string
 // or a 32-char hex EOS ID, preventing injection of RCON arguments via crafted
-// IDs while matching the identifier formats the Squad server actually uses.
+// IDs while matching the identifier formats the Squad server actually uses
+// for persistent player tracking (ban/kick/warn flows).
 func validatePlayerID(playerID string) error {
 	id := strings.TrimSpace(playerID)
 	if id == "" {
@@ -261,6 +268,25 @@ func validatePlayerID(playerID string) error {
 		return nil
 	}
 	return fmt.Errorf("player_id must be a Steam64 or 32-char hex EOS ID")
+}
+
+// validateSquadOpPlayerID accepts Steam64, 32-char hex EOS, or the in-match
+// numeric Squad player ID. Squad RCON's AdminRemovePlayerFromSquadById
+// command actually expects the in-match numeric ID, but the player tracker
+// can populate Player.ID with any of the three depending on which event
+// source first observed the player. Rejecting Squad numeric IDs here was
+// the regression M-16 described. This wider validator is ONLY used by the
+// squad-removal RPC; persistent flows (ban/kick/warn) keep the strict
+// validatePlayerID.
+func validateSquadOpPlayerID(playerID string) error {
+	id := strings.TrimSpace(playerID)
+	if id == "" {
+		return fmt.Errorf("player_id must not be empty")
+	}
+	if utils.IsAnyPlayerID(id) {
+		return nil
+	}
+	return fmt.Errorf("player_id must be a Steam64, 32-char hex EOS, or in-match Squad player ID")
 }
 
 func (d *hostAPIDispatcher) checkRcon() error {
@@ -512,7 +538,9 @@ func (d *hostAPIDispatcher) RconRemovePlayerFromSquadById(_ context.Context, req
 	if err := d.checkRcon(); err != nil {
 		return nil, err
 	}
-	if err := validatePlayerID(req.GetPlayerId()); err != nil {
+	// Use the wider validator: AdminRemovePlayerFromSquadById accepts the
+	// in-match numeric Squad player ID in addition to Steam64/EOS (M-16).
+	if err := validateSquadOpPlayerID(req.GetPlayerId()); err != nil {
 		return nil, err
 	}
 	if err := d.apis.RconAPI.RemovePlayerFromSquadById(req.GetPlayerId()); err != nil {
@@ -635,8 +663,8 @@ func validatePluginDataKey(key string) error {
 	if key == "" {
 		return fmt.Errorf("database key must not be empty")
 	}
-	if len(key) > 256 {
-		return fmt.Errorf("database key exceeds maximum length of 256")
+	if len(key) > MaxPluginDataKeyLen {
+		return fmt.Errorf("database key exceeds maximum length of %d", MaxPluginDataKeyLen)
 	}
 	return nil
 }
@@ -1034,7 +1062,7 @@ func mapToDiscordEmbed(in map[string]interface{}) (*DiscordEmbed, error) {
 
 // -- Connector --------------------------------------------------------------
 
-func (d *hostAPIDispatcher) ConnectorCall(_ context.Context, req *pluginrpcpb.ConnectorCallRequest) (*pluginrpcpb.ConnectorCallResponse, error) {
+func (d *hostAPIDispatcher) ConnectorCall(rpcCtx context.Context, req *pluginrpcpb.ConnectorCallRequest) (*pluginrpcpb.ConnectorCallResponse, error) {
 	release, err := d.admit()
 	if err != nil {
 		return nil, err
@@ -1050,7 +1078,15 @@ func (d *hostAPIDispatcher) ConnectorCall(_ context.Context, req *pluginrpcpb.Co
 	if err != nil {
 		return nil, fmt.Errorf("decode connector data: %w", err)
 	}
-	ctx := context.Background()
+	// Build the dispatch context from the inbound RPC ctx so plugin-side
+	// cancellation / disconnect aborts the host work, layered with the
+	// caller's TimeoutMs (if any). Falling back to context.Background()
+	// previously meant a wedged host-side connector could not be cancelled
+	// from the plugin side.
+	ctx := rpcCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if req.GetTimeoutMs() > 0 {
 		timeout := time.Duration(req.GetTimeoutMs()) * time.Millisecond
 		if timeout > maxConnectorCallTimeout {

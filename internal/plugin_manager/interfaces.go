@@ -315,6 +315,11 @@ type PluginInstance struct {
 	// mu protects mutable state (Status, LastError) that may be written
 	// from concurrent event-handler goroutines.
 	mu sync.Mutex `json:"-"`
+
+	// lifecycleMu serializes Create/Start/Init vs Delete/Stop and
+	// Enable vs Disable on a single instance so a Delete cannot race
+	// with a still-running Create's subprocess spawn.
+	lifecycleMu sync.Mutex `json:"-"`
 }
 
 // setStatus safely updates the instance status.
@@ -338,6 +343,34 @@ func (pi *PluginInstance) clearError(s PluginStatus) {
 	pi.Status = s
 	pi.LastError = ""
 	pi.mu.Unlock()
+}
+
+// getStatus returns a snapshot of the instance status under instance.mu.
+func (pi *PluginInstance) getStatus() PluginStatus {
+	pi.mu.Lock()
+	defer pi.mu.Unlock()
+	return pi.Status
+}
+
+// getError returns a snapshot of the instance LastError under instance.mu.
+func (pi *PluginInstance) getError() string {
+	pi.mu.Lock()
+	defer pi.mu.Unlock()
+	return pi.LastError
+}
+
+// snapshotStatusAndError returns a consistent view of (status, lastError) under instance.mu.
+func (pi *PluginInstance) snapshotStatusAndError() (PluginStatus, string) {
+	pi.mu.Lock()
+	defer pi.mu.Unlock()
+	return pi.Status, pi.LastError
+}
+
+// killablePlugin is implemented by subprocess-isolated plugins that can
+// SIGKILL their backing process when a graceful Stop() hangs. In-process
+// plugins do not implement this and are skipped.
+type killablePlugin interface {
+	Kill() error
 }
 
 // ConnectorInvokeRequest is the versioned JSON envelope plugins send to connectors via ConnectorAPI.
@@ -454,12 +487,25 @@ type ConnectorInstance struct {
 	UpdatedAt time.Time              `json:"updated_at"`
 
 	mu sync.Mutex `json:"-"`
+
+	// lifecycleMu serializes Create/Start/Init vs Delete/Stop on a single
+	// connector instance so a Delete cannot race with a still-running
+	// Create's subprocess spawn.
+	lifecycleMu sync.Mutex `json:"-"`
 }
 
 // setStatus safely updates the connector instance status.
 func (ci *ConnectorInstance) setStatus(s ConnectorStatus) {
 	ci.mu.Lock()
 	ci.Status = s
+	ci.mu.Unlock()
+}
+
+// setStatusError safely sets status and writes an error message in one critical section.
+func (ci *ConnectorInstance) setStatusError(s ConnectorStatus, msg string) {
+	ci.mu.Lock()
+	ci.Status = s
+	ci.LastError = msg
 	ci.mu.Unlock()
 }
 
@@ -478,6 +524,20 @@ func (ci *ConnectorInstance) clearError() {
 	ci.mu.Lock()
 	ci.LastError = ""
 	ci.mu.Unlock()
+}
+
+// getStatus returns a snapshot of the connector instance status under ci.mu.
+func (ci *ConnectorInstance) getStatus() ConnectorStatus {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	return ci.Status
+}
+
+// getError returns a snapshot of the connector LastError under ci.mu.
+func (ci *ConnectorInstance) getError() string {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	return ci.LastError
 }
 
 // PluginAPIs provides secure access to server functionality for plugins

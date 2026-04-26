@@ -204,14 +204,21 @@ func peekNativePluginDefinition(runtimePath, expectedSHA256 string, manifest Plu
 	}
 	defer handle.Kill()
 
-	wire, err := handle.rpc.GetDefinition()
+	// peekNativePluginDefinition runs at install/load time — bound the call
+	// so a wedged plugin cannot hang the host installMu indefinitely.
+	peekCtx, peekCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer peekCancel()
+	wire, err := handle.rpc.GetDefinition(peekCtx)
 	if err != nil {
 		return PluginDefinition{}, fmt.Errorf("failed to fetch plugin definition: %w", err)
 	}
 
-	// Guard against adversarial config schemas with unbounded nesting depth.
-	const maxConfigFieldDepth = 10
-	if err := validateConfigFieldDepth(wire.ConfigSchema.Fields, maxConfigFieldDepth); err != nil {
+	// Defense in depth: pkg/pluginrpc.protoToConfigFieldsAtDepth already
+	// rejects schemas exceeding MaxConfigFieldDepth before recursion (M-29),
+	// so this post-check should never trigger for input that came through
+	// the wire decoder. We keep it as an assert in case a future code path
+	// constructs ConfigField trees in-process without the depth guard.
+	if err := validateConfigFieldDepth(wire.ConfigSchema.Fields, pluginrpc.MaxConfigFieldDepth); err != nil {
 		return PluginDefinition{}, fmt.Errorf("plugin %q: %w", manifest.PluginID, err)
 	}
 
@@ -268,7 +275,12 @@ func (s *subprocessPluginShim) Initialize(config map[string]interface{}, apis *P
 	if apis != nil && apis.ServerAPI != nil {
 		serverID = apis.ServerAPI.GetServerID().String()
 	}
-	initErr := handle.rpc.Initialize(pluginrpc.InitializeArgs{
+	// Bound Initialize so a wedged subprocess cannot keep the host caller
+	// blocked forever. The host-side Stop timeout fallback in
+	// stopPluginInstance catches anything that gets past this.
+	initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer initCancel()
+	initErr := handle.rpc.Initialize(initCtx, pluginrpc.InitializeArgs{
 		Config:          config,
 		HostAPIBrokerID: brokerID,
 		ServerID:        serverID,
@@ -356,17 +368,16 @@ func healthCheckInterval() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// Start calls the plugin's Start RPC. The local ctx is NOT forwarded to the
-// subprocess; cancellation is expressed through Stop instead.
+// Start calls the plugin's Start RPC. The provided ctx is forwarded so host
+// shutdown / per-instance cancellation propagates to the subprocess RPC.
 func (s *subprocessPluginShim) Start(ctx context.Context) error {
-	_ = ctx
 	s.mu.Lock()
 	handle := s.handle
 	s.mu.Unlock()
 	if handle == nil {
 		return errors.New("plugin subprocess is not initialized")
 	}
-	if err := handle.rpc.Start(); err != nil {
+	if err := handle.rpc.Start(ctx); err != nil {
 		s.mu.Lock()
 		s.status = PluginStatusError
 		s.mu.Unlock()
@@ -406,7 +417,11 @@ func (s *subprocessPluginShim) Stop() error {
 
 	var stopErr error
 	if handle != nil && handle.rpc != nil {
-		stopErr = handle.rpc.Stop()
+		// Bound the Stop RPC: if the plugin's Stop hangs, the host-side
+		// stopPluginInstance timeout will subsequently call Kill().
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		stopErr = handle.rpc.Stop(stopCtx)
+		stopCancel()
 	}
 	if svc != nil {
 		svc.Close()
@@ -422,7 +437,53 @@ func (s *subprocessPluginShim) Stop() error {
 	return stopErr
 }
 
-// HandleEvent forwards an event to the subprocess via RPC.
+// Kill SIGKILLs the subprocess, closes the HostAPI listener, and signals the
+// watcher to exit, without attempting a graceful Stop RPC. Used by the host
+// when a graceful Stop has timed out so a wedged plugin cannot keep its
+// HostAPI broker alive after disable/delete/shutdown. Safe to call multiple
+// times and idempotent with Stop().
+func (s *subprocessPluginShim) Kill() error {
+	s.mu.Lock()
+	handle := s.handle
+	svc := s.hostAPISvc
+	stopWatcher := s.stopWatcher
+	watcherDone := s.watcherDone
+	s.handle = nil
+	s.hostAPISvc = nil
+	s.stopWatcher = nil
+	s.watcherDone = nil
+	s.intentional = true
+	s.status = PluginStatusStopped
+	s.mu.Unlock()
+
+	if stopWatcher != nil {
+		select {
+		case <-stopWatcher:
+		default:
+			close(stopWatcher)
+		}
+	}
+
+	if svc != nil {
+		svc.Close()
+	}
+	if handle != nil {
+		handle.Kill()
+	}
+	if watcherDone != nil {
+		<-watcherDone
+	}
+	return nil
+}
+
+// Compile-time guard: subprocessPluginShim satisfies killablePlugin so the
+// host-side Stop timeout fallback at plugin_manager.stopPluginInstance can
+// SIGKILL a wedged subprocess.
+var _ killablePlugin = (*subprocessPluginShim)(nil)
+
+// HandleEvent forwards an event to the subprocess via RPC. The host caller
+// owns the timeout; we bound the call here so a wedged plugin handler
+// cannot block the event-distribution goroutine indefinitely.
 func (s *subprocessPluginShim) HandleEvent(event *PluginEvent) error {
 	if event == nil {
 		return nil
@@ -437,7 +498,9 @@ func (s *subprocessPluginShim) HandleEvent(event *PluginEvent) error {
 	if err != nil {
 		return err
 	}
-	return handle.rpc.HandleEvent(wireEvent)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	return handle.rpc.HandleEvent(ctx, wireEvent)
 }
 
 // GetStatus returns the cached status.
@@ -455,7 +518,9 @@ func (s *subprocessPluginShim) GetConfig() map[string]interface{} {
 	if handle == nil {
 		return map[string]interface{}{}
 	}
-	cfg, err := handle.rpc.GetConfig()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cfg, err := handle.rpc.GetConfig(ctx)
 	if err != nil {
 		log.Warn().Err(err).Str("plugin_id", s.pluginID).Msg("Failed to fetch plugin config via subprocess RPC")
 		return map[string]interface{}{}
@@ -471,7 +536,9 @@ func (s *subprocessPluginShim) UpdateConfig(config map[string]interface{}) error
 	if handle == nil {
 		return errors.New("plugin subprocess is not initialized")
 	}
-	return handle.rpc.UpdateConfig(config)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return handle.rpc.UpdateConfig(ctx, config)
 }
 
 // GetCommands fetches the plugin's command list.
@@ -482,7 +549,9 @@ func (s *subprocessPluginShim) GetCommands() []PluginCommand {
 	if handle == nil {
 		return nil
 	}
-	wire, err := handle.rpc.GetCommands()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	wire, err := handle.rpc.GetCommands(ctx)
 	if err != nil {
 		log.Warn().Err(err).Str("plugin_id", s.pluginID).Msg("Failed to fetch plugin commands via subprocess RPC")
 		return nil
@@ -507,7 +576,12 @@ func (s *subprocessPluginShim) ExecuteCommand(commandID string, params map[strin
 	if handle == nil {
 		return nil, errors.New("plugin subprocess is not initialized")
 	}
-	wire, err := handle.rpc.ExecuteCommand(commandID, params)
+	// Commands can legitimately be slow (e.g. balance teams over hundreds of
+	// players) — give them a generous bound but still cap so a misbehaving
+	// command cannot wedge the host thread forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	wire, err := handle.rpc.ExecuteCommand(ctx, commandID, params)
 	if err != nil {
 		return nil, err
 	}
@@ -531,7 +605,9 @@ func (s *subprocessPluginShim) GetCommandExecutionStatus(executionID string) (*C
 	if handle == nil {
 		return nil, errors.New("plugin subprocess is not initialized")
 	}
-	wire, err := handle.rpc.GetCommandExecutionStatus(executionID)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	wire, err := handle.rpc.GetCommandExecutionStatus(ctx, executionID)
 	if err != nil {
 		return nil, err
 	}
@@ -599,10 +675,55 @@ func mergeWirePluginIntoHost(wire pluginrpc.PluginDefinition, manifest PluginPac
 	hostDef.ConfigSchema = schema
 
 	hostDef.Events = make([]event_manager.EventType, 0, len(wire.Events))
+	declaredCaps := capabilitySet(target.RequiredCapabilities)
 	for _, ev := range wire.Events {
-		hostDef.Events = append(hostDef.Events, event_manager.EventType(ev))
+		evType := event_manager.EventType(ev)
+		requiredCap := capabilityForEventType(evType)
+		if requiredCap != "" && !declaredCaps[requiredCap] {
+			log.Warn().
+				Str("plugin_id", manifest.PluginID).
+				Str("event_type", string(evType)).
+				Str("required_capability", requiredCap).
+				Msg("Plugin subscribed to event without declaring required manifest capability; subscription dropped")
+			continue
+		}
+		hostDef.Events = append(hostDef.Events, evType)
 	}
 	return hostDef, nil
+}
+
+// capabilitySet builds a quick-lookup set for declared target capabilities.
+func capabilitySet(caps []string) map[string]bool {
+	set := make(map[string]bool, len(caps))
+	for _, c := range caps {
+		set[strings.TrimSpace(c)] = true
+	}
+	return set
+}
+
+// capabilityForEventType maps a runtime event type to the manifest capability
+// that gates subscription to that family of events. Returns "" for events
+// that have no required capability (defensive fallback; treated as allowed).
+func capabilityForEventType(t event_manager.EventType) string {
+	name := string(t)
+	switch {
+	case name == "" || name == "*":
+		return ""
+	case strings.HasPrefix(name, "RCON_"):
+		return NativePluginCapabilityEventsRCON
+	case strings.HasPrefix(name, "LOG_"):
+		return NativePluginCapabilityEventsLog
+	case strings.HasPrefix(name, "PLUGIN_"):
+		return NativePluginCapabilityEventsPlugin
+	case strings.HasPrefix(name, "CONNECTOR_"):
+		return NativePluginCapabilityEventsConnector
+	case strings.HasPrefix(name, "PLAYER_"),
+		strings.HasPrefix(name, "SQUAD_"),
+		strings.HasPrefix(name, "ENHANCED_"):
+		return NativePluginCapabilityEventsSystem
+	default:
+		return NativePluginCapabilityEventsSystem
+	}
 }
 
 // hostPluginEventToWire converts a host PluginEvent into its wire shape.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -560,7 +561,28 @@ func (pm *PluginManager) InstallPluginPackageFromBundle(ctx context.Context, arc
 	return pm.installPluginBundle(ctx, archive, size, originalName, PluginDistributionSideload)
 }
 
+// ErrUnsignedBundleNeedsConfirm is returned by InstallPluginPackageFromBundleWithUnsafeConfirm
+// when the operator must explicitly opt into installing an unsigned/unverified
+// sideload. The HTTP handler maps this into a 400 with a hint to retry with
+// ?confirm_unsafe=true (M-17). Signed bundles never produce this error so the
+// signed-upload UI flow works without confirm_unsafe.
+var ErrUnsignedBundleNeedsConfirm = errors.New("unsigned bundle: re-submit with ?confirm_unsafe=true to acknowledge the security risk")
+
+// InstallPluginPackageFromBundleWithUnsafeConfirm is identical to
+// InstallPluginPackageFromBundle except it gates installation on a
+// confirm_unsafe flag when the parsed bundle turns out to be unsigned. This
+// allows the HTTP handler to make the gate signature-aware: it does not
+// reject signed bundles in unsafe-sideload mode just because the operator
+// forgot to add the query param.
+func (pm *PluginManager) InstallPluginPackageFromBundleWithUnsafeConfirm(ctx context.Context, archive io.ReaderAt, size int64, originalName string, confirmUnsafe bool) (*InstalledPluginPackage, error) {
+	return pm.installPluginBundleWithFlags(ctx, archive, size, originalName, PluginDistributionSideload, confirmUnsafe)
+}
+
 func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.ReaderAt, size int64, originalName string, distribution PluginDistribution) (*InstalledPluginPackage, error) {
+	return pm.installPluginBundleWithFlags(ctx, archive, size, originalName, distribution, true)
+}
+
+func (pm *PluginManager) installPluginBundleWithFlags(ctx context.Context, archive io.ReaderAt, size int64, originalName string, distribution PluginDistribution, confirmUnsafe bool) (*InstalledPluginPackage, error) {
 	pm.installMu.Lock()
 	defer pm.installMu.Unlock()
 
@@ -634,6 +656,15 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		return nil, fmt.Errorf("unsigned sideloads are disabled")
 	}
 
+	// Operator-facing confirm gate: in unsafe-sideload mode, accept signed
+	// bundles unconditionally. Only require confirm_unsafe=true when the
+	// parsed bundle is actually unsigned/unverified — the previous fail-fast
+	// check at the HTTP layer blocked signed uploads simply because unsafe
+	// sideload was enabled (M-17).
+	if distribution == PluginDistributionSideload && !signatureVerified && allowUnsafeSideload() && !confirmUnsafe {
+		return nil, ErrUnsignedBundleNeedsConfirm
+	}
+
 	pluginIDSegment, versionSegment, err := pluginRuntimeSegments(manifest.PluginID, manifest.Version)
 	if err != nil {
 		return nil, err
@@ -662,7 +693,21 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		}
 	}
 
-	if err := writeRuntimeLibrary(runtimePath, parts.LibraryBytes); err != nil {
+	// If running plugin instances are using the existing runtime file, write
+	// the new bytes to a side file rather than overwriting in place. The
+	// pending file is atomically swapped into runtimePath on next host
+	// restart (see promotePendingRuntimeIfPresent). Without this, a
+	// pre-restart lifecycle restart would either fail checksum validation
+	// or execute mixed bytes from a half-overwritten .so (M-12).
+	willRequireRestart, restartErr := pm.hasPluginInstances(ctx, manifest.PluginID)
+	if restartErr != nil {
+		return nil, restartErr
+	}
+	writePath := runtimePath
+	if willRequireRestart {
+		writePath = runtimePath + ".pending"
+	}
+	if err := writeRuntimeLibrary(writePath, parts.LibraryBytes); err != nil {
 		return nil, err
 	}
 	// Track whether the install completed atomically. On any error after
@@ -671,8 +716,8 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	installCommitted := false
 	defer func() {
 		if !installCommitted {
-			if safePath, pathErr := validateRuntimePathWithinRoot(runtimePath, pluginRuntimeDir()); pathErr != nil {
-				log.Warn().Err(pathErr).Str("path", runtimePath).Msg("Refusing to roll back runtime file outside plugin runtime root")
+			if safePath, pathErr := validateRuntimePathWithinRoot(writePath, pluginRuntimeDir()); pathErr != nil {
+				log.Warn().Err(pathErr).Str("path", writePath).Msg("Refusing to roll back runtime file outside plugin runtime root")
 			} else {
 				removeRuntimeFile(safePath)
 			}
@@ -714,11 +759,11 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	// and so that a successful load is rolled back (registry unregister) if
 	// the subsequent save fails.
 	loadFailureRecorded := false
-	requiresRestart, err := pm.hasPluginInstances(ctx, manifest.PluginID)
-	if err != nil {
-		return nil, err
-	}
+	requiresRestart := willRequireRestart
 	if requiresRestart {
+		// Pending file already written above; running instances continue to
+		// use the existing runtimePath until host restart promotes the
+		// pending bytes (M-12).
 		pkg.InstallState = PluginInstallStatePendingRestart
 		pkg.LastError = nativePluginPendingRestartMessage
 	} else {

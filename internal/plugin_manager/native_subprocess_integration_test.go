@@ -66,11 +66,21 @@ func helloPluginTestManifest() PluginPackageManifest {
 }
 
 // helloPluginTestTarget returns a target snapshot matching the current host.
+// Mirrors the manifest produced by scripts/package-example-native-plugin.sh:
+// the example hello plugin uses RCON broadcasting + ConnectorAPI + subscribes
+// to RCON_CHAT_MESSAGE, so it must declare the matching capabilities. Without
+// these, runtime event subscriptions are dropped by the manifest capability
+// enforcement (see mergeWirePluginIntoHost).
 func helloPluginTestTarget() PluginPackageTarget {
 	return PluginPackageTarget{
 		MinHostAPIVersion: NativePluginHostAPIVersion,
-		TargetOS:          runtime.GOOS,
-		TargetArch:        runtime.GOARCH,
+		RequiredCapabilities: []string{
+			NativePluginCapabilityAPIRCON,
+			NativePluginCapabilityAPIConnector,
+			NativePluginCapabilityEventsRCON,
+		},
+		TargetOS:   runtime.GOOS,
+		TargetArch: runtime.GOARCH,
 	}
 }
 

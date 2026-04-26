@@ -173,7 +173,7 @@ func (pm *PluginManager) invokeConnector(ctx context.Context, connectorRef strin
 		out.Error = fmt.Sprintf("connector %q is not available", connectorRef)
 		return out, nil
 	}
-	if instance.Status != ConnectorStatusRunning {
+	if instance.getStatus() != ConnectorStatusRunning {
 		out.Error = fmt.Sprintf("connector %q is not running", connectorRef)
 		return out, nil
 	}
