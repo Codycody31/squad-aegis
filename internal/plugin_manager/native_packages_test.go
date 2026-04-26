@@ -767,6 +767,160 @@ func TestInstallPluginBundleAfterDeletingLoadedPackageIsCleanInstall(t *testing.
 	}
 }
 
+func TestInstallPluginBundleMarksLiveUpdatePendingRestart(t *testing.T) {
+	requireLinuxNativePlugins(t)
+
+	runtimeDir := t.TempDir()
+	setPluginTestConfig(t, func(cfg *config.Struct) {
+		cfg.Plugins.NativeEnabled = true
+		cfg.Plugins.RuntimeDir = runtimeDir
+		cfg.Plugins.AllowUnsafeSideload = true
+	})
+
+	var saveCalls int
+	db := openTestSQLDB(t, &testSQLDriver{
+		queryContext: func(query string, args []driver.NamedValue) (driver.Rows, error) {
+			if !strings.Contains(query, "SELECT EXISTS") {
+				return nil, fmt.Errorf("unexpected query: %s", query)
+			}
+			if len(args) != 1 {
+				t.Fatalf("len(args) = %d, want 1", len(args))
+			}
+			if got, want := fmt.Sprint(args[0].Value), "com.example.plugin"; got != want {
+				t.Fatalf("args[0] = %q, want %q", got, want)
+			}
+
+			return &testSQLRows{
+				columns: []string{"exists"},
+				values:  [][]driver.Value{{false}},
+			}, nil
+		},
+		execContext: func(query string, args []driver.NamedValue) (driver.Result, error) {
+			if !strings.Contains(query, "INSERT INTO plugin_packages") {
+				return nil, fmt.Errorf("unexpected exec: %s", query)
+			}
+			saveCalls++
+			if got, want := fmt.Sprint(args[7].Value), string(PluginInstallStatePendingRestart); got != want {
+				t.Fatalf("persisted install state = %q, want %q", got, want)
+			}
+			if got, want := fmt.Sprint(args[17].Value), nativePluginPendingRestartMessage; got != want {
+				t.Fatalf("persisted last error = %q, want %q", got, want)
+			}
+			return driver.RowsAffected(1), nil
+		},
+	})
+
+	registry := NewPluginRegistry()
+	oldRuntimePath := filepath.Join(runtimeDir, "com.example.plugin", "1.0.0", "plugin.so")
+	if err := registry.RegisterPlugin(PluginDefinition{
+		ID:             "com.example.plugin",
+		Name:           "Native Plugin",
+		Version:        "1.0.0",
+		Source:         PluginSourceNative,
+		RuntimePath:    oldRuntimePath,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("registry.RegisterPlugin() error = %v", err)
+	}
+
+	serverID := uuid.New()
+	instanceID := uuid.New()
+	pm := &PluginManager{
+		db:       db,
+		registry: registry,
+		plugins: map[uuid.UUID]map[uuid.UUID]*PluginInstance{
+			serverID: {
+				instanceID: {
+					ID:       instanceID,
+					ServerID: serverID,
+					PluginID: "com.example.plugin",
+					Plugin:   &noopPlugin{},
+				},
+			},
+		},
+		nativePackages: map[string]*InstalledPluginPackage{
+			"com.example.plugin": {
+				PluginID:     "com.example.plugin",
+				Name:         "Native Plugin",
+				Version:      "1.0.0",
+				Source:       PluginSourceNative,
+				Distribution: PluginDistributionSideload,
+				InstallState: PluginInstallStateReady,
+				RuntimePath:  oldRuntimePath,
+				Checksum:     "old-checksum",
+			},
+		},
+		loadedNativePlugins: map[string]string{
+			"com.example.plugin": "1.0.0",
+		},
+	}
+
+	var loaderCalls int
+	previousLoader := nativePluginVerifiedLoader
+	nativePluginVerifiedLoader = func(string, string, PluginPackageManifest, PluginPackageTarget) (PluginDefinition, error) {
+		loaderCalls++
+		return PluginDefinition{
+			ID:             "com.example.plugin",
+			Name:           "Native Plugin",
+			Version:        "2.0.0",
+			Source:         PluginSourceNative,
+			CreateInstance: func() Plugin { return &noopPlugin{} },
+		}, nil
+	}
+	t.Cleanup(func() { nativePluginVerifiedLoader = previousLoader })
+
+	manifest := testManifest("com.example.plugin")
+	manifest.Version = "2.0.0"
+	archive := buildPluginArchive(t, manifest, primaryManifestLibraryPath(manifest), []byte("replacement-so"), nil, nil)
+
+	pkg, err := pm.installPluginBundle(context.Background(), bytes.NewReader(archive), int64(len(archive)), "replacement.zip", PluginDistributionSideload)
+	if err != nil {
+		t.Fatalf("installPluginBundle() error = %v", err)
+	}
+	if got, want := pkg.InstallState, PluginInstallStatePendingRestart; got != want {
+		t.Fatalf("pkg.InstallState = %q, want %q", got, want)
+	}
+	if got, want := pkg.LastError, nativePluginPendingRestartMessage; got != want {
+		t.Fatalf("pkg.LastError = %q, want %q", got, want)
+	}
+	if loaderCalls != 0 {
+		t.Fatalf("nativePluginVerifiedLoader() calls = %d, want 0", loaderCalls)
+	}
+	if saveCalls != 1 {
+		t.Fatalf("saveCalls = %d, want 1", saveCalls)
+	}
+
+	loadedVersion, ok := pm.getLoadedNativePluginVersion("com.example.plugin")
+	if !ok {
+		t.Fatal("getLoadedNativePluginVersion() ok = false, want true")
+	}
+	if got, want := loadedVersion, "1.0.0"; got != want {
+		t.Fatalf("loaded version = %q, want %q", got, want)
+	}
+
+	definition, err := pm.registry.GetPlugin("com.example.plugin")
+	if err != nil {
+		t.Fatalf("registry.GetPlugin() error = %v", err)
+	}
+	if got, want := definition.Version, "1.0.0"; got != want {
+		t.Fatalf("definition.Version = %q, want %q", got, want)
+	}
+	if got, want := definition.RuntimePath, oldRuntimePath; got != want {
+		t.Fatalf("definition.RuntimePath = %q, want %q", got, want)
+	}
+
+	persisted := pm.getNativePackage("com.example.plugin")
+	if persisted == nil {
+		t.Fatal("getNativePackage() returned nil")
+	}
+	if got, want := persisted.Version, "2.0.0"; got != want {
+		t.Fatalf("persisted.Version = %q, want %q", got, want)
+	}
+	if got, want := persisted.InstallState, PluginInstallStatePendingRestart; got != want {
+		t.Fatalf("persisted.InstallState = %q, want %q", got, want)
+	}
+}
+
 func TestReadPluginBundleRejectsUnsafePath(t *testing.T) {
 	t.Parallel()
 
@@ -1344,7 +1498,20 @@ func TestInstallPluginBundleAcceptsTrustedSignedBundle(t *testing.T) {
 		plugins:             make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
 		nativePackages:      make(map[string]*InstalledPluginPackage),
 		loadedNativePlugins: make(map[string]string),
-		db:                  openTestSQLDB(t, &testSQLDriver{execContext: func(string, []driver.NamedValue) (driver.Result, error) { return driver.RowsAffected(1), nil }}),
+		db: openTestSQLDB(t, &testSQLDriver{
+			queryContext: func(query string, args []driver.NamedValue) (driver.Rows, error) {
+				if !strings.Contains(query, "SELECT EXISTS") {
+					return nil, fmt.Errorf("unexpected query: %s", query)
+				}
+				return &testSQLRows{
+					columns: []string{"exists"},
+					values:  [][]driver.Value{{false}},
+				}, nil
+			},
+			execContext: func(string, []driver.NamedValue) (driver.Result, error) {
+				return driver.RowsAffected(1), nil
+			},
+		}),
 	}
 
 	pkg, err := pm.installPluginBundle(context.Background(), bytes.NewReader(archive), int64(len(archive)), "signed.zip", PluginDistributionSideload)

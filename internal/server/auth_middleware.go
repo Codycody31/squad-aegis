@@ -29,13 +29,10 @@ func (s *Server) authSession(c *gin.Context, required bool) {
 		sessionToken = sessionToken[7:]
 	}
 
-	// Only allow query parameter tokens for SSE/WebSocket upgrade requests to
-	// prevent token leakage via browser history, referrer headers, and proxy logs.
+	// Only allow query parameter tokens for upgrade-style requests plus the
+	// storage download endpoint that currently relies on window.open().
 	if sessionToken == "" {
-		if c.GetHeader("Upgrade") == "websocket" ||
-			c.GetHeader("Accept") == "text/event-stream" ||
-			strings.HasSuffix(c.Request.URL.Path, "/ws") ||
-			strings.HasSuffix(c.Request.URL.Path, "/events") {
+		if allowQueryTokenAuth(c) {
 			sessionToken = c.Query("token")
 		}
 	}
@@ -74,6 +71,27 @@ func (s *Server) authSession(c *gin.Context, required bool) {
 	}
 
 	c.Set("session", session)
+}
+
+func allowQueryTokenAuth(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+
+	path := c.Request.URL.Path
+	if c.GetHeader("Upgrade") == "websocket" ||
+		c.GetHeader("Accept") == "text/event-stream" ||
+		strings.HasSuffix(path, "/ws") ||
+		strings.HasSuffix(path, "/events") {
+		return true
+	}
+
+	if c.Request.Method != http.MethodGet {
+		return false
+	}
+
+	return strings.HasPrefix(path, "/api/sudo/storage/files/") ||
+		strings.HasPrefix(path, "/sudo/storage/files/")
 }
 
 // AuthIsSuperAdmin checks if the user is a super admin, if not it returns a 403 Forbidden response

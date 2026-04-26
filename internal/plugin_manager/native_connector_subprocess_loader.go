@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"sync"
 	"time"
 
@@ -46,16 +45,7 @@ func launchNativeConnectorSubprocess(runtimePath, expectedSHA256 string) (*conne
 	}
 	defer verifiedFile.Close()
 
-	// Execute from the verified fd to eliminate the TOCTOU window.
-	execPath := fmt.Sprintf("/proc/self/fd/%d", verifiedFile.Fd())
-	cmd := exec.Command(execPath)
-	// Restrict the subprocess environment to a minimal allowlist so host
-	// credentials (DB passwords, API keys, etc.) are never leaked.
-	cmd.Env = []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
-		"HOME=/nonexistent",
-		"LANG=C.UTF-8",
-	}
+	cmd := commandFromVerifiedRuntimeFile(verifiedFile)
 	if err := applySubprocessHardening(cmd); err != nil {
 		return nil, fmt.Errorf("failed to harden connector subprocess: %w", err)
 	}

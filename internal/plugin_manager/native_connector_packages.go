@@ -25,6 +25,8 @@ import (
 // ConnectorDefinition.
 var nativeConnectorVerifiedLoader = peekNativeConnectorDefinition
 
+const nativeConnectorPendingRestartMessage = "Restart Aegis to activate the updated native connector package"
+
 // peekNativeConnectorDefinition spawns a throwaway connector subprocess,
 // fetches the wire definition, merges it with the identity fields from the
 // signed manifest, kills the peek subprocess, and returns a host-typed
@@ -522,39 +524,50 @@ func (pm *PluginManager) installConnectorBundle(ctx context.Context, archive io.
 	}
 
 	loadFailureRecorded := false
-	// If a previous version is already loaded, unload it first so the new
-	// version can take its place immediately. With subprocess-based connectors
-	// (hashicorp/go-plugin) there is no in-process state to worry about.
-	if _, loaded := pm.getLoadedNativeConnectorVersion(manifest.ConnectorID); loaded {
-		pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
-		pm.nativeMu.Lock()
-		delete(pm.loadedNativeConnectors, manifest.ConnectorID)
-		pm.nativeMu.Unlock()
+	instanceKeys := connectorInstanceKeysForPackage(pkg)
+	requiresRestart, err := pm.hasConnectorInstances(ctx, instanceKeys)
+	if err != nil {
+		return nil, err
 	}
-	if err := pm.loadNativeConnectorPackage(pkg); err != nil {
-		pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
-		pkg.InstallState = PluginInstallStateError
-		pkg.LastError = err.Error()
-		loadFailureRecorded = true
-		log.Warn().Err(err).Str("connector_id", manifest.ConnectorID).Str("version", manifest.Version).Msg("Failed to load uploaded native connector package")
+	if requiresRestart {
+		pkg.InstallState = PluginInstallStatePendingRestart
+		pkg.LastError = nativeConnectorPendingRestartMessage
 	} else {
-		pkg.InstallState = PluginInstallStateReady
-		pkg.LastError = ""
+		if _, loaded := pm.getLoadedNativeConnectorVersion(manifest.ConnectorID); loaded {
+			pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
+			pm.nativeMu.Lock()
+			delete(pm.loadedNativeConnectors, manifest.ConnectorID)
+			pm.nativeMu.Unlock()
+		}
+		if err := pm.loadNativeConnectorPackage(pkg); err != nil {
+			pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
+			pkg.InstallState = PluginInstallStateError
+			pkg.LastError = err.Error()
+			loadFailureRecorded = true
+			log.Warn().Err(err).Str("connector_id", manifest.ConnectorID).Str("version", manifest.Version).Msg("Failed to load uploaded native connector package")
+		} else {
+			pkg.InstallState = PluginInstallStateReady
+			pkg.LastError = ""
+		}
 	}
 	pkg.UpdatedAt = time.Now()
 
 	if err := pm.saveConnectorPackageToDatabaseContext(ctx, pkg); err != nil {
 		// Roll back the live registry so it does not outlive the (now-rolled-back) DB row.
-		pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
-		pm.nativeMu.Lock()
-		delete(pm.loadedNativeConnectors, manifest.ConnectorID)
-		pm.nativeMu.Unlock()
+		if !requiresRestart {
+			pm.connectorRegistry.UnregisterConnector(manifest.ConnectorID)
+			pm.nativeMu.Lock()
+			delete(pm.loadedNativeConnectors, manifest.ConnectorID)
+			pm.nativeMu.Unlock()
+		}
 		return nil, fmt.Errorf("failed to persist connector package state: %w", err)
 	}
 
 	pm.setNativeConnectorPackage(pkg)
 	installCommitted = true
-	if loadFailureRecorded {
+	if requiresRestart {
+		log.Info().Str("connector_id", pkg.ConnectorID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Msg("Installed native connector package pending restart")
+	} else if loadFailureRecorded {
 		log.Info().Str("connector_id", pkg.ConnectorID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Msg("Persisted native connector package install error state")
 	} else {
 		log.Info().Str("connector_id", pkg.ConnectorID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Bool("signature_verified", pkg.SignatureVerified).Msg("Installed native connector package")

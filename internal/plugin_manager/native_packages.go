@@ -41,6 +41,8 @@ const (
 // a real process.
 var nativePluginVerifiedLoader = peekNativePluginDefinition
 
+const nativePluginPendingRestartMessage = "Restart Aegis to activate the updated native plugin package"
+
 // runtimeDirCache caches the resolved absolute paths for the plugin and
 // connector runtime directories. Resolving once at first use guarantees the
 // containment checks remain consistent even if the process changes its
@@ -644,22 +646,27 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 	// and so that a successful load is rolled back (registry unregister) if
 	// the subsequent save fails.
 	loadFailureRecorded := false
-	// If a previous version is already loaded, unload it first so the new
-	// version can take its place immediately. With subprocess-based plugins
-	// (hashicorp/go-plugin) there is no in-process state to worry about —
-	// each instance spawns a fresh subprocess from the runtime binary.
-	if _, loaded := pm.getLoadedNativePluginVersion(manifest.PluginID); loaded {
-		pm.unregisterNativePlugin(manifest.PluginID)
+	requiresRestart, err := pm.hasPluginInstances(ctx, manifest.PluginID)
+	if err != nil {
+		return nil, err
 	}
-	if err := pm.loadNativePluginPackage(pkg); err != nil {
-		pm.unregisterNativePluginDefinition(manifest.PluginID)
-		pkg.InstallState = PluginInstallStateError
-		pkg.LastError = err.Error()
-		loadFailureRecorded = true
-		log.Warn().Err(err).Str("plugin_id", manifest.PluginID).Str("version", manifest.Version).Msg("Failed to load uploaded native plugin package")
+	if requiresRestart {
+		pkg.InstallState = PluginInstallStatePendingRestart
+		pkg.LastError = nativePluginPendingRestartMessage
 	} else {
-		pkg.InstallState = PluginInstallStateReady
-		pkg.LastError = ""
+		if _, loaded := pm.getLoadedNativePluginVersion(manifest.PluginID); loaded {
+			pm.unregisterNativePlugin(manifest.PluginID)
+		}
+		if err := pm.loadNativePluginPackage(pkg); err != nil {
+			pm.unregisterNativePluginDefinition(manifest.PluginID)
+			pkg.InstallState = PluginInstallStateError
+			pkg.LastError = err.Error()
+			loadFailureRecorded = true
+			log.Warn().Err(err).Str("plugin_id", manifest.PluginID).Str("version", manifest.Version).Msg("Failed to load uploaded native plugin package")
+		} else {
+			pkg.InstallState = PluginInstallStateReady
+			pkg.LastError = ""
+		}
 	}
 	pkg.UpdatedAt = time.Now()
 
@@ -667,13 +674,17 @@ func (pm *PluginManager) installPluginBundle(ctx context.Context, archive io.Rea
 		// DB save failed. Clean up the loaded state so the live registry
 		// doesn't outlive the (now-rolled-back) database row, and let the
 		// deferred file remover clear the runtime file from disk.
-		pm.unregisterNativePlugin(manifest.PluginID)
+		if !requiresRestart {
+			pm.unregisterNativePlugin(manifest.PluginID)
+		}
 		return nil, fmt.Errorf("failed to persist plugin package state: %w", err)
 	}
 
 	pm.setNativePackage(pkg)
 	installCommitted = true
-	if loadFailureRecorded {
+	if requiresRestart {
+		log.Info().Str("plugin_id", pkg.PluginID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Msg("Installed native plugin package pending restart")
+	} else if loadFailureRecorded {
 		log.Info().Str("plugin_id", pkg.PluginID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Msg("Persisted native plugin package install error state")
 	} else {
 		log.Info().Str("plugin_id", pkg.PluginID).Str("version", pkg.Version).Str("install_state", string(pkg.InstallState)).Bool("signature_verified", pkg.SignatureVerified).Msg("Installed native plugin package")

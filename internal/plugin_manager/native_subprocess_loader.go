@@ -29,6 +29,23 @@ import (
 // processes.
 var nativePluginSubprocessLauncher = launchNativePluginSubprocess
 
+func commandFromVerifiedRuntimeFile(verifiedFile *os.File) *exec.Cmd {
+	// Execute from the verified fd to eliminate the TOCTOU window between
+	// checksum verification and exec. exec.Cmd only preserves stdio plus
+	// ExtraFiles, so publish the verified binary as the first extra file.
+	// In the child that descriptor is always fd 3.
+	cmd := exec.Command("/proc/self/fd/3")
+	cmd.ExtraFiles = []*os.File{verifiedFile}
+	// Restrict the subprocess environment to a minimal allowlist so host
+	// credentials (DB passwords, API keys, etc.) are never leaked.
+	cmd.Env = []string{
+		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"HOME=/nonexistent",
+		"LANG=C.UTF-8",
+	}
+	return cmd
+}
+
 // pluginSubprocessHandle holds the live subprocess + the RPC client stub.
 // A handle must be released via Kill() when the plugin is unloaded.
 type pluginSubprocessHandle struct {
@@ -56,18 +73,7 @@ func launchNativePluginSubprocess(runtimePath, expectedSHA256 string) (*pluginSu
 	}
 	defer verifiedFile.Close()
 
-	// Execute from the verified fd to eliminate the TOCTOU window between
-	// checksum verification and exec. The /proc/self/fd path is Linux-only,
-	// which is fine because native plugins are gated by nativePluginsEnabled().
-	execPath := fmt.Sprintf("/proc/self/fd/%d", verifiedFile.Fd())
-	cmd := exec.Command(execPath)
-	// Restrict the subprocess environment to a minimal allowlist so host
-	// credentials (DB passwords, API keys, etc.) are never leaked.
-	cmd.Env = []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
-		"HOME=/nonexistent",
-		"LANG=C.UTF-8",
-	}
+	cmd := commandFromVerifiedRuntimeFile(verifiedFile)
 	if err := applySubprocessHardening(cmd); err != nil {
 		return nil, fmt.Errorf("failed to harden plugin subprocess: %w", err)
 	}
