@@ -27,14 +27,9 @@ type AutoTKWarnPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "auto_tk_warn",
-		Name:                   "Auto TK Warn",
-		Description:            "The Auto TK Warn plugin will automatically warn players with a message when they teamkill.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "auto_tk_warn",
+		Name:        "Auto TK Warn",
+		Description: "The Auto TK Warn plugin will automatically warn players with a message when they teamkill.",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

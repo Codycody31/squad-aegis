@@ -6,12 +6,9 @@ import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
 import type { SessionInfo } from "~/types";
 
-definePageMeta({ middleware: "auth", layout: "sudo" });
+definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
 
 const runtimeConfig = useRuntimeConfig();
-const authStore = useAuthStore();
-
-if (!authStore.user?.super_admin) navigateTo("/dashboard");
 
 const loading = ref(true);
 const sessions = ref<SessionInfo[]>([]);

@@ -25,13 +25,13 @@ type GlobalAuditLogEntry struct {
 
 // GlobalAuditStatsResponse represents audit log statistics
 type GlobalAuditStatsResponse struct {
-	TotalLogs        int64            `json:"total_logs"`
-	LogsToday        int64            `json:"logs_today"`
-	LogsThisWeek     int64            `json:"logs_this_week"`
-	LogsThisMonth    int64            `json:"logs_this_month"`
-	TopActions       []ActionCount    `json:"top_actions"`
-	TopUsers         []UserActionCount `json:"top_users"`
-	RecentActivity   []GlobalAuditLogEntry `json:"recent_activity"`
+	TotalLogs      int64                 `json:"total_logs"`
+	LogsToday      int64                 `json:"logs_today"`
+	LogsThisWeek   int64                 `json:"logs_this_week"`
+	LogsThisMonth  int64                 `json:"logs_this_month"`
+	TopActions     []ActionCount         `json:"top_actions"`
+	TopUsers       []UserActionCount     `json:"top_users"`
+	RecentActivity []GlobalAuditLogEntry `json:"recent_activity"`
 }
 
 // ActionCount represents count of actions by type
@@ -448,4 +448,3 @@ func (s *Server) ExportGlobalAuditLogs(c *gin.Context) {
 	c.Header("Content-Type", "text/csv")
 	c.String(200, csv)
 }
-

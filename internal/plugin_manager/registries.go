@@ -2,6 +2,7 @@ package plugin_manager
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -30,12 +31,36 @@ func (r *pluginRegistry) RegisterPlugin(definition PluginDefinition) error {
 		return fmt.Errorf("plugin %s must have a CreateInstance function", definition.ID)
 	}
 
-	if _, exists := r.plugins[definition.ID]; exists {
+	if definition.Source == "" {
+		definition.Source = PluginSourceBundled
+	}
+	if definition.Source == PluginSourceBundled {
+		if definition.Distribution == "" {
+			definition.Distribution = PluginDistributionBundled
+		}
+		definition.Official = true
+		if definition.InstallState == "" {
+			definition.InstallState = PluginInstallStateReady
+		}
+	}
+	if definition.Source == PluginSourceNative && definition.InstallState == "" {
+		definition.InstallState = PluginInstallStateReady
+	}
+
+	existing, exists := r.plugins[definition.ID]
+	if exists && !(existing.Source == PluginSourceNative && definition.Source == PluginSourceNative) {
 		return fmt.Errorf("plugin %s is already registered", definition.ID)
 	}
 
 	r.plugins[definition.ID] = definition
 	return nil
+}
+
+func (r *pluginRegistry) UnregisterPlugin(pluginID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	delete(r.plugins, pluginID)
 }
 
 func (r *pluginRegistry) GetPlugin(pluginID string) (*PluginDefinition, error) {
@@ -76,7 +101,8 @@ func (r *pluginRegistry) CreatePluginInstance(pluginID string) (Plugin, error) {
 
 // connectorRegistry implements ConnectorRegistry interface
 type connectorRegistry struct {
-	connectors map[string]ConnectorDefinition
+	connectors map[string]ConnectorDefinition // canonical connector ID -> definition
+	aliases    map[string]string              // legacy/instance key/alias -> canonical ID
 	mu         sync.RWMutex
 }
 
@@ -84,7 +110,50 @@ type connectorRegistry struct {
 func NewConnectorRegistry() ConnectorRegistry {
 	return &connectorRegistry{
 		connectors: make(map[string]ConnectorDefinition),
+		aliases:    make(map[string]string),
 	}
+}
+
+func (r *connectorRegistry) removeConnectorAliasesLocked(canonicalID string) {
+	for alias, target := range r.aliases {
+		if target == canonicalID || alias == canonicalID {
+			delete(r.aliases, alias)
+		}
+	}
+}
+
+func (r *connectorRegistry) registerConnectorAliasesLocked(canonicalID string, definition ConnectorDefinition) {
+	r.aliases[canonicalID] = canonicalID
+	storageKey := definition.ConnectorInstanceStorageKey()
+	if storageKey != "" && storageKey != canonicalID {
+		r.aliases[storageKey] = canonicalID
+	}
+	for _, legacy := range definition.LegacyIDs {
+		legacy = strings.TrimSpace(legacy)
+		if legacy == "" {
+			continue
+		}
+		if other, exists := r.aliases[legacy]; exists && other != canonicalID {
+			// Should not happen if callers unregister native replacements first.
+			delete(r.aliases, legacy)
+		}
+		r.aliases[legacy] = canonicalID
+	}
+}
+
+// resolveCanonicalConnectorIDRefLocked maps a legacy or canonical reference to a canonical ID (call with r.mu RLock held).
+func (r *connectorRegistry) resolveCanonicalConnectorIDRefLocked(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", fmt.Errorf("connector ID cannot be empty")
+	}
+	if canonical, ok := r.aliases[ref]; ok {
+		return canonical, nil
+	}
+	if _, ok := r.connectors[ref]; ok {
+		return ref, nil
+	}
+	return "", fmt.Errorf("connector %s not found", ref)
 }
 
 func (r *connectorRegistry) RegisterConnector(definition ConnectorDefinition) error {
@@ -99,19 +168,83 @@ func (r *connectorRegistry) RegisterConnector(definition ConnectorDefinition) er
 		return fmt.Errorf("connector %s must have a CreateInstance function", definition.ID)
 	}
 
-	if _, exists := r.connectors[definition.ID]; exists {
-		return fmt.Errorf("connector %s is already registered", definition.ID)
+	canonical := strings.TrimSpace(definition.ID)
+
+	if existing, exists := r.connectors[canonical]; exists {
+		sameNative := existing.Source == PluginSourceNative && definition.Source == PluginSourceNative
+		if !sameNative {
+			return fmt.Errorf("connector %s is already registered", canonical)
+		}
+		r.removeConnectorAliasesLocked(canonical)
 	}
 
-	r.connectors[definition.ID] = definition
+	// Reject native packages that try to claim a bundled connector's identity
+	// via alias hijacking. Without this, a native package declaring an alias
+	// such as "discord" could inherit the bundled discord connector's
+	// existing config + secrets when its alias is auto-mapped to its
+	// canonical ID. Bundled connectors retain their identity and config;
+	// only colliding native packages are rejected here.
+	if definition.Source == PluginSourceNative {
+		candidates := make([]string, 0, 1+1+len(definition.LegacyIDs))
+		candidates = append(candidates, canonical)
+		if storageKey := strings.TrimSpace(definition.InstanceKey); storageKey != "" && storageKey != canonical {
+			candidates = append(candidates, storageKey)
+		}
+		for _, legacy := range definition.LegacyIDs {
+			legacy = strings.TrimSpace(legacy)
+			if legacy != "" {
+				candidates = append(candidates, legacy)
+			}
+		}
+		for _, candidate := range candidates {
+			if existingCanonical, ok := r.aliases[candidate]; ok && existingCanonical != canonical {
+				if existing, exists := r.connectors[existingCanonical]; exists && existing.Source == PluginSourceBundled {
+					return fmt.Errorf("native connector %s alias %q collides with bundled connector %s; rename the alias to register this package", canonical, candidate, existingCanonical)
+				}
+			}
+		}
+	}
+
+	if definition.Source == "" {
+		definition.Source = PluginSourceBundled
+	}
+	if definition.Source == PluginSourceBundled {
+		if definition.Distribution == "" {
+			definition.Distribution = PluginDistributionBundled
+		}
+		definition.Official = true
+		if definition.InstallState == "" {
+			definition.InstallState = PluginInstallStateReady
+		}
+	}
+	if definition.Source == PluginSourceNative && definition.InstallState == "" {
+		definition.InstallState = PluginInstallStateReady
+	}
+
+	r.connectors[canonical] = definition
+	r.registerConnectorAliasesLocked(canonical, definition)
 	return nil
+}
+
+func (r *connectorRegistry) UnregisterConnector(canonicalID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	canonicalID = strings.TrimSpace(canonicalID)
+	delete(r.connectors, canonicalID)
+	r.removeConnectorAliasesLocked(canonicalID)
 }
 
 func (r *connectorRegistry) GetConnector(connectorID string) (*ConnectorDefinition, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	definition, exists := r.connectors[connectorID]
+	canonical, err := r.resolveCanonicalConnectorIDRefLocked(connectorID)
+	if err != nil {
+		return nil, err
+	}
+
+	definition, exists := r.connectors[canonical]
 	if !exists {
 		return nil, fmt.Errorf("connector %s not found", connectorID)
 	}
@@ -135,7 +268,12 @@ func (r *connectorRegistry) CreateConnectorInstance(connectorID string) (Connect
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	definition, exists := r.connectors[connectorID]
+	canonical, err := r.resolveCanonicalConnectorIDRefLocked(connectorID)
+	if err != nil {
+		return nil, err
+	}
+
+	definition, exists := r.connectors[canonical]
 	if !exists {
 		return nil, fmt.Errorf("connector %s not found", connectorID)
 	}

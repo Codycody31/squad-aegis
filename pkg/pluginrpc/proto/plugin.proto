@@ -1,0 +1,134 @@
+// Squad Aegis native plugin wire protocol.
+//
+// The host invokes the Plugin service on the subprocess. Most fields whose
+// shape is plugin-defined (config, command params, event data) travel as
+// JSON-encoded bytes so the SDK can keep them as map[string]interface{} on
+// either end without forcing every plugin to model a fixed proto schema.
+syntax = "proto3";
+
+package squadaegis.pluginrpc.v1;
+
+option go_package = "go.codycody31.dev/squad-aegis/pkg/pluginrpc/proto;pluginrpcpb";
+
+import "google/protobuf/timestamp.proto";
+
+// Plugin is the host-to-plugin service. Each loaded plugin subprocess
+// registers exactly one Plugin server.
+service Plugin {
+  rpc GetDefinition(Empty) returns (PluginDefinition);
+  rpc Initialize(InitializeRequest) returns (Empty);
+  rpc Start(Empty) returns (Empty);
+  rpc Stop(Empty) returns (Empty);
+  rpc HandleEvent(PluginEvent) returns (Empty);
+  rpc GetStatus(Empty) returns (StatusResponse);
+  rpc GetConfig(Empty) returns (ConfigJSON);
+  rpc UpdateConfig(ConfigJSON) returns (Empty);
+  rpc GetCommands(Empty) returns (CommandList);
+  rpc ExecuteCommand(ExecuteCommandRequest) returns (CommandResult);
+  rpc GetCommandExecutionStatus(ExecutionIDRequest) returns (CommandExecutionStatus);
+}
+
+message Empty {}
+
+message ConfigField {
+  string name = 1;
+  string description = 2;
+  bool required = 3;
+  string type = 4;
+  // JSON-encoded default value; empty = no default.
+  bytes default_json = 5;
+  bool sensitive = 6;
+  // JSON-encoded list of options.
+  bytes options_json = 7;
+  repeated ConfigField nested = 8;
+}
+
+message ConfigSchema {
+  repeated ConfigField fields = 1;
+}
+
+message PluginDefinition {
+  string plugin_id = 1;
+  bool allow_multiple_instances = 2;
+  bool long_running = 3;
+  repeated string required_connectors = 4;
+  repeated string optional_connectors = 5;
+  ConfigSchema config_schema = 6;
+  repeated string events = 7;
+}
+
+message InitializeRequest {
+  // JSON-encoded config map.
+  bytes config_json = 1;
+  // Broker ID the plugin should dial back into for the HostAPI service.
+  uint32 host_api_broker_id = 2;
+  string instance_id = 3;
+  string server_id = 4;
+  string log_level = 5;
+}
+
+message PluginEvent {
+  string id = 1;
+  string server_id = 2;
+  string source = 3;
+  string type = 4;
+  // JSON-encoded event-specific data; empty means no data.
+  bytes data_json = 5;
+  string raw = 6;
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+message StatusResponse {
+  string status = 1;
+}
+
+// ConfigJSON wraps a JSON-encoded map[string]interface{} so plugin authors
+// can keep working with arbitrary config shapes.
+message ConfigJSON {
+  bytes config_json = 1;
+}
+
+message CommandList {
+  repeated PluginCommand commands = 1;
+}
+
+message PluginCommand {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string category = 4;
+  ConfigSchema parameters = 5;
+  string execution_type = 6;
+  repeated string required_permissions = 7;
+  string confirm_message = 8;
+}
+
+message ExecuteCommandRequest {
+  string command_id = 1;
+  // JSON-encoded params map.
+  bytes params_json = 2;
+}
+
+message CommandResult {
+  bool success = 1;
+  string message = 2;
+  // JSON-encoded data map.
+  bytes data_json = 3;
+  string execution_id = 4;
+  string error = 5;
+}
+
+message ExecutionIDRequest {
+  string execution_id = 1;
+}
+
+message CommandExecutionStatus {
+  string execution_id = 1;
+  string command_id = 2;
+  string status = 3;
+  int32 progress = 4;
+  string message = 5;
+  CommandResult result = 6;
+  google.protobuf.Timestamp started_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+}

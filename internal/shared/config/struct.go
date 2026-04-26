@@ -2,7 +2,7 @@ package config
 
 type Struct struct {
 	App struct {
-		IsDevelopment bool   `default:"true"`
+		IsDevelopment bool   `default:"false"`
 		WebUiProxy    string `default:""`
 		Port          string `default:"3113"`
 		Url           string `default:"http://localhost:3113"`
@@ -59,5 +59,48 @@ type Struct struct {
 			Endpoint        string `default:""` // Optional: for S3-compatible services (MinIO, etc.)
 			UseSSL          bool   `default:"true"`
 		}
+	}
+	Plugins struct {
+		NativeEnabled       bool   `default:"true"`
+		RuntimeDir          string `default:""`
+		ConnectorRuntimeDir string `default:""`
+		AllowUnsafeSideload bool   `default:"false"`
+		MaxUploadSize       int64  `default:"52428800"`
+		// Comma-separated base64 ed25519 public keys. A manifest.pub not in
+		// this list is treated as unsigned regardless of signature validity.
+		TrustedSigningKeys string `default:""`
+
+		// RevokedKeyIDsPath points at a JSON file of the form
+		// {"revoked_key_ids": ["ops-key-2025-q4", ...]}. Empty disables the
+		// CRL. The file is re-read every RevokedKeyIDsRefreshSeconds.
+		RevokedKeyIDsPath           string `default:""`
+		RevokedKeyIDsRefreshSeconds int    `default:"300"`
+
+		// SignatureClockSkewSeconds widens the expiry check window so brief
+		// host clock drift does not quarantine a freshly-signed bundle.
+		SignatureClockSkewSeconds int `default:"300"`
+
+		// Subprocess rate limiting: per-instance HostAPI token bucket. A
+		// compromised plugin that floods the host with RconAPI/LogAPI calls
+		// is throttled to HostAPIRatePerSec sustained with HostAPIBurst peak.
+		// Zero or negative values disable rate limiting (NOT recommended in
+		// production).
+		HostAPIRatePerSec float64 `default:"50"`
+		HostAPIBurst      int     `default:"100"`
+
+		// Subprocess health monitoring: how often to ping each subprocess.
+		// Zero or negative disables the background health monitor.
+		HealthCheckIntervalSeconds int `default:"10"`
+
+		// Subprocess privilege drop (unix only). Set a non-zero UID/GID to
+		// launch native plugin/connector subprocesses under a different
+		// user/group. Groups is a comma-separated list of supplementary
+		// group IDs. To prevent subprocesses from gaining new privileges
+		// across exec, run the Aegis process itself under a systemd unit
+		// with NoNewPrivileges=yes (or an equivalent container flag); the
+		// prctl is inherited into subprocess children.
+		SubprocessUID    int    `default:"0"`
+		SubprocessGID    int    `default:"0"`
+		SubprocessGroups string `default:""`
 	}
 }

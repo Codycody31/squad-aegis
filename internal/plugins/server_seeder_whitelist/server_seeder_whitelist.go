@@ -54,14 +54,10 @@ type legacyPlayerProgressRecord struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "server_seeder_whitelist",
-		Name:                   "Server Seeder Whitelist",
-		Description:            "Tracks players who help seed the server and progressively adds them to a whitelist based on time spent seeding. Players earn progress when server is below seeding threshold and lose progress over time when inactive.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            true,
+		ID:          "server_seeder_whitelist",
+		Name:        "Server Seeder Whitelist",
+		Description: "Tracks players who help seed the server and progressively adds them to a whitelist based on time spent seeding. Players earn progress when server is below seeding threshold and lose progress over time when inactive.",
+		LongRunning: true,
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

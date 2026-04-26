@@ -3,20 +3,54 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
+	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
+
+// pluginUploadMaxBytes mirrors plugin_manager.defaultPluginMaxUploadSize
+// (50 MiB) when no override is configured. The constant lives in
+// plugin_manager but the handler enforces the limit before delegating, so
+// keep them in sync.
+const handlerDefaultPluginMaxUploadSize = 50 * 1024 * 1024
+
+func pluginUploadMaxBytes() int64 {
+	if maxUploadSize := config.Config.Plugins.MaxUploadSize; maxUploadSize > 0 {
+		return maxUploadSize
+	}
+	return handlerDefaultPluginMaxUploadSize
+}
+
+func (s *Server) pluginAuditActorID(c *gin.Context) *uuid.UUID {
+	user := s.getUserFromSession(c)
+	if user == nil {
+		return nil
+	}
+	id := user.Id
+	return &id
+}
+
+// requirePluginManager writes a 500 response and returns false when the
+// plugin manager dependency is missing, so handlers can early-return with
+// `if !s.requirePluginManager(c) { return }`.
+func (s *Server) requirePluginManager(c *gin.Context) bool {
+	if s.Dependencies.PluginManager == nil {
+		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+		return false
+	}
+	return true
+}
 
 // PluginListAvailable returns all available plugin definitions
 func (s *Server) PluginListAvailable(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -24,109 +58,133 @@ func (s *Server) PluginListAvailable(c *gin.Context) {
 	responses.Success(c, "Available plugins fetched successfully", &gin.H{"plugins": plugins})
 }
 
-// ConnectorListAvailable returns all available connector definitions
-func (s *Server) ConnectorListAvailable(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+// PluginListInstalled returns all globally installed plugin packages.
+func (s *Server) PluginListInstalled(c *gin.Context) {
+	if !s.requirePluginManager(c) {
 		return
 	}
 
-	connectors := s.Dependencies.PluginManager.ListAvailableConnectorDefinitions()
-	responses.Success(c, "Available connectors fetched successfully", &gin.H{"connectors": connectors})
+	packages := s.Dependencies.PluginManager.ListInstalledPluginPackages()
+	responses.Success(c, "Installed plugins fetched successfully", &gin.H{"plugins": packages})
 }
 
-// ConnectorList returns all configured connectors
-func (s *Server) ConnectorList(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+// PluginUpload installs a plugin package uploaded by a super admin.
+func (s *Server) PluginUpload(c *gin.Context) {
+	if !s.requirePluginManager(c) {
 		return
 	}
 
-	connectors := s.Dependencies.PluginManager.GetConnectors()
-	responses.Success(c, "Connectors fetched successfully", &gin.H{"connectors": connectors})
-}
+	// confirm_unsafe is only consulted when the bundle turns out to be
+	// unsigned. Signed bundles install through the standard path even in
+	// unsafe-sideload mode (M-17). The decision happens after parsing.
+	confirmUnsafe := c.Query("confirm_unsafe") == "true"
 
-// ConnectorCreate creates a new connector instance
-func (s *Server) ConnectorCreate(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
-		return
-	}
+	maxUploadSize := pluginUploadMaxBytes()
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadSize+1024)
 
-	var request struct {
-		ConnectorID string                 `json:"connector_id" binding:"required"`
-		Config      map[string]interface{} `json:"config" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&request); err != nil {
-		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
-		return
-	}
-
-	instance, err := s.Dependencies.PluginManager.CreateConnectorInstance(request.ConnectorID, request.Config)
+	file, err := c.FormFile("bundle")
 	if err != nil {
-		responses.BadRequest(c, "Failed to create connector", &gin.H{"error": err.Error()})
+		responses.BadRequest(c, "No plugin bundle provided", &gin.H{})
 		return
 	}
 
-	responses.Success(c, "Connector created successfully", &gin.H{"connector": instance})
+	if !strings.HasSuffix(strings.ToLower(file.Filename), ".zip") {
+		responses.BadRequest(c, "Plugin bundle must be a .zip file", &gin.H{})
+		return
+	}
+
+	if file.Size > maxUploadSize {
+		responses.BadRequest(c, "Plugin bundle is too large", &gin.H{
+			"file_size": file.Size,
+			"max_size":  maxUploadSize,
+		})
+		return
+	}
+
+	openedFile, err := file.Open()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to open uploaded plugin bundle")
+		responses.BadRequest(c, "Failed to open plugin bundle", &gin.H{})
+		return
+	}
+	defer openedFile.Close()
+
+	clientIP := c.ClientIP()
+	userAgent := c.GetHeader("User-Agent")
+
+	pkg, err := s.Dependencies.PluginManager.InstallPluginPackageFromBundleWithUnsafeConfirm(c.Request.Context(), openedFile, file.Size, file.Filename, confirmUnsafe)
+	if err != nil {
+		log.Error().Err(err).Str("filename", file.Filename).Msg("Failed to install uploaded plugin bundle")
+		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:upload_failed", gin.H{
+			"filename":   file.Filename,
+			"size":       file.Size,
+			"error":      err.Error(),
+			"client_ip":  clientIP,
+			"user_agent": userAgent,
+		})
+		// Surface the confirm_unsafe hint specifically so the UI can prompt
+		// the operator to retry; signed-bundle failures and other parser
+		// errors are reported as generic install failures.
+		if errors.Is(err, plugin_manager.ErrUnsignedBundleNeedsConfirm) {
+			responses.BadRequest(c, err.Error(), &gin.H{"error": err.Error(), "needs_confirm_unsafe": true})
+			return
+		}
+		responses.BadRequest(c, "Failed to install uploaded plugin bundle", &gin.H{"error": err.Error()})
+		return
+	}
+
+	s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:upload", gin.H{
+		"plugin_id":            pkg.PluginID,
+		"version":              pkg.Version,
+		"signature_verified":   pkg.SignatureVerified,
+		"signature_key_id":     pkg.SignatureKeyID,
+		"signature_expires_at": pkg.SignatureExpiresAt,
+		"install_state":        pkg.InstallState,
+		"filename":             file.Filename,
+		"client_ip":            clientIP,
+		"user_agent":           userAgent,
+	})
+
+	message := "Plugin uploaded successfully"
+	if pkg.InstallState == plugin_manager.PluginInstallStatePendingRestart {
+		message = "Plugin uploaded successfully and will activate after restart"
+	}
+
+	responses.Success(c, message, &gin.H{"plugin": pkg})
 }
 
-// ConnectorUpdate updates a connector's configuration
-func (s *Server) ConnectorUpdate(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+// PluginInstalledDelete removes an installed native plugin package.
+func (s *Server) PluginInstalledDelete(c *gin.Context) {
+	if !s.requirePluginManager(c) {
 		return
 	}
 
-	connectorID := c.Param("connectorId")
-	if connectorID == "" {
-		responses.BadRequest(c, "Connector ID is required", &gin.H{})
+	pluginID := c.Param("pluginId")
+	if pluginID == "" {
+		responses.BadRequest(c, "Plugin ID is required", &gin.H{})
 		return
 	}
 
-	var request struct {
-		Config map[string]interface{} `json:"config" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&request); err != nil {
-		responses.BadRequest(c, "Invalid request payload", &gin.H{"error": err.Error()})
+	if err := s.Dependencies.PluginManager.DeleteInstalledPluginPackage(c.Request.Context(), pluginID); err != nil {
+		log.Error().Err(err).Str("plugin_id", pluginID).Msg("Failed to delete installed plugin")
+		s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:delete_failed", gin.H{
+			"plugin_id": pluginID,
+			"error":     err.Error(),
+		})
+		responses.BadRequest(c, "Failed to delete installed plugin", nil)
 		return
 	}
 
-	if err := s.Dependencies.PluginManager.UpdateConnectorConfig(connectorID, request.Config); err != nil {
-		responses.BadRequest(c, "Failed to update connector", &gin.H{"error": err.Error()})
-		return
-	}
+	s.CreateAuditLog(c.Request.Context(), nil, s.pluginAuditActorID(c), "plugin:package:delete", gin.H{
+		"plugin_id": pluginID,
+	})
 
-	responses.Success(c, "Connector updated successfully", nil)
-}
-
-// ConnectorDelete deletes a connector instance
-func (s *Server) ConnectorDelete(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
-		return
-	}
-
-	connectorID := c.Param("connectorId")
-	if connectorID == "" {
-		responses.BadRequest(c, "Connector ID is required", &gin.H{})
-		return
-	}
-
-	if err := s.Dependencies.PluginManager.DeleteConnectorInstance(connectorID); err != nil {
-		responses.BadRequest(c, "Failed to delete connector", &gin.H{"error": err.Error()})
-		return
-	}
-
-	responses.Success(c, "Connector deleted successfully", nil)
+	responses.Success(c, "Plugin deleted successfully", nil)
 }
 
 // ServerPluginList returns all plugin instances for a server
 func (s *Server) ServerPluginList(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -142,8 +200,7 @@ func (s *Server) ServerPluginList(c *gin.Context) {
 
 // ServerPluginCreate creates a new plugin instance for a server
 func (s *Server) ServerPluginCreate(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -179,8 +236,7 @@ func (s *Server) ServerPluginCreate(c *gin.Context) {
 
 // ServerPluginGet returns a specific plugin instance
 func (s *Server) ServerPluginGet(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -207,8 +263,7 @@ func (s *Server) ServerPluginGet(c *gin.Context) {
 
 // ServerPluginUpdate updates a plugin instance's configuration and settings
 func (s *Server) ServerPluginUpdate(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -262,8 +317,7 @@ func (s *Server) ServerPluginUpdate(c *gin.Context) {
 
 // ServerPluginEnable enables a plugin instance
 func (s *Server) ServerPluginEnable(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -290,8 +344,7 @@ func (s *Server) ServerPluginEnable(c *gin.Context) {
 
 // ServerPluginDisable disables a plugin instance
 func (s *Server) ServerPluginDisable(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -321,8 +374,7 @@ func (s *Server) ServerPluginDisable(c *gin.Context) {
 
 // ServerPluginDelete deletes a plugin instance
 func (s *Server) ServerPluginDelete(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -349,8 +401,7 @@ func (s *Server) ServerPluginDelete(c *gin.Context) {
 
 // ServerPluginLogs returns recent logs for a plugin instance
 func (s *Server) ServerPluginLogs(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -372,6 +423,9 @@ func (s *Server) ServerPluginLogs(c *gin.Context) {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
 		}
+	}
+	if limit > 1000 {
+		limit = 1000
 	}
 
 	before := c.Query("before")
@@ -390,10 +444,42 @@ func (s *Server) ServerPluginLogs(c *gin.Context) {
 	responses.Success(c, "Plugin logs fetched successfully", &gin.H{"logs": logs})
 }
 
+// ServerPluginMetrics returns metrics for a plugin instance.
+//
+// Restored compatibility route (M-24): the previous implementation returned
+// an empty metrics object; clients still rely on the route returning 200 +
+// the same shape, so we keep the surface stable while plugin metrics are
+// reworked. Use the dedicated logs endpoints for per-plugin runtime data.
+func (s *Server) ServerPluginMetrics(c *gin.Context) {
+	if !s.requirePluginManager(c) {
+		return
+	}
+
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	instanceID, err := uuid.Parse(c.Param("pluginId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify the plugin instance exists and belongs to this server before
+	// returning success so a 404 path is preserved for invalid IDs.
+	if _, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID); err != nil {
+		responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
+		return
+	}
+
+	responses.Success(c, "Plugin metrics fetched successfully", &gin.H{"metrics": &gin.H{}})
+}
+
 // ServerPluginLogsAll returns aggregated logs for all plugin instances for a server
 func (s *Server) ServerPluginLogsAll(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
+	if !s.requirePluginManager(c) {
 		return
 	}
 
@@ -410,6 +496,9 @@ func (s *Server) ServerPluginLogsAll(c *gin.Context) {
 			limit = parsed
 		}
 	}
+	if limit > 1000 {
+		limit = 1000
+	}
 
 	before := c.Query("before")
 	after := c.Query("after")
@@ -425,438 +514,4 @@ func (s *Server) ServerPluginLogsAll(c *gin.Context) {
 	}
 
 	responses.Success(c, "Server plugin logs fetched successfully", &gin.H{"logs": logs})
-}
-
-// ServerPluginMetrics returns metrics for a plugin instance
-func (s *Server) ServerPluginMetrics(c *gin.Context) {
-	// TODO: Implement plugin-specific metrics retrieval from ClickHouse
-	responses.Success(c, "Plugin metrics fetched successfully", &gin.H{"metrics": &gin.H{}})
-}
-
-// ServerPluginDataGet returns all plugin data for a plugin instance
-func (s *Server) ServerPluginDataGet(c *gin.Context) {
-	if s.Dependencies.DB == nil {
-		responses.InternalServerError(c, errors.New("database not available"), nil)
-		return
-	}
-
-	serverID, err := uuid.Parse(c.Param("serverId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	instanceID, err := uuid.Parse(c.Param("pluginId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Verify plugin instance exists and belongs to the server
-	if s.Dependencies.PluginManager != nil {
-		_, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID)
-		if err != nil {
-			responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	// Query all plugin data
-	query := `SELECT key, value, created_at, updated_at FROM plugin_data WHERE plugin_instance_id = $1 ORDER BY key`
-	rows, err := s.Dependencies.DB.Query(query, instanceID)
-	if err != nil {
-		responses.InternalServerError(c, fmt.Errorf("failed to query plugin data: %w", err), nil)
-		return
-	}
-	defer rows.Close()
-
-	type PluginDataItem struct {
-		Key       string    `json:"key"`
-		Value     string    `json:"value"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-	}
-
-	var data []PluginDataItem
-	for rows.Next() {
-		var item PluginDataItem
-		if err := rows.Scan(&item.Key, &item.Value, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			responses.InternalServerError(c, fmt.Errorf("failed to scan plugin data: %w", err), nil)
-			return
-		}
-		data = append(data, item)
-	}
-
-	if err := rows.Err(); err != nil {
-		responses.InternalServerError(c, fmt.Errorf("error iterating plugin data: %w", err), nil)
-		return
-	}
-
-	responses.Success(c, "Plugin data fetched successfully", &gin.H{"data": data})
-}
-
-// ServerPluginDataClear clears all plugin data for a plugin instance
-func (s *Server) ServerPluginDataClear(c *gin.Context) {
-	if s.Dependencies.DB == nil {
-		responses.InternalServerError(c, errors.New("database not available"), nil)
-		return
-	}
-
-	serverID, err := uuid.Parse(c.Param("serverId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	instanceID, err := uuid.Parse(c.Param("pluginId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Verify plugin instance exists and belongs to the server
-	if s.Dependencies.PluginManager != nil {
-		_, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID)
-		if err != nil {
-			responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	// Delete all plugin data
-	query := `DELETE FROM plugin_data WHERE plugin_instance_id = $1`
-	result, err := s.Dependencies.DB.Exec(query, instanceID)
-	if err != nil {
-		responses.InternalServerError(c, fmt.Errorf("failed to clear plugin data: %w", err), nil)
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		responses.InternalServerError(c, fmt.Errorf("failed to get rows affected: %w", err), nil)
-		return
-	}
-
-	log.Info().
-		Str("server_id", serverID.String()).
-		Str("plugin_instance_id", instanceID.String()).
-		Int64("rows_deleted", rowsAffected).
-		Msg("Cleared plugin data")
-
-	responses.Success(c, "Plugin data cleared successfully", &gin.H{"rows_deleted": rowsAffected})
-}
-
-// ServerPluginDataSet sets or updates a plugin data item
-func (s *Server) ServerPluginDataSet(c *gin.Context) {
-	if s.Dependencies.DB == nil {
-		responses.InternalServerError(c, errors.New("database not available"), nil)
-		return
-	}
-
-	serverID, err := uuid.Parse(c.Param("serverId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	instanceID, err := uuid.Parse(c.Param("pluginId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Verify plugin instance exists and belongs to the server
-	if s.Dependencies.PluginManager != nil {
-		_, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID)
-		if err != nil {
-			responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	var requestBody struct {
-		Key   string `json:"key" binding:"required"`
-		Value string `json:"value" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&requestBody); err != nil {
-		responses.BadRequest(c, "Invalid request body", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Insert or update plugin data using UPSERT
-	query := `INSERT INTO plugin_data (plugin_instance_id, key, value, created_at, updated_at)
-		VALUES ($1, $2, $3, NOW(), NOW())
-		ON CONFLICT (plugin_instance_id, key)
-		DO UPDATE SET value = $3, updated_at = NOW()`
-
-	_, err = s.Dependencies.DB.Exec(query, instanceID, requestBody.Key, requestBody.Value)
-	if err != nil {
-		responses.InternalServerError(c, fmt.Errorf("failed to set plugin data: %w", err), nil)
-		return
-	}
-
-	log.Info().
-		Str("server_id", serverID.String()).
-		Str("plugin_instance_id", instanceID.String()).
-		Str("key", requestBody.Key).
-		Msg("Set plugin data")
-
-	responses.Success(c, "Plugin data set successfully", nil)
-}
-
-// ServerPluginDataDelete deletes a specific plugin data item
-func (s *Server) ServerPluginDataDelete(c *gin.Context) {
-	if s.Dependencies.DB == nil {
-		responses.InternalServerError(c, errors.New("database not available"), nil)
-		return
-	}
-
-	serverID, err := uuid.Parse(c.Param("serverId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	instanceID, err := uuid.Parse(c.Param("pluginId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	key := c.Param("key")
-	if key == "" {
-		responses.BadRequest(c, "Key parameter is required", nil)
-		return
-	}
-
-	// Verify plugin instance exists and belongs to the server
-	if s.Dependencies.PluginManager != nil {
-		_, err := s.Dependencies.PluginManager.GetPluginInstance(serverID, instanceID)
-		if err != nil {
-			responses.NotFound(c, "Plugin instance not found", &gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	// Delete the specific plugin data item
-	query := `DELETE FROM plugin_data WHERE plugin_instance_id = $1 AND key = $2`
-	result, err := s.Dependencies.DB.Exec(query, instanceID, key)
-	if err != nil {
-		responses.InternalServerError(c, fmt.Errorf("failed to delete plugin data: %w", err), nil)
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		responses.InternalServerError(c, fmt.Errorf("failed to get rows affected: %w", err), nil)
-		return
-	}
-
-	if rowsAffected == 0 {
-		responses.NotFound(c, "Plugin data item not found", nil)
-		return
-	}
-
-	log.Info().
-		Str("server_id", serverID.String()).
-		Str("plugin_instance_id", instanceID.String()).
-		Str("key", key).
-		Msg("Deleted plugin data item")
-
-	responses.Success(c, "Plugin data item deleted successfully", nil)
-}
-
-// ServerPluginCommandsList returns available commands for a plugin instance
-func (s *Server) ServerPluginCommandsList(c *gin.Context) {
-	user := s.getUserFromSession(c)
-
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
-		return
-	}
-
-	serverID, err := uuid.Parse(c.Param("serverId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	instanceID, err := uuid.Parse(c.Param("pluginId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Get commands from plugin manager
-	commands, err := s.Dependencies.PluginManager.GetPluginCommands(serverID, instanceID)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get plugin commands", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Filter commands based on user permissions
-	filteredCommands := []interface{}{}
-	for _, cmd := range commands {
-		// Check if user has required permissions for this command
-		hasPermission := true
-		if len(cmd.RequiredPermissions) > 0 {
-			hasPermission, err = s.userHasAnyServerPermission(c, user.Id, serverID, cmd.RequiredPermissions)
-			if err != nil {
-				log.Warn().Err(err).Msg("Failed to check user permissions for command")
-				hasPermission = false
-			}
-		}
-
-		if hasPermission {
-			filteredCommands = append(filteredCommands, cmd)
-		}
-	}
-
-	responses.Success(c, "Commands fetched successfully", &gin.H{
-		"commands": filteredCommands,
-	})
-}
-
-// ServerPluginCommandExecute executes a command on a plugin instance
-func (s *Server) ServerPluginCommandExecute(c *gin.Context) {
-	user := s.getUserFromSession(c)
-
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
-		return
-	}
-
-	serverID, err := uuid.Parse(c.Param("serverId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	instanceID, err := uuid.Parse(c.Param("pluginId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	commandID := c.Param("commandId")
-	if commandID == "" {
-		responses.BadRequest(c, "Command ID is required", nil)
-		return
-	}
-
-	// Parse request body for parameters
-	var requestBody struct {
-		Params map[string]interface{} `json:"params"`
-	}
-
-	if err := c.ShouldBindJSON(&requestBody); err != nil {
-		responses.BadRequest(c, "Invalid request body", &gin.H{"error": err.Error()})
-		return
-	}
-
-	if requestBody.Params == nil {
-		requestBody.Params = make(map[string]interface{})
-	}
-
-	// Get commands to check permissions
-	commands, err := s.Dependencies.PluginManager.GetPluginCommands(serverID, instanceID)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get plugin commands", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Find the command and check permissions
-	var targetCommand *plugin_manager.PluginCommand
-	for i := range commands {
-		if commands[i].ID == commandID {
-			targetCommand = &commands[i]
-			break
-		}
-	}
-
-	if targetCommand == nil {
-		responses.NotFound(c, "Command not found", nil)
-		return
-	}
-
-	// Check if user has required permissions
-	if len(targetCommand.RequiredPermissions) > 0 {
-		hasPermission, err := s.userHasAnyServerPermission(c, user.Id, serverID, targetCommand.RequiredPermissions)
-		if err != nil {
-			responses.InternalServerError(c, fmt.Errorf("failed to check permissions: %w", err), nil)
-			return
-		}
-
-		if !hasPermission {
-			responses.Forbidden(c, "Insufficient permissions to execute this command", nil)
-			return
-		}
-	}
-
-	// Execute command
-	result, err := s.Dependencies.PluginManager.ExecutePluginCommand(serverID, instanceID, commandID, requestBody.Params)
-	if err != nil {
-		responses.BadRequest(c, "Failed to execute command", &gin.H{"error": err.Error()})
-		return
-	}
-
-	// Create audit log
-	auditData := map[string]interface{}{
-		"commandId": commandID,
-		"params":    requestBody.Params,
-	}
-	if result.ExecutionID != "" {
-		auditData["executionId"] = result.ExecutionID
-	}
-
-	s.CreateAuditLog(c.Request.Context(), &serverID, &user.Id, "plugin:command:execute", auditData)
-
-	log.Info().
-		Str("server_id", serverID.String()).
-		Str("plugin_instance_id", instanceID.String()).
-		Str("command_id", commandID).
-		Str("user_id", user.Id.String()).
-		Msg("Executed plugin command")
-
-	responses.Success(c, "Command executed successfully", &gin.H{
-		"result": result,
-	})
-}
-
-// ServerPluginCommandStatus gets async command execution status
-func (s *Server) ServerPluginCommandStatus(c *gin.Context) {
-	if s.Dependencies.PluginManager == nil {
-		responses.InternalServerError(c, errors.New("plugin manager not available"), nil)
-		return
-	}
-
-	serverID, err := uuid.Parse(c.Param("serverId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	instanceID, err := uuid.Parse(c.Param("pluginId"))
-	if err != nil {
-		responses.BadRequest(c, "Invalid plugin instance ID", &gin.H{"error": err.Error()})
-		return
-	}
-
-	executionID := c.Param("executionId")
-	if executionID == "" {
-		responses.BadRequest(c, "Execution ID is required", nil)
-		return
-	}
-
-	// Get execution status
-	status, err := s.Dependencies.PluginManager.GetCommandExecutionStatus(serverID, instanceID, executionID)
-	if err != nil {
-		responses.BadRequest(c, "Failed to get command execution status", &gin.H{"error": err.Error()})
-		return
-	}
-
-	responses.Success(c, "Execution status fetched successfully", &gin.H{
-		"status": status,
-	})
 }

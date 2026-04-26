@@ -1,16 +1,14 @@
 {
-    "pages": [
-        "---Introduction---",
-        "index",
-        "installation",
-        "---Plugins---",
-        "...plugins",
-        "---Workflows---",
-        "...workflows",
-        "---Developers---",
-        "...developers",
-        "---Misc---",
-        "screenshots",
-        "acknowledgements"
-    ]
+  "pages": [
+    "---Introduction---",
+    "index",
+    "installation",
+    "---Workflows---",
+    "...workflows",
+    "---Developers---",
+    "...developers",
+    "---Misc---",
+    "screenshots",
+    "acknowledgements"
+  ]
 }

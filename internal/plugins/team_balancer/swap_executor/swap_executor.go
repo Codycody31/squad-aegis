@@ -25,10 +25,10 @@ type MoveStatus struct {
 
 // ExecutorConfig holds configuration for the swap executor
 type ExecutorConfig struct {
-	RetryInterval          time.Duration // Time between retry attempts
-	MaxCompletionTime      time.Duration // Maximum time to complete all swaps
-	WarnOnSwap             bool          // Send warning to players when swapped
-	MaxAttemptsPerPlayer   int           // Maximum retry attempts per player
+	RetryInterval        time.Duration // Time between retry attempts
+	MaxCompletionTime    time.Duration // Maximum time to complete all swaps
+	WarnOnSwap           bool          // Send warning to players when swapped
+	MaxAttemptsPerPlayer int           // Maximum retry attempts per player
 }
 
 // SwapExecutor manages the execution of player team swaps with retry logic
@@ -176,11 +176,11 @@ func (e *SwapExecutor) executeMove(steamID string) {
 		if err != nil {
 			move.LastError = err
 			e.log.Debug("Player move attempt failed, will retry", map[string]interface{}{
-				"steamID":     steamID,
-				"name":        move.Name,
-				"attempt":     currentAttempt,
+				"steamID":      steamID,
+				"name":         move.Name,
+				"attempt":      currentAttempt,
 				"max_attempts": move.MaxAttempts,
-				"error":       err.Error(),
+				"error":        err.Error(),
 			})
 			e.mu.Unlock()
 
@@ -289,4 +289,3 @@ func (e *SwapExecutor) IsPending() bool {
 	}
 	return false
 }
-

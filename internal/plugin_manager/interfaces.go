@@ -2,7 +2,9 @@ package plugin_manager
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,6 +12,142 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
+
+type PluginSource string
+
+const (
+	PluginSourceBundled PluginSource = "bundled"
+	PluginSourceNative  PluginSource = "native"
+)
+
+type PluginDistribution string
+
+const (
+	PluginDistributionBundled  PluginDistribution = "bundled"
+	PluginDistributionSideload PluginDistribution = "sideload"
+)
+
+type PluginInstallState string
+
+const (
+	PluginInstallStateReady          PluginInstallState = "ready"
+	PluginInstallStateNotInstalled   PluginInstallState = "not_installed"
+	PluginInstallStatePendingRestart PluginInstallState = "pending_restart"
+	PluginInstallStateError          PluginInstallState = "error"
+)
+
+const NativePluginHostAPIVersion = 1
+
+// NativeConnectorHostAPIVersion is the wire/API version for native connector packages (manifest min_host_api_version).
+const NativeConnectorHostAPIVersion = 1
+
+// ConnectorWireProtocolV1 is the JSON envelope version for ConnectorAPI.Invoke (field "v").
+const ConnectorWireProtocolV1 = "1"
+
+const (
+	NativePluginCapabilityEntrypointGetAegisPlugin = "entrypoint.get_aegis_plugin"
+	NativePluginCapabilityAPIRCON                  = "api.rcon"
+	NativePluginCapabilityAPIServer                = "api.server"
+	NativePluginCapabilityAPIDatabase              = "api.database"
+	NativePluginCapabilityAPIRule                  = "api.rule"
+	NativePluginCapabilityAPIAdmin                 = "api.admin"
+	NativePluginCapabilityAPIDiscord               = "api.discord"
+	NativePluginCapabilityAPIConnector             = "api.connector"
+	NativePluginCapabilityAPIEvent                 = "api.event"
+	NativePluginCapabilityAPILog                   = "api.log"
+	NativePluginCapabilityEventsRCON               = "events.rcon"
+	NativePluginCapabilityEventsLog                = "events.log"
+	NativePluginCapabilityEventsSystem             = "events.system"
+	NativePluginCapabilityEventsConnector          = "events.connector"
+	NativePluginCapabilityEventsPlugin             = "events.plugin"
+)
+
+var nativePluginHostCapabilities = []string{
+	NativePluginCapabilityEntrypointGetAegisPlugin,
+	NativePluginCapabilityAPIRCON,
+	NativePluginCapabilityAPIServer,
+	NativePluginCapabilityAPIDatabase,
+	NativePluginCapabilityAPIRule,
+	NativePluginCapabilityAPIAdmin,
+	NativePluginCapabilityAPIDiscord,
+	NativePluginCapabilityAPIConnector,
+	NativePluginCapabilityAPIEvent,
+	NativePluginCapabilityAPILog,
+	NativePluginCapabilityEventsRCON,
+	NativePluginCapabilityEventsLog,
+	NativePluginCapabilityEventsSystem,
+	NativePluginCapabilityEventsConnector,
+	NativePluginCapabilityEventsPlugin,
+}
+
+func NativePluginHostCapabilities() []string {
+	capabilities := make([]string, len(nativePluginHostCapabilities))
+	copy(capabilities, nativePluginHostCapabilities)
+	return capabilities
+}
+
+type PluginPackageTarget struct {
+	MinHostAPIVersion    int      `json:"min_host_api_version"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
+	TargetOS             string   `json:"target_os"`
+	TargetArch           string   `json:"target_arch"`
+	SHA256               string   `json:"sha256,omitempty"`
+	LibraryPath          string   `json:"library_path"`
+}
+
+// ManifestAuthor identifies a plugin or connector author.
+type ManifestAuthor struct {
+	Name    string `json:"name"`
+	Contact string `json:"contact,omitempty"`
+}
+
+// PluginPackageManifest is the signed manifest.json shipped with every
+// native plugin bundle. It carries ONLY the identity and distribution
+// metadata operators need to evaluate a package at upload time. Runtime
+// behavior (config schema, event subscriptions, long-running flag,
+// required connectors, multi-instance support) lives in the plugin binary
+// and is fetched over RPC at load time via pluginrpc.PluginDefinition.
+type PluginPackageManifest struct {
+	PluginID    string                `json:"plugin_id"`
+	Name        string                `json:"name"`
+	Description string                `json:"description,omitempty"`
+	Version     string                `json:"version"`
+	Authors     []ManifestAuthor      `json:"authors,omitempty"`
+	License     string                `json:"license,omitempty"`
+	Repository  string                `json:"repository,omitempty"`
+	DocsURL     string                `json:"docs_url,omitempty"`
+	Official    bool                  `json:"official,omitempty"`
+	Targets     []PluginPackageTarget `json:"targets"`
+}
+
+type InstalledPluginPackage struct {
+	PluginID             string                `json:"plugin_id"`
+	Name                 string                `json:"name"`
+	Description          string                `json:"description"`
+	Version              string                `json:"version"`
+	Source               PluginSource          `json:"source"`
+	Distribution         PluginDistribution    `json:"distribution"`
+	Official             bool                  `json:"official"`
+	InstallState         PluginInstallState    `json:"install_state"`
+	RuntimePath          string                `json:"runtime_path,omitempty"`
+	Manifest             PluginPackageManifest `json:"manifest"`
+	ManifestJSON         json.RawMessage       `json:"-"`
+	SignedManifestJSON   []byte                `json:"-"`
+	ManifestSignature    []byte                `json:"-"`
+	ManifestPublicKey    []byte                `json:"-"`
+	SignatureVerified    bool                  `json:"signature_verified"`
+	Unsafe               bool                  `json:"unsafe"`
+	SignatureKeyID       string                `json:"signature_key_id,omitempty"`
+	SignatureSignedAt    time.Time             `json:"signature_signed_at,omitempty"`
+	SignatureExpiresAt   time.Time             `json:"signature_expires_at,omitempty"`
+	MinHostAPIVersion    int                   `json:"min_host_api_version"`
+	RequiredCapabilities []string              `json:"required_capabilities,omitempty"`
+	TargetOS             string                `json:"target_os"`
+	TargetArch           string                `json:"target_arch"`
+	LastError            string                `json:"last_error,omitempty"`
+	CreatedAt            time.Time             `json:"created_at"`
+	UpdatedAt            time.Time             `json:"updated_at"`
+}
 
 // Plugin represents a server-specific plugin instance
 type Plugin interface {
@@ -55,20 +193,25 @@ type PluginDefinition struct {
 	Name                   string                          `json:"name"`
 	Description            string                          `json:"description"`
 	Version                string                          `json:"version"`
-	Author                 string                          `json:"author"`
+	Authors                []ManifestAuthor                `json:"authors,omitempty"`
+	Source                 PluginSource                    `json:"source"`
+	Official               bool                            `json:"official"`
+	InstallState           PluginInstallState              `json:"install_state"`
+	Distribution           PluginDistribution              `json:"distribution"`
+	MinHostAPIVersion      int                             `json:"min_host_api_version,omitempty"`
+	RequiredCapabilities   []string                        `json:"required_capabilities,omitempty"`
+	TargetOS               string                          `json:"target_os,omitempty"`
+	TargetArch             string                          `json:"target_arch,omitempty"`
+	RuntimePath            string                          `json:"runtime_path,omitempty"`
+	SignatureVerified      bool                            `json:"signature_verified"`
+	Unsafe                 bool                            `json:"unsafe"`
 	AllowMultipleInstances bool                            `json:"allow_multiple_instances"`
 	RequiredConnectors     []string                        `json:"required_connectors"`
+	OptionalConnectors     []string                        `json:"optional_connectors,omitempty"`
 	ConfigSchema           plug_config_schema.ConfigSchema `json:"config_schema"`
 	Events                 []event_manager.EventType       `json:"event_handlers"`
 	LongRunning            bool                            `json:"long_running"`
 	CreateInstance         func() Plugin                   `json:"-"`
-}
-
-// EventHandler defines an event handler for a plugin
-type EventHandler struct {
-	Source      EventSource `json:"source"`
-	EventType   string      `json:"event_type"`
-	Description string      `json:"description"`
 }
 
 // EventSource represents the source of an event
@@ -148,21 +291,110 @@ type CommandExecutionStatus struct {
 
 // PluginInstance represents an active plugin instance
 type PluginInstance struct {
-	ID         uuid.UUID              `json:"id"`
-	ServerID   uuid.UUID              `json:"server_id"`
-	PluginID   string                 `json:"plugin_id"`
-	PluginName string                 `json:"plugin_name"`
-	Notes      string                 `json:"notes"`
-	Config     map[string]interface{} `json:"config"`
-	Status     PluginStatus           `json:"status"`
-	Enabled    bool                   `json:"enabled"`
-	LogLevel   string                 `json:"log_level"` // debug, info, warn, error
-	Plugin     Plugin                 `json:"-"`
-	Context    context.Context        `json:"-"`
-	Cancel     context.CancelFunc     `json:"-"`
-	LastError  string                 `json:"last_error,omitempty"`
-	CreatedAt  time.Time              `json:"created_at"`
-	UpdatedAt  time.Time              `json:"updated_at"`
+	ID                uuid.UUID              `json:"id"`
+	ServerID          uuid.UUID              `json:"server_id"`
+	PluginID          string                 `json:"plugin_id"`
+	PluginName        string                 `json:"plugin_name"`
+	Source            PluginSource           `json:"source,omitempty"`
+	Official          bool                   `json:"official,omitempty"`
+	Distribution      PluginDistribution     `json:"distribution,omitempty"`
+	InstallState      PluginInstallState     `json:"install_state,omitempty"`
+	MinHostAPIVersion int                    `json:"min_host_api_version,omitempty"`
+	Notes             string                 `json:"notes"`
+	Config            map[string]interface{} `json:"config"`
+	Status            PluginStatus           `json:"status"`
+	Enabled           bool                   `json:"enabled"`
+	LogLevel          string                 `json:"log_level"` // debug, info, warn, error
+	Plugin            Plugin                 `json:"-"`
+	Context           context.Context        `json:"-"`
+	Cancel            context.CancelFunc     `json:"-"`
+	LastError         string                 `json:"last_error,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+
+	// mu protects mutable state (Status, LastError) that may be written
+	// from concurrent event-handler goroutines.
+	mu sync.Mutex `json:"-"`
+
+	// lifecycleMu serializes Create/Start/Init vs Delete/Stop and
+	// Enable vs Disable on a single instance so a Delete cannot race
+	// with a still-running Create's subprocess spawn.
+	lifecycleMu sync.Mutex `json:"-"`
+}
+
+// setStatus safely updates the instance status.
+func (pi *PluginInstance) setStatus(s PluginStatus) {
+	pi.mu.Lock()
+	pi.Status = s
+	pi.mu.Unlock()
+}
+
+// setError safely updates the instance status and last error.
+func (pi *PluginInstance) setError(s PluginStatus, msg string) {
+	pi.mu.Lock()
+	pi.Status = s
+	pi.LastError = msg
+	pi.mu.Unlock()
+}
+
+// clearError safely updates status and clears the last error.
+func (pi *PluginInstance) clearError(s PluginStatus) {
+	pi.mu.Lock()
+	pi.Status = s
+	pi.LastError = ""
+	pi.mu.Unlock()
+}
+
+// getStatus returns a snapshot of the instance status under instance.mu.
+func (pi *PluginInstance) getStatus() PluginStatus {
+	pi.mu.Lock()
+	defer pi.mu.Unlock()
+	return pi.Status
+}
+
+// getError returns a snapshot of the instance LastError under instance.mu.
+func (pi *PluginInstance) getError() string {
+	pi.mu.Lock()
+	defer pi.mu.Unlock()
+	return pi.LastError
+}
+
+// snapshotStatusAndError returns a consistent view of (status, lastError) under instance.mu.
+func (pi *PluginInstance) snapshotStatusAndError() (PluginStatus, string) {
+	pi.mu.Lock()
+	defer pi.mu.Unlock()
+	return pi.Status, pi.LastError
+}
+
+// killablePlugin is implemented by subprocess-isolated plugins that can
+// SIGKILL their backing process when a graceful Stop() hangs. In-process
+// plugins do not implement this and are skipped.
+type killablePlugin interface {
+	Kill() error
+}
+
+// ConnectorInvokeRequest is the versioned JSON envelope plugins send to connectors via ConnectorAPI.
+type ConnectorInvokeRequest struct {
+	V    string                 `json:"v"`
+	Data map[string]interface{} `json:"data"`
+}
+
+// ConnectorInvokeResponse is returned from ConnectorAPI.Call and InvokableConnector.Invoke.
+type ConnectorInvokeResponse struct {
+	V     string                 `json:"v"`
+	OK    bool                   `json:"ok"`
+	Data  map[string]interface{} `json:"data,omitempty"`
+	Error string                 `json:"error,omitempty"`
+}
+
+// InvokableConnector is implemented by connectors that support JSON invoke (ConnectorAPI).
+type InvokableConnector interface {
+	Invoke(ctx context.Context, req *ConnectorInvokeRequest) (*ConnectorInvokeResponse, error)
+}
+
+// ConnectorAPI lets plugins call connectors by ID with a versioned JSON envelope.
+type ConnectorAPI interface {
+	Call(ctx context.Context, connectorID string, req *ConnectorInvokeRequest) (*ConnectorInvokeResponse, error)
 }
 
 // Connector represents a global service connector (Discord, Slack, etc.)
@@ -194,14 +426,39 @@ type Connector interface {
 
 // ConnectorDefinition defines the metadata and capabilities of a connector
 type ConnectorDefinition struct {
-	ID             string                          `json:"id"`
-	Name           string                          `json:"name"`
-	Description    string                          `json:"description"`
-	Version        string                          `json:"version"`
-	Author         string                          `json:"author"`
-	ConfigSchema   plug_config_schema.ConfigSchema `json:"config_schema"`
-	APIInterface   interface{}                     `json:"-"`
-	CreateInstance func() Connector                `json:"-"`
+	ID           string                          `json:"id"`
+	LegacyIDs    []string                        `json:"legacy_ids,omitempty"`
+	InstanceKey  string                          `json:"instance_key,omitempty"`
+	Source       PluginSource                    `json:"source"`
+	Name         string                          `json:"name"`
+	Description  string                          `json:"description"`
+	Version      string                          `json:"version"`
+	Authors      []ManifestAuthor                `json:"authors,omitempty"`
+	ConfigSchema plug_config_schema.ConfigSchema `json:"config_schema"`
+	APIInterface interface{}                     `json:"-"`
+	// MinHostAPIVersion is required for native connector packages (see NativeConnectorHostAPIVersion).
+	MinHostAPIVersion    int                `json:"min_host_api_version,omitempty"`
+	RequiredCapabilities []string           `json:"required_capabilities,omitempty"`
+	TargetOS             string             `json:"target_os,omitempty"`
+	TargetArch           string             `json:"target_arch,omitempty"`
+	RuntimePath          string             `json:"runtime_path,omitempty"`
+	SignatureVerified    bool               `json:"signature_verified,omitempty"`
+	Unsafe               bool               `json:"unsafe,omitempty"`
+	InstallState         PluginInstallState `json:"install_state,omitempty"`
+	Distribution         PluginDistribution `json:"distribution,omitempty"`
+	Official             bool               `json:"official,omitempty"`
+	CreateInstance       func() Connector   `json:"-"`
+}
+
+// ConnectorInstanceStorageKey returns the primary key used in the connectors table and pm.connectors.
+func (d ConnectorDefinition) ConnectorInstanceStorageKey() string {
+	if strings.TrimSpace(d.InstanceKey) != "" {
+		return strings.TrimSpace(d.InstanceKey)
+	}
+	if len(d.LegacyIDs) > 0 && strings.TrimSpace(d.LegacyIDs[0]) != "" {
+		return strings.TrimSpace(d.LegacyIDs[0])
+	}
+	return d.ID
 }
 
 // ConnectorStatus represents the current status of a connector
@@ -228,6 +485,59 @@ type ConnectorInstance struct {
 	LastError string                 `json:"last_error,omitempty"`
 	CreatedAt time.Time              `json:"created_at"`
 	UpdatedAt time.Time              `json:"updated_at"`
+
+	mu sync.Mutex `json:"-"`
+
+	// lifecycleMu serializes Create/Start/Init vs Delete/Stop on a single
+	// connector instance so a Delete cannot race with a still-running
+	// Create's subprocess spawn.
+	lifecycleMu sync.Mutex `json:"-"`
+}
+
+// setStatus safely updates the connector instance status.
+func (ci *ConnectorInstance) setStatus(s ConnectorStatus) {
+	ci.mu.Lock()
+	ci.Status = s
+	ci.mu.Unlock()
+}
+
+// setStatusError safely sets status and writes an error message in one critical section.
+func (ci *ConnectorInstance) setStatusError(s ConnectorStatus, msg string) {
+	ci.mu.Lock()
+	ci.Status = s
+	ci.LastError = msg
+	ci.mu.Unlock()
+}
+
+// setError safely records an error on the connector instance.
+func (ci *ConnectorInstance) setError(err error) {
+	ci.mu.Lock()
+	if err != nil {
+		ci.LastError = err.Error()
+		ci.Status = ConnectorStatusError
+	}
+	ci.mu.Unlock()
+}
+
+// clearError safely clears the last error.
+func (ci *ConnectorInstance) clearError() {
+	ci.mu.Lock()
+	ci.LastError = ""
+	ci.mu.Unlock()
+}
+
+// getStatus returns a snapshot of the connector instance status under ci.mu.
+func (ci *ConnectorInstance) getStatus() ConnectorStatus {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	return ci.Status
+}
+
+// getError returns a snapshot of the connector LastError under ci.mu.
+func (ci *ConnectorInstance) getError() string {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	return ci.LastError
 }
 
 // PluginAPIs provides secure access to server functionality for plugins
@@ -235,8 +545,11 @@ type PluginAPIs struct {
 	// Server information
 	ServerAPI ServerAPI
 
-	// Database access (limited)
+	// Plugin-scoped key/value storage
 	DatabaseAPI DatabaseAPI
+
+	// Server rule access
+	RuleAPI RuleAPI
 
 	// RCON access (limited)
 	RconAPI RconAPI
@@ -247,7 +560,10 @@ type PluginAPIs struct {
 	// Event system access
 	EventAPI EventAPI
 
-	// Connector access
+	// Discord messaging access when the Discord connector is available
+	DiscordAPI DiscordAPI
+
+	// ConnectorAPI provides JSON invoke into connectors when exposed for this plugin instance.
 	ConnectorAPI ConnectorAPI
 
 	// Logging
@@ -272,11 +588,8 @@ type ServerAPI interface {
 	GetSquads() ([]*SquadInfo, error)
 }
 
-// DatabaseAPI provides limited database access to plugins
+// DatabaseAPI provides plugin-scoped key/value storage
 type DatabaseAPI interface {
-	// ExecuteQuery executes a read-only query (SELECT only)
-	ExecuteQuery(query string, args ...interface{}) (*sql.Rows, error)
-
 	// GetPluginData retrieves plugin-specific data
 	GetPluginData(key string) (string, error)
 
@@ -285,6 +598,16 @@ type DatabaseAPI interface {
 
 	// DeletePluginData removes plugin-specific data
 	DeletePluginData(key string) error
+}
+
+// RuleAPI provides read-only access to server rules and their configured actions.
+type RuleAPI interface {
+	// ListServerRules returns rules for the current server scoped to the provided parent rule.
+	// Pass nil to fetch top-level rules.
+	ListServerRules(parentRuleID *string) ([]*RuleInfo, error)
+
+	// ListServerRuleActions returns escalation actions for a rule on the current server.
+	ListServerRuleActions(ruleID string) ([]*RuleActionInfo, error)
 }
 
 // RconAPI provides limited RCON access to plugins
@@ -391,13 +714,13 @@ type EventAPI interface {
 	SubscribeToEvents(eventTypes []string, handler func(*PluginEvent)) error
 }
 
-// ConnectorAPI provides access to global connectors
-type ConnectorAPI interface {
-	// GetConnector returns a connector API by ID
-	GetConnector(connectorID string) (interface{}, error)
+// DiscordAPI provides limited Discord messaging functionality to plugins.
+type DiscordAPI interface {
+	// SendMessage sends a plain text message to a Discord channel.
+	SendMessage(channelID, content string) (string, error)
 
-	// ListConnectors returns available connector IDs
-	ListConnectors() []string
+	// SendEmbed sends an embed message to a Discord channel.
+	SendEmbed(channelID string, embed *DiscordEmbed) (string, error)
 }
 
 // LogAPI provides logging functionality to plugins
@@ -416,6 +739,60 @@ type LogAPI interface {
 }
 
 // Data structures for API responses
+
+// RuleInfo contains the rule fields plugins are allowed to inspect.
+type RuleInfo struct {
+	ID           string `json:"id"`
+	ParentID     string `json:"parent_id,omitempty"`
+	DisplayOrder int    `json:"display_order"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+}
+
+// RuleActionInfo contains server-configured escalation actions for a rule.
+type RuleActionInfo struct {
+	ID             string `json:"id"`
+	RuleID         string `json:"rule_id"`
+	ViolationCount int    `json:"violation_count"`
+	ActionType     string `json:"action_type"`
+	Duration       *int   `json:"duration,omitempty"`
+	Message        string `json:"message,omitempty"`
+}
+
+// DiscordEmbed represents a Discord embed message.
+type DiscordEmbed struct {
+	Title       string                 `json:"title,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Color       int                    `json:"color,omitempty"`
+	Fields      []*DiscordEmbedField   `json:"fields,omitempty"`
+	Footer      *DiscordEmbedFooter    `json:"footer,omitempty"`
+	Thumbnail   *DiscordEmbedThumbnail `json:"thumbnail,omitempty"`
+	Image       *DiscordEmbedImage     `json:"image,omitempty"`
+	Timestamp   *time.Time             `json:"timestamp,omitempty"`
+}
+
+// DiscordEmbedField represents an embed field.
+type DiscordEmbedField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+// DiscordEmbedFooter represents an embed footer.
+type DiscordEmbedFooter struct {
+	Text    string `json:"text"`
+	IconURL string `json:"icon_url,omitempty"`
+}
+
+// DiscordEmbedThumbnail represents an embed thumbnail.
+type DiscordEmbedThumbnail struct {
+	URL string `json:"url"`
+}
+
+// DiscordEmbedImage represents an embed image.
+type DiscordEmbedImage struct {
+	URL string `json:"url"`
+}
 
 // ServerInfo contains basic server information
 type ServerInfo struct {
@@ -518,6 +895,9 @@ type PluginRegistry interface {
 	// RegisterPlugin registers a new plugin definition
 	RegisterPlugin(definition PluginDefinition) error
 
+	// UnregisterPlugin removes a plugin definition by ID
+	UnregisterPlugin(pluginID string)
+
 	// GetPlugin returns a plugin definition by ID
 	GetPlugin(pluginID string) (*PluginDefinition, error)
 
@@ -532,6 +912,9 @@ type PluginRegistry interface {
 type ConnectorRegistry interface {
 	// RegisterConnector registers a new connector definition
 	RegisterConnector(definition ConnectorDefinition) error
+
+	// UnregisterConnector removes a connector definition by canonical ID and its aliases
+	UnregisterConnector(canonicalID string)
 
 	// GetConnector returns a connector definition by ID
 	GetConnector(connectorID string) (*ConnectorDefinition, error)

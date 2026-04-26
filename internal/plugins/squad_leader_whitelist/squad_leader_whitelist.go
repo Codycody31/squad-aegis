@@ -67,14 +67,10 @@ type SquadLeaderSession struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "squad_leader_whitelist",
-		Name:                   "Squad Leader Whitelist",
-		Description:            "Tracks players who serve as squad leaders with 5+ members and progressively adds them to a whitelist based on time spent leading. Players earn progress when leading unlocked squads with minimum members and lose progress over time when inactive.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            true,
+		ID:          "squad_leader_whitelist",
+		Name:        "Squad Leader Whitelist",
+		Description: "Tracks players who serve as squad leaders with 5+ members and progressively adds them to a whitelist based on time spent leading. Players earn progress when leading unlocked squads with minimum members and lose progress over time when inactive.",
+		LongRunning: true,
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

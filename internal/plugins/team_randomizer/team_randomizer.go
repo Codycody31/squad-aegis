@@ -30,14 +30,9 @@ type TeamRandomizerPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "team_randomizer",
-		Name:                   "Team Randomizer",
-		Description:            "The Team Randomizer can be used to randomize teams. It's great for destroying clan stacks or for social events. It can be run by typing, by default, !randomize into in-game admin chat.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "team_randomizer",
+		Name:        "Team Randomizer",
+		Description: "The Team Randomizer can be used to randomize teams. It's great for destroying clan stacks or for social events. It can be run by typing, by default, !randomize into in-game admin chat.",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
