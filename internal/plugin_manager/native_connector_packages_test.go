@@ -8,6 +8,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -159,7 +160,7 @@ func TestInstallConnectorBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 	runtimeDir := t.TempDir()
 	setPluginTestConfig(t, func(cfg *config.Struct) {
 		cfg.Plugins.NativeEnabled = true
-		cfg.Plugins.RuntimeDir = runtimeDir
+		cfg.Plugins.ConnectorRuntimeDir = runtimeDir
 		cfg.Plugins.AllowUnsafeSideload = true
 	})
 
@@ -191,6 +192,12 @@ func TestInstallConnectorBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 
 	registry := NewConnectorRegistry()
 	oldRuntimePath := filepath.Join(runtimeDir, "com.example.connector", "1.0.0", "connector.so")
+	if err := os.MkdirAll(filepath.Dir(oldRuntimePath), 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(oldRuntimePath, []byte("old-so"), 0o600); err != nil {
+		t.Fatalf("WriteFile(oldRuntimePath) error = %v", err)
+	}
 	if err := registry.RegisterConnector(ConnectorDefinition{
 		ID:             "com.example.connector",
 		Name:           "Native Connector",
@@ -245,7 +252,6 @@ func TestInstallConnectorBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 	t.Cleanup(func() { nativeConnectorVerifiedLoader = previousLoader })
 
 	manifest := testConnectorManifest("com.example.connector")
-	manifest.Version = "2.0.0"
 	archive := buildConnectorArchive(t, manifest, primaryConnectorManifestLibraryPath(manifest), []byte("replacement-so"))
 
 	pkg, err := pm.installConnectorBundle(context.Background(), bytes.NewReader(archive), int64(len(archive)), "replacement.zip", PluginDistributionSideload)
@@ -263,6 +269,17 @@ func TestInstallConnectorBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 	}
 	if saveCalls != 1 {
 		t.Fatalf("saveCalls = %d, want 1", saveCalls)
+	}
+	if gotRaw, err := os.ReadFile(oldRuntimePath); err != nil {
+		t.Fatalf("ReadFile(oldRuntimePath) error = %v", err)
+	} else if got, want := string(gotRaw), "old-so"; got != want {
+		t.Fatalf("old runtime contents = %q, want %q", got, want)
+	}
+	pendingPath := oldRuntimePath + ".pending"
+	if gotRaw, err := os.ReadFile(pendingPath); err != nil {
+		t.Fatalf("ReadFile(pendingPath) error = %v", err)
+	} else if got, want := string(gotRaw), "replacement-so"; got != want {
+		t.Fatalf("pending runtime contents = %q, want %q", got, want)
 	}
 
 	loadedVersion, ok := pm.getLoadedNativeConnectorVersion("com.example.connector")
@@ -288,7 +305,7 @@ func TestInstallConnectorBundleMarksLiveUpdatePendingRestart(t *testing.T) {
 	if persisted == nil {
 		t.Fatal("getNativeConnectorPackage() returned nil")
 	}
-	if got, want := persisted.Version, "2.0.0"; got != want {
+	if got, want := persisted.Version, "1.0.0"; got != want {
 		t.Fatalf("persisted.Version = %q, want %q", got, want)
 	}
 	if got, want := persisted.InstallState, PluginInstallStatePendingRestart; got != want {

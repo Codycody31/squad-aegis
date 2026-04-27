@@ -118,6 +118,40 @@ func openTestSQLDB(t *testing.T, driverImpl *testSQLDriver) *sql.DB {
 	return db
 }
 
+func TestPluginManagerRejectsInstanceCreationAfterStop(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	pm := &PluginManager{
+		plugins:           make(map[uuid.UUID]map[uuid.UUID]*PluginInstance),
+		connectors:        make(map[string]*ConnectorInstance),
+		registry:          NewPluginRegistry(),
+		connectorRegistry: NewConnectorRegistry(),
+		ctx:               ctx,
+		cancel:            cancel,
+	}
+
+	if err := pm.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	_, err := pm.CreatePluginInstance(uuid.New(), "com.example.plugin", "", nil)
+	if err == nil {
+		t.Fatal("CreatePluginInstance() error = nil, want stopped-manager error")
+	}
+	if !strings.Contains(err.Error(), "plugin manager is stopped") {
+		t.Fatalf("CreatePluginInstance() error = %q, want stopped-manager error", err)
+	}
+
+	_, err = pm.CreateConnectorInstance("com.example.connector", nil)
+	if err == nil {
+		t.Fatal("CreateConnectorInstance() error = nil, want stopped-manager error")
+	}
+	if !strings.Contains(err.Error(), "plugin manager is stopped") {
+		t.Fatalf("CreateConnectorInstance() error = %q, want stopped-manager error", err)
+	}
+}
+
 func TestLoadInstalledPluginPackagesActivatesPendingRestartPackageOnStartup(t *testing.T) {
 	requireLinuxNativePlugins(t)
 

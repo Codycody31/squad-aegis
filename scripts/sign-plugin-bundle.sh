@@ -6,9 +6,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUNDLE_DIR="${BUNDLE_DIR:-$ROOT_DIR/dist/native-plugin-hello}"
 PRIVATE_KEY_FILE="${PRIVATE_KEY_FILE:-$ROOT_DIR/dist/plugin-signing/private-key.b64}"
 OUTPUT_ZIP="${OUTPUT_ZIP:-$BUNDLE_DIR/hello-example-linux-amd64-signed.zip}"
+KEY_ID="${KEY_ID:-}"
+
+if [[ -z "${KEY_ID}" ]]; then
+  echo "KEY_ID is required" >&2
+  exit 1
+fi
 
 cd "${ROOT_DIR}"
 env GOCACHE=/tmp/go-build-cache go run ./scripts/sign_plugin_bundle \
   -bundle-dir "${BUNDLE_DIR}" \
   -private-key "${PRIVATE_KEY_FILE}" \
+  -key-id "${KEY_ID}" \
   -output "${OUTPUT_ZIP}"

@@ -48,8 +48,9 @@ type PluginManager struct {
 	loadedNativeConnectors  map[string]string
 
 	// installMu serializes the full native plugin/connector install and
-	// delete flow. nativeMu / connectorMu alone are insufficient because
-	// the install flow spans multiple separate critical sections.
+	// delete flow, and gates instance creation against package replacement and
+	// manager shutdown. nativeMu / connectorMu alone are insufficient because
+	// those flows span multiple separate critical sections.
 	installMu sync.Mutex
 
 	// Event subscription
@@ -131,39 +132,54 @@ func (pm *PluginManager) Start() error {
 	return nil
 }
 
+func (pm *PluginManager) ensureRunning() error {
+	if pm.ctx == nil {
+		return nil
+	}
+	if err := pm.ctx.Err(); err != nil {
+		return fmt.Errorf("plugin manager is stopped: %w", err)
+	}
+	return nil
+}
+
 // Stop stops the plugin manager.
-//
-// Intentionally holds pm.mu / pm.connectorMu for the entire shutdown sweep.
-// At this point pm.cancel() has already fired, so any pending lifecycle
-// operations should bail out early; serializing the shutdown under the
-// registry locks prevents new admin operations from racing with the
-// per-instance Stop RPCs and prevents a delete handler from removing an
-// entry the sweep is mid-iterating.
 func (pm *PluginManager) Stop() error {
+	pm.installMu.Lock()
+	defer pm.installMu.Unlock()
+
 	log.Info().Msg("Stopping plugin manager")
 
 	pm.cancel()
 
-	// Stop all plugins
-	pm.mu.Lock()
-	for serverID, serverPlugins := range pm.plugins {
-		for instanceID, instance := range serverPlugins {
+	pluginInstances := make([]*PluginInstance, 0)
+	pm.mu.RLock()
+	for _, serverPlugins := range pm.plugins {
+		for _, instance := range serverPlugins {
+			pluginInstances = append(pluginInstances, instance)
+		}
+	}
+	pm.mu.RUnlock()
+
+	for _, instance := range pluginInstances {
+		instance.lifecycleMu.Lock()
+		func() {
+			defer instance.lifecycleMu.Unlock()
 			log.Trace().
-				Str("serverID", serverID.String()).
-				Str("instanceID", instanceID.String()).
+				Str("serverID", instance.ServerID.String()).
+				Str("instanceID", instance.ID.String()).
 				Str("pluginID", instance.PluginID).
 				Msg("Stopping plugin instance")
 			if err := pm.stopPluginInstance(instance); err != nil {
 				log.Error().
-					Str("serverID", serverID.String()).
-					Str("instanceID", instanceID.String()).
+					Str("serverID", instance.ServerID.String()).
+					Str("instanceID", instance.ID.String()).
 					Str("pluginID", instance.PluginID).
 					Err(err).
 					Msg("Failed to stop plugin instance")
 			} else {
 				log.Info().
-					Str("serverID", serverID.String()).
-					Str("instanceID", instanceID.String()).
+					Str("serverID", instance.ServerID.String()).
+					Str("instanceID", instance.ID.String()).
 					Str("pluginID", instance.PluginID).
 					Msg("Stopped plugin instance")
 			}
@@ -171,40 +187,47 @@ func (pm *PluginManager) Stop() error {
 			// Check if plugin was forcefully killed due to timeout
 			if instance.getError() == "Plugin shutdown timed out after 30 seconds" {
 				log.Warn().
-					Str("serverID", serverID.String()).
-					Str("instanceID", instanceID.String()).
+					Str("serverID", instance.ServerID.String()).
+					Str("instanceID", instance.ID.String()).
 					Str("pluginID", instance.PluginID).
 					Msg("Plugin instance was forcefully killed due to shutdown timeout")
 			}
-		}
+		}()
 	}
-	pm.mu.Unlock()
 
-	// Stop all connectors
-	pm.connectorMu.Lock()
-	for connectorID, instance := range pm.connectors {
-		log.Trace().
-			Str("connectorID", connectorID).
-			Msg("Stopping connector instance")
-		if err := pm.stopConnectorInstance(instance); err != nil {
-			log.Error().
-				Str("connectorID", connectorID).
-				Err(err).
-				Msg("Failed to stop connector instance")
-		} else {
-			log.Info().
-				Str("connectorID", connectorID).
-				Msg("Stopped connector instance")
-		}
-
-		// Check if connector was forcefully killed due to timeout
-		if instance.getError() == "Connector shutdown timed out after 30 seconds" {
-			log.Warn().
-				Str("connectorID", connectorID).
-				Msg("Connector instance was forcefully killed due to shutdown timeout")
-		}
+	connectorInstances := make([]*ConnectorInstance, 0, len(pm.connectors))
+	pm.connectorMu.RLock()
+	for _, instance := range pm.connectors {
+		connectorInstances = append(connectorInstances, instance)
 	}
-	pm.connectorMu.Unlock()
+	pm.connectorMu.RUnlock()
+
+	for _, instance := range connectorInstances {
+		instance.lifecycleMu.Lock()
+		func() {
+			defer instance.lifecycleMu.Unlock()
+			log.Trace().
+				Str("connectorID", instance.ID).
+				Msg("Stopping connector instance")
+			if err := pm.stopConnectorInstance(instance); err != nil {
+				log.Error().
+					Str("connectorID", instance.ID).
+					Err(err).
+					Msg("Failed to stop connector instance")
+			} else {
+				log.Info().
+					Str("connectorID", instance.ID).
+					Msg("Stopped connector instance")
+			}
+
+			// Check if connector was forcefully killed due to timeout
+			if instance.getError() == "Connector shutdown timed out after 30 seconds" {
+				log.Warn().
+					Str("connectorID", instance.ID).
+					Msg("Connector instance was forcefully killed due to shutdown timeout")
+			}
+		}()
+	}
 
 	// Unsubscribe from events
 	if pm.eventSubscriber != nil {
@@ -232,6 +255,13 @@ func (pm *PluginManager) RegisterConnector(definition ConnectorDefinition) error
 
 // CreatePluginInstance creates and starts a new plugin instance
 func (pm *PluginManager) CreatePluginInstance(serverID uuid.UUID, pluginID string, notes string, config map[string]interface{}) (*PluginInstance, error) {
+	pm.installMu.Lock()
+	defer pm.installMu.Unlock()
+
+	if err := pm.ensureRunning(); err != nil {
+		return nil, err
+	}
+
 	// Get plugin definition (registry has its own lock; no pm.mu needed here)
 	definition, err := pm.registry.GetPlugin(pluginID)
 	if err != nil {
@@ -622,6 +652,10 @@ func (pm *PluginManager) UpdatePluginLogLevel(serverID, instanceID uuid.UUID, lo
 
 // EnablePluginInstance enables a plugin instance
 func (pm *PluginManager) EnablePluginInstance(serverID, instanceID uuid.UUID) error {
+	if err := pm.ensureRunning(); err != nil {
+		return err
+	}
+
 	// Snapshot the instance under pm.mu, then release before initializePluginInstance
 	// which RPCs into the subprocess.
 	pm.mu.Lock()
@@ -1106,6 +1140,11 @@ type unexpectedExitReporter interface {
 // with the write. The RPCs themselves run with no manager-wide lock held so
 // a misbehaving subprocess does not stall every other plugin operation.
 func (pm *PluginManager) initializePluginInstance(instance *PluginInstance) error {
+	if err := pm.ensureRunning(); err != nil {
+		instance.setError(PluginStatusError, err.Error())
+		return err
+	}
+
 	// Serialize the (rare) instance.Plugin assignment with concurrent map
 	// readers. ensurePluginInstanceRuntime is a pure in-memory operation
 	// (registry lookups + struct field writes) so this critical section is

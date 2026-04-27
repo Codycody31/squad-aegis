@@ -2,6 +2,7 @@ package plugin_manager
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -59,5 +60,40 @@ func TestConnectorRegistryAliasesLegacyID(t *testing.T) {
 	_, err = reg.CreateConnectorInstance("com.squad-aegis.connectors.discord")
 	if err != nil {
 		t.Fatalf("CreateConnectorInstance(canonical): %v", err)
+	}
+}
+
+func TestConnectorRegistryRejectsNativeAliasCollision(t *testing.T) {
+	t.Parallel()
+
+	reg := NewConnectorRegistry()
+	if err := reg.RegisterConnector(ConnectorDefinition{
+		ID:        "com.example.first",
+		LegacyIDs: []string{"shared"},
+		Name:      "First",
+		Version:   "1",
+		Source:    PluginSourceNative,
+		CreateInstance: func() Connector {
+			return testConnector{}
+		},
+	}); err != nil {
+		t.Fatalf("RegisterConnector(first): %v", err)
+	}
+
+	err := reg.RegisterConnector(ConnectorDefinition{
+		ID:          "com.example.second",
+		Name:        "Second",
+		Version:     "1",
+		Source:      PluginSourceNative,
+		InstanceKey: "shared",
+		CreateInstance: func() Connector {
+			return testConnector{}
+		},
+	})
+	if err == nil {
+		t.Fatal("RegisterConnector(second) error = nil, want alias collision")
+	}
+	if !strings.Contains(err.Error(), "collides with connector com.example.first") {
+		t.Fatalf("RegisterConnector(second) error = %q, want collision with first connector", err)
 	}
 }

@@ -178,12 +178,10 @@ func (r *connectorRegistry) RegisterConnector(definition ConnectorDefinition) er
 		r.removeConnectorAliasesLocked(canonical)
 	}
 
-	// Reject native packages that try to claim a bundled connector's identity
-	// via alias hijacking. Without this, a native package declaring an alias
-	// such as "discord" could inherit the bundled discord connector's
-	// existing config + secrets when its alias is auto-mapped to its
-	// canonical ID. Bundled connectors retain their identity and config;
-	// only colliding native packages are rejected here.
+	// Reject native packages that try to claim another connector's identity
+	// via alias hijacking. Without this, a native package declaring a legacy
+	// ID or instance key already owned by another connector could inherit
+	// that connector's existing config + secrets when the alias is remapped.
 	if definition.Source == PluginSourceNative {
 		candidates := make([]string, 0, 1+1+len(definition.LegacyIDs))
 		candidates = append(candidates, canonical)
@@ -198,9 +196,7 @@ func (r *connectorRegistry) RegisterConnector(definition ConnectorDefinition) er
 		}
 		for _, candidate := range candidates {
 			if existingCanonical, ok := r.aliases[candidate]; ok && existingCanonical != canonical {
-				if existing, exists := r.connectors[existingCanonical]; exists && existing.Source == PluginSourceBundled {
-					return fmt.Errorf("native connector %s alias %q collides with bundled connector %s; rename the alias to register this package", canonical, candidate, existingCanonical)
-				}
+				return fmt.Errorf("native connector %s alias %q collides with connector %s; rename the alias to register this package", canonical, candidate, existingCanonical)
 			}
 		}
 	}

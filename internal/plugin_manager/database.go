@@ -369,6 +369,11 @@ func (pm *PluginManager) startConnectors() error {
 }
 
 func (pm *PluginManager) initializeConnectorInstance(instance *ConnectorInstance) error {
+	if err := pm.ensureRunning(); err != nil {
+		instance.setStatusError(ConnectorStatusError, err.Error())
+		return err
+	}
+
 	instance.setStatus(ConnectorStatusStarting)
 
 	// Initialize connector (panic-safe so a crashing native connector cannot
@@ -547,6 +552,13 @@ func (pm *PluginManager) saveConnectorToDatabase(instance *ConnectorInstance) er
 
 // CreateConnectorInstance creates and starts a new connector instance
 func (pm *PluginManager) CreateConnectorInstance(connectorID string, config map[string]interface{}) (*ConnectorInstance, error) {
+	pm.installMu.Lock()
+	defer pm.installMu.Unlock()
+
+	if err := pm.ensureRunning(); err != nil {
+		return nil, err
+	}
+
 	definition, err := pm.connectorRegistry.GetConnector(connectorID)
 	if err != nil {
 		return nil, fmt.Errorf("connector definition not found: %w", err)

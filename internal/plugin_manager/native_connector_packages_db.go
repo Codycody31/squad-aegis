@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -175,6 +176,20 @@ func (pm *PluginManager) loadInstalledConnectorPackages() error {
 
 		shouldPersistReadyState := false
 		if pkg.InstallState == PluginInstallStatePendingRestart {
+			if pkg.RuntimePath != "" {
+				pendingPath := pkg.RuntimePath + ".pending"
+				if _, statErr := os.Stat(pendingPath); statErr == nil {
+					if safePending, pathErr := validateRuntimePathWithinRoot(pendingPath, connectorRuntimeDir()); pathErr == nil {
+						if safeRuntime, runtimePathErr := validateRuntimePathWithinRoot(pkg.RuntimePath, connectorRuntimeDir()); runtimePathErr == nil {
+							if renameErr := os.Rename(safePending, safeRuntime); renameErr == nil {
+								log.Info().Str("connector_id", pkg.ConnectorID).Str("path", safeRuntime).Msg("Promoted pending native connector runtime file")
+							} else {
+								log.Warn().Err(renameErr).Str("connector_id", pkg.ConnectorID).Str("from", safePending).Str("to", safeRuntime).Msg("Failed to promote pending native connector runtime file")
+							}
+						}
+					}
+				}
+			}
 			pkg.InstallState = PluginInstallStateReady
 			pkg.LastError = ""
 			pkg.UpdatedAt = time.Now()

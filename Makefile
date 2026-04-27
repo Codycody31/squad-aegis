@@ -93,6 +93,10 @@ install-tools: ## Install development tools
 	fi
 
 install-proto-tools: ## Install protoc-gen-go and protoc-gen-go-grpc
+	@hash protoc > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
+		echo "protoc is required. Install the protobuf compiler for your platform and rerun make generate." >&2 ; \
+		exit 1 ; \
+	fi
 	@hash protoc-gen-go > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
 		go install google.golang.org/protobuf/cmd/protoc-gen-go@latest ; \
 	fi

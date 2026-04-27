@@ -836,8 +836,8 @@ plugins:
 This repository includes signing helpers:
 
 ```bash
-./scripts/sign-plugin-bundle.sh
-./scripts/sign-connector-bundle.sh
+KEY_ID=ops-key-2026-q1 ./scripts/sign-plugin-bundle.sh
+KEY_ID=ops-key-2026-q1 ./scripts/sign-connector-bundle.sh
 ```
 
 The signing tool expects a base64-encoded Ed25519 private key file plus two operator-supplied flags:

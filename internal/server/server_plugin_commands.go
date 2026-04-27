@@ -228,6 +228,12 @@ func (s *Server) ServerPluginCommandExecute(c *gin.Context) {
 
 // ServerPluginCommandStatus gets async command execution status
 func (s *Server) ServerPluginCommandStatus(c *gin.Context) {
+	user := s.getUserFromSession(c)
+	if user == nil {
+		responses.Unauthorized(c, "Unauthorized", nil)
+		return
+	}
+
 	if !s.requirePluginManager(c) {
 		return
 	}
@@ -255,6 +261,37 @@ func (s *Server) ServerPluginCommandStatus(c *gin.Context) {
 		log.Error().Err(err).Str("server_id", serverID.String()).Str("instance_id", instanceID.String()).Str("execution_id", executionID).Msg("Failed to get command execution status")
 		responses.BadRequest(c, "Failed to get command execution status", nil)
 		return
+	}
+
+	commands, err := s.Dependencies.PluginManager.GetPluginCommands(serverID, instanceID)
+	if err != nil {
+		log.Error().Err(err).Str("server_id", serverID.String()).Str("instance_id", instanceID.String()).Msg("Failed to get plugin commands")
+		responses.BadRequest(c, "Failed to get plugin commands", nil)
+		return
+	}
+
+	var targetCommand *plugin_manager.PluginCommand
+	for i := range commands {
+		if commands[i].ID == status.CommandID {
+			targetCommand = &commands[i]
+			break
+		}
+	}
+	if targetCommand == nil {
+		responses.NotFound(c, "Command not found", nil)
+		return
+	}
+
+	if len(targetCommand.RequiredPermissions) > 0 {
+		hasPermission, err := s.userHasAnyServerPermission(c, user.Id, serverID, targetCommand.RequiredPermissions)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to check permissions: %w", err), nil)
+			return
+		}
+		if !hasPermission {
+			responses.Forbidden(c, "Insufficient permissions to view this command status", nil)
+			return
+		}
 	}
 
 	responses.Success(c, "Execution status fetched successfully", &gin.H{

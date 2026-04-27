@@ -541,20 +541,6 @@ func (pm *PluginManager) installConnectorBundleWithFlags(ctx context.Context, ar
 		}
 	}
 
-	if err := writeRuntimeLibrary(runtimePath, parts.LibraryBytes); err != nil {
-		return nil, err
-	}
-	installCommitted := false
-	defer func() {
-		if !installCommitted {
-			if safePath, pathErr := validateRuntimePathWithinRoot(runtimePath, connectorRuntimeDir()); pathErr != nil {
-				log.Warn().Err(pathErr).Str("path", runtimePath).Msg("Refusing to roll back runtime file outside connector runtime root")
-			} else {
-				removeRuntimeFile(safePath)
-			}
-		}
-	}()
-
 	now := time.Now()
 	pkg := &InstalledConnectorPackage{
 		ConnectorID:        manifest.ConnectorID,
@@ -585,12 +571,31 @@ func (pm *PluginManager) installConnectorBundleWithFlags(ctx context.Context, ar
 		pkg.CreatedAt = existing.CreatedAt
 	}
 
-	loadFailureRecorded := false
 	instanceKeys := connectorInstanceKeysForPackage(pkg)
-	requiresRestart, err := pm.hasConnectorInstances(ctx, instanceKeys)
-	if err != nil {
+	willRequireRestart, restartErr := pm.hasConnectorInstances(ctx, instanceKeys)
+	if restartErr != nil {
+		return nil, restartErr
+	}
+	writePath := runtimePath
+	if willRequireRestart {
+		writePath = runtimePath + ".pending"
+	}
+	if err := writeRuntimeLibrary(writePath, parts.LibraryBytes); err != nil {
 		return nil, err
 	}
+	installCommitted := false
+	defer func() {
+		if !installCommitted {
+			if safePath, pathErr := validateRuntimePathWithinRoot(writePath, connectorRuntimeDir()); pathErr != nil {
+				log.Warn().Err(pathErr).Str("path", writePath).Msg("Refusing to roll back runtime file outside connector runtime root")
+			} else {
+				removeRuntimeFile(safePath)
+			}
+		}
+	}()
+
+	loadFailureRecorded := false
+	requiresRestart := willRequireRestart
 	if requiresRestart {
 		pkg.InstallState = PluginInstallStatePendingRestart
 		pkg.LastError = nativeConnectorPendingRestartMessage
