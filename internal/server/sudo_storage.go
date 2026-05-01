@@ -23,13 +23,13 @@ type StorageFileResponse struct {
 
 // StorageSummaryResponse represents storage usage statistics
 type StorageSummaryResponse struct {
-	TotalSize         int64                       `json:"total_size"`
-	TotalSizeReadable string                      `json:"total_size_readable"`
-	TotalFiles        int64                       `json:"total_files"`
-	FilesByType       map[string]int              `json:"files_by_type"`
-	SizeByType        map[string]int64            `json:"size_by_type"`
-	StorageType       string                      `json:"storage_type"`
-	RecentFiles       []StorageFileResponse       `json:"recent_files"`
+	TotalSize         int64                 `json:"total_size"`
+	TotalSizeReadable string                `json:"total_size_readable"`
+	TotalFiles        int64                 `json:"total_files"`
+	FilesByType       map[string]int        `json:"files_by_type"`
+	SizeByType        map[string]int64      `json:"size_by_type"`
+	StorageType       string                `json:"storage_type"`
+	RecentFiles       []StorageFileResponse `json:"recent_files"`
 }
 
 // BulkDeleteRequest represents a bulk delete operation
@@ -257,6 +257,10 @@ func (s *Server) DeleteStorageFile(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:storage:delete", gin.H{
+		"path": path,
+	})
+
 	responses.SimpleSuccess(c, "File deleted successfully")
 }
 
@@ -298,6 +302,12 @@ func (s *Server) BulkDeleteStorageFiles(c *gin.Context) {
 		}
 	}
 
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:storage:delete", gin.H{
+		"paths":   req.Paths,
+		"deleted": deleted,
+		"failed":  failed,
+	})
+
 	responses.Success(c, "Bulk delete completed", &gin.H{
 		"deleted": deleted,
 		"failed":  failed,
@@ -318,4 +328,3 @@ func formatBytes(bytes int64) string {
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
-

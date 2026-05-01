@@ -47,14 +47,10 @@ type CommandSchedulerPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "command_scheduler",
-		Name:                   "Command Scheduler",
-		Description:            "The Command Scheduler plugin allows you to schedule predefined commands to run at specific intervals or after certain events like new games.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            true,
+		ID:          "command_scheduler",
+		Name:        "Command Scheduler",
+		Description: "The Command Scheduler plugin allows you to schedule predefined commands to run at specific intervals or after certain events like new games.",
+		LongRunning: true,
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

@@ -2,7 +2,6 @@ package rule_lookup
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -33,14 +32,9 @@ type RuleLookupPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "rule_lookup",
-		Name:                   "Rule Lookup",
-		Description:            "Allows players to look up server rules by typing !rule followed by a rule number (e.g., !rule 1.1)",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "rule_lookup",
+		Name:        "Rule Lookup",
+		Description: "Allows players to look up server rules by typing !rule followed by a rule number (e.g., !rule 1.1)",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
@@ -89,6 +83,10 @@ func (p *RuleLookupPlugin) Initialize(config map[string]interface{}, apis *plugi
 	p.config = config
 	p.apis = apis
 	p.status = plugin_manager.PluginStatusStopped
+
+	if apis.RuleAPI == nil {
+		return fmt.Errorf("rule API is required but not available")
+	}
 
 	// Validate config
 	definition := p.GetDefinition()
@@ -226,13 +224,11 @@ func (p *RuleLookupPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEven
 
 // lookupAndSendRule finds a rule by its display order pattern and sends it to players
 func (p *RuleLookupPlugin) lookupAndSendRule(event *event_manager.RconChatMessageData, playerID string, ruleNumber string) error {
-	serverID := p.apis.ServerAPI.GetServerID()
-
 	// Parse the rule number into components (e.g., "1.1.2" -> [1, 1, 2])
 	numberParts := strings.Split(ruleNumber, ".")
 
 	// Find the rule by traversing the hierarchy
-	rule, err := p.findRuleByHierarchy(serverID.String(), numberParts)
+	rule, err := p.findRuleByHierarchy(numberParts)
 	if err != nil {
 		p.apis.LogAPI.Error("Failed to lookup rule", err, map[string]interface{}{
 			"rule_number": ruleNumber,
@@ -281,20 +277,11 @@ func (p *RuleLookupPlugin) lookupAndSendRule(event *event_manager.RconChatMessag
 }
 
 // findRuleByHierarchy finds a rule by traversing the display order hierarchy
-func (p *RuleLookupPlugin) findRuleByHierarchy(serverID string, numberParts []string) (*RuleData, error) {
-	// Start by finding top-level rules (no parent)
-	query := `
-		SELECT id, title, description, display_order, parent_id
-		FROM server_rules
-		WHERE server_id = $1 AND parent_id IS NULL
-		ORDER BY display_order ASC
-	`
-
-	rows, err := p.apis.DatabaseAPI.ExecuteQuery(query, serverID)
+func (p *RuleLookupPlugin) findRuleByHierarchy(numberParts []string) (*RuleData, error) {
+	rules, err := p.apis.RuleAPI.ListServerRules(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query top-level rules: %w", err)
 	}
-	defer rows.Close()
 
 	// Parse first number part
 	targetOrder, err := strconv.Atoi(numberParts[0])
@@ -305,16 +292,10 @@ func (p *RuleLookupPlugin) findRuleByHierarchy(serverID string, numberParts []st
 	// Find the rule with the matching display order at the top level
 	var currentRule *RuleData
 	currentOrder := 1
-	for rows.Next() {
-		var rule RuleData
-		var parentID sql.NullString
-		err := rows.Scan(&rule.ID, &rule.Title, &rule.Description, &rule.DisplayOrder, &parentID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan rule: %w", err)
-		}
-
+	for _, ruleInfo := range rules {
+		rule := ruleDataFromInfo(ruleInfo)
 		if currentOrder == targetOrder {
-			currentRule = &rule
+			currentRule = rule
 			break
 		}
 		currentOrder++
@@ -335,18 +316,10 @@ func (p *RuleLookupPlugin) findRuleByHierarchy(serverID string, numberParts []st
 
 // findSubRule finds a sub-rule by traversing down the hierarchy
 func (p *RuleLookupPlugin) findSubRule(parentRuleID string, numberParts []string) (*RuleData, error) {
-	query := `
-		SELECT id, title, description, display_order, parent_id
-		FROM server_rules
-		WHERE parent_id = $1
-		ORDER BY display_order ASC
-	`
-
-	rows, err := p.apis.DatabaseAPI.ExecuteQuery(query, parentRuleID)
+	rules, err := p.apis.RuleAPI.ListServerRules(&parentRuleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sub-rules: %w", err)
 	}
-	defer rows.Close()
 
 	// Parse the next number part
 	targetOrder, err := strconv.Atoi(numberParts[0])
@@ -357,16 +330,10 @@ func (p *RuleLookupPlugin) findSubRule(parentRuleID string, numberParts []string
 	// Find the rule with the matching display order
 	var currentRule *RuleData
 	currentOrder := 1
-	for rows.Next() {
-		var rule RuleData
-		var parentID sql.NullString
-		err := rows.Scan(&rule.ID, &rule.Title, &rule.Description, &rule.DisplayOrder, &parentID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan rule: %w", err)
-		}
-
+	for _, ruleInfo := range rules {
+		rule := ruleDataFromInfo(ruleInfo)
 		if currentOrder == targetOrder {
-			currentRule = &rule
+			currentRule = rule
 			break
 		}
 		currentOrder++
@@ -423,4 +390,17 @@ type RuleData struct {
 	Title        string
 	Description  string
 	DisplayOrder int
+}
+
+func ruleDataFromInfo(rule *plugin_manager.RuleInfo) *RuleData {
+	if rule == nil {
+		return nil
+	}
+
+	return &RuleData{
+		ID:           rule.ID,
+		Title:        rule.Title,
+		Description:  rule.Description,
+		DisplayOrder: rule.DisplayOrder,
+	}
 }

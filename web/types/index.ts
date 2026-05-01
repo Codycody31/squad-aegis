@@ -179,6 +179,12 @@ export interface SystemConfig {
   valkey: Record<string, any>;
   storage: Record<string, any>;
   log: Record<string, any>;
+  plugins?: {
+    native_enabled?: boolean;
+    allow_unsafe_sideload?: boolean;
+    max_upload_size?: number;
+    trusted_signing_keys_set?: boolean;
+  };
 }
 
 export interface GlobalAuditLog {
@@ -256,6 +262,146 @@ export interface PostgreSQLStats {
   active_queries: number;
   cache_hit_ratio: number;
   tables: DatabaseTableStats[];
+}
+
+export interface PluginPackageManifest {
+  plugin_id: string;
+  name: string;
+  description: string;
+  version: string;
+  official: boolean;
+  license?: string;
+  entry_symbol: string;
+  targets: PluginPackageTarget[];
+}
+
+export interface PluginPackageTarget {
+  min_host_api_version: number;
+  required_capabilities?: string[];
+  target_os: string;
+  target_arch: string;
+  sha256?: string;
+  library_path: string;
+}
+
+export interface PluginPackage {
+  plugin_id: string;
+  name: string;
+  description: string;
+  version: string;
+  source: "bundled" | "native";
+  distribution: "bundled" | "sideload";
+  official: boolean;
+  install_state: "ready" | "not_installed" | "pending_restart" | "error";
+  runtime_path?: string;
+  manifest: PluginPackageManifest;
+  signature_verified: boolean;
+  unsafe: boolean;
+  // Backend dropped the checksum column; signature metadata replaces it.
+  signature_key_id?: string;
+  signature_signed_at?: string;
+  signature_expires_at?: string;
+  min_host_api_version: number;
+  required_capabilities?: string[];
+  target_os: string;
+  target_arch: string;
+  last_error?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// Plugin & Connector Types
+
+export interface ConfigSchemaField {
+  name: string;
+  type: string;
+  label?: string;
+  description?: string;
+  required?: boolean;
+  default?: any;
+  enum?: any[];
+  sensitive?: boolean;
+  nested?: ConfigSchemaField[];
+  item_type?: string;
+  item_fields?: ConfigSchemaField[];
+}
+
+export interface PluginInstance {
+  id: string;
+  server_id: string;
+  plugin_id: string;
+  plugin_name: string;
+  source?: string;
+  official?: boolean;
+  distribution?: string;
+  install_state?: string;
+  min_host_api_version?: number;
+  notes: string;
+  config: Record<string, any>;
+  status: string;
+  enabled: boolean;
+  log_level: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginDefinition {
+  id: string;
+  name: string;
+  description: string;
+  version?: string;
+  source?: string;
+  official?: boolean;
+  distribution?: string;
+  install_state?: string;
+  config_schema?: { fields?: ConfigSchemaField[] };
+  events?: string[];
+  allow_multiple_instances?: boolean;
+  long_running?: boolean;
+  required_connectors?: string[];
+  optional_connectors?: string[];
+}
+
+export interface ConnectorInstance {
+  id: string;
+  config: Record<string, any>;
+  status: string;
+  enabled: boolean;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectorDefinition {
+  id: string;
+  name: string;
+  description: string;
+  version?: string;
+  config_schema?: { fields?: ConfigSchemaField[] };
+  source?: string;
+  official?: boolean;
+  distribution?: string;
+  install_state?: string;
+}
+
+export interface PluginCommand {
+  id: string;
+  name: string;
+  description: string;
+  required_permissions?: string[];
+  params?: CommandParam[];
+  execution_type?: string;
+}
+
+export interface CommandParam {
+  name: string;
+  type: string;
+  label?: string;
+  description?: string;
+  required?: boolean;
+  default?: any;
+  enum?: any[];
 }
 
 export interface ClickHouseTableStats {

@@ -64,14 +64,9 @@ func (p *SwitchTeamsPlugin) resolveLastSwitchKeyLocked(playerID string, steamID 
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "switch_teams",
-		Name:                   "Switch Teams",
-		Description:            "Allows players to request team switches using !switch command. Players are switched immediately if it doesn't worsen team balance. No queuing or automatic processing.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "switch_teams",
+		Name:        "Switch Teams",
+		Description: "Allows players to request team switches using !switch command. Players are switched immediately if it doesn't worsen team balance. No queuing or automatic processing.",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

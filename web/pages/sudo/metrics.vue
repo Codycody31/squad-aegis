@@ -4,12 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import type { MetricsTimeline, ServerActivity } from "~/types";
 
-definePageMeta({ middleware: "auth", layout: "sudo" });
+definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
 
 const runtimeConfig = useRuntimeConfig();
 const authStore = useAuthStore();
-
-if (!authStore.user?.super_admin) navigateTo("/dashboard");
 
 const loading = ref(true);
 const timeline = ref<MetricsTimeline | null>(null);

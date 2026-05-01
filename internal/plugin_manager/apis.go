@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
@@ -272,6 +272,10 @@ func (api *serverAPI) GetAdmins() ([]*AdminInfo, error) {
 		}
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating admin rows: %w", err)
+	}
+
 	// Convert map to slice
 	var admins []*AdminInfo
 	for _, admin := range adminMap {
@@ -370,6 +374,11 @@ type adminAPI struct {
 	db               *sql.DB
 	rconManager      *rcon_manager.RconManager
 	pluginInstanceID uuid.UUID
+}
+
+type managedAdminRecord struct {
+	ID                      uuid.UUID
+	ManagedByPluginInstance sql.NullString
 }
 
 func NewAdminAPI(serverID uuid.UUID, db *sql.DB, rconManager *rcon_manager.RconManager, pluginInstanceID uuid.UUID) AdminAPI {
@@ -487,7 +496,92 @@ func (api *adminAPI) resolvePlayerIdentifierArgs(playerID string) (steamIDArg in
 	return steamIDArg, eosIDArg, normalizedPlayerID, steamID, eosID, nil
 }
 
+func (api *adminAPI) requirePluginInstanceOwnership() error {
+	if api.pluginInstanceID == uuid.Nil {
+		return fmt.Errorf("plugin instance ID is required for temporary admin management")
+	}
+	return nil
+}
+
+func (api *adminAPI) listMatchingAdminRecords(steamIDArg interface{}, eosIDArg interface{}, roleID *uuid.UUID) ([]managedAdminRecord, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+
+	if roleID != nil {
+		rows, err = api.db.Query(`
+			SELECT id, managed_by_plugin_instance_id
+			FROM server_admins
+			WHERE server_id = $1
+			  AND server_role_id = $2
+			  AND (
+				($3::bigint IS NOT NULL AND steam_id = $3::bigint)
+				OR ($4::text IS NOT NULL AND eos_id = $4::text)
+			  )
+		`, api.serverID, *roleID, steamIDArg, eosIDArg)
+	} else {
+		rows, err = api.db.Query(`
+			SELECT id, managed_by_plugin_instance_id
+			FROM server_admins
+			WHERE server_id = $1
+			  AND (
+				($2::bigint IS NOT NULL AND steam_id = $2::bigint)
+				OR ($3::text IS NOT NULL AND eos_id = $3::text)
+			  )
+		`, api.serverID, steamIDArg, eosIDArg)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]managedAdminRecord, 0)
+	for rows.Next() {
+		var record managedAdminRecord
+		if err := rows.Scan(&record.ID, &record.ManagedByPluginInstance); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return records, nil
+}
+
+func validateManagedAdminRecordOwnership(records []managedAdminRecord, pluginInstanceID uuid.UUID) ([]uuid.UUID, error) {
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	ownedIDs := make([]uuid.UUID, 0, len(records))
+	for _, record := range records {
+		if !record.ManagedByPluginInstance.Valid || strings.TrimSpace(record.ManagedByPluginInstance.String) == "" {
+			return nil, fmt.Errorf("matching admin record is not managed by this plugin")
+		}
+
+		ownerID, err := uuid.Parse(strings.TrimSpace(record.ManagedByPluginInstance.String))
+		if err != nil {
+			return nil, fmt.Errorf("matching admin record has invalid plugin ownership: %w", err)
+		}
+		if ownerID != pluginInstanceID {
+			return nil, fmt.Errorf("matching admin record is managed by another plugin")
+		}
+
+		ownedIDs = append(ownedIDs, record.ID)
+	}
+
+	return ownedIDs, nil
+}
+
 func (api *adminAPI) AddTemporaryAdmin(playerID string, roleName string, notes string, expiresAt *time.Time) error {
+	if err := api.requirePluginInstanceOwnership(); err != nil {
+		return err
+	}
+
 	// First, get or create the role for this server
 	var roleID uuid.UUID
 	err := api.db.QueryRow(`
@@ -514,37 +608,33 @@ func (api *adminAPI) AddTemporaryAdmin(playerID string, roleName string, notes s
 		return fmt.Errorf("invalid player ID: %w", err)
 	}
 
-	// Check if admin record already exists
-	var existingID uuid.UUID
-	err = api.db.QueryRow(`
-		SELECT id FROM server_admins
-		WHERE server_id = $1
-		  AND server_role_id = $2
-		  AND (
-			($3::bigint IS NOT NULL AND steam_id = $3::bigint)
-			OR ($4::text IS NOT NULL AND eos_id = $4::text)
-		  )
-	`, api.serverID, roleID, steamIDArg, eosIDArg).Scan(&existingID)
+	existingRecords, err := api.listMatchingAdminRecords(steamIDArg, eosIDArg, &roleID)
+	if err != nil {
+		return fmt.Errorf("failed to check existing admin record: %w", err)
+	}
 
-	if err == sql.ErrNoRows {
+	ownedRecordIDs, err := validateManagedAdminRecordOwnership(existingRecords, api.pluginInstanceID)
+	if err != nil {
+		return fmt.Errorf("refusing to overwrite existing admin record for role %q: %w", roleName, err)
+	}
+
+	if len(ownedRecordIDs) == 0 {
 		// Create new admin record
 		adminID := uuid.New()
 		_, err = api.db.Exec(`
-			INSERT INTO server_admins (id, server_id, steam_id, eos_id, server_role_id, expires_at, notes, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-		`, adminID, api.serverID, steamIDArg, eosIDArg, roleID, expiresAt, notes)
+			INSERT INTO server_admins (id, server_id, steam_id, eos_id, server_role_id, expires_at, notes, managed_by_plugin_instance_id, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+		`, adminID, api.serverID, steamIDArg, eosIDArg, roleID, expiresAt, notes, api.pluginInstanceID)
 		if err != nil {
 			return fmt.Errorf("failed to create admin record: %w", err)
 		}
-	} else if err != nil {
-		return fmt.Errorf("failed to check existing admin record: %w", err)
 	} else {
-		// Update existing admin record
+		// Update records already owned by this plugin instance
 		_, err = api.db.Exec(`
 			UPDATE server_admins
 			SET steam_id = $1, eos_id = $2, expires_at = $3, notes = $4
-			WHERE id = $5
-		`, steamIDArg, eosIDArg, expiresAt, notes, existingID)
+			WHERE id = ANY($5::uuid[])
+		`, steamIDArg, eosIDArg, expiresAt, notes, pq.Array(ownedRecordIDs))
 		if err != nil {
 			return fmt.Errorf("failed to update admin record: %w", err)
 		}
@@ -554,50 +644,44 @@ func (api *adminAPI) AddTemporaryAdmin(playerID string, roleName string, notes s
 }
 
 func (api *adminAPI) RemoveTemporaryAdmin(playerID string, notes string) error {
+	if err := api.requirePluginInstanceOwnership(); err != nil {
+		return err
+	}
+
 	steamIDArg, eosIDArg, normalizedPlayerID, _, _, err := api.resolvePlayerIdentifierArgs(playerID)
 	if err != nil {
 		return fmt.Errorf("invalid player ID: %w", err)
 	}
 
-	// Find and remove admin records for this player ID
-	rows, err := api.db.Query(`
-		SELECT id FROM server_admins
+	result, err := api.db.Exec(`
+		DELETE FROM server_admins
 		WHERE server_id = $1
+		  AND managed_by_plugin_instance_id = $2
 		  AND (
-			($2::bigint IS NOT NULL AND steam_id = $2::bigint)
-			OR ($3::text IS NOT NULL AND eos_id = $3::text)
+			($3::bigint IS NOT NULL AND steam_id = $3::bigint)
+			OR ($4::text IS NOT NULL AND eos_id = $4::text)
 		  )
-	`, api.serverID, steamIDArg, eosIDArg)
+	`, api.serverID, api.pluginInstanceID, steamIDArg, eosIDArg)
 	if err != nil {
-		return fmt.Errorf("failed to query admin records: %w", err)
-	}
-	defer rows.Close()
-
-	var adminIDs []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return fmt.Errorf("failed to scan admin ID: %w", err)
-		}
-		adminIDs = append(adminIDs, id)
+		return fmt.Errorf("failed to remove admin records: %w", err)
 	}
 
-	if len(adminIDs) == 0 {
-		return fmt.Errorf("no admin records found for player ID %s", normalizedPlayerID)
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to determine removed admin record count: %w", err)
 	}
-
-	// Remove admin records
-	for _, adminID := range adminIDs {
-		_, err = api.db.Exec(`DELETE FROM server_admins WHERE id = $1`, adminID)
-		if err != nil {
-			return fmt.Errorf("failed to remove admin record %s: %w", adminID, err)
-		}
+	if rowsAffected == 0 {
+		return fmt.Errorf("no plugin-managed admin records found for player ID %s", normalizedPlayerID)
 	}
 
 	return nil
 }
 
 func (api *adminAPI) RemoveTemporaryAdminRole(playerID string, roleName string, notes string) error {
+	if err := api.requirePluginInstanceOwnership(); err != nil {
+		return err
+	}
+
 	steamIDArg, eosIDArg, normalizedPlayerID, _, _, err := api.resolvePlayerIdentifierArgs(playerID)
 	if err != nil {
 		return fmt.Errorf("invalid player ID: %w", err)
@@ -608,13 +692,14 @@ func (api *adminAPI) RemoveTemporaryAdminRole(playerID string, roleName string, 
 		USING server_roles sr
 		WHERE sa.server_role_id = sr.id
 			AND sa.server_id = $1
+			AND sa.managed_by_plugin_instance_id = $2
 			AND (
-				($2::bigint IS NOT NULL AND sa.steam_id = $2::bigint)
-				OR ($3::text IS NOT NULL AND sa.eos_id = $3::text)
+				($3::bigint IS NOT NULL AND sa.steam_id = $3::bigint)
+				OR ($4::text IS NOT NULL AND sa.eos_id = $4::text)
 			)
 			AND sr.server_id = $1
-			AND sr.name = $4
-	`, api.serverID, steamIDArg, eosIDArg, roleName)
+			AND sr.name = $5
+	`, api.serverID, api.pluginInstanceID, steamIDArg, eosIDArg, roleName)
 	if err != nil {
 		return fmt.Errorf("failed to remove admin role %q for player ID %s: %w", roleName, normalizedPlayerID, err)
 	}
@@ -624,7 +709,7 @@ func (api *adminAPI) RemoveTemporaryAdminRole(playerID string, roleName string, 
 		return fmt.Errorf("failed to determine removed admin role count: %w", err)
 	}
 	if rowsAffected == 0 {
-		return fmt.Errorf("no admin role %q found for player ID %s", roleName, normalizedPlayerID)
+		return fmt.Errorf("no plugin-managed admin role %q found for player ID %s", roleName, normalizedPlayerID)
 	}
 
 	return nil
@@ -695,14 +780,19 @@ func (api *adminAPI) GetPlayerAdminStatus(playerID string) (*PlayerAdminStatus, 
 }
 
 func (api *adminAPI) ListTemporaryAdmins() ([]*TemporaryAdminInfo, error) {
-	// Query all temporary admins for this server with notes containing plugin information
+	if err := api.requirePluginInstanceOwnership(); err != nil {
+		return nil, err
+	}
+
+	// Query plugin-managed temporary admins for this plugin instance only.
 	rows, err := api.db.Query(`
 		SELECT sa.id, sa.steam_id, sa.eos_id, sr.name as role_name, sa.notes, sa.expires_at, sa.created_at
 		FROM server_admins sa
 		JOIN server_roles sr ON sa.server_role_id = sr.id
-		WHERE sa.server_id = $1 AND sa.notes IS NOT NULL AND sa.notes LIKE '%Plugin:%'
+		WHERE sa.server_id = $1
+		  AND sa.managed_by_plugin_instance_id = $2
 		ORDER BY sa.created_at DESC
-	`, api.serverID)
+	`, api.serverID, api.pluginInstanceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query temporary admins: %w", err)
 	}
@@ -759,6 +849,10 @@ func (api *adminAPI) ListTemporaryAdmins() ([]*TemporaryAdminInfo, error) {
 		admins = append(admins, &admin)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating temporary admin rows: %w", err)
+	}
+
 	if api.rconManager != nil {
 		players, err := NewServerAPI(api.serverID, api.db, api.rconManager).GetPlayers()
 		if err == nil {
@@ -790,6 +884,125 @@ func (api *adminAPI) ListTemporaryAdmins() ([]*TemporaryAdminInfo, error) {
 	return admins, nil
 }
 
+// ruleAPI implements RuleAPI interface
+type ruleAPI struct {
+	serverID uuid.UUID
+	db       *sql.DB
+}
+
+func NewRuleAPI(serverID uuid.UUID, db *sql.DB) RuleAPI {
+	return &ruleAPI{
+		serverID: serverID,
+		db:       db,
+	}
+}
+
+func (api *ruleAPI) ListServerRules(parentRuleID *string) ([]*RuleInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+
+	if parentRuleID == nil || strings.TrimSpace(*parentRuleID) == "" {
+		rows, err = api.db.QueryContext(ctx, `
+			SELECT id, parent_id, display_order, title, description
+			FROM server_rules
+			WHERE server_id = $1 AND parent_id IS NULL
+			ORDER BY display_order ASC
+		`, api.serverID)
+	} else {
+		parentUUID, parseErr := uuid.Parse(strings.TrimSpace(*parentRuleID))
+		if parseErr != nil {
+			return nil, fmt.Errorf("invalid parent rule ID: %w", parseErr)
+		}
+
+		rows, err = api.db.QueryContext(ctx, `
+			SELECT id, parent_id, display_order, title, description
+			FROM server_rules
+			WHERE server_id = $1 AND parent_id = $2
+			ORDER BY display_order ASC
+		`, api.serverID, parentUUID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query server rules: %w", err)
+	}
+	defer rows.Close()
+
+	rules := make([]*RuleInfo, 0)
+	for rows.Next() {
+		var rule RuleInfo
+		var parentID sql.NullString
+		if err := rows.Scan(&rule.ID, &parentID, &rule.DisplayOrder, &rule.Title, &rule.Description); err != nil {
+			return nil, fmt.Errorf("failed to scan server rule: %w", err)
+		}
+		if parentID.Valid {
+			rule.ParentID = parentID.String
+		}
+		rules = append(rules, &rule)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed while reading server rules: %w", err)
+	}
+
+	return rules, nil
+}
+
+func (api *ruleAPI) ListServerRuleActions(ruleID string) ([]*RuleActionInfo, error) {
+	ruleUUID, err := uuid.Parse(strings.TrimSpace(ruleID))
+	if err != nil {
+		return nil, fmt.Errorf("invalid rule ID: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := api.db.QueryContext(ctx, `
+		SELECT sra.id, sra.rule_id, sra.violation_count, sra.action_type, sra.duration, sra.message
+		FROM server_rule_actions sra
+		JOIN server_rules sr ON sr.id = sra.rule_id
+		WHERE sr.server_id = $1 AND sra.rule_id = $2
+		ORDER BY sra.violation_count ASC
+	`, api.serverID, ruleUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query server rule actions: %w", err)
+	}
+	defer rows.Close()
+
+	actions := make([]*RuleActionInfo, 0)
+	for rows.Next() {
+		var action RuleActionInfo
+		var actionID uuid.UUID
+		var actionRuleID uuid.UUID
+		var duration sql.NullInt64
+		var message sql.NullString
+		if err := rows.Scan(&actionID, &actionRuleID, &action.ViolationCount, &action.ActionType, &duration, &message); err != nil {
+			return nil, fmt.Errorf("failed to scan server rule action: %w", err)
+		}
+
+		action.ID = actionID.String()
+		action.RuleID = actionRuleID.String()
+		if duration.Valid {
+			value := int(duration.Int64)
+			action.Duration = &value
+		}
+		if message.Valid {
+			action.Message = message.String
+		}
+
+		actions = append(actions, &action)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed while reading server rule actions: %w", err)
+	}
+
+	return actions, nil
+}
+
 // databaseAPI implements DatabaseAPI interface
 type databaseAPI struct {
 	instanceID uuid.UUID
@@ -801,153 +1014,6 @@ func NewDatabaseAPI(instanceID uuid.UUID, db *sql.DB) DatabaseAPI {
 		instanceID: instanceID,
 		db:         db,
 	}
-}
-
-func (api *databaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Rows, error) {
-	// Only allow SELECT queries for security
-	trimmedQuery := strings.TrimSpace(strings.ToUpper(query))
-	if !strings.HasPrefix(trimmedQuery, "SELECT") {
-		return nil, fmt.Errorf("only SELECT queries are allowed")
-	}
-
-	// Reject multi-statement queries
-	if hasMultipleSQLStatements(query) {
-		return nil, fmt.Errorf("multi-statement queries are not allowed")
-	}
-
-	// Prevent certain dangerous operations
-	if strings.Contains(trimmedQuery, "DROP") ||
-		strings.Contains(trimmedQuery, "DELETE") ||
-		strings.Contains(trimmedQuery, "INSERT") ||
-		strings.Contains(trimmedQuery, "UPDATE") ||
-		strings.Contains(trimmedQuery, "ALTER") ||
-		strings.Contains(trimmedQuery, "CREATE") {
-		return nil, fmt.Errorf("query contains prohibited operations")
-	}
-
-	return api.db.Query(query, args...)
-}
-
-// This is shit, we know its shit.... but it's for plugins... which we control...., but at least it puts somekind of ground work for the future
-func hasMultipleSQLStatements(query string) bool {
-	statementTerminated := false
-	lineComment := false
-	blockCommentDepth := 0
-	singleQuoted := false
-	doubleQuoted := false
-	dollarQuoteTag := ""
-
-	for i := 0; i < len(query); i++ {
-		ch := query[i]
-
-		if lineComment {
-			if ch == '\n' {
-				lineComment = false
-			}
-			continue
-		}
-
-		if blockCommentDepth > 0 {
-			if ch == '/' && i+1 < len(query) && query[i+1] == '*' {
-				blockCommentDepth++
-				i++
-				continue
-			}
-			if ch == '*' && i+1 < len(query) && query[i+1] == '/' {
-				blockCommentDepth--
-				i++
-			}
-			continue
-		}
-
-		if dollarQuoteTag != "" {
-			if strings.HasPrefix(query[i:], dollarQuoteTag) {
-				i += len(dollarQuoteTag) - 1
-				dollarQuoteTag = ""
-			}
-			continue
-		}
-
-		if singleQuoted {
-			if ch == '\'' {
-				if i+1 < len(query) && query[i+1] == '\'' {
-					i++
-				} else {
-					singleQuoted = false
-				}
-			}
-			continue
-		}
-
-		if doubleQuoted {
-			if ch == '"' {
-				if i+1 < len(query) && query[i+1] == '"' {
-					i++
-				} else {
-					doubleQuoted = false
-				}
-			}
-			continue
-		}
-
-		switch ch {
-		case '-':
-			if i+1 < len(query) && query[i+1] == '-' {
-				lineComment = true
-				i++
-				continue
-			}
-		case '/':
-			if i+1 < len(query) && query[i+1] == '*' {
-				blockCommentDepth = 1
-				i++
-				continue
-			}
-		case '\'':
-			singleQuoted = true
-			continue
-		case '"':
-			doubleQuoted = true
-			continue
-		case '$':
-			if tag := parseDollarQuoteTag(query, i); tag != "" {
-				dollarQuoteTag = tag
-				i += len(tag) - 1
-				continue
-			}
-		case ';':
-			if statementTerminated {
-				return true
-			}
-			statementTerminated = true
-			continue
-		}
-
-		if statementTerminated && !unicode.IsSpace(rune(ch)) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func parseDollarQuoteTag(query string, start int) string {
-	if start >= len(query) || query[start] != '$' {
-		return ""
-	}
-
-	for i := start + 1; i < len(query); i++ {
-		switch ch := rune(query[i]); {
-		case query[i] == '$':
-			return query[start : i+1]
-		case ch == '_' || unicode.IsLetter(ch) || unicode.IsDigit(ch):
-			continue
-		default:
-			return ""
-		}
-	}
-
-	return ""
 }
 
 func (api *databaseAPI) GetPluginData(key string) (string, error) {
@@ -1482,14 +1548,16 @@ func (api *rconAPI) BanWithEvidenceAndRuleAndMetadata(playerID string, reason st
 
 // eventAPI implements EventAPI interface
 type eventAPI struct {
+	ctx              context.Context
 	serverID         uuid.UUID
 	pluginInstanceID uuid.UUID
 	pluginName       string
 	eventManager     *event_manager.EventManager
 }
 
-func NewEventAPI(serverID uuid.UUID, pluginInstanceID uuid.UUID, pluginName string, eventManager *event_manager.EventManager) EventAPI {
+func NewEventAPI(ctx context.Context, serverID uuid.UUID, pluginInstanceID uuid.UUID, pluginName string, eventManager *event_manager.EventManager) EventAPI {
 	return &eventAPI{
+		ctx:              ctx,
 		serverID:         serverID,
 		pluginInstanceID: pluginInstanceID,
 		pluginName:       pluginName,
@@ -1526,49 +1594,39 @@ func (api *eventAPI) SubscribeToEvents(eventTypes []string, handler func(*Plugin
 	// Subscribe to events
 	subscriber := api.eventManager.Subscribe(filter, &api.serverID, 100)
 
-	// Start goroutine to handle events
+	// Start goroutine to handle events with context cancellation
 	go func() {
-		for event := range subscriber.Channel {
-			rawString := ""
-			if event.RawData != nil {
-				if str, ok := event.RawData.(string); ok {
-					rawString = str
+		defer api.eventManager.Unsubscribe(subscriber.ID)
+		for {
+			select {
+			case <-api.ctx.Done():
+				return
+			case event, ok := <-subscriber.Channel:
+				if !ok {
+					return
 				}
-			}
+				rawString := ""
+				if event.RawData != nil {
+					if str, ok := event.RawData.(string); ok {
+						rawString = str
+					}
+				}
 
-			pluginEvent := &PluginEvent{
-				ID:        event.ID,
-				ServerID:  event.ServerID,
-				Source:    EventSourceSystem,
-				Type:      string(event.Type),
-				Data:      event.Data,
-				Raw:       rawString,
-				Timestamp: event.Timestamp,
+				pluginEvent := &PluginEvent{
+					ID:        event.ID,
+					ServerID:  event.ServerID,
+					Source:    EventSourceSystem,
+					Type:      string(event.Type),
+					Data:      event.Data,
+					Raw:       rawString,
+					Timestamp: event.Timestamp,
+				}
+				handler(pluginEvent)
 			}
-			handler(pluginEvent)
 		}
 	}()
 
 	return nil
-}
-
-// connectorAPI implements ConnectorAPI interface
-type connectorAPI struct {
-	pluginManager *PluginManager
-}
-
-func NewConnectorAPI(pluginManager *PluginManager) ConnectorAPI {
-	return &connectorAPI{
-		pluginManager: pluginManager,
-	}
-}
-
-func (api *connectorAPI) GetConnector(connectorID string) (interface{}, error) {
-	return api.pluginManager.GetConnectorAPI(connectorID)
-}
-
-func (api *connectorAPI) ListConnectors() []string {
-	return api.pluginManager.ListAvailableConnectors()
 }
 
 // logAPI implements LogAPI interface
@@ -1617,45 +1675,16 @@ func (api *logAPI) shouldStoreLog(logLevel string) bool {
 	return getLogLevelPriority(logLevel) >= getLogLevelPriority(api.logLevel)
 }
 
-// Helper function to write log to ClickHouse
-func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fields map[string]interface{}) {
-	// Marshal fields to JSON
-	fieldsJSON := "{}"
-	if len(fields) > 0 {
-		if jsonBytes, err := json.Marshal(fields); err == nil {
-			fieldsJSON = string(jsonBytes)
-		}
-	}
-
+// recordPluginLog persists a plugin log entry. The ClickHouse insert is
+// gated by a non-nil client + the configured log level threshold, but the
+// live PluginLogEventData publish runs unconditionally so non-ClickHouse
+// deployments still see live plugin logs in the UI/SSE stream (M-08).
+func (api *logAPI) recordPluginLog(level, message string, errorMsg *string, fields map[string]interface{}) {
 	timestamp := time.Now().UTC()
 
-	// Only store to ClickHouse if log level is high enough
-	if api.shouldStoreLog(level) {
-		// Insert into ClickHouse
-		insertQuery := `
-			INSERT INTO squad_aegis.plugin_logs (
-				timestamp, server_id, plugin_instance_id,
-				level, message, error_message, fields
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
-		`
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if err := api.clickhouseClient.Exec(ctx, insertQuery,
-			timestamp,
-			api.serverID,
-			api.instanceID,
-			level,
-			message,
-			errorMsg,
-			fieldsJSON,
-		); err != nil {
-			log.Error().Err(err).Msg("Failed to write plugin log to ClickHouse")
-		}
-	}
-
-	// Always publish event to event manager (for live viewing)
+	// Always publish to event manager FIRST, regardless of ClickHouse state,
+	// so live log streams work on every deployment (M-08 fix). This was
+	// previously gated behind the nil-client early-return below.
 	if api.eventManager != nil {
 		eventData := event_manager.PluginLogEventData{
 			PluginInstanceID: api.instanceID.String(),
@@ -1667,9 +1696,53 @@ func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fi
 			ErrorMessage:     errorMsg,
 			Fields:           fields,
 		}
-
 		api.eventManager.PublishEvent(api.serverID, eventData, nil)
 	}
+
+	if api.clickhouseClient == nil {
+		return
+	}
+
+	// Only store to ClickHouse if log level is high enough.
+	if !api.shouldStoreLog(level) {
+		return
+	}
+
+	fieldsJSON := "{}"
+	if len(fields) > 0 {
+		if jsonBytes, err := json.Marshal(fields); err == nil {
+			fieldsJSON = string(jsonBytes)
+		}
+	}
+
+	insertQuery := `
+		INSERT INTO squad_aegis.plugin_logs (
+			timestamp, server_id, plugin_instance_id,
+			level, message, error_message, fields
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := api.clickhouseClient.Exec(ctx, insertQuery,
+		timestamp,
+		api.serverID,
+		api.instanceID,
+		level,
+		message,
+		errorMsg,
+		fieldsJSON,
+	); err != nil {
+		log.Error().Err(err).Msg("Failed to write plugin log to ClickHouse")
+	}
+}
+
+// writeToClickHouse is kept as a thin wrapper for backwards-compat with any
+// internal callers; it now delegates to recordPluginLog so the live event
+// publish is guaranteed even when ClickHouse is unconfigured.
+func (api *logAPI) writeToClickHouse(level, message string, errorMsg *string, fields map[string]interface{}) {
+	api.recordPluginLog(level, message, errorMsg, fields)
 }
 
 func (api *logAPI) Info(message string, fields map[string]interface{}) {

@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -19,7 +18,7 @@ type DiscordAdminBroadcastPlugin struct {
 	apis   *plugin_manager.PluginAPIs
 
 	// Discord connector
-	discordAPI discord.DiscordAPI
+	discordAPI plugin_manager.DiscordAPI
 
 	// State management
 	mu     sync.Mutex
@@ -31,14 +30,10 @@ type DiscordAdminBroadcastPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_admin_broadcast",
-		Name:                   "Discord Admin Broadcast",
-		Description:            "The Discord Admin Broadcast plugin will send a copy of admin broadcasts made in game to a Discord channel.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_admin_broadcast",
+		Name:               "Discord Admin Broadcast",
+		Description:        "The Discord Admin Broadcast plugin will send a copy of admin broadcasts made in game to a Discord channel.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
@@ -104,18 +99,10 @@ func (p *DiscordAdminBroadcastPlugin) Initialize(config map[string]interface{}, 
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
 
-	// Get Discord connector
-	discordConnector, err := apis.ConnectorAPI.GetConnector("discord")
-	if err != nil {
-		return fmt.Errorf("failed to get Discord connector: %w", err)
+	if apis.DiscordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
 	}
-
-	// Type assertion
-	var ok bool
-	p.discordAPI, ok = discordConnector.(discord.DiscordAPI)
-	if !ok {
-		return fmt.Errorf("invalid Discord connector type")
-	}
+	p.discordAPI = apis.DiscordAPI
 
 	p.status = plugin_manager.PluginStatusStopped
 
@@ -243,10 +230,10 @@ func (p *DiscordAdminBroadcastPlugin) sendDiscordEmbed(event *event_manager.LogA
 		return fmt.Errorf("channel_id not configured")
 	}
 
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title: "Admin Broadcast",
 		Color: p.getIntConfig("color"),
-		Fields: []*discord.DiscordEmbedField{
+		Fields: []*plugin_manager.DiscordEmbedField{
 			{
 				Name:  "Message",
 				Value: event.Message,

@@ -109,14 +109,10 @@ func (p *AutoKickUnassignedPlugin) findMatchingPlayer(players []*plugin_manager.
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "auto_kick_unassigned",
-		Name:                   "Auto Kick Unassigned",
-		Description:            "The Auto Kick Unassigned plugin will automatically kick players that are not in a squad after a specified amount of time.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            true,
+		ID:          "auto_kick_unassigned",
+		Name:        "Auto Kick Unassigned",
+		Description: "The Auto Kick Unassigned plugin will automatically kick players that are not in a squad after a specified amount of time.",
+		LongRunning: true,
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

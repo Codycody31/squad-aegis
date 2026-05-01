@@ -2,7 +2,9 @@ package discord
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,111 +27,21 @@ type DiscordConfig struct {
 	GuildID string `json:"guild_id"`
 }
 
-// DiscordAPI provides Discord functionality to plugins
-type DiscordAPI interface {
-	// SendMessage sends a message to a Discord channel
-	SendMessage(channelID, content string) (string, error)
-
-	// SendEmbed sends an embed message to a Discord channel
-	SendEmbed(channelID string, embed *DiscordEmbed) (string, error)
-
-	// GetGuildID returns the configured guild ID
-	GetGuildID() string
-
-	// GetChannelMembers returns members of a specific channel (if voice channel)
-	GetChannelMembers(channelID string) ([]*DiscordMember, error)
-
-	// GetGuildMembers returns all members of the guild
-	GetGuildMembers() ([]*DiscordMember, error)
-
-	// HasRole checks if a user has a specific role
-	HasRole(userID, roleID string) (bool, error)
-
-	// AddRole adds a role to a user
-	AddRole(userID, roleID string) error
-
-	// RemoveRole removes a role from a user
-	RemoveRole(userID, roleID string) error
-
-	// SetStatus sets the bot's custom status message
-	SetStatus(status string) error
-
-	// SetActivity sets the bot's activity (e.g., playing, watching)
-	SetActivity(activity string, activityType int) error
-
-	// UpdateMessage updates the content of an existing message
-	UpdateMessage(channelID, messageID, content string) error
-
-	// DeleteMessage deletes a message from a channel
-	DeleteMessage(channelID, messageID string) error
-
-	// GetMessage retrieves a message from a channel
-	GetMessage(channelID, messageID string) (*DiscordMessage, error)
-}
-
-// DiscordEmbed represents a Discord embed message
-type DiscordEmbed struct {
-	Title       string                 `json:"title,omitempty"`
-	Description string                 `json:"description,omitempty"`
-	Color       int                    `json:"color,omitempty"`
-	Fields      []*DiscordEmbedField   `json:"fields,omitempty"`
-	Footer      *DiscordEmbedFooter    `json:"footer,omitempty"`
-	Thumbnail   *DiscordEmbedThumbnail `json:"thumbnail,omitempty"`
-	Image       *DiscordEmbedImage     `json:"image,omitempty"`
-	Timestamp   *time.Time             `json:"timestamp,omitempty"`
-}
-
-// DiscordEmbedField represents an embed field
-type DiscordEmbedField struct {
-	Name   string `json:"name"`
-	Value  string `json:"value"`
-	Inline bool   `json:"inline,omitempty"`
-}
-
-// DiscordEmbedFooter represents an embed footer
-type DiscordEmbedFooter struct {
-	Text    string `json:"text"`
-	IconURL string `json:"icon_url,omitempty"`
-}
-
-// DiscordEmbedThumbnail represents an embed thumbnail
-type DiscordEmbedThumbnail struct {
-	URL string `json:"url"`
-}
-
-// DiscordEmbedImage represents an embed image
-type DiscordEmbedImage struct {
-	URL string `json:"url"`
-}
-
-// DiscordMember represents a Discord guild member
-type DiscordMember struct {
-	UserID      string    `json:"user_id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	Roles       []string  `json:"roles"`
-	JoinedAt    time.Time `json:"joined_at"`
-	IsBot       bool      `json:"is_bot"`
-}
-
-// DiscordMessage represents a Discord message
-type DiscordMessage struct {
-	ID        string         `json:"id"`
-	ChannelID string         `json:"channel_id"`
-	Author    *DiscordMember `json:"author"`
-	Content   string         `json:"content"`
-	Timestamp time.Time      `json:"timestamp"`
-}
+type DiscordAPI = plugin_manager.DiscordAPI
+type DiscordEmbed = plugin_manager.DiscordEmbed
+type DiscordEmbedField = plugin_manager.DiscordEmbedField
+type DiscordEmbedFooter = plugin_manager.DiscordEmbedFooter
+type DiscordEmbedThumbnail = plugin_manager.DiscordEmbedThumbnail
+type DiscordEmbedImage = plugin_manager.DiscordEmbedImage
 
 // Define returns the connector definition
 func Define() plugin_manager.ConnectorDefinition {
 	return plugin_manager.ConnectorDefinition{
-		ID:          "discord",
+		ID:          "com.squad-aegis.connectors.discord",
+		LegacyIDs:   []string{"discord"},
+		Source:      plugin_manager.PluginSourceBundled,
 		Name:        "Discord",
 		Description: "Discord bot connector for sending messages and managing Discord integration",
-		Version:     "1.0.0",
-		Author:      "Squad Aegis",
-
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
 				{
@@ -148,7 +60,7 @@ func Define() plugin_manager.ConnectorDefinition {
 			},
 		},
 
-		APIInterface: (*DiscordAPI)(nil),
+		APIInterface: (*plugin_manager.DiscordAPI)(nil),
 
 		CreateInstance: func() plugin_manager.Connector {
 			return &DiscordConnector{}
@@ -299,6 +211,163 @@ func (c *DiscordConnector) GetAPI() interface{} {
 	return &discordAPI{connector: c}
 }
 
+// Invoke handles JSON connector requests (actions: send_message, send_embed).
+func (c *DiscordConnector) Invoke(ctx context.Context, req *plugin_manager.ConnectorInvokeRequest) (*plugin_manager.ConnectorInvokeResponse, error) {
+	_ = ctx
+	out := &plugin_manager.ConnectorInvokeResponse{V: plugin_manager.ConnectorWireProtocolV1}
+	if req == nil || req.Data == nil {
+		out.OK = false
+		out.Error = "missing data"
+		return out, nil
+	}
+	rawAction, ok := req.Data["action"].(string)
+	if !ok || rawAction == "" {
+		out.OK = false
+		out.Error = `data.action is required`
+		return out, nil
+	}
+	action := strings.ToLower(strings.TrimSpace(rawAction))
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.status != plugin_manager.ConnectorStatusRunning {
+		out.OK = false
+		out.Error = "Discord connector is not running"
+		return out, nil
+	}
+
+	switch action {
+	case "send_message":
+		ch, _ := req.Data["channel_id"].(string)
+		content, _ := req.Data["content"].(string)
+		if ch == "" || content == "" {
+			out.OK = false
+			out.Error = "send_message requires channel_id and content"
+			return out, nil
+		}
+		msgID, err := c.sendMessageLocked(ch, content)
+		if err != nil {
+			out.OK = false
+			out.Error = err.Error()
+			return out, nil
+		}
+		out.OK = true
+		out.Data = map[string]interface{}{"message_id": msgID}
+		return out, nil
+	case "send_embed":
+		ch, _ := req.Data["channel_id"].(string)
+		if ch == "" {
+			out.OK = false
+			out.Error = "send_embed requires channel_id"
+			return out, nil
+		}
+		embed, err := parseEmbedFromData(req.Data["embed"])
+		if err != nil {
+			out.OK = false
+			out.Error = err.Error()
+			return out, nil
+		}
+		msgID, err := c.sendEmbedLocked(ch, embed)
+		if err != nil {
+			out.OK = false
+			out.Error = err.Error()
+			return out, nil
+		}
+		out.OK = true
+		out.Data = map[string]interface{}{"message_id": msgID}
+		return out, nil
+	default:
+		out.OK = false
+		out.Error = fmt.Sprintf("unknown action %q", rawAction)
+		return out, nil
+	}
+}
+
+func parseEmbedFromData(v interface{}) (*DiscordEmbed, error) {
+	if v == nil {
+		return nil, fmt.Errorf("send_embed requires embed")
+	}
+	switch t := v.(type) {
+	case *DiscordEmbed:
+		return t, nil
+	case map[string]interface{}:
+		raw, err := json.Marshal(t)
+		if err != nil {
+			return nil, fmt.Errorf("invalid embed: %w", err)
+		}
+		var e DiscordEmbed
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid embed: %w", err)
+		}
+		return &e, nil
+	default:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid embed: %w", err)
+		}
+		var e DiscordEmbed
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("invalid embed: %w", err)
+		}
+		return &e, nil
+	}
+}
+
+func (c *DiscordConnector) sendMessageLocked(channelID, content string) (string, error) {
+	msg, err := c.session.ChannelMessageSend(channelID, content)
+	if err != nil {
+		return "", fmt.Errorf("failed to send Discord message: %w", err)
+	}
+	return msg.ID, nil
+}
+
+func discordEmbedToGo(embed *DiscordEmbed) *discordgo.MessageEmbed {
+	discordEmbed := &discordgo.MessageEmbed{
+		Title:       embed.Title,
+		Description: embed.Description,
+		Color:       embed.Color,
+	}
+	if embed.Fields != nil {
+		discordEmbed.Fields = make([]*discordgo.MessageEmbedField, len(embed.Fields))
+		for i, field := range embed.Fields {
+			discordEmbed.Fields[i] = &discordgo.MessageEmbedField{
+				Name:   field.Name,
+				Value:  field.Value,
+				Inline: field.Inline,
+			}
+		}
+	}
+	if embed.Footer != nil {
+		discordEmbed.Footer = &discordgo.MessageEmbedFooter{
+			Text:    embed.Footer.Text,
+			IconURL: embed.Footer.IconURL,
+		}
+	}
+	if embed.Thumbnail != nil {
+		discordEmbed.Thumbnail = &discordgo.MessageEmbedThumbnail{
+			URL: embed.Thumbnail.URL,
+		}
+	}
+	if embed.Image != nil {
+		discordEmbed.Image = &discordgo.MessageEmbedImage{
+			URL: embed.Image.URL,
+		}
+	}
+	if embed.Timestamp != nil {
+		discordEmbed.Timestamp = embed.Timestamp.Format(time.RFC3339)
+	}
+	return discordEmbed
+}
+
+func (c *DiscordConnector) sendEmbedLocked(channelID string, embed *DiscordEmbed) (string, error) {
+	msg, err := c.session.ChannelMessageSendEmbed(channelID, discordEmbedToGo(embed))
+	if err != nil {
+		return "", fmt.Errorf("failed to send Discord embed: %w", err)
+	}
+	return msg.ID, nil
+}
+
 // discordAPI implements DiscordAPI interface
 type discordAPI struct {
 	connector *DiscordConnector
@@ -312,12 +381,7 @@ func (api *discordAPI) SendMessage(channelID, content string) (string, error) {
 		return "", fmt.Errorf("Discord connector is not running")
 	}
 
-	msg, err := api.connector.session.ChannelMessageSend(channelID, content)
-	if err != nil {
-		return "", fmt.Errorf("failed to send Discord message: %w", err)
-	}
-
-	return msg.ID, nil
+	return api.connector.sendMessageLocked(channelID, content)
 }
 
 func (api *discordAPI) SendEmbed(channelID string, embed *DiscordEmbed) (string, error) {
@@ -328,276 +392,5 @@ func (api *discordAPI) SendEmbed(channelID string, embed *DiscordEmbed) (string,
 		return "", fmt.Errorf("Discord connector is not running")
 	}
 
-	// Convert our embed to discordgo embed
-	discordEmbed := &discordgo.MessageEmbed{
-		Title:       embed.Title,
-		Description: embed.Description,
-		Color:       embed.Color,
-	}
-
-	// Convert fields
-	if embed.Fields != nil {
-		discordEmbed.Fields = make([]*discordgo.MessageEmbedField, len(embed.Fields))
-		for i, field := range embed.Fields {
-			discordEmbed.Fields[i] = &discordgo.MessageEmbedField{
-				Name:   field.Name,
-				Value:  field.Value,
-				Inline: field.Inline,
-			}
-		}
-	}
-
-	// Convert footer
-	if embed.Footer != nil {
-		discordEmbed.Footer = &discordgo.MessageEmbedFooter{
-			Text:    embed.Footer.Text,
-			IconURL: embed.Footer.IconURL,
-		}
-	}
-
-	// Convert thumbnail
-	if embed.Thumbnail != nil {
-		discordEmbed.Thumbnail = &discordgo.MessageEmbedThumbnail{
-			URL: embed.Thumbnail.URL,
-		}
-	}
-
-	// Convert image
-	if embed.Image != nil {
-		discordEmbed.Image = &discordgo.MessageEmbedImage{
-			URL: embed.Image.URL,
-		}
-	}
-
-	// Convert timestamp
-	if embed.Timestamp != nil {
-		discordEmbed.Timestamp = embed.Timestamp.Format(time.RFC3339)
-	}
-
-	msg, err := api.connector.session.ChannelMessageSendEmbed(channelID, discordEmbed)
-	if err != nil {
-		return "", fmt.Errorf("failed to send Discord embed: %w", err)
-	}
-
-	return msg.ID, nil
-}
-
-func (api *discordAPI) GetGuildID() string {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.config == nil {
-		return ""
-	}
-
-	return api.connector.config.GuildID
-}
-
-func (api *discordAPI) GetChannelMembers(channelID string) ([]*DiscordMember, error) {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return nil, fmt.Errorf("Discord connector is not running")
-	}
-
-	// This is primarily for voice channels
-	// For text channels, this doesn't make much sense as all guild members can see them
-	// We'll return an empty list for now
-	return []*DiscordMember{}, nil
-}
-
-func (api *discordAPI) GetGuildMembers() ([]*DiscordMember, error) {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return nil, fmt.Errorf("Discord connector is not running")
-	}
-
-	members, err := api.connector.session.GuildMembers(api.connector.config.GuildID, "", 1000)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get guild members: %w", err)
-	}
-
-	result := make([]*DiscordMember, len(members))
-	for i, member := range members {
-		// Use the JoinedAt time directly since it's already a time.Time
-		joinedAt := member.JoinedAt
-
-		displayName := member.Nick
-		if displayName == "" {
-			displayName = member.User.Username
-		}
-
-		result[i] = &DiscordMember{
-			UserID:      member.User.ID,
-			Username:    member.User.Username,
-			DisplayName: displayName,
-			Roles:       member.Roles,
-			JoinedAt:    joinedAt,
-			IsBot:       member.User.Bot,
-		}
-	}
-
-	return result, nil
-}
-
-func (api *discordAPI) HasRole(userID, roleID string) (bool, error) {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return false, fmt.Errorf("Discord connector is not running")
-	}
-
-	member, err := api.connector.session.GuildMember(api.connector.config.GuildID, userID)
-	if err != nil {
-		return false, fmt.Errorf("failed to get guild member: %w", err)
-	}
-
-	for _, role := range member.Roles {
-		if role == roleID {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-func (api *discordAPI) AddRole(userID, roleID string) error {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return fmt.Errorf("Discord connector is not running")
-	}
-
-	err := api.connector.session.GuildMemberRoleAdd(api.connector.config.GuildID, userID, roleID)
-	if err != nil {
-		return fmt.Errorf("failed to add role: %w", err)
-	}
-
-	return nil
-}
-
-func (api *discordAPI) RemoveRole(userID, roleID string) error {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return fmt.Errorf("Discord connector is not running")
-	}
-
-	err := api.connector.session.GuildMemberRoleRemove(api.connector.config.GuildID, userID, roleID)
-	if err != nil {
-		return fmt.Errorf("failed to remove role: %w", err)
-	}
-
-	return nil
-}
-
-func (api *discordAPI) SetStatus(status string) error {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return fmt.Errorf("Discord connector is not running")
-	}
-
-	err := api.connector.session.UpdateStatusComplex(discordgo.UpdateStatusData{
-		Status: "online",
-		Activities: []*discordgo.Activity{
-			{
-				Name: status,
-				Type: discordgo.ActivityTypeCustom,
-			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to set custom status: %w", err)
-	}
-
-	return nil
-}
-
-func (api *discordAPI) SetActivity(activity string, activityType int) error {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return fmt.Errorf("Discord connector is not running")
-	}
-
-	err := api.connector.session.UpdateGameStatus(activityType, activity)
-	if err != nil {
-		return fmt.Errorf("failed to set activity: %w", err)
-	}
-
-	return nil
-}
-
-func (api *discordAPI) UpdateMessage(channelID, messageID, content string) error {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return fmt.Errorf("Discord connector is not running")
-	}
-
-	_, err := api.connector.session.ChannelMessageEdit(channelID, messageID, content)
-	if err != nil {
-		return fmt.Errorf("failed to update message: %w", err)
-	}
-
-	return nil
-}
-
-func (api *discordAPI) DeleteMessage(channelID, messageID string) error {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return fmt.Errorf("Discord connector is not running")
-	}
-
-	err := api.connector.session.ChannelMessageDelete(channelID, messageID)
-	if err != nil {
-		return fmt.Errorf("failed to delete message: %w", err)
-	}
-
-	return nil
-}
-
-func (api *discordAPI) GetMessage(channelID, messageID string) (*DiscordMessage, error) {
-	api.connector.mu.RLock()
-	defer api.connector.mu.RUnlock()
-
-	if api.connector.status != plugin_manager.ConnectorStatusRunning {
-		return nil, fmt.Errorf("Discord connector is not running")
-	}
-
-	msg, err := api.connector.session.ChannelMessage(channelID, messageID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get message: %w", err)
-	}
-
-	author := &DiscordMember{
-		UserID:      msg.Author.ID,
-		Username:    msg.Author.Username,
-		DisplayName: msg.Author.Username, // Assuming no nick for simplicity
-		Roles:       []string{},          // Not fetched here
-		JoinedAt:    time.Time{},         // Not available
-		IsBot:       msg.Author.Bot,
-	}
-
-	discordMsg := &DiscordMessage{
-		ID:        msg.ID,
-		ChannelID: msg.ChannelID,
-		Author:    author,
-		Content:   msg.Content,
-		Timestamp: msg.Timestamp,
-	}
-
-	return discordMsg, nil
+	return api.connector.sendEmbedLocked(channelID, embed)
 }

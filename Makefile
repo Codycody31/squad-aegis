@@ -75,12 +75,33 @@ format: install-tools ## Format source code
 	@gofumpt -extra -w .
 
 .PHONY: generate
-generate: install-tools ## Run all code generations
+generate: install-tools generate-proto ## Run all code generations
 	CGO_ENABLED=0 go generate ./...
+
+.PHONY: generate-proto
+generate-proto: install-proto-tools ## Regenerate gRPC stubs for native plugin/connector wire protocol
+	protoc -I. \
+		--go_out=. --go_opt=module=go.codycody31.dev/squad-aegis \
+		--go-grpc_out=. --go-grpc_opt=module=go.codycody31.dev/squad-aegis \
+		pkg/pluginrpc/proto/plugin.proto \
+		pkg/pluginrpc/proto/hostapi.proto \
+		pkg/connectorrpc/proto/connector.proto
 
 install-tools: ## Install development tools
 	@hash golangci-lint > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
 		go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest ; \
+	fi
+
+install-proto-tools: ## Install protoc-gen-go and protoc-gen-go-grpc
+	@hash protoc > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
+		echo "protoc is required. Install the protobuf compiler for your platform and rerun make generate." >&2 ; \
+		exit 1 ; \
+	fi
+	@hash protoc-gen-go > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
+		go install google.golang.org/protobuf/cmd/protoc-gen-go@latest ; \
+	fi
+	@hash protoc-gen-go-grpc > /dev/null 2>&1; if [ $$? -ne 0 ]; then \
+		go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest ; \
 	fi
 
 ##@ Test

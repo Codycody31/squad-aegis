@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"time"
@@ -62,33 +63,29 @@ func (s *Server) customRecovery(c *gin.Context, err any) {
 }
 
 func (s *Server) customLoggerWithFormatter(param gin.LogFormatterParams) string {
+	logPath := param.Path
+	if strings.Contains(logPath, "token=") {
+		// Strip session token from logged URL to prevent credential leakage
+		if u, err := url.Parse(logPath); err == nil {
+			q := u.Query()
+			if q.Has("token") {
+				q.Set("token", "[REDACTED]")
+				u.RawQuery = q.Encode()
+				logPath = u.String()
+			}
+		}
+	}
 	return fmt.Sprintf("%s - [%s] \"%s %s %s %d %s \"%s\" %s\"\n",
 		param.ClientIP,
 		param.TimeStamp.Format(time.RFC1123),
 		param.Method,
-		param.Path,
+		logPath,
 		param.Request.Proto,
 		param.StatusCode,
 		param.Latency,
 		param.Request.UserAgent(),
 		param.ErrorMessage,
 	)
-}
-
-func (s *Server) customUserLastSeen(c *gin.Context) {
-	session, exists := c.Get("session")
-	if exists {
-		session := session.(*models.Session)
-		_, err := s.Dependencies.DB.Exec("UPDATE sessions SET last_seen = NOW(), last_seen_ip = $1 WHERE id = $2", c.ClientIP(), session.Id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"message": "Internal Server Error",
-				"code":    http.StatusInternalServerError,
-			})
-			c.Abort()
-			return
-		}
-	}
 }
 
 func (s *Server) getUserFromSession(c *gin.Context) *models.User {

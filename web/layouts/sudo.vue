@@ -23,6 +23,13 @@ const sudoNavigationItems: NavigationItem[] = [
     icon: "mdi:folder",
   },
   {
+    title: "Plugins",
+    to: {
+      name: "sudo-plugins",
+    },
+    icon: "lucide:puzzle",
+  },
+  {
     title: "Analytics",
     to: {
       name: "sudo-metrics",
@@ -76,4 +83,3 @@ const sudoNavigationItems: NavigationItem[] = [
     </SidebarInset>
   </SidebarProvider>
 </template>
-

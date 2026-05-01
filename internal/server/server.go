@@ -57,9 +57,12 @@ func New(serverDependencies *Dependencies) *Server {
 func NewRouter(server *Server) *gin.Engine {
 	router := gin.New()
 
+	// Disable trusting X-Forwarded-For headers by default to prevent
+	// IP spoofing that would bypass rate limiting. Operators behind a
+	// reverse proxy should configure trusted proxies explicitly.
+	router.SetTrustedProxies(nil) //nolint:errcheck
+
 	if config.Config.Log.ShowGin {
-		// General Middleware
-		router.Use(gin.Logger())
 		router.Use(gin.LoggerWithFormatter(server.customLoggerWithFormatter))
 	}
 
@@ -70,6 +73,10 @@ func NewRouter(server *Server) *gin.Engine {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", config.Config.App.Url)
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, PATCH, DELETE")
+		c.Writer.Header().Set("Vary", "Origin")
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		c.Writer.Header().Set("X-Frame-Options", "DENY")
+		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -78,9 +85,6 @@ func NewRouter(server *Server) *gin.Engine {
 
 		c.Next()
 	})
-
-	// Setup user last seen for session
-	router.Use(server.customUserLastSeen)
 
 	// Setup the no route handler
 	router.NoRoute(gin.WrapF(func(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +142,7 @@ func NewRouter(server *Server) *gin.Engine {
 					return
 				}
 			})
-			authGroup.POST("/login", server.AuthLogin)
+			authGroup.POST("/login", RateLimitMiddleware(5.0/60, 5), server.AuthLogin)
 		}
 
 		usersGroup := apiGroup.Group("/users")
@@ -315,6 +319,9 @@ func NewRouter(server *Server) *gin.Engine {
 					pluginGroup.DELETE("/:pluginId", pluginManagePerm, server.ServerPluginDelete)
 					pluginGroup.GET("/:pluginId/logs", pluginManagePerm, server.ServerPluginLogs)
 					pluginGroup.GET("/:pluginId/logs/ws", pluginManagePerm, server.ServerPluginLogsWebSocket)
+					// Restored compatibility route (M-24): the prior plugin
+					// metrics endpoint returned an empty object but clients
+					// rely on the route resolving with 200.
 					pluginGroup.GET("/:pluginId/metrics", pluginViewPerm, server.ServerPluginMetrics)
 					pluginGroup.GET("/:pluginId/data", pluginManagePerm, server.ServerPluginDataGet)
 					pluginGroup.POST("/:pluginId/data", pluginManagePerm, server.ServerPluginDataSet)
@@ -401,6 +408,9 @@ func NewRouter(server *Server) *gin.Engine {
 			pluginsGroup.Use(server.AuthSession)
 
 			pluginsGroup.GET("/available", server.PluginListAvailable)
+			pluginsGroup.GET("/installed", server.AuthIsSuperAdmin(), server.PluginListInstalled)
+			pluginsGroup.POST("/upload", server.AuthIsSuperAdmin(), RateLimitMiddleware(10.0/60, 3), server.PluginUpload)
+			pluginsGroup.DELETE("/installed/:pluginId", server.AuthIsSuperAdmin(), server.PluginInstalledDelete)
 		}
 
 		connectorsGroup := apiGroup.Group("/connectors")
@@ -409,6 +419,9 @@ func NewRouter(server *Server) *gin.Engine {
 			connectorsGroup.Use(server.AuthIsSuperAdmin())
 
 			connectorsGroup.GET("/available", server.ConnectorListAvailable)
+			connectorsGroup.GET("/packages/installed", server.ConnectorPackageListInstalled)
+			connectorsGroup.POST("/packages/upload", RateLimitMiddleware(10.0/60, 3), server.ConnectorPackageUpload)
+			connectorsGroup.DELETE("/packages/installed/:connectorId", server.ConnectorPackageInstalledDelete)
 			connectorsGroup.GET("", server.ConnectorList)
 			connectorsGroup.POST("", server.ConnectorCreate)
 			connectorsGroup.PUT("/:connectorId", server.ConnectorUpdate)
@@ -475,7 +488,10 @@ func NewRouter(server *Server) *gin.Engine {
 			sudoGroup.POST("/database/optimize/:type", server.OptimizeDatabase)
 		}
 
-		// Public Routes for the server
+		// Public server config endpoints - intentionally unauthenticated.
+		// These are consumed by Squad game servers via remote admin file loading
+		// (RCON RemoteAdminListHosts). Operators should use network-level access
+		// controls (firewall, VPN) if additional protection is needed.
 		apiGroup.GET("/servers/:serverId/admins/cfg", server.ServerAdminsCfg)
 		apiGroup.GET("/servers/:serverId/bans/cfg", server.ServerBansCfgEnhanced)
 		apiGroup.GET("/ban-lists/:banListId/cfg", server.BanListCfg)

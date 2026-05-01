@@ -10,16 +10,12 @@ import { Badge } from "~/components/ui/badge";
 import type { StorageSummary, StorageFile } from "~/types";
 
 definePageMeta({
-  middleware: "auth",
+  middleware: ["auth", "sudo"],
   layout: "sudo",
 });
 
 const runtimeConfig = useRuntimeConfig();
 const authStore = useAuthStore();
-
-if (!authStore.user?.super_admin) {
-  navigateTo("/dashboard");
-}
 
 const loading = ref(true);
 const summary = ref<StorageSummary | null>(null);

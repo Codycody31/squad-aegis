@@ -376,8 +376,8 @@ func (s *SFTPSource) connect() error {
 
 	// Create SSH client configuration
 	config := &ssh.ClientConfig{
-		User:            s.username,
-		Auth:            []ssh.AuthMethod{},
+		User: s.username,
+		Auth: []ssh.AuthMethod{},
 		// Intentionally skipping host key verification: this is a long-lived
 		// connection to trusted, operator-configured infrastructure used to
 		// stream server log data.

@@ -78,9 +78,9 @@ type WorkflowErrorAction struct {
 type ServerWorkflowExecution struct {
 	ID           uuid.UUID              `json:"id"`
 	WorkflowID   uuid.UUID              `json:"workflow_id"`
-	ExecutionID  uuid.UUID              `json:"execution_id"`  // Links to ClickHouse logs
-	Status       string                 `json:"status"`        // "RUNNING", "COMPLETED", "FAILED", "CANCELLED"
-	TriggerData  map[string]interface{} `json:"trigger_data"`  // Event data that triggered the workflow
+	ExecutionID  uuid.UUID              `json:"execution_id"` // Links to ClickHouse logs
+	Status       string                 `json:"status"`       // "RUNNING", "COMPLETED", "FAILED", "CANCELLED"
+	TriggerData  map[string]interface{} `json:"trigger_data"` // Event data that triggered the workflow
 	StartedAt    time.Time              `json:"started_at"`
 	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
 	ErrorMessage *string                `json:"error_message,omitempty"`
@@ -123,19 +123,19 @@ const (
 
 // Predefined action types
 const (
-	ActionTypeRconCommand            = "rcon_command"
-	ActionTypeAdminBroadcast         = "admin_broadcast"
-	ActionTypeChatMessage            = "chat_message"
-	ActionTypeKickPlayer             = "kick_player"
-	ActionTypeBanPlayer              = "ban_player"
-	ActionTypeBanPlayerWithEvidence  = "ban_player_with_evidence"
-	ActionTypeWarnPlayer             = "warn_player"
-	ActionTypeHTTPRequest            = "http_request"
-	ActionTypeWebhook                = "webhook"
-	ActionTypeDiscordMessage         = "discord_message"
-	ActionTypeLogMessage             = "log_message"
-	ActionTypeSetVariable            = "set_variable"
-	ActionTypeLuaScript              = "lua_script"
+	ActionTypeRconCommand           = "rcon_command"
+	ActionTypeAdminBroadcast        = "admin_broadcast"
+	ActionTypeChatMessage           = "chat_message"
+	ActionTypeKickPlayer            = "kick_player"
+	ActionTypeBanPlayer             = "ban_player"
+	ActionTypeBanPlayerWithEvidence = "ban_player_with_evidence"
+	ActionTypeWarnPlayer            = "warn_player"
+	ActionTypeHTTPRequest           = "http_request"
+	ActionTypeWebhook               = "webhook"
+	ActionTypeDiscordMessage        = "discord_message"
+	ActionTypeLogMessage            = "log_message"
+	ActionTypeSetVariable           = "set_variable"
+	ActionTypeLuaScript             = "lua_script"
 )
 
 // Predefined condition operators

@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -19,7 +18,7 @@ type DiscordChatPlugin struct {
 	apis   *plugin_manager.PluginAPIs
 
 	// Discord connector
-	discordAPI discord.DiscordAPI
+	discordAPI plugin_manager.DiscordAPI
 
 	// State management
 	mu     sync.Mutex
@@ -31,14 +30,10 @@ type DiscordChatPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_chat",
-		Name:                   "Discord Chat",
-		Description:            "The Discord Chat plugin will log in-game chat to a Discord channel.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_chat",
+		Name:               "Discord Chat",
+		Description:        "The Discord Chat plugin will log in-game chat to a Discord channel.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
@@ -120,18 +115,10 @@ func (p *DiscordChatPlugin) Initialize(config map[string]interface{}, apis *plug
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
 
-	// Get Discord connector
-	discordConnector, err := apis.ConnectorAPI.GetConnector("discord")
-	if err != nil {
-		return fmt.Errorf("failed to get Discord connector: %w", err)
+	if apis.DiscordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
 	}
-
-	// Type assertion
-	var ok bool
-	p.discordAPI, ok = discordConnector.(discord.DiscordAPI)
-	if !ok {
-		return fmt.Errorf("invalid Discord connector type")
-	}
+	p.discordAPI = apis.DiscordAPI
 
 	p.status = plugin_manager.PluginStatusStopped
 
@@ -303,10 +290,10 @@ func (p *DiscordChatPlugin) sendChatEmbed(event *event_manager.RconChatMessageDa
 		steamIDFieldValue = event.EosID
 	}
 
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title: event.ChatType,
 		Color: color,
-		Fields: []*discord.DiscordEmbedField{
+		Fields: []*plugin_manager.DiscordEmbedField{
 			{
 				Name:   "Player",
 				Value:  event.PlayerName,
