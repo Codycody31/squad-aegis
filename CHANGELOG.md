@@ -16,6 +16,8 @@
 
 ### Misc
 
+- fix(config): pin S3 env/yaml path and add storage env vars ([7ef2da4](https://github.com/Codycody31/squad-aegis/commit/7ef2da490affb2c55acd05ddd7835db8c622382c))
+- chore(deps): bump go version to 1.25 ([76a44ef](https://github.com/Codycody31/squad-aegis/commit/76a44ef749727f8f1463bf47773b1128e7d8644e))
 - chore: security policy documentation ([14ed269](https://github.com/Codycody31/squad-aegis/commit/14ed2693ffbe65e1e075931d27cac45cceb4a0f7))
 
 ## [0.9.3](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.3) - 2026-04-03
