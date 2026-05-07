@@ -171,4 +171,3 @@ func (s *LocalStorage) GetStats(ctx context.Context) (*StorageStats, error) {
 
 	return stats, nil
 }
-

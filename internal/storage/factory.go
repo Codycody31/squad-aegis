@@ -21,4 +21,3 @@ func NewStorage(cfg config.Struct) (Storage, error) {
 		return nil, fmt.Errorf("unsupported storage type: %s (supported: local, s3)", cfg.Storage.Type)
 	}
 }
-

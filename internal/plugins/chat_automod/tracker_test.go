@@ -1,7 +1,6 @@
 package chat_automod
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -10,10 +9,6 @@ import (
 
 type fakeDatabaseAPI struct {
 	data map[string]string
-}
-
-func (f *fakeDatabaseAPI) ExecuteQuery(query string, args ...interface{}) (*sql.Rows, error) {
-	return nil, errors.New("not implemented")
 }
 
 func (f *fakeDatabaseAPI) GetPluginData(key string) (string, error) {

@@ -522,7 +522,6 @@ func (s *Server) ServerAdminsUpdate(c *gin.Context) {
 	// Get username for audit log
 	if existingUserId.Valid {
 		auditData["userId"] = existingUserId.String
-		// TODO: Get actual username from users table if needed
 		auditData["username"] = "User ID: " + existingUserId.String
 	} else if existingSteamId.Valid {
 		auditData["steamId"] = fmt.Sprintf("%d", existingSteamId.Int64)

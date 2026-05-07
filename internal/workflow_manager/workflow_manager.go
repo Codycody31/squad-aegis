@@ -2937,10 +2937,7 @@ func (wm *WorkflowManager) createDataContext(context *models.WorkflowExecutionCo
 	return data
 }
 
-// evaluateExpression evaluates a simple expression (placeholder for future enhancement)
 func (wm *WorkflowManager) evaluateExpression(expression string, context *models.WorkflowExecutionContext) (interface{}, error) {
-	// This is a simple implementation - could be enhanced with a proper expression parser
-	// For now, just replace variables in the expression
 	result := wm.replaceVariablesWithContext(expression, context.Variables, context.TriggerEvent, context.Metadata)
 
 	// Try to parse as number

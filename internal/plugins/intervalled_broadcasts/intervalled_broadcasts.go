@@ -29,14 +29,10 @@ type IntervalledBroadcastsPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "intervalled_broadcasts",
-		Name:                   "Intervalled Broadcasts",
-		Description:            "The Intervalled Broadcasts plugin allows you to set broadcasts, which will be broadcasted at preset intervals.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            true,
+		ID:          "intervalled_broadcasts",
+		Name:        "Intervalled Broadcasts",
+		Description: "The Intervalled Broadcasts plugin allows you to set broadcasts, which will be broadcasted at preset intervals.",
+		LongRunning: true,
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
