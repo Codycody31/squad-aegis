@@ -14,6 +14,10 @@
 
 - refactor: expand server_rules title column to text [[#213](https://github.com/Codycody31/squad-aegis/pull/213)]
 
+### 📦️ Dependency
+
+- chore(deps): bump google.golang.org/grpc from 1.64.1 to 1.79.3 [[#214](https://github.com/Codycody31/squad-aegis/pull/214)]
+
 ### Misc
 
 - chore(web): add pnpm config and remove vite temp package.json ([5d9bf81](https://github.com/Codycody31/squad-aegis/commit/5d9bf81369185f6577c5b957edaf1e4be79d5f89))
