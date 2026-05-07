@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -20,7 +19,7 @@ type DiscordAdminRequestPlugin struct {
 	apis   *plugin_manager.PluginAPIs
 
 	// Discord connector
-	discordAPI discord.DiscordAPI
+	discordAPI plugin_manager.DiscordAPI
 
 	// State management
 	lastPingTime time.Time
@@ -33,14 +32,10 @@ type DiscordAdminRequestPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_admin_request",
-		Name:                   "Discord Admin Requests",
-		Description:            "Will ping admins in a Discord channel when a player requests an admin via the !admin command in in-game chat.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_admin_request",
+		Name:               "Discord Admin Requests",
+		Description:        "Will ping admins in a Discord channel when a player requests an admin via the !admin command in in-game chat.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
@@ -147,18 +142,10 @@ func (p *DiscordAdminRequestPlugin) Initialize(config map[string]interface{}, ap
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
 
-	// Get Discord connector
-	discordConnector, err := apis.ConnectorAPI.GetConnector("discord")
-	if err != nil {
-		return fmt.Errorf("failed to get Discord connector: %w", err)
+	if apis.DiscordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
 	}
-
-	// Type assertion
-	var ok bool
-	p.discordAPI, ok = discordConnector.(discord.DiscordAPI)
-	if !ok {
-		return fmt.Errorf("invalid Discord connector type")
-	}
+	p.discordAPI = apis.DiscordAPI
 
 	p.status = plugin_manager.PluginStatusStopped
 
@@ -393,7 +380,7 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 		}
 	}
 
-	fields := []*discord.DiscordEmbedField{
+	fields := []*plugin_manager.DiscordEmbedField{
 		{
 			Name:   "Player",
 			Value:  playerName,
@@ -406,31 +393,31 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 		},
 	}
 	if player.SteamID != "" {
-		fields = append(fields, &discord.DiscordEmbedField{
+		fields = append(fields, &plugin_manager.DiscordEmbedField{
 			Name:   "Steam ID",
 			Value:  fmt.Sprintf("[%s](https://steamcommunity.com/profiles/%s)", player.SteamID, player.SteamID),
 			Inline: true,
 		})
 	}
 	if player.EOSID != "" {
-		fields = append(fields, &discord.DiscordEmbedField{
+		fields = append(fields, &plugin_manager.DiscordEmbedField{
 			Name:   "EOS ID",
 			Value:  player.EOSID,
 			Inline: true,
 		})
 	}
 	fields = append(fields,
-		&discord.DiscordEmbedField{
+		&plugin_manager.DiscordEmbedField{
 			Name:   "Team & Squad",
 			Value:  fmt.Sprintf("Team: %d, Squad: %d", player.TeamID, player.SquadID),
 			Inline: false,
 		},
-		&discord.DiscordEmbedField{
+		&plugin_manager.DiscordEmbedField{
 			Name:   "Reason",
 			Value:  message,
 			Inline: false,
 		},
-		&discord.DiscordEmbedField{
+		&plugin_manager.DiscordEmbedField{
 			Name:   "Online Admins",
 			Value:  fmt.Sprintf("%d", len(onlineAdmins)),
 			Inline: false,
@@ -438,11 +425,11 @@ func (p *DiscordAdminRequestPlugin) sendAdminRequestNotification(serverInfo *plu
 	)
 
 	// Create embed
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title:  fmt.Sprintf("Player **%s** has requested admin support!", playerName),
 		Color:  p.getIntConfig("color"),
 		Fields: fields,
-		Footer: &discord.DiscordEmbedFooter{
+		Footer: &plugin_manager.DiscordEmbedFooter{
 			Text: "Powered by Squad Aegis",
 		},
 		Timestamp: func() *time.Time { t := time.Now(); return &t }(),

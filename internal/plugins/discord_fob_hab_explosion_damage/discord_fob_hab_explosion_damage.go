@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -20,7 +19,7 @@ type DiscordFOBHABExplosionDamagePlugin struct {
 	apis   *plugin_manager.PluginAPIs
 
 	// Discord connector
-	discordAPI discord.DiscordAPI
+	discordAPI plugin_manager.DiscordAPI
 
 	// State management
 	mu     sync.Mutex
@@ -36,14 +35,10 @@ type DiscordFOBHABExplosionDamagePlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "discord_fob_hab_explosion_damage",
-		Name:                   "Discord FOB/HAB Explosion Damage",
-		Description:            "The Discord FOB/HAB Explosion Damage plugin logs damage done to FOBs and HABs by explosions to help identify engineers blowing up friendly FOBs and HABs.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "discord_fob_hab_explosion_damage",
+		Name:               "Discord FOB/HAB Explosion Damage",
+		Description:        "The Discord FOB/HAB Explosion Damage plugin logs damage done to FOBs and HABs by explosions to help identify engineers blowing up friendly FOBs and HABs.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
@@ -121,18 +116,10 @@ func (p *DiscordFOBHABExplosionDamagePlugin) Initialize(config map[string]interf
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
 
-	// Get Discord connector
-	discordConnector, err := apis.ConnectorAPI.GetConnector("discord")
-	if err != nil {
-		return fmt.Errorf("failed to get Discord connector: %w", err)
+	if apis.DiscordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
 	}
-
-	// Type assertion
-	var ok bool
-	p.discordAPI, ok = discordConnector.(discord.DiscordAPI)
-	if !ok {
-		return fmt.Errorf("invalid Discord connector type")
-	}
+	p.discordAPI = apis.DiscordAPI
 
 	p.status = plugin_manager.PluginStatusStopped
 
@@ -277,10 +264,10 @@ func (p *DiscordFOBHABExplosionDamagePlugin) sendFOBHABDamageEmbed(event *event_
 		playerInfo = "Unknown Player"
 	}
 
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title: fmt.Sprintf("FOB/HAB Explosion Damage: %s", playerInfo),
 		Color: p.getIntConfig("color"),
-		Fields: []*discord.DiscordEmbedField{
+		Fields: []*plugin_manager.DiscordEmbedField{
 			{
 				Name:   "Player Info",
 				Value:  playerInfo,

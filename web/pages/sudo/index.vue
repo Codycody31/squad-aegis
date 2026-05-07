@@ -7,17 +7,12 @@ import { Progress } from "~/components/ui/progress";
 import type { MetricsOverview, SystemHealth } from "~/types";
 
 definePageMeta({
-  middleware: "auth",
+  middleware: ["auth", "sudo"],
   layout: "sudo",
 });
 
 const runtimeConfig = useRuntimeConfig();
 const authStore = useAuthStore();
-
-// Redirect if not superadmin
-if (!authStore.user?.super_admin) {
-  navigateTo("/dashboard");
-}
 
 const loading = ref(true);
 const metricsOverview = ref<MetricsOverview | null>(null);
@@ -212,6 +207,18 @@ const getStatusBadgeVariant = (status: string) => {
       <div>
         <h2 class="text-xl font-semibold mb-4">Management Pages</h2>
         <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <Card class="hover:bg-accent cursor-pointer transition-colors" @click="navigateTo('/sudo/plugins')">
+            <CardHeader>
+              <CardTitle class="flex items-center gap-2">
+                <Icon name="lucide:puzzle" class="h-5 w-5" />
+                Plugin Packages
+              </CardTitle>
+              <CardDescription>
+                Install official plugins and manage native bundles
+              </CardDescription>
+            </CardHeader>
+          </Card>
+
           <Card class="hover:bg-accent cursor-pointer transition-colors" @click="navigateTo('/sudo/storage')">
             <CardHeader>
               <CardTitle class="flex items-center gap-2">
@@ -276,4 +283,3 @@ const getStatusBadgeVariant = (status: string) => {
     </div>
   </div>
 </template>
-

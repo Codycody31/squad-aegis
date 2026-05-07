@@ -1,12 +1,15 @@
 package server
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/leighmacdonald/steamid/v3/steamid"
+	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/permissions"
@@ -44,16 +47,22 @@ func (s *Server) AuthLogin(c *gin.Context) {
 
 	user, err := core.AuthenticateUser(c.Copy(), tx, req.Username, req.Password)
 	if err != nil {
+		_ = tx.Rollback()
+		if errors.Is(err, core.ErrorInvalidPassword) || errors.Is(err, sql.ErrNoRows) {
+			log.Warn().Err(err).Str("username", req.Username).Str("client_ip", c.ClientIP()).Msg("Login failed")
+			responses.Unauthorized(c, "invalid credentials", nil)
+			return
+		}
+		log.Error().Err(err).Str("username", req.Username).Msg("AuthenticateUser failed")
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 
 	session, err := core.CreateSession(c.Copy(), tx, user.Id, c.ClientIP(), time.Hour*24)
 	if err != nil {
-		fmt.Println(err)
-		err := tx.Rollback()
-		if err != nil {
-			responses.InternalServerError(c, fmt.Errorf("failed to rollback transaction: %w", err), nil)
+		log.Error().Err(err).Msg("CreateSession failed")
+		if rbErr := tx.Rollback(); rbErr != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to rollback transaction: %w", rbErr), nil)
 			return
 		}
 		responses.InternalServerError(c, err, nil)
@@ -62,7 +71,7 @@ func (s *Server) AuthLogin(c *gin.Context) {
 
 	err = tx.Commit()
 	if err != nil {
-		fmt.Println(err)
+		log.Error().Err(err).Msg("login transaction commit failed")
 		responses.InternalServerError(c, err, nil)
 		return
 	}

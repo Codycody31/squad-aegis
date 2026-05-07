@@ -29,14 +29,10 @@ type SeedingModePlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "seeding_mode",
-		Name:                   "Seeding Mode",
-		Description:            "The Seeding Mode plugin broadcasts seeding rule messages to players at regular intervals when the server is below a specified player count. It can also be configured to display \"Live\" messages when the server goes live.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            true,
+		ID:          "seeding_mode",
+		Name:        "Seeding Mode",
+		Description: "The Seeding Mode plugin broadcasts seeding rule messages to players at regular intervals when the server is below a specified player count. It can also be configured to display \"Live\" messages when the server goes live.",
+		LongRunning: true,
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

@@ -27,14 +27,9 @@ type FogOfWarPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "fog_of_war",
-		Name:                   "Fog of War",
-		Description:            "The Fog of War plugin can be used to automate setting fog of war mode.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "fog_of_war",
+		Name:        "Fog of War",
+		Description: "The Fog of War plugin can be used to automate setting fog of war mode.",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

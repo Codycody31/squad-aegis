@@ -7,12 +7,9 @@ import { Button } from "~/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import type { GlobalAuditLog } from "~/types";
 
-definePageMeta({ middleware: "auth", layout: "sudo" });
+definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
 
 const runtimeConfig = useRuntimeConfig();
-const authStore = useAuthStore();
-
-if (!authStore.user?.super_admin) navigateTo("/dashboard");
 
 const loading = ref(true);
 const logs = ref<GlobalAuditLog[]>([]);

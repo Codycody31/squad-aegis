@@ -7,29 +7,30 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.codycody31.dev/squad-aegis/internal/models"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
 // SessionInfo represents session information for display
 type SessionInfo struct {
-	ID          uuid.UUID  `json:"id"`
-	UserID      uuid.UUID  `json:"user_id"`
-	Username    string     `json:"username"`
-	Token       string     `json:"token"` // Masked for security
-	CreatedAt   time.Time  `json:"created_at"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-	LastSeen    time.Time  `json:"last_seen"`
-	LastSeenIP  string     `json:"last_seen_ip"`
-	IsExpired   bool       `json:"is_expired"`
-	TimeRemaining string    `json:"time_remaining"`
+	ID            uuid.UUID  `json:"id"`
+	UserID        uuid.UUID  `json:"user_id"`
+	Username      string     `json:"username"`
+	Token         string     `json:"token"` // Masked for security
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	LastSeen      time.Time  `json:"last_seen"`
+	LastSeenIP    string     `json:"last_seen_ip"`
+	IsExpired     bool       `json:"is_expired"`
+	TimeRemaining string     `json:"time_remaining"`
 }
 
 // SessionStatsResponse represents session statistics
 type SessionStatsResponse struct {
-	TotalSessions    int                 `json:"total_sessions"`
-	ActiveSessions   int                 `json:"active_sessions"`
-	ExpiredSessions  int                 `json:"expired_sessions"`
-	SessionsByUser   []UserSessionCount  `json:"sessions_by_user"`
+	TotalSessions   int                `json:"total_sessions"`
+	ActiveSessions  int                `json:"active_sessions"`
+	ExpiredSessions int                `json:"expired_sessions"`
+	SessionsByUser  []UserSessionCount `json:"sessions_by_user"`
 }
 
 // UserSessionCount represents session count per user
@@ -125,7 +126,7 @@ func (s *Server) GetAllSessions(c *gin.Context) {
 		if expiresAt.Valid {
 			session.ExpiresAt = &expiresAt.Time
 			session.IsExpired = expiresAt.Time.Before(now)
-			
+
 			if !session.IsExpired {
 				duration := time.Until(expiresAt.Time)
 				session.TimeRemaining = formatSessionDuration(duration)
@@ -204,9 +205,11 @@ func (s *Server) DeleteSession(c *gin.Context) {
 		return
 	}
 
-	// Get current session to prevent self-logout
-	currentSession := c.MustGet("session").(*SessionInfo)
-	if currentSession.ID == sessionID {
+	// Get current session to prevent self-logout. Auth middleware stores
+	// *models.Session here; the prior assertion to *SessionInfo panicked on
+	// every call (gin recovery -> 500), so this endpoint never worked.
+	currentSession := c.MustGet("session").(*models.Session)
+	if currentSession.Id == sessionID {
 		responses.BadRequest(c, "Cannot delete your own session", nil)
 		return
 	}
@@ -227,6 +230,10 @@ func (s *Server) DeleteSession(c *gin.Context) {
 		return
 	}
 
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:session:delete", gin.H{
+		"session_id": sessionID.String(),
+	})
+
 	responses.SimpleSuccess(c, "Session deleted successfully")
 }
 
@@ -241,13 +248,15 @@ func (s *Server) DeleteUserSessions(c *gin.Context) {
 		return
 	}
 
-	// Get current session to prevent self-logout
-	currentSession := c.MustGet("session")
-	if currentSession != nil {
-		if sess, ok := currentSession.(*SessionInfo); ok && sess.UserID == userID {
-			responses.BadRequest(c, "Cannot delete your own sessions", nil)
-			return
-		}
+	// Get current session to prevent self-logout. Auth middleware stores
+	// *models.Session here; the prior assertion to *SessionInfo always
+	// failed silently, so the self-protection check was a no-op and a
+	// super-admin could purge their own user's sessions including the
+	// active one.
+	currentSession := c.MustGet("session").(*models.Session)
+	if currentSession.UserId == userID {
+		responses.BadRequest(c, "Cannot delete your own sessions", nil)
+		return
 	}
 
 	// Delete all sessions for the user
@@ -261,6 +270,11 @@ func (s *Server) DeleteUserSessions(c *gin.Context) {
 	}
 
 	rowsAffected, _ := result.RowsAffected()
+
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:session:delete_user", gin.H{
+		"user_id":       userID.String(),
+		"deleted_count": rowsAffected,
+	})
 
 	responses.Success(c, "User sessions deleted successfully", &gin.H{
 		"deleted_count": rowsAffected,
@@ -282,6 +296,10 @@ func (s *Server) CleanupExpiredSessions(c *gin.Context) {
 	}
 
 	rowsAffected, _ := result.RowsAffected()
+
+	s.CreateAuditLog(ctx, nil, s.pluginAuditActorID(c), "sudo:session:cleanup_expired", gin.H{
+		"deleted_count": rowsAffected,
+	})
 
 	responses.Success(c, "Expired sessions cleaned up successfully", &gin.H{
 		"deleted_count": rowsAffected,
@@ -306,4 +324,3 @@ func formatSessionDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%dm", minutes)
 }
-

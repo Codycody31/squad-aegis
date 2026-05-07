@@ -106,6 +106,44 @@ func IsSteamID(s string) bool {
 	return val >= 76561197960265728
 }
 
+// IsSquadID returns true if the string looks like an in-match Squad player ID.
+// Squad assigns small unsigned integer IDs (typically 1..hundreds) to players
+// in a match; the RCON command AdminRemovePlayerFromSquadById accepts these.
+// We accept 1-4 digit positive integers below the Steam ID floor to avoid
+// overlap with Steam IDs.
+func IsSquadID(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if len(s) > 4 {
+		return false
+	}
+	val, err := strconv.ParseUint(s, 10, 32)
+	if err != nil {
+		return false
+	}
+	return val > 0
+}
+
+// IsAnyPlayerID returns true if s is a recognized Steam, EOS, or Squad ID.
+// Squad IDs are only meaningful for in-match RCON commands; do not accept them
+// for ban/kick/warn flows that need persistent identifiers.
+func IsAnyPlayerID(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if IsSteamID(s) {
+		return true
+	}
+	normalizedEOS := NormalizeEOSID(s)
+	if IsEOSID(normalizedEOS) {
+		return true
+	}
+	return IsSquadID(s)
+}
+
 // SanitizeBanReason replaces newlines with spaces so ban reasons are safe for
 // single-line config formats like Bans.cfg.
 func SanitizeBanReason(reason string) string {

@@ -12,15 +12,15 @@ import (
 
 // MetricsOverviewResponse represents high-level instance metrics
 type MetricsOverviewResponse struct {
-	TotalServers       int     `json:"total_servers"`
-	ActiveServers      int     `json:"active_servers"`
-	TotalPlayers       int64   `json:"total_players"`
-	TotalEvents        int64   `json:"total_events"`
-	EventsThisWeek     int64   `json:"events_this_week"`
-	EventsThisMonth    int64   `json:"events_this_month"`
-	TotalChatMessages  int64   `json:"total_chat_messages"`
-	TotalWorkflowRuns  int64   `json:"total_workflow_runs"`
-	StorageUsed        int64   `json:"storage_used"`
+	TotalServers        int    `json:"total_servers"`
+	ActiveServers       int    `json:"active_servers"`
+	TotalPlayers        int64  `json:"total_players"`
+	TotalEvents         int64  `json:"total_events"`
+	EventsThisWeek      int64  `json:"events_this_week"`
+	EventsThisMonth     int64  `json:"events_this_month"`
+	TotalChatMessages   int64  `json:"total_chat_messages"`
+	TotalWorkflowRuns   int64  `json:"total_workflow_runs"`
+	StorageUsed         int64  `json:"storage_used"`
 	StorageUsedReadable string `json:"storage_used_readable"`
 }
 
@@ -32,21 +32,21 @@ type MetricsTimelinePoint struct {
 
 // MetricsTimelineResponse represents time-series metrics data
 type MetricsTimelineResponse struct {
-	EventsOverTime []MetricsTimelinePoint `json:"events_over_time"`
-	ChatOverTime   []MetricsTimelinePoint `json:"chat_over_time"`
+	EventsOverTime  []MetricsTimelinePoint `json:"events_over_time"`
+	ChatOverTime    []MetricsTimelinePoint `json:"chat_over_time"`
 	PlayersOverTime []MetricsTimelinePoint `json:"players_over_time"`
 }
 
 // ServerActivityResponse represents per-server activity metrics
 type ServerActivityResponse struct {
-	ServerID        string `json:"server_id"`
-	ServerName      string `json:"server_name"`
-	TotalEvents     int64  `json:"total_events"`
-	ChatMessages    int64  `json:"chat_messages"`
-	UniquePlayers   int64  `json:"unique_players"`
-	WorkflowRuns    int64  `json:"workflow_runs"`
-	AvgPlayerCount  float64 `json:"avg_player_count"`
-	LastActivity    string `json:"last_activity"`
+	ServerID       string  `json:"server_id"`
+	ServerName     string  `json:"server_name"`
+	TotalEvents    int64   `json:"total_events"`
+	ChatMessages   int64   `json:"chat_messages"`
+	UniquePlayers  int64   `json:"unique_players"`
+	WorkflowRuns   int64   `json:"workflow_runs"`
+	AvgPlayerCount float64 `json:"avg_player_count"`
+	LastActivity   string  `json:"last_activity"`
 }
 
 // TopServersResponse represents the most active servers
@@ -93,15 +93,15 @@ func (s *Server) GetMetricsOverview(c *gin.Context) {
 
 		// Get total events (approximate from multiple tables)
 		var chatCount, playerCount, woundedCount int64
-		
+
 		s.Dependencies.Clickhouse.QueryRow(ctx, `
 			SELECT COUNT(*) FROM squad_aegis.server_player_chat_messages
 		`).Scan(&chatCount)
-		
+
 		s.Dependencies.Clickhouse.QueryRow(ctx, `
 			SELECT COUNT(*) FROM squad_aegis.server_player_connected
 		`).Scan(&playerCount)
-		
+
 		s.Dependencies.Clickhouse.QueryRow(ctx, `
 			SELECT COUNT(*) FROM squad_aegis.server_player_wounded
 		`).Scan(&woundedCount)
@@ -170,7 +170,7 @@ func (s *Server) GetMetricsTimeline(c *gin.Context) {
 			GROUP BY date
 			ORDER BY date
 		`, days)
-		
+
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -195,7 +195,7 @@ func (s *Server) GetMetricsTimeline(c *gin.Context) {
 			GROUP BY date
 			ORDER BY date
 		`, days)
-		
+
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -220,7 +220,7 @@ func (s *Server) GetMetricsTimeline(c *gin.Context) {
 			GROUP BY date
 			ORDER BY date
 		`, days)
-		
+
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
@@ -307,7 +307,7 @@ func (s *Server) GetServerActivities(c *gin.Context) {
 			FROM squad_aegis.server_info_metrics
 			WHERE server_id = ? AND event_time >= now() - INTERVAL 30 DAY
 		`, serverID).Scan(&avgPlayers)
-		
+
 		if avgPlayers.Valid {
 			activity.AvgPlayerCount = avgPlayers.Float64
 		}
@@ -437,4 +437,3 @@ func (s *Server) GetTopServers(c *gin.Context) {
 
 	responses.Success(c, "Top servers retrieved successfully", &gin.H{"data": topServers})
 }
-

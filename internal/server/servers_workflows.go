@@ -28,8 +28,6 @@ func (s *Server) ServerWorkflowsList(c *gin.Context) {
 		return
 	}
 
-	// TODO: Check if user has access to this server
-
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 	workflows, err := workflowDB.GetWorkflowsByServerID(serverID)
 	if err != nil {

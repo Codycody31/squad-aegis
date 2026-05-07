@@ -227,4 +227,3 @@ func (s *S3Storage) GetStats(ctx context.Context) (*StorageStats, error) {
 
 	return stats, nil
 }
-

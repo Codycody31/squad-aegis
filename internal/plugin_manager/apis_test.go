@@ -1,74 +1,213 @@
 package plugin_manager
 
-import "testing"
+import (
+	"context"
+	"database/sql"
+	"strings"
+	"testing"
 
-func TestHasMultipleSQLStatements(t *testing.T) {
+	"github.com/google/uuid"
+)
+
+func TestMissingRequiredCapabilitiesSupportsScopedPluginAPIs(t *testing.T) {
 	t.Parallel()
 
+	if missing := missingRequiredCapabilities([]string{
+		NativePluginCapabilityAPIRule,
+		NativePluginCapabilityAPIDiscord,
+		NativePluginCapabilityAPIConnector,
+		NativePluginCapabilityAPIRCON,
+	}); len(missing) != 0 {
+		t.Fatalf("missingRequiredCapabilities() = %v, want no missing capabilities", missing)
+	}
+
+	if missing := missingRequiredCapabilities([]string{"api.fake"}); len(missing) != 1 || missing[0] != "api.fake" {
+		t.Fatalf("missingRequiredCapabilities() = %v, want [api.fake]", missing)
+	}
+}
+
+func TestNativePluginHostCapabilitiesIncludesScopedPluginAPIs(t *testing.T) {
+	t.Parallel()
+
+	capabilities := NativePluginHostCapabilities()
+	want := map[string]bool{
+		NativePluginCapabilityAPIDatabase:  true,
+		NativePluginCapabilityAPIRule:      true,
+		NativePluginCapabilityAPIDiscord:   true,
+		NativePluginCapabilityAPIConnector: true,
+	}
+
+	for _, capability := range capabilities {
+		delete(want, capability)
+	}
+
+	if len(want) != 0 {
+		t.Fatalf("NativePluginHostCapabilities() missing expected capabilities: %v", want)
+	}
+}
+
+func TestCreatePluginAPIsScopesNativeManifestCapabilities(t *testing.T) {
+	t.Parallel()
+
+	const pluginID = "com.example.scoped"
+	pm := &PluginManager{
+		registry:          NewPluginRegistry(),
+		connectorRegistry: NewConnectorRegistry(),
+		connectors:        make(map[string]*ConnectorInstance),
+		nativePackages: map[string]*InstalledPluginPackage{
+			pluginID: {
+				PluginID:             pluginID,
+				Name:                 "Scoped Native Plugin",
+				Source:               PluginSourceNative,
+				InstallState:         PluginInstallStateReady,
+				RequiredCapabilities: []string{NativePluginCapabilityAPILog},
+			},
+		},
+	}
+	if err := pm.registry.RegisterPlugin(PluginDefinition{
+		ID:             pluginID,
+		Source:         PluginSourceNative,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("RegisterPlugin() error = %v", err)
+	}
+
+	apis := pm.createPluginAPIs(context.Background(), uuid.New(), uuid.New(), "Scoped Native Plugin", pluginID, "info")
+	if apis.LogAPI == nil {
+		t.Fatal("LogAPI = nil, want exposed api.log capability")
+	}
+	if apis.ServerAPI != nil ||
+		apis.DatabaseAPI != nil ||
+		apis.RuleAPI != nil ||
+		apis.RconAPI != nil ||
+		apis.AdminAPI != nil ||
+		apis.EventAPI != nil ||
+		apis.DiscordAPI != nil ||
+		apis.ConnectorAPI != nil {
+		t.Fatalf("createPluginAPIs() exposed undeclared native capabilities: %+v", apis)
+	}
+}
+
+func TestCreatePluginAPIsKeepsBundledPluginsUnscoped(t *testing.T) {
+	t.Parallel()
+
+	const pluginID = "com.example.bundled"
+	pm := &PluginManager{
+		registry:          NewPluginRegistry(),
+		connectorRegistry: NewConnectorRegistry(),
+		connectors:        make(map[string]*ConnectorInstance),
+	}
+	if err := pm.registry.RegisterPlugin(PluginDefinition{
+		ID:             pluginID,
+		Source:         PluginSourceBundled,
+		CreateInstance: func() Plugin { return &noopPlugin{} },
+	}); err != nil {
+		t.Fatalf("RegisterPlugin() error = %v", err)
+	}
+
+	apis := pm.createPluginAPIs(context.Background(), uuid.New(), uuid.New(), "Bundled Plugin", pluginID, "info")
+	if apis.ServerAPI == nil ||
+		apis.DatabaseAPI == nil ||
+		apis.RuleAPI == nil ||
+		apis.RconAPI == nil ||
+		apis.AdminAPI == nil ||
+		apis.EventAPI == nil ||
+		apis.LogAPI == nil ||
+		apis.ConnectorAPI == nil {
+		t.Fatalf("createPluginAPIs() scoped a bundled plugin unexpectedly: %+v", apis)
+	}
+}
+
+func TestValidateManagedAdminRecordOwnership(t *testing.T) {
+	t.Parallel()
+
+	pluginInstanceID := uuid.New()
+	otherPluginInstanceID := uuid.New()
+
 	tests := []struct {
-		name  string
-		query string
-		want  bool
+		name    string
+		records []managedAdminRecord
+		wantIDs int
+		wantErr string
 	}{
 		{
-			name:  "allows single select without semicolon",
-			query: "SELECT 1",
-			want:  false,
+			name: "owned records are accepted",
+			records: []managedAdminRecord{
+				{
+					ID: uuid.New(),
+					ManagedByPluginInstance: sql.NullString{
+						String: pluginInstanceID.String(),
+						Valid:  true,
+					},
+				},
+				{
+					ID: uuid.New(),
+					ManagedByPluginInstance: sql.NullString{
+						String: pluginInstanceID.String(),
+						Valid:  true,
+					},
+				},
+			},
+			wantIDs: 2,
 		},
 		{
-			name:  "allows trailing semicolon",
-			query: "SELECT 1;",
-			want:  false,
+			name: "unmanaged records are rejected",
+			records: []managedAdminRecord{
+				{
+					ID:                      uuid.New(),
+					ManagedByPluginInstance: sql.NullString{},
+				},
+			},
+			wantErr: "not managed by this plugin",
 		},
 		{
-			name:  "allows trailing semicolon with comment",
-			query: "SELECT 1; -- keep this query readable",
-			want:  false,
+			name: "records owned by another plugin are rejected",
+			records: []managedAdminRecord{
+				{
+					ID: uuid.New(),
+					ManagedByPluginInstance: sql.NullString{
+						String: otherPluginInstanceID.String(),
+						Valid:  true,
+					},
+				},
+			},
+			wantErr: "managed by another plugin",
 		},
 		{
-			name:  "allows semicolon inside string literal",
-			query: "SELECT ';' AS separator;",
-			want:  false,
-		},
-		{
-			name:  "allows semicolon inside quoted identifier",
-			query: `SELECT "semi;colon" FROM "table";`,
-			want:  false,
-		},
-		{
-			name:  "allows semicolon inside block comment",
-			query: "SELECT 1 /* ; */;",
-			want:  false,
-		},
-		{
-			name:  "allows semicolon inside dollar-quoted string",
-			query: "SELECT $$;$$;",
-			want:  false,
-		},
-		{
-			name:  "rejects second statement",
-			query: "SELECT 1; SELECT 2",
-			want:  true,
-		},
-		{
-			name:  "rejects second statement after comment",
-			query: "SELECT 1; -- done\nSELECT 2",
-			want:  true,
-		},
-		{
-			name:  "rejects duplicate top-level semicolons",
-			query: "SELECT 1;;",
-			want:  true,
+			name: "invalid owner IDs are rejected",
+			records: []managedAdminRecord{
+				{
+					ID: uuid.New(),
+					ManagedByPluginInstance: sql.NullString{
+						String: "not-a-uuid",
+						Valid:  true,
+					},
+				},
+			},
+			wantErr: "invalid plugin ownership",
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := hasMultipleSQLStatements(tt.query); got != tt.want {
-				t.Fatalf("hasMultipleSQLStatements(%q) = %v, want %v", tt.query, got, tt.want)
+			ids, err := validateManagedAdminRecordOwnership(tt.records, pluginInstanceID)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("validateManagedAdminRecordOwnership() error = nil, want %q", tt.wantErr)
+				}
+				if got := err.Error(); !strings.Contains(got, tt.wantErr) {
+					t.Fatalf("validateManagedAdminRecordOwnership() error = %q, want substring %q", got, tt.wantErr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("validateManagedAdminRecordOwnership() error = %v", err)
+			}
+			if len(ids) != tt.wantIDs {
+				t.Fatalf("validateManagedAdminRecordOwnership() len = %d, want %d", len(ids), tt.wantIDs)
 			}
 		})
 	}

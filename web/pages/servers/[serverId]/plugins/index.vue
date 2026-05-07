@@ -68,6 +68,11 @@ import {
 } from "lucide-vue-next";
 import PluginKVStore from "~/components/PluginKVStore.vue";
 import PluginCommandsModal from "~/components/PluginCommandsModal.vue";
+import { initializeConfigFromSchema } from "~/composables/useConfigSchema";
+import type {
+    PluginInstance,
+    PluginDefinition,
+} from "~/types";
 import {
     Sheet,
     SheetContent,
@@ -92,8 +97,8 @@ const authStore = useAuthStore();
 
 // State variables
 const loading = ref(true);
-const plugins = ref<any[]>([]);
-const availablePlugins = ref<any[]>([]);
+const plugins = ref<PluginInstance[]>([]);
+const availablePlugins = ref<PluginDefinition[]>([]);
 const selectedPlugin = ref<string>("");
 const showAddDialog = ref(false);
 const showConfigDialog = ref(false);
@@ -180,6 +185,27 @@ const getStatusIcon = (status: string) => {
         default:
             return CheckCircle;
     }
+};
+
+const getPluginMetadata = (plugin: any) => {
+    return (
+        availablePlugins.value.find((p) => p.id === plugin.plugin_id) || plugin
+    );
+};
+
+const getPluginSourceLabel = (plugin: any) => {
+    const metadata = getPluginMetadata(plugin);
+    if (metadata.source === "bundled") {
+        return "Bundled";
+    }
+    return "Sideload Native";
+};
+
+const formatInstallState = (state: string) => {
+    if (!state) {
+        return "";
+    }
+    return state.replaceAll("_", " ");
 };
 
 // Load plugins for this server
@@ -284,7 +310,7 @@ const togglePlugin = async (plugin: any, newState: boolean) => {
 // Delete plugin instance
 const deletePlugin = async (plugin: any) => {
     if (
-        !confirm(`Are you sure you want to delete the plugin "${plugin.name}"?`)
+        !confirm(`Are you sure you want to delete the plugin "${plugin.plugin_name}"?`)
     ) {
         return;
     }
@@ -314,103 +340,16 @@ const deletePlugin = async (plugin: any) => {
 const configurePlugin = (plugin: any) => {
     currentPlugin.value = plugin;
 
-    // Deep copy and convert values to proper types
-    const config = JSON.parse(JSON.stringify(plugin.config || {}));
+    const baseConfig = (plugin.config || {}) as Record<string, unknown>;
     const pluginDef = availablePlugins.value.find(
         (p) => p.id === plugin.plugin_id,
     );
 
-    if (pluginDef?.config_schema?.fields) {
-        // Initialize config with schema-aware defaults
-        initializeConfigFromSchema(config, pluginDef.config_schema.fields);
-    }
-
-    pluginConfig.value = config;
+    pluginConfig.value = pluginDef?.config_schema?.fields
+        ? initializeConfigFromSchema(baseConfig, pluginDef.config_schema.fields)
+        : { ...baseConfig };
     pluginLogLevel.value = plugin.log_level || "info";
     showConfigDialog.value = true;
-};
-
-// Initialize config values based on schema
-const initializeConfigFromSchema = (config: any, fields: any[]) => {
-    fields.forEach((field: any) => {
-        if (field.type === "bool") {
-            if (config[field.name] !== undefined) {
-                if (typeof config[field.name] === "string") {
-                    config[field.name] =
-                        config[field.name] === "true" ||
-                        config[field.name] === "1";
-                } else {
-                    config[field.name] = Boolean(config[field.name]);
-                }
-            } else {
-                config[field.name] =
-                    field.default !== undefined
-                        ? Boolean(field.default)
-                        : false;
-            }
-        } else if (field.sensitive && config[field.name] === "***MASKED***") {
-            config[field.name] = "";
-        } else if (field.type === "arraystring") {
-            if (config[field.name] && !Array.isArray(config[field.name])) {
-                if (typeof config[field.name] === "string") {
-                    config[field.name] = config[field.name]
-                        .split(",")
-                        .map((s: string) => s.trim())
-                        .filter((s: string) => s.length > 0);
-                }
-            } else if (!config[field.name]) {
-                config[field.name] = field.default || [];
-            }
-        } else if (field.type === "arrayint") {
-            if (config[field.name] && !Array.isArray(config[field.name])) {
-                if (typeof config[field.name] === "string") {
-                    config[field.name] = config[field.name]
-                        .split(",")
-                        .map((s: string) => parseInt(s.trim()))
-                        .filter((n: number) => !isNaN(n));
-                }
-            } else if (!config[field.name]) {
-                config[field.name] = field.default || [];
-            }
-        } else if (field.type === "arraybool") {
-            if (!config[field.name]) {
-                config[field.name] = field.default || [];
-            }
-        } else if (field.type === "arrayobject") {
-            if (!config[field.name]) {
-                config[field.name] = field.default || [];
-            }
-            // Initialize nested objects in array
-            if (
-                Array.isArray(config[field.name]) &&
-                field.nested &&
-                field.nested.length > 0
-            ) {
-                config[field.name].forEach((item: any) => {
-                    if (typeof item === "object" && item !== null) {
-                        initializeConfigFromSchema(item, field.nested);
-                    }
-                });
-            }
-        } else if (field.type === "object") {
-            if (!config[field.name]) {
-                config[field.name] = field.default || {};
-            }
-            if (field.nested && field.nested.length > 0) {
-                initializeConfigFromSchema(config[field.name], field.nested);
-            }
-        } else if (field.type === "int") {
-            if (config[field.name] === undefined) {
-                config[field.name] =
-                    field.default !== undefined ? field.default : 0;
-            }
-        } else if (field.type === "string") {
-            if (config[field.name] === undefined) {
-                config[field.name] =
-                    field.default !== undefined ? field.default : "";
-            }
-        }
-    });
 };
 
 // Save plugin configuration
@@ -453,10 +392,8 @@ const onPluginSelect = (pluginId: any) => {
     selectedPlugin.value = pluginId || "";
     const plugin = availablePlugins.value.find((p) => p.id === pluginId);
     if (plugin?.config_schema?.fields) {
-        // Initialize config with schema-aware defaults
-        pluginConfig.value = {};
-        initializeConfigFromSchema(
-            pluginConfig.value,
+        pluginConfig.value = initializeConfigFromSchema(
+            {},
             plugin.config_schema.fields,
         );
     }
@@ -468,10 +405,8 @@ const onComboboxPluginSelect = (plugin: any) => {
     showPluginDropdown.value = false;
 
     if (plugin?.config_schema?.fields) {
-        // Initialize config with schema-aware defaults
-        pluginConfig.value = {};
-        initializeConfigFromSchema(
-            pluginConfig.value,
+        pluginConfig.value = initializeConfigFromSchema(
+            {},
             plugin.config_schema.fields,
         );
     }
@@ -762,10 +697,9 @@ const addArrayObjectItem = (fieldName: string, nestedFields: any[]) => {
         pluginConfig.value[fieldName] = [];
     }
 
-    const newItem: Record<string, any> = {};
-    initializeConfigFromSchema(newItem, nestedFields);
-
-    pluginConfig.value[fieldName].push(newItem);
+    pluginConfig.value[fieldName].push(
+        initializeConfigFromSchema({}, nestedFields),
+    );
 };
 
 const removeArrayObjectItem = (fieldName: string, index: number) => {
@@ -1487,19 +1421,35 @@ onMounted(async () => {
                                 class="hover:bg-muted/50"
                             >
                                 <TableCell>
-                                    <div class="flex flex-col">
+                                    <div class="flex flex-col gap-2">
                                         <span class="font-medium">{{
                                             plugin.plugin_name
                                         }}</span>
+                                        <div class="flex flex-wrap gap-2">
+                                            <Badge variant="outline">
+                                                {{ getPluginSourceLabel(plugin) }}
+                                            </Badge>
+                                            <Badge
+                                                v-if="getPluginMetadata(plugin).official"
+                                                variant="default"
+                                            >
+                                                Official
+                                            </Badge>
+                                            <Badge
+                                                v-if="plugin.install_state && plugin.install_state !== 'ready'"
+                                                variant="secondary"
+                                                class="capitalize"
+                                            >
+                                                {{ formatInstallState(plugin.install_state) }}
+                                            </Badge>
+                                        </div>
                                     </div>
                                 </TableCell>
                                 <TableCell class="font-medium">
                                     <span class="text-sm text-muted-foreground">
                                         {{
-                                            availablePlugins.find(
-                                                (p) =>
-                                                    p.id === plugin.plugin_id,
-                                            )?.description
+                                            getPluginMetadata(plugin).description ||
+                                            "Plugin metadata is unavailable until the package is ready."
                                         }}
                                     </span>
                                 </TableCell>
@@ -1649,7 +1599,7 @@ onMounted(async () => {
             <DialogContent class="sm:max-w-2xl max-h-[90vh] flex flex-col">
                 <DialogHeader>
                     <DialogTitle
-                        >Configure {{ currentPlugin?.name }}</DialogTitle
+                        >Configure {{ currentPlugin?.plugin_name }}</DialogTitle
                     >
                     <DialogDescription>
                         Update the configuration for this plugin instance.
@@ -2251,7 +2201,7 @@ onMounted(async () => {
                                     <Button
                                         variant="destructive"
                                         size="sm"
-                                        @click="deleteDataItem(item)"
+                                        @click="deleteDataItem(item.key)"
                                         title="Delete"
                                     >
                                         <Trash2 class="w-4 h-4" />
