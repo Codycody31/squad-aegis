@@ -38,14 +38,9 @@ type ChatAutoModPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "chat_automod",
-		Name:                   "Chat AutoMod",
-		Description:            "Automatically moderates chat for hate speech, slurs, discrimination, and other rule violations with escalating consequences.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "chat_automod",
+		Name:        "Chat AutoMod",
+		Description: "Automatically moderates chat for hate speech, slurs, discrimination, and other rule violations with escalating consequences.",
 
 		ConfigSchema: getConfigSchema(),
 
@@ -596,42 +591,37 @@ func (p *ChatAutoModPlugin) getServerRuleActions() ([]EscalationAction, error) {
 		return nil, fmt.Errorf("rule_id not configured")
 	}
 
-	query := `
-		SELECT violation_count, action_type, duration, message
-		FROM server_rule_actions
-		WHERE rule_id = $1
-		ORDER BY violation_count ASC
-	`
+	if p.apis.RuleAPI == nil {
+		return nil, fmt.Errorf("rule API is not available")
+	}
 
-	rows, err := p.apis.DatabaseAPI.ExecuteQuery(query, ruleID)
+	actions, err := p.apis.RuleAPI.ListServerRuleActions(ruleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query server rule actions: %w", err)
 	}
-	defer rows.Close()
 
-	var actions []EscalationAction
-	for rows.Next() {
-		var action EscalationAction
-		var duration *int
-		var message *string
-
-		if err := rows.Scan(&action.ViolationCount, &action.Action, &duration, &message); err != nil {
-			return nil, fmt.Errorf("failed to scan rule action: %w", err)
+	result := make([]EscalationAction, 0, len(actions))
+	for _, ruleAction := range actions {
+		if ruleAction == nil {
+			continue
 		}
 
-		if duration != nil {
-			action.BanDurationDays = *duration
+		action := EscalationAction{
+			ViolationCount: ruleAction.ViolationCount,
+			Action:         ruleAction.ActionType,
+			Message:        "Server rule violation",
 		}
-		if message != nil {
-			action.Message = *message
-		} else {
-			action.Message = "Server rule violation"
+		if ruleAction.Duration != nil {
+			action.BanDurationDays = *ruleAction.Duration
+		}
+		if ruleAction.Message != "" {
+			action.Message = ruleAction.Message
 		}
 
-		actions = append(actions, action)
+		result = append(result, action)
 	}
 
-	return actions, nil
+	return result, nil
 }
 
 // isPlayerAdmin checks if a player is a server admin (cached).

@@ -24,6 +24,7 @@ make test            # Run tests with coverage
 make lint            # Run golangci-lint
 make format          # Format code with gofumpt
 make generate        # Run code generation
+make generate-proto  # Regenerate native plugin/connector gRPC stubs (pkg/pluginrpc/proto, pkg/connectorrpc/proto)
 make vendor          # Update vendor directory
 ```
 
@@ -65,7 +66,7 @@ The plugin system allows extending server functionality:
 
 - **plugin_manager/**: Plugin lifecycle management, interfaces, and APIs
   - `Plugin` interface: `GetDefinition()`, `Initialize()`, `Start()`, `Stop()`, `HandleEvent()`
-  - `PluginAPIs`: Provides `ServerAPI`, `RconAPI`, `DatabaseAPI`, `AdminAPI`, `EventAPI`, `ConnectorAPI`, `LogAPI`
+  - `PluginAPIs`: Provides `ServerAPI`, `RconAPI`, `DatabaseAPI`, `RuleAPI`, `AdminAPI`, `EventAPI`, `DiscordAPI`, `LogAPI`
 - **plugins/**: Individual plugin implementations (one directory per plugin)
 - **connectors/**: Global service connectors (e.g., Discord integration in `connectors/discord/`)
 - **plugin_registry/**: Registers all available plugins and connectors

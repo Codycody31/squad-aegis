@@ -50,14 +50,9 @@ type KillBroadcastPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "kill_broadcast",
-		Name:                   "Kill Broadcast",
-		Description:            "Broadcast to the Squad server when a player gets a certain type of kill.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "kill_broadcast",
+		Name:        "Kill Broadcast",
+		Description: "Broadcast to the Squad server when a player gets a certain type of kill.",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

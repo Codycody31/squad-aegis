@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.codycody31.dev/squad-aegis/internal/models"
@@ -28,9 +29,12 @@ func (s *Server) authSession(c *gin.Context, required bool) {
 		sessionToken = sessionToken[7:]
 	}
 
-	// If no Authorization header, check for token in query parameter (for SSE/WebSocket connections)
+	// Only allow query parameter tokens for upgrade-style requests plus the
+	// storage download endpoint that currently relies on window.open().
 	if sessionToken == "" {
-		sessionToken = c.Query("token")
+		if allowQueryTokenAuth(c) {
+			sessionToken = c.Query("token")
+		}
 	}
 
 	// If still no token, check for cookies (try multiple cookie names)
@@ -48,7 +52,7 @@ func (s *Server) authSession(c *gin.Context, required bool) {
 	dests := []any{&session.Id, &session.UserId, &session.Token, &session.CreatedAt, &session.ExpiresAt, &session.LastSeen, &session.LastSeenIp}
 
 	// Check if the session token provided is valid
-	row := s.Dependencies.DB.QueryRow("SELECT * FROM sessions WHERE token = $1 AND (expires_at IS NULL OR expires_at > NOW())", sessionToken)
+	row := s.Dependencies.DB.QueryRow("SELECT id, user_id, token, created_at, expires_at, last_seen, last_seen_ip FROM sessions WHERE token = $1 AND (expires_at IS NULL OR expires_at > NOW())", sessionToken)
 	if err := row.Scan(dests...); err != nil {
 		if required {
 			responses.Unauthorized(c, "Unauthorized", nil)
@@ -67,6 +71,27 @@ func (s *Server) authSession(c *gin.Context, required bool) {
 	}
 
 	c.Set("session", session)
+}
+
+func allowQueryTokenAuth(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+
+	path := c.Request.URL.Path
+	if c.GetHeader("Upgrade") == "websocket" ||
+		c.GetHeader("Accept") == "text/event-stream" ||
+		strings.HasSuffix(path, "/ws") ||
+		strings.HasSuffix(path, "/events") {
+		return true
+	}
+
+	if c.Request.Method != http.MethodGet {
+		return false
+	}
+
+	return strings.HasPrefix(path, "/api/sudo/storage/files/") ||
+		strings.HasPrefix(path, "/sudo/storage/files/")
 }
 
 // AuthIsSuperAdmin checks if the user is a super admin, if not it returns a 403 Forbidden response

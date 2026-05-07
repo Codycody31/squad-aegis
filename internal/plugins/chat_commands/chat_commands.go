@@ -38,14 +38,9 @@ type ChatCommandsPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "chat_commands",
-		Name:                   "Chat Commands",
-		Description:            "The Chat Commands plugin can be configured to make chat commands that broadcast or warn the caller with preset messages.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{},
-		LongRunning:            false,
+		ID:          "chat_commands",
+		Name:        "Chat Commands",
+		Description: "The Chat Commands plugin can be configured to make chat commands that broadcast or warn the caller with preset messages.",
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{

@@ -6,12 +6,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~
 import { Button } from "~/components/ui/button";
 import type { PostgreSQLStats, ClickHouseStats } from "~/types";
 
-definePageMeta({ middleware: "auth", layout: "sudo" });
+definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
 
 const runtimeConfig = useRuntimeConfig();
 const authStore = useAuthStore();
-
-if (!authStore.user?.super_admin) navigateTo("/dashboard");
 
 const loading = ref(true);
 const pgStats = ref<PostgreSQLStats | null>(null);

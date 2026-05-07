@@ -161,10 +161,11 @@ classDiagram
     class PluginAPIs {
         +ServerAPI
         +DatabaseAPI
+        +RuleAPI
         +RconAPI
         +AdminAPI
         +EventAPI
-        +ConnectorAPI
+        +DiscordAPI
         +LogAPI
     }
     

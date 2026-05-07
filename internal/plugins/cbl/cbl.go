@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"go.codycody31.dev/squad-aegis/internal/connectors/discord"
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/shared/plug_config_schema"
@@ -70,7 +69,7 @@ type CBLPlugin struct {
 	apis   *plugin_manager.PluginAPIs
 
 	// Discord connector
-	discordAPI discord.DiscordAPI
+	discordAPI plugin_manager.DiscordAPI
 
 	// State management
 	mu     sync.Mutex
@@ -85,14 +84,10 @@ type CBLPlugin struct {
 // Define returns the plugin definition
 func Define() plugin_manager.PluginDefinition {
 	return plugin_manager.PluginDefinition{
-		ID:                     "cbl",
-		Name:                   "Community Ban List",
-		Description:            "The CBL plugin alerts admins when a harmful player is detected joining their server based on data from the Community Ban List.",
-		Version:                "1.0.0",
-		Author:                 "Squad Aegis",
-		AllowMultipleInstances: false,
-		RequiredConnectors:     []string{"discord"},
-		LongRunning:            false,
+		ID:                 "cbl",
+		Name:               "Community Ban List",
+		Description:        "The CBL plugin alerts admins when a harmful player is detected joining their server based on data from the Community Ban List.",
+		RequiredConnectors: []string{"discord"},
 
 		ConfigSchema: plug_config_schema.ConfigSchema{
 			Fields: []plug_config_schema.ConfigField{
@@ -179,18 +174,10 @@ func (p *CBLPlugin) Initialize(config map[string]interface{}, apis *plugin_manag
 	// Fill defaults
 	definition.ConfigSchema.FillDefaults(config)
 
-	// Get Discord connector
-	discordConnector, err := apis.ConnectorAPI.GetConnector("discord")
-	if err != nil {
-		return fmt.Errorf("failed to get Discord connector: %w", err)
+	if apis.DiscordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
 	}
-
-	// Type assertion
-	var ok bool
-	p.discordAPI, ok = discordConnector.(discord.DiscordAPI)
-	if !ok {
-		return fmt.Errorf("invalid Discord connector type")
-	}
+	p.discordAPI = apis.DiscordAPI
 
 	// Initialize HTTP client
 	timeout := p.getIntConfig("api_timeout_seconds")
@@ -491,14 +478,14 @@ func (p *CBLPlugin) sendDiscordAlert(user *CBLUser, event *event_manager.LogPlay
 		playerName = user.Name
 	}
 
-	embed := &discord.DiscordEmbed{
+	embed := &plugin_manager.DiscordEmbed{
 		Title: fmt.Sprintf("%s is a potentially harmful player!", playerName),
-		Thumbnail: &discord.DiscordEmbedThumbnail{
+		Thumbnail: &plugin_manager.DiscordEmbedThumbnail{
 			URL: user.AvatarFull,
 		},
 		Description: fmt.Sprintf("[%s](https://communitybanlist.com/search/%s) has %d reputation points on the Community Ban List and is therefore a potentially harmful player.",
 			playerName, event.SteamID, user.ReputationPoints),
-		Fields: []*discord.DiscordEmbedField{
+		Fields: []*plugin_manager.DiscordEmbedField{
 			{
 				Name:   "Reputation Points",
 				Value:  fmt.Sprintf("%d (%d from this month)", user.ReputationPoints, user.ReputationPointsMonthChange),
@@ -526,7 +513,7 @@ func (p *CBLPlugin) sendDiscordAlert(user *CBLUser, event *event_manager.LogPlay
 			},
 		},
 		Color: 0xffc40b, // #ffc40b
-		Footer: &discord.DiscordEmbedFooter{
+		Footer: &plugin_manager.DiscordEmbedFooter{
 			Text: "Powered by Squad Aegis and the Community Ban List",
 		},
 		Timestamp: func() *time.Time { t := time.Now(); return &t }(),
