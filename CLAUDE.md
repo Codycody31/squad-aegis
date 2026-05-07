@@ -8,7 +8,7 @@ Squad Aegis is a comprehensive control panel for Squad game server administratio
 
 ## Tech Stack
 
-- **Backend**: Go 1.24+ with Gin HTTP framework
+- **Backend**: Go 1.25+ with Gin HTTP framework
 - **Frontend**: Nuxt 3 (Vue 3) with TypeScript, Tailwind CSS, shadcn-vue components
 - **Databases**: PostgreSQL (primary), ClickHouse (analytics/events), Valkey (caching)
 - **Documentation**: Next.js with Fumadocs
