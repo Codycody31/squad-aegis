@@ -58,7 +58,7 @@ type Struct struct {
 			SecretAccessKey string `default:""`
 			Endpoint        string `default:""` // Optional: for S3-compatible services (MinIO, etc.)
 			UseSSL          bool   `default:"true"`
-		}
+		} `env:"S3" yaml:"s3" flag:"s3"`
 	}
 	Plugins struct {
 		NativeEnabled       bool   `default:"true"`
