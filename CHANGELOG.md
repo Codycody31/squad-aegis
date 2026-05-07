@@ -1,10 +1,14 @@
 # Changelog
 
-## [0.9.4](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.4) - 2026-04-14
+## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-07
 
 ### ❤️ Thanks to all contributors! ❤️
 
-@Insidious Fiddler
+@Codycody31, @Insidious Fiddler
+
+### ✨ Features
+
+- feat(plugins): native plugin and connector runtime [[#206](https://github.com/Codycody31/squad-aegis/pull/206)]
 
 ### Misc
 
