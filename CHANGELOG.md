@@ -10,6 +10,10 @@
 
 - feat(plugins): native plugin and connector runtime [[#206](https://github.com/Codycody31/squad-aegis/pull/206)]
 
+### 📈 Enhancement
+
+- refactor: expand server_rules title column to text [[#213](https://github.com/Codycody31/squad-aegis/pull/213)]
+
 ### Misc
 
 - chore: security policy documentation ([14ed269](https://github.com/Codycody31/squad-aegis/commit/14ed2693ffbe65e1e075931d27cac45cceb4a0f7))
