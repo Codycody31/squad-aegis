@@ -93,7 +93,7 @@ async function fetchPluginData() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to fetch plugin data",
+            description: extractApiErrorMessage(err, "Failed to fetch plugin data"),
             variant: "destructive",
         });
     } finally {
@@ -150,7 +150,7 @@ async function addDataItem() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to add data item",
+            description: extractApiErrorMessage(err, "Failed to add data item"),
             variant: "destructive",
         });
     }
@@ -209,7 +209,7 @@ async function updateDataItem() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to update data item",
+            description: extractApiErrorMessage(err, "Failed to update data item"),
             variant: "destructive",
         });
     }
@@ -253,7 +253,7 @@ async function deleteDataItemByKey(key: string, showToast = true) {
         if (showToast) {
             toast({
                 title: "Error",
-                description: err.message || "Failed to delete data item",
+                description: extractApiErrorMessage(err, "Failed to delete data item"),
                 variant: "destructive",
             });
         } else {
@@ -309,7 +309,7 @@ async function clearAllData() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to clear plugin data",
+            description: extractApiErrorMessage(err, "Failed to clear plugin data"),
             variant: "destructive",
         });
     }

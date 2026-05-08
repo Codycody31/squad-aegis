@@ -579,14 +579,14 @@ const fetchMetrics = async () => {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to fetch metrics");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to fetch metrics"));
     }
 
     if (data.value) {
       metrics.value = (data.value as any).data?.metrics || data.value;
     }
   } catch (err: any) {
-    error.value = err.message || "An error occurred while fetching metrics";
+    error.value = extractApiErrorMessage(err, "An error occurred while fetching metrics");
   } finally {
     loading.value = false;
   }

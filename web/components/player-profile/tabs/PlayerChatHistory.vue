@@ -77,7 +77,7 @@ async function fetchChat() {
     total.value = chat.total;
     totalPages.value = chat.total_pages;
   } catch (err: any) {
-    error.value = err.message;
+    error.value = extractApiErrorMessage(err);
   } finally {
     loading.value = false;
   }

@@ -77,7 +77,7 @@ async function fetchSessions() {
     sessions.value = data.data.sessions || [];
     canViewIP.value = data.data.can_view_ip || false;
   } catch (err: any) {
-    error.value = err.message;
+    error.value = extractApiErrorMessage(err);
   } finally {
     loading.value = false;
   }

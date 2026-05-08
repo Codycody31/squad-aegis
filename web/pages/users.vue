@@ -155,7 +155,7 @@ async function fetchUsers() {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to fetch users data");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to fetch users data"));
     }
 
     if (data.value && data.value.data) {
@@ -171,7 +171,7 @@ async function fetchUsers() {
   } catch (err: any) {
     toast({
       title: "Error",
-      description: err.message || "An error occurred while fetching users data",
+      description: extractApiErrorMessage(err, "An error occurred while fetching users data"),
       variant: "destructive",
     });
   } finally {
@@ -201,7 +201,7 @@ async function addUser(values: any) {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to add user");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to add user"));
     }
 
     // Reset form and close dialog
@@ -218,7 +218,7 @@ async function addUser(values: any) {
   } catch (err: any) {
     toast({
       title: "Failed to Add User",
-      description: err.message || "An error occurred while adding the user",
+      description: extractApiErrorMessage(err, "An error occurred while adding the user"),
       variant: "destructive",
     });
   } finally {
@@ -260,7 +260,7 @@ async function editUser(values: any) {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to update user");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to update user"));
     }
 
     // Reset form and close dialog
@@ -278,7 +278,7 @@ async function editUser(values: any) {
   } catch (err: any) {
     toast({
       title: "Failed to Update User",
-      description: err.message || "An error occurred while updating the user",
+      description: extractApiErrorMessage(err, "An error occurred while updating the user"),
       variant: "destructive",
     });
   } finally {
@@ -303,7 +303,7 @@ async function deleteUser(userId: string) {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to delete user");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to delete user"));
     }
 
     toast({
@@ -316,7 +316,7 @@ async function deleteUser(userId: string) {
   } catch (err: any) {
     toast({
       title: "Failed to Delete User",
-      description: err.message || "An error occurred while deleting the user",
+      description: extractApiErrorMessage(err, "An error occurred while deleting the user"),
       variant: "destructive",
     });
   } finally {

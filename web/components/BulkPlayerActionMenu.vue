@@ -309,7 +309,7 @@ async function executeBulkAction() {
         console.error(err);
         toast({
             title: "Error",
-            description: err.message || `Failed to ${actionType.value} players`,
+            description: extractApiErrorMessage(err, `Failed to ${actionType.value} players`),
             variant: "destructive",
         });
     } finally {

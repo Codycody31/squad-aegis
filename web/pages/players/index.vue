@@ -146,7 +146,7 @@ async function searchPlayers() {
     const data: PlayersResponse = await response.json();
     players.value = data.data.players || [];
   } catch (err: any) {
-    error.value = err.message || "An error occurred while searching";
+    error.value = extractApiErrorMessage(err, "An error occurred while searching");
     players.value = [];
   } finally {
     loading.value = false;

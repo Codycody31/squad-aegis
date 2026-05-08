@@ -532,7 +532,7 @@ const loadWorkflow = async () => {
             };
         }
     } catch (err: any) {
-        error.value = err.message || "Error fetching workflow";
+        error.value = extractApiErrorMessage(err, "Error fetching workflow");
         toast({
             title: "Error",
             description: error.value,

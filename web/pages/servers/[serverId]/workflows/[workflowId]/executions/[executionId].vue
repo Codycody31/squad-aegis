@@ -1024,7 +1024,7 @@ const loadExecution = async () => {
             error.value = response.message || "Failed to load execution";
         }
     } catch (err: any) {
-        error.value = err.message || "Failed to load execution";
+        error.value = extractApiErrorMessage(err, "Failed to load execution");
     } finally {
         loading.value = false;
     }
@@ -1077,7 +1077,7 @@ const loadMessages = async (append = false) => {
             error.value = response.message || "Failed to load messages";
         }
     } catch (err: any) {
-        error.value = err.message || "Failed to load messages";
+        error.value = extractApiErrorMessage(err, "Failed to load messages");
     } finally {
         messagesLoading.value = false;
     }
@@ -1139,7 +1139,7 @@ const loadLogs = async (append = false) => {
             error.value = response.message || "Failed to load logs";
         }
     } catch (err: any) {
-        error.value = err.message || "Failed to load logs";
+        error.value = extractApiErrorMessage(err, "Failed to load logs");
     } finally {
         logsLoading.value = false;
     }

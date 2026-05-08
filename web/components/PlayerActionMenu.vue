@@ -449,7 +449,7 @@ async function executePlayerAction() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || `Failed to ${actionType.value}`,
+                extractApiErrorMessage(fetchError.value, `Failed to ${actionType.value}`),
             );
         }
 
@@ -480,7 +480,7 @@ async function executePlayerAction() {
         console.error(err);
         toast({
             title: "Error",
-            description: err.message || `Failed to ${actionType.value}`,
+            description: extractApiErrorMessage(err, `Failed to ${actionType.value}`),
             variant: "destructive",
         });
     } finally {

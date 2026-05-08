@@ -672,7 +672,7 @@ const connectToFeeds = async () => {
       connecting.value = false;
     };
   } catch (err: any) {
-    error.value = err.message || "Failed to connect to live feeds";
+    error.value = extractApiErrorMessage(err, "Failed to connect to live feeds");
     connecting.value = false;
   }
 };

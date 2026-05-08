@@ -73,12 +73,14 @@ func (s *Server) ServersCreate(c *gin.Context) {
 
 	err = validation.ValidateStruct(&request,
 		validation.Field(&request.Name, validation.Required),
-		validation.Field(&request.IpAddress, validation.Required),
-		validation.Field(&request.GamePort, validation.Required),
-		validation.Field(&request.RconPort, validation.Required),
+		validation.Field(&request.IpAddress, validation.Required, validation.By(validateIPAddress)),
+		validation.Field(&request.RconIpAddress, validation.By(validateOptionalIPAddress)),
+		validation.Field(&request.GamePort, validation.Required, validation.Min(1), validation.Max(65535)),
+		validation.Field(&request.RconPort, validation.Required, validation.Min(1), validation.Max(65535)),
 		validation.Field(&request.RconPassword, validation.Required),
 		validation.Field(&request.LogSourceType, validation.Required),
 		validation.Field(&request.SquadGamePath, validation.Required, validation.By(validateSquadGamePath)),
+		validation.Field(&request.LogPort, validation.By(validateLogPort)),
 	)
 
 	if err != nil {
@@ -129,7 +131,7 @@ func (s *Server) ServersCreate(c *gin.Context) {
 
 	server, err := core.CreateServer(c.Request.Context(), s.Dependencies.DB, &serverToCreate)
 	if err != nil {
-		responses.BadRequest(c, "Failed to create server", &gin.H{"error": err.Error()})
+		responses.InternalServerError(c, fmt.Errorf("create server: %w", err), &gin.H{"error": "Failed to create server"})
 		return
 	}
 
@@ -768,11 +770,13 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 	// Validate request
 	err = validation.ValidateStruct(&request,
 		validation.Field(&request.Name, validation.Required),
-		validation.Field(&request.IpAddress, validation.Required),
-		validation.Field(&request.GamePort, validation.Required),
-		validation.Field(&request.RconPort, validation.Required),
+		validation.Field(&request.IpAddress, validation.Required, validation.By(validateIPAddress)),
+		validation.Field(&request.RconIpAddress, validation.By(validateOptionalIPAddress)),
+		validation.Field(&request.GamePort, validation.Required, validation.Min(1), validation.Max(65535)),
+		validation.Field(&request.RconPort, validation.Required, validation.Min(1), validation.Max(65535)),
 		validation.Field(&request.LogSourceType, validation.Required),
 		validation.Field(&request.SquadGamePath, validation.Required, validation.By(validateSquadGamePath)),
+		validation.Field(&request.LogPort, validation.By(validateLogPort)),
 	)
 
 	if err != nil {
@@ -916,6 +920,48 @@ func (s *Server) ServerLogwatcherRestart(c *gin.Context) {
 	s.CreateAuditLog(c.Request.Context(), &serverId, &user.Id, "server:logwatcher:restart", auditData)
 
 	responses.Success(c, "Log watcher restarted successfully", nil)
+}
+
+// validateIPAddress accepts an IPv4 or IPv6 address. The servers table stores
+// ip_address as PostgreSQL `inet`, which rejects hostnames with a confusing
+// "invalid input syntax for type inet" error if we let it through. Validate up
+// front so we can return a clear, field-specific message.
+func validateIPAddress(value interface{}) error {
+	str, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("must be a string")
+	}
+	trimmed := strings.TrimSpace(str)
+	if trimmed == "" {
+		return nil // Required check is separate.
+	}
+	if net.ParseIP(trimmed) == nil {
+		return fmt.Errorf("must be a valid IPv4 or IPv6 address (hostnames are not supported)")
+	}
+	return nil
+}
+
+// validateOptionalIPAddress accepts a *string and validates the contained value
+// when present. Used for fields that are optional but, when supplied, must be
+// a valid IP literal.
+func validateOptionalIPAddress(value interface{}) error {
+	ptr, ok := value.(*string)
+	if !ok || ptr == nil {
+		return nil
+	}
+	return validateIPAddress(*ptr)
+}
+
+// validateLogPort validates a non-nil *int port falls within 1-65535.
+func validateLogPort(value interface{}) error {
+	ptr, ok := value.(*int)
+	if !ok || ptr == nil {
+		return nil
+	}
+	if *ptr < 1 || *ptr > 65535 {
+		return fmt.Errorf("must be between 1 and 65535")
+	}
+	return nil
 }
 
 func validateSquadGamePath(value interface{}) error {

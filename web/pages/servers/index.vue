@@ -72,16 +72,33 @@ interface ServersResponse {
   };
 }
 
+// IPv4 / IPv6 literal validator. The backend stores ip_address as PostgreSQL
+// `inet`, which rejects hostnames — surface the constraint up front so users
+// see the right field flagged instead of "Bad Request".
+const ipAddressSchema = z
+  .string()
+  .min(1, "IP address is required")
+  .refine((v) => z.string().ip().safeParse(v.trim()).success, {
+    message: "Must be a valid IPv4 or IPv6 address (hostnames are not supported)",
+  });
+
 // Form schema for adding a server
 const formSchema = toTypedSchema(
   z.object({
     name: z.string().min(1, "Server name is required"),
-    ip_address: z.string().min(1, "IP address is required"),
+    ip_address: ipAddressSchema,
     game_port: z.coerce
       .number()
       .min(1, "Game port is required")
       .max(65535, "Port must be between 1 and 65535"),
-    rcon_ip_address: z.string().optional().nullable(),
+    rcon_ip_address: z
+      .string()
+      .optional()
+      .nullable()
+      .refine(
+        (v) => !v || z.string().ip().safeParse(v.trim()).success,
+        { message: "Must be a valid IPv4 or IPv6 address" },
+      ),
     rcon_port: z.coerce
       .number()
       .min(1, "RCON port is required")
@@ -158,7 +175,7 @@ async function fetchServers() {
 
     if (fetchError.value) {
       throw new Error(
-        fetchError.value.message || "Failed to fetch servers data"
+        extractApiErrorMessage(fetchError.value, "Failed to fetch servers data")
       );
     }
 
@@ -174,7 +191,7 @@ async function fetchServers() {
     }
   } catch (err: any) {
     error.value =
-      err.message || "An error occurred while fetching servers data";
+      extractApiErrorMessage(err, "An error occurred while fetching servers data");
     console.error(err);
   } finally {
     loading.value = false;
@@ -219,7 +236,7 @@ async function addServer(values: any) {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to add server");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to add server"));
     }
 
     // Reset form and close dialog
@@ -229,7 +246,7 @@ async function addServer(values: any) {
     // Refresh the servers list
     fetchServers();
   } catch (err: any) {
-    error.value = err.message || "An error occurred while adding the server";
+    error.value = extractApiErrorMessage(err, "An error occurred while adding the server");
     console.error(err);
   } finally {
     addServerLoading.value = false;
@@ -258,13 +275,13 @@ async function deleteServer(serverId: string) {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to delete server");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to delete server"));
     }
 
     // Refresh the servers list
     fetchServers();
   } catch (err: any) {
-    error.value = err.message || "An error occurred while deleting the server";
+    error.value = extractApiErrorMessage(err, "An error occurred while deleting the server");
     console.error(err);
   } finally {
     loading.value = false;

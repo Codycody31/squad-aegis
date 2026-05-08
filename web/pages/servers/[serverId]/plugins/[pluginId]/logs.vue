@@ -429,7 +429,7 @@ const connectToLogs = async () => {
             connecting.value = false;
         };
     } catch (err: any) {
-        error.value = err.message || "Failed to connect to live logs";
+        error.value = extractApiErrorMessage(err, "Failed to connect to live logs");
         connecting.value = false;
     }
 };

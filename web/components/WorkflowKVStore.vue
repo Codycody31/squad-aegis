@@ -80,7 +80,7 @@ async function fetchKVPairs() {
         );
 
         if (fetchError.value) {
-            throw new Error(fetchError.value.message);
+            throw new Error(extractApiErrorMessage(fetchError.value));
         }
 
         if (data.value && data.value.data && data.value.data.kv_pairs) {
@@ -91,7 +91,7 @@ async function fetchKVPairs() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to fetch KV pairs",
+            description: extractApiErrorMessage(err, "Failed to fetch KV pairs"),
             variant: "destructive",
         });
     } finally {
@@ -156,7 +156,7 @@ async function addKVPair() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to add KV pair",
+            description: extractApiErrorMessage(err, "Failed to add KV pair"),
             variant: "destructive",
         });
     }
@@ -223,7 +223,7 @@ async function updateKVPair() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to update KV pair",
+            description: extractApiErrorMessage(err, "Failed to update KV pair"),
             variant: "destructive",
         });
     }
@@ -267,7 +267,7 @@ async function deleteKVPairByKey(key: string, showToast = true) {
         if (showToast) {
             toast({
                 title: "Error",
-                description: err.message || "Failed to delete KV pair",
+                description: extractApiErrorMessage(err, "Failed to delete KV pair"),
                 variant: "destructive",
             });
         } else {
@@ -323,7 +323,7 @@ async function clearAllKV() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to clear KV store",
+            description: extractApiErrorMessage(err, "Failed to clear KV store"),
             variant: "destructive",
         });
     }

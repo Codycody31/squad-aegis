@@ -109,9 +109,7 @@ async function fetchUserData() {
     );
 
     if (fetchError.value) {
-      throw new Error(
-        fetchError.value.data?.message || fetchError.value.message || "Failed to fetch user data"
-      );
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to fetch user data"));
     }
 
     if (data.value && data.value.data && data.value.data.user) {
@@ -123,7 +121,7 @@ async function fetchUserData() {
       });
     }
   } catch (err: any) {
-    showError("Error", err.message || "An error occurred while fetching user data");
+    showError("Error", extractApiErrorMessage(err, "An error occurred while fetching user data"));
   } finally {
     loading.value.fetchUser = false;
   }
@@ -148,9 +146,7 @@ async function updateProfile(values: any) {
     );
 
     if (fetchError.value) {
-      throw new Error(
-        fetchError.value.data?.message || fetchError.value.message || "Failed to update profile"
-      );
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to update profile"));
     }
 
     await authStore.fetch();
@@ -160,7 +156,7 @@ async function updateProfile(values: any) {
     // Refresh user data
     fetchUserData();
   } catch (err: any) {
-    showError("Update Failed", err.message || "An error occurred while updating profile");
+    showError("Update Failed", extractApiErrorMessage(err, "An error occurred while updating profile"));
   } finally {
     loading.value.profile = false;
   }
@@ -185,9 +181,7 @@ async function changePassword(values: any) {
     );
 
     if (fetchError.value) {
-      throw new Error(
-        fetchError.value.data?.message || fetchError.value.message || "Failed to change password"
-      );
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to change password"));
     }
 
     showSuccess("Your password has been changed successfully.");
@@ -195,7 +189,7 @@ async function changePassword(values: any) {
     // Reset password form
     passwordForm.resetForm();
   } catch (err: any) {
-    showError("Password Change Failed", err.message || "An error occurred while changing password");
+    showError("Password Change Failed", extractApiErrorMessage(err, "An error occurred while changing password"));
   } finally {
     loading.value.password = false;
   }

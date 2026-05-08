@@ -60,7 +60,7 @@ async function fetchDisconnectedPlayers() {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to fetch disconnected players data");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to fetch disconnected players data"));
     }
 
     if (data.value && data.value.data && data.value.data.players) {
@@ -83,7 +83,7 @@ async function fetchDisconnectedPlayers() {
       });
     }
   } catch (err: any) {
-    error.value = err.message || "An error occurred while fetching disconnected players data";
+    error.value = extractApiErrorMessage(err, "An error occurred while fetching disconnected players data");
   } finally {
     loading.value = false;
   }

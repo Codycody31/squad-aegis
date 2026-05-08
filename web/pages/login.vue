@@ -52,7 +52,7 @@ const onSubmit = form.handleSubmit(async (values) => {
   );
 
   if (error.value) {
-    const errorMessage = error.value.data?.message || "Invalid username or password";
+    const errorMessage = extractApiErrorMessage(error.value, "Invalid username or password");
     loginError.value = errorMessage;
     toast({
       title: "Login Failed",
