@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-07
+## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-08
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -20,6 +20,8 @@
 
 ### Misc
 
+- Merge branch 'master' of https://github.com/Codycody31/squad-aegis ([d0e1b80](https://github.com/Codycody31/squad-aegis/commit/d0e1b80be49a6619b7d909f094d03fb4ca6ecf25))
+- chore: add centralized API error handling utility and enhance server validation ([49efac8](https://github.com/Codycody31/squad-aegis/commit/49efac8728aa380598eb654560694f2c1f235197))
 - chore(web): add pnpm config and remove vite temp package.json ([5d9bf81](https://github.com/Codycody31/squad-aegis/commit/5d9bf81369185f6577c5b957edaf1e4be79d5f89))
 - fix(config): pin S3 env/yaml path and add storage env vars ([7ef2da4](https://github.com/Codycody31/squad-aegis/commit/7ef2da490affb2c55acd05ddd7835db8c622382c))
 - chore(deps): bump go version to 1.25 ([76a44ef](https://github.com/Codycody31/squad-aegis/commit/76a44ef749727f8f1463bf47773b1128e7d8644e))
