@@ -99,7 +99,7 @@ async function fetchCombatHistory() {
     events.value = data.data.events || [];
     hasMore.value = data.data.has_more ?? false;
   } catch (err: any) {
-    error.value = err.message;
+    error.value = extractApiErrorMessage(err);
   } finally {
     loading.value = false;
   }

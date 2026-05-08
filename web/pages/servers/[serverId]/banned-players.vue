@@ -289,7 +289,7 @@ async function searchPlayers(query: string) {
         );
 
         if (fetchError.value) {
-            throw new Error(fetchError.value.message || "Failed to search players");
+            throw new Error(extractApiErrorMessage(fetchError.value, "Failed to search players"));
         }
 
         if (data.value && (data.value as any).data) {
@@ -297,7 +297,7 @@ async function searchPlayers(query: string) {
             showPlayerDropdown.value = playerSearchResults.value.length > 0;
         }
     } catch (err: any) {
-        toast({ title: "Player search failed", description: err.message || "An error occurred", variant: "destructive" });
+        toast({ title: "Player search failed", description: extractApiErrorMessage(err, "An error occurred"), variant: "destructive" });
         playerSearchResults.value = [];
     } finally {
         isSearchingPlayers.value = false;
@@ -404,8 +404,7 @@ async function fetchBannedPlayers() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message ||
-                    "Failed to fetch banned players data",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch banned players data"),
             );
         }
 
@@ -421,9 +420,7 @@ async function fetchBannedPlayers() {
             });
         }
     } catch (err: any) {
-        error.value =
-            err.message ||
-            "An error occurred while fetching banned players data";
+        error.value = extractApiErrorMessage(err, "An error occurred while fetching banned players data");
         console.error(err);
     } finally {
         loading.value = false;
@@ -530,7 +527,7 @@ async function addBan(values: any) {
         );
 
         if (fetchError.value) {
-            throw new Error(fetchError.value.message || "Failed to add ban");
+            throw new Error(extractApiErrorMessage(fetchError.value, "Failed to add ban"));
         }
 
         // Reset form and close dialog
@@ -558,7 +555,7 @@ async function addBan(values: any) {
         // Refresh the banned players list
         fetchBannedPlayers();
     } catch (err: any) {
-        error.value = err.message || "An error occurred while adding the ban";
+        error.value = extractApiErrorMessage(err, "An error occurred while adding the ban");
         console.error(err);
     } finally {
         addBanLoading.value = false;
@@ -585,7 +582,7 @@ async function removeBan(banId: string) {
         );
 
         if (fetchError.value) {
-            throw new Error(fetchError.value.message || "Failed to remove ban");
+            throw new Error(extractApiErrorMessage(fetchError.value, "Failed to remove ban"));
         }
 
         toast({
@@ -596,7 +593,7 @@ async function removeBan(banId: string) {
         // Refresh the banned players list
         fetchBannedPlayers();
     } catch (err: any) {
-        error.value = err.message || "An error occurred while removing the ban";
+        error.value = extractApiErrorMessage(err, "An error occurred while removing the ban");
     } finally {
         loading.value = false;
     }
@@ -709,7 +706,7 @@ async function editBan(values: any) {
         );
 
         if (fetchError.value) {
-            throw new Error(fetchError.value.message || "Failed to update ban");
+            throw new Error(extractApiErrorMessage(fetchError.value, "Failed to update ban"));
         }
 
         // Reset form and close dialog
@@ -723,7 +720,7 @@ async function editBan(values: any) {
         // Refresh the banned players list
         fetchBannedPlayers();
     } catch (err: any) {
-        error.value = err.message || "An error occurred while updating the ban";
+        error.value = extractApiErrorMessage(err, "An error occurred while updating the ban");
         console.error(err);
     } finally {
         editBanLoading.value = false;
@@ -868,7 +865,7 @@ async function downloadEvidenceFile(filePath: string, fileName: string) {
         console.error("File download error:", err);
         toast({
             title: "Error",
-            description: err.message || "Failed to download file",
+            description: extractApiErrorMessage(err, "Failed to download file"),
             variant: "destructive",
         });
     }
@@ -1053,7 +1050,7 @@ async function fetchServerRules() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch server rules",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch server rules"),
             );
         }
 
@@ -1135,7 +1132,7 @@ async function fetchPlayerBanHistory(playerId: string) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch player history",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch player history"),
             );
         }
 
@@ -1246,7 +1243,7 @@ async function searchEvidenceInline(steamId: string) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to search for evidence",
+                extractApiErrorMessage(fetchError.value, "Failed to search for evidence"),
             );
         }
 
@@ -1257,7 +1254,7 @@ async function searchEvidenceInline(steamId: string) {
         console.error("Failed to search evidence:", err);
         toast({
             title: "Error",
-            description: err.message || "Failed to search for evidence",
+            description: extractApiErrorMessage(err, "Failed to search for evidence"),
             variant: "destructive",
         });
     } finally {
@@ -1384,7 +1381,7 @@ async function handleFileUpload(event: Event) {
         console.error("File upload error:", err);
         toast({
             title: "Error",
-            description: err.message || "Failed to upload file",
+            description: extractApiErrorMessage(err, "Failed to upload file"),
             variant: "destructive",
         });
     } finally {

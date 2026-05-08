@@ -164,8 +164,7 @@ async function fetchServerInfo() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message ||
-                    "Failed to fetch server information",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch server information"),
             );
         }
 
@@ -174,9 +173,7 @@ async function fetchServerInfo() {
             serverInfo.value = serverData;
         }
     } catch (err: any) {
-        error.value =
-            err.message ||
-            "An error occurred while fetching server information";
+        error.value = extractApiErrorMessage(err, "An error occurred while fetching server information");
         console.error(err);
     } finally {
         loading.value = false;
@@ -196,7 +193,7 @@ async function fetchServerMetrics() {
 
     if (fetchError.value) {
         throw new Error(
-            fetchError.value.message || "Failed to fetch server metrics",
+            extractApiErrorMessage(fetchError.value, "Failed to fetch server metrics"),
         );
     }
 
@@ -222,8 +219,7 @@ async function fetchRconServerInfo() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message ||
-                    "Failed to fetch rcon server information",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch rcon server information"),
             );
         }
 
@@ -232,9 +228,7 @@ async function fetchRconServerInfo() {
             rconServerInfo.value = serverData;
         }
     } catch (err: any) {
-        rconServerInfoError.value =
-            err.message ||
-            "An error occurred while fetching rcon server information";
+        rconServerInfoError.value = extractApiErrorMessage(err, "An error occurred while fetching rcon server information");
         console.error(err);
     } finally {
         rconServerInfoLoading.value = false;
@@ -258,7 +252,7 @@ async function fetchTeamsData() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch teams data",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch teams data"),
             );
         }
 
@@ -276,7 +270,7 @@ async function fetchTeamsData() {
         }
     } catch (err: any) {
         errorTeams.value =
-            err.message || "An error occurred while fetching teams data";
+            extractApiErrorMessage(err, "An error occurred while fetching teams data");
         console.error(err);
     } finally {
         loadingTeams.value = false;
@@ -313,7 +307,7 @@ async function fetchRecentJoins() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch recent joins",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch recent joins"),
             );
         }
 
@@ -322,7 +316,7 @@ async function fetchRecentJoins() {
         }
     } catch (err: any) {
         errorRecentJoins.value =
-            err.message || "An error occurred while fetching recent joins";
+            extractApiErrorMessage(err, "An error occurred while fetching recent joins");
         console.error(err);
     } finally {
         loadingRecentJoins.value = false;
@@ -409,7 +403,7 @@ async function fetchAvailableLayers() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch available layers",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch available layers"),
             );
         }
 
@@ -424,7 +418,7 @@ async function fetchAvailableLayers() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to fetch available layers",
+            description: extractApiErrorMessage(err, "Failed to fetch available layers"),
             variant: "destructive",
         });
         console.error(err);
@@ -469,7 +463,7 @@ async function changeServerLayer() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to change layer",
+                extractApiErrorMessage(fetchError.value, "Failed to change layer"),
             );
         }
 
@@ -484,7 +478,7 @@ async function changeServerLayer() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to change layer",
+            description: extractApiErrorMessage(err, "Failed to change layer"),
             variant: "destructive",
         });
         console.error(err);
@@ -535,7 +529,7 @@ async function setNextLayer() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to set next layer",
+                extractApiErrorMessage(fetchError.value, "Failed to set next layer"),
             );
         }
 
@@ -551,7 +545,7 @@ async function setNextLayer() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to set next layer",
+            description: extractApiErrorMessage(err, "Failed to set next layer"),
             variant: "destructive",
         });
         console.error(err);
@@ -592,7 +586,7 @@ async function endMatch() {
             );
 
         if (fetchError.value) {
-            throw new Error(fetchError.value.message || "Failed to end match");
+            throw new Error(extractApiErrorMessage(fetchError.value, "Failed to end match"));
         }
 
         toast({
@@ -607,7 +601,7 @@ async function endMatch() {
     } catch (err: any) {
         toast({
             title: "Error",
-            description: err.message || "Failed to end match",
+            description: extractApiErrorMessage(err, "Failed to end match"),
             variant: "destructive",
         });
         console.error(err);

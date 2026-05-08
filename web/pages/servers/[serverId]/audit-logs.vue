@@ -158,7 +158,7 @@ async function fetchAuditLogs() {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to fetch audit logs");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to fetch audit logs"));
     }
 
     if (data.value && data.value.data) {
@@ -167,7 +167,7 @@ async function fetchAuditLogs() {
       totalPages.value = data.value.data.pagination.pages;
     }
   } catch (err: any) {
-    error.value = err.message || "An error occurred while fetching audit logs";
+    error.value = extractApiErrorMessage(err, "An error occurred while fetching audit logs");
   } finally {
     loading.value = false;
   }

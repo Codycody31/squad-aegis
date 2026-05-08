@@ -63,7 +63,7 @@ async function fetchRelatedPlayers() {
     const data = await response.json();
     relatedPlayers.value = data.data.related_players || [];
   } catch (err: any) {
-    error.value = err.message;
+    error.value = extractApiErrorMessage(err);
   } finally {
     loading.value = false;
   }

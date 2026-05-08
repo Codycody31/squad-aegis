@@ -633,7 +633,7 @@ const loadExecutions = async (append = false) => {
             error.value = response.message || "Failed to load executions";
         }
     } catch (err: any) {
-        error.value = err.message || "Failed to load executions";
+        error.value = extractApiErrorMessage(err, "Failed to load executions");
     } finally {
         loading.value = false;
     }

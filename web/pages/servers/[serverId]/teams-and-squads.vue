@@ -72,7 +72,7 @@ async function fetchTeamsData() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch teams data",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch teams data"),
             );
         }
 
@@ -87,7 +87,7 @@ async function fetchTeamsData() {
         }
     } catch (err: any) {
         error.value =
-            err.message || "An error occurred while fetching teams data";
+            extractApiErrorMessage(err, "An error occurred while fetching teams data");
     } finally {
         loading.value = false;
     }

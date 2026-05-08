@@ -77,7 +77,7 @@ async function fetchRules() {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to fetch rules");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to fetch rules"));
     }
 
     if (data.value) {
@@ -114,7 +114,7 @@ async function fetchRules() {
       deletedRuleIds.value = [];
     }
   } catch (err: any) {
-    error.value = err.message || "Error fetching rules";
+    error.value = extractApiErrorMessage(err, "Error fetching rules");
   } finally {
     loading.value = false;
   }
@@ -583,7 +583,7 @@ async function saveAllRules() {
     );
 
     if (fetchError.value) {
-      throw new Error(fetchError.value.message || "Failed to save rules");
+      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to save rules"));
     }
 
     // Success - refresh rules from server
@@ -607,7 +607,7 @@ async function saveAllRules() {
     }
 
   } catch (err: any) {
-    error.value = err.message || "Error saving rules";
+    error.value = extractApiErrorMessage(err, "Error saving rules");
   } finally {
     isSaving.value = false;
   }

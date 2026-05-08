@@ -64,7 +64,7 @@ async function fetchAltGroups() {
     altGroups.value = data.data.alt_groups || [];
     totalGroups.value = data.data.total_groups || 0;
   } catch (err: any) {
-    error.value = err.message || "Failed to load alt account groups";
+    error.value = extractApiErrorMessage(err, "Failed to load alt account groups");
   } finally {
     loading.value = false;
   }

@@ -84,7 +84,7 @@ async function fetchPlayerProfile() {
     player.value = data.data.player;
   } catch (err: any) {
     error.value =
-      err.message || "An error occurred while fetching player profile";
+      extractApiErrorMessage(err, "An error occurred while fetching player profile");
   } finally {
     loading.value = false;
   }

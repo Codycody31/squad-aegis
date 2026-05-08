@@ -268,7 +268,7 @@ async function fetchWorkflows() {
             workflows.value = response.data.workflows;
         }
     } catch (err: any) {
-        error.value = err.message || "Error fetching workflows";
+        error.value = extractApiErrorMessage(err, "Error fetching workflows");
         toast({
             title: "Error",
             description: error.value,

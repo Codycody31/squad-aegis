@@ -36,7 +36,7 @@ const fetchData = async () => {
     metricsOverview.value = metricsRes.data.data;
     systemHealth.value = healthRes.data.data;
   } catch (err: any) {
-    error.value = err.message || "Failed to load dashboard data";
+    error.value = extractApiErrorMessage(err, "Failed to load dashboard data");
     console.error("Error fetching dashboard data:", err);
   } finally {
     loading.value = false;

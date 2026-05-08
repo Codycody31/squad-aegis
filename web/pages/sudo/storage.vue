@@ -55,7 +55,7 @@ const fetchFiles = async () => {
     totalPages.value = res.data.pagination.totalPages;
     totalFiles.value = res.data.pagination.total;
   } catch (err: any) {
-    error.value = err.message || "Failed to load files";
+    error.value = extractApiErrorMessage(err, "Failed to load files");
     console.error("Error fetching files:", err);
   } finally {
     loading.value = false;
@@ -114,7 +114,7 @@ const deleteFile = async () => {
     deleteDialogOpen.value = false;
     fileToDelete.value = null;
   } catch (err: any) {
-    error.value = err.message || "Failed to delete file";
+    error.value = extractApiErrorMessage(err, "Failed to delete file");
     console.error("Error deleting file:", err);
   }
 };
@@ -131,7 +131,7 @@ const bulkDelete = async () => {
     selectedFiles.value.clear();
     await Promise.all([fetchFiles(), fetchSummary()]);
   } catch (err: any) {
-    error.value = err.message || "Failed to delete files";
+    error.value = extractApiErrorMessage(err, "Failed to delete files");
     console.error("Error bulk deleting:", err);
   }
 };

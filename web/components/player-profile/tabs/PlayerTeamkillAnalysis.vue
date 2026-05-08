@@ -57,7 +57,7 @@ async function fetchTeamkillAnalysis() {
     victims.value = data.data.victims || [];
     tkWeapons.value = data.data.tk_weapons || [];
   } catch (err: any) {
-    error.value = err.message;
+    error.value = extractApiErrorMessage(err);
   } finally {
     loading.value = false;
   }

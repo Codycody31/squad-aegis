@@ -378,7 +378,7 @@ async function fetchPermissions() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch permissions",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch permissions"),
             );
         }
 
@@ -408,7 +408,7 @@ async function fetchRoleTemplates() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch role templates",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch role templates"),
             );
         }
 
@@ -439,7 +439,7 @@ async function fetchRoles() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch roles",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch roles"),
             );
         }
 
@@ -447,7 +447,7 @@ async function fetchRoles() {
             roles.value = data.value.data.roles || [];
         }
     } catch (err: any) {
-        error.value = err.message || "An error occurred while fetching roles";
+        error.value = extractApiErrorMessage(err, "An error occurred while fetching roles");
         console.error(err);
     } finally {
         loading.value.roles = false;
@@ -479,7 +479,7 @@ async function fetchAdmins() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch admins",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch admins"),
             );
         }
 
@@ -501,7 +501,7 @@ async function fetchAdmins() {
             }
         }
     } catch (err: any) {
-        error.value = err.message || "An error occurred while fetching admins";
+        error.value = extractApiErrorMessage(err, "An error occurred while fetching admins");
         console.error(err);
     } finally {
         loading.value.admins = false;
@@ -521,7 +521,7 @@ async function fetchAllAdmins() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch full admin list",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch full admin list"),
             );
         }
 
@@ -580,7 +580,7 @@ async function fetchUsers() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.message || "Failed to fetch users",
+                extractApiErrorMessage(fetchError.value, "Failed to fetch users"),
             );
         }
 
@@ -588,7 +588,7 @@ async function fetchUsers() {
             users.value = data.value.data.users || [];
         }
     } catch (err: any) {
-        error.value = err.message || "An error occurred while fetching users";
+        error.value = extractApiErrorMessage(err, "An error occurred while fetching users");
         console.error(err);
     } finally {
         loading.value.users = false;
@@ -617,7 +617,7 @@ async function onRoleSubmit(values: any) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.data.message || fetchError.value.message,
+                extractApiErrorMessage(fetchError.value),
             );
         }
 
@@ -633,7 +633,7 @@ async function onRoleSubmit(values: any) {
         // Refresh the roles list
         fetchRoles();
     } catch (err: any) {
-        error.value = err.message || "An error occurred while adding the role";
+        error.value = extractApiErrorMessage(err, "An error occurred while adding the role");
         console.error(err);
     } finally {
         addRoleLoading.value = false;
@@ -661,7 +661,7 @@ async function createRoleFromTemplate(values: any) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.data.message || fetchError.value.message,
+                extractApiErrorMessage(fetchError.value),
             );
         }
 
@@ -677,7 +677,7 @@ async function createRoleFromTemplate(values: any) {
         // Refresh the roles list
         fetchRoles();
     } catch (err: any) {
-        error.value = err.message || "An error occurred while creating the role";
+        error.value = extractApiErrorMessage(err, "An error occurred while creating the role");
         console.error(err);
     } finally {
         createFromTemplateLoading.value = false;
@@ -709,7 +709,7 @@ async function removeRole(roleId: string) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.data.message || fetchError.value.message,
+                extractApiErrorMessage(fetchError.value),
             );
         }
 
@@ -722,7 +722,7 @@ async function removeRole(roleId: string) {
         fetchRoles();
     } catch (err: any) {
         error.value =
-            err.message || "An error occurred while removing the role";
+            extractApiErrorMessage(err, "An error occurred while removing the role");
         console.error(err);
     } finally {
         loading.value.roles = false;
@@ -785,7 +785,7 @@ async function updateRole(values: any) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.data.message || fetchError.value.message,
+                extractApiErrorMessage(fetchError.value),
             );
         }
 
@@ -798,7 +798,7 @@ async function updateRole(values: any) {
         closeEditRoleDialog();
         fetchRoles();
     } catch (err: any) {
-        error.value = err.message || "An error occurred while updating the role";
+        error.value = extractApiErrorMessage(err, "An error occurred while updating the role");
         console.error(err);
     } finally {
         editRoleLoading.value = false;
@@ -857,7 +857,7 @@ async function addAdmin(values: any) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.data.message || fetchError.value.message,
+                extractApiErrorMessage(fetchError.value),
             );
         }
 
@@ -875,7 +875,7 @@ async function addAdmin(values: any) {
         await fetchAdmins();
         await fetchAllAdmins();
     } catch (err: any) {
-        error.value = err.message || "An error occurred while adding the admin";
+        error.value = extractApiErrorMessage(err, "An error occurred while adding the admin");
         console.error(err);
     } finally {
         addAdminLoading.value = false;
@@ -903,7 +903,7 @@ async function removeAdmin(adminId: string) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.data.message || fetchError.value.message,
+                extractApiErrorMessage(fetchError.value),
             );
         }
 
@@ -917,7 +917,7 @@ async function removeAdmin(adminId: string) {
         await fetchAllAdmins();
     } catch (err: any) {
         error.value =
-            err.message || "An error occurred while removing the admin";
+            extractApiErrorMessage(err, "An error occurred while removing the admin");
         console.error(err);
     } finally {
         loading.value.admins = false;
@@ -958,7 +958,7 @@ async function updateAdminNotes(values: any) {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.data.message || fetchError.value.message,
+                extractApiErrorMessage(fetchError.value),
             );
         }
 
@@ -972,7 +972,7 @@ async function updateAdminNotes(values: any) {
         fetchAdmins();
     } catch (err: any) {
         error.value =
-            err.message || "An error occurred while updating the admin";
+            extractApiErrorMessage(err, "An error occurred while updating the admin");
         console.error(err);
     } finally {
         editAdminLoading.value = false;
@@ -1004,7 +1004,7 @@ async function cleanupExpiredAdmins() {
 
         if (fetchError.value) {
             throw new Error(
-                fetchError.value.data.message || fetchError.value.message,
+                extractApiErrorMessage(fetchError.value),
             );
         }
 
@@ -1018,7 +1018,7 @@ async function cleanupExpiredAdmins() {
         await fetchAllAdmins();
     } catch (err: any) {
         error.value =
-            err.message || "An error occurred while cleaning up expired admins";
+            extractApiErrorMessage(err, "An error occurred while cleaning up expired admins");
         console.error(err);
     } finally {
         cleanupLoading.value = false;

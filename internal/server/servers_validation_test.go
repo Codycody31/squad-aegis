@@ -78,3 +78,75 @@ func TestNormalizeLogSourceType(t *testing.T) {
 func stringPtr(value string) *string {
 	return &value
 }
+
+func intPtr(value int) *int {
+	return &value
+}
+
+func TestValidateIPAddress(t *testing.T) {
+	t.Parallel()
+
+	valid := []string{
+		"127.0.0.1",
+		"192.168.1.1",
+		"::1",
+		"2001:db8::1",
+	}
+	for _, ip := range valid {
+		if err := validateIPAddress(ip); err != nil {
+			t.Errorf("expected %q to be valid, got: %v", ip, err)
+		}
+	}
+
+	invalid := []string{
+		"node.example.com",
+		"localhost",
+		"999.999.999.999",
+		"not-an-ip",
+		"1.2.3",
+	}
+	for _, ip := range invalid {
+		if err := validateIPAddress(ip); err == nil {
+			t.Errorf("expected %q to be invalid", ip)
+		}
+	}
+
+	// Empty string is allowed (Required is a separate check).
+	if err := validateIPAddress(""); err != nil {
+		t.Errorf("expected empty string to pass (Required handles emptiness), got: %v", err)
+	}
+}
+
+func TestValidateOptionalIPAddress(t *testing.T) {
+	t.Parallel()
+
+	if err := validateOptionalIPAddress((*string)(nil)); err != nil {
+		t.Errorf("nil pointer should be valid, got: %v", err)
+	}
+	good := "10.0.0.1"
+	if err := validateOptionalIPAddress(&good); err != nil {
+		t.Errorf("expected valid IP to pass, got: %v", err)
+	}
+	bad := "panel.example.com"
+	if err := validateOptionalIPAddress(&bad); err == nil {
+		t.Error("expected hostname to fail validation")
+	}
+}
+
+func TestValidateLogPort(t *testing.T) {
+	t.Parallel()
+
+	if err := validateLogPort((*int)(nil)); err != nil {
+		t.Errorf("nil pointer should be valid, got: %v", err)
+	}
+	for _, p := range []int{1, 22, 2022, 65535} {
+		if err := validateLogPort(intPtr(p)); err != nil {
+			t.Errorf("port %d should be valid, got: %v", p, err)
+		}
+	}
+	for _, p := range []int{0, -1, 65536, 99999} {
+		if err := validateLogPort(intPtr(p)); err == nil {
+			t.Errorf("port %d should be invalid", p)
+		}
+	}
+}
