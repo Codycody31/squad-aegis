@@ -232,13 +232,40 @@ func (p *DiscordTeamkillPlugin) sendTeamkillEmbed(event *event_manager.LogPlayer
 		return fmt.Errorf("channel_id not configured")
 	}
 
-	// Extract attacker name from player controller (fallback if no separate name field)
-	attackerName := event.Attacker.PlayerSuffix
-	attackerSteamID := event.Attacker.SteamID
-	attackerEOSID := event.Attacker.EOSID
-	victimName := event.Victim.PlayerSuffix
-	victimSteamID := event.Victim.SteamID
-	victimEOSID := event.Victim.EOSID
+	// Prefer flat fields (always populated); fall back to structured PlayerInfo when present.
+	attackerName := event.AttackerName
+	attackerSteamID := event.AttackerSteam
+	attackerEOSID := event.AttackerEOS
+	if event.Attacker != nil {
+		if attackerName == "" {
+			attackerName = event.Attacker.PlayerSuffix
+		}
+		if attackerSteamID == "" {
+			attackerSteamID = event.Attacker.SteamID
+		}
+		if attackerEOSID == "" {
+			attackerEOSID = event.Attacker.EOSID
+		}
+	}
+
+	victimName := event.VictimName
+	victimSteamID := event.VictimSteam
+	victimEOSID := event.VictimEOS
+	if event.Victim != nil {
+		if victimName == "" {
+			victimName = event.Victim.PlayerSuffix
+		}
+		if victimSteamID == "" {
+			victimSteamID = event.Victim.SteamID
+		}
+		if victimEOSID == "" {
+			victimEOSID = event.Victim.EOSID
+		}
+	}
+
+	if attackerName == "" {
+		attackerName = "Unknown"
+	}
 
 	// Default values for missing data
 	if attackerSteamID == "" {
