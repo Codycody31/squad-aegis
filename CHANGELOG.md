@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-08
+## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-10
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -20,6 +20,7 @@
 
 ### Misc
 
+- fix(plugins): avoid panic on nil event data; prefer flat player fields ([25fc92a](https://github.com/Codycody31/squad-aegis/commit/25fc92abdcafc7394a9d06072d6c52bcce51993c))
 - Merge branch 'master' of https://github.com/Codycody31/squad-aegis ([d0e1b80](https://github.com/Codycody31/squad-aegis/commit/d0e1b80be49a6619b7d909f094d03fb4ca6ecf25))
 - chore: add centralized API error handling utility and enhance server validation ([49efac8](https://github.com/Codycody31/squad-aegis/commit/49efac8728aa380598eb654560694f2c1f235197))
 - chore(web): add pnpm config and remove vite temp package.json ([5d9bf81](https://github.com/Codycody31/squad-aegis/commit/5d9bf81369185f6577c5b957edaf1e4be79d5f89))
