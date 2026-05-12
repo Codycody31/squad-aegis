@@ -34,10 +34,12 @@ func (s *Server) CreateAuditLog(ctx context.Context, serverID *uuid.UUID, userID
 		return
 	}
 
-	// Insert the audit log into the database
+	// Insert the audit log into the database. username_snapshot captures the acting
+	// user's name at write time so the row remains attributable after user deletion
+	// (FK is ON DELETE SET NULL).
 	_, err = s.Dependencies.DB.ExecContext(ctx, `
-		INSERT INTO audit_logs (id, server_id, user_id, action, changes, timestamp)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO audit_logs (id, server_id, user_id, action, changes, timestamp, username_snapshot)
+		VALUES ($1, $2, $3, $4, $5, $6, (SELECT username FROM users WHERE id = $3))
 	`, uuid.New(), serverID, userID, action, changesJSON, time.Now())
 
 	if err != nil {
@@ -79,9 +81,10 @@ func (s *Server) ServerAuditLogs(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
-	// Build the query
+	// Build the query. COALESCE prefers the live username, falls back to the
+	// snapshot captured at write time so rows for deleted users still show a name.
 	query := `
-		SELECT al.id, al.user_id, u.username, al.action, al.changes, al.timestamp
+		SELECT al.id, al.user_id, COALESCE(u.username, al.username_snapshot), al.action, al.changes, al.timestamp
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
 		WHERE al.server_id = $1
@@ -112,11 +115,13 @@ func (s *Server) ServerAuditLogs(c *gin.Context) {
 		}
 	}
 
-	// Add search if provided
+	// Add search if provided. Also search the username snapshot so deleted users
+	// remain findable by name.
 	if search := c.Query("search"); search != "" {
 		whereCount++
-		query += " AND (u.username ILIKE $" + intToString(whereCount) + " OR al.action ILIKE $" + intToString(whereCount) + ")"
-		countQuery += " AND (EXISTS (SELECT 1 FROM users WHERE id = user_id AND username ILIKE $" + intToString(whereCount) + ") OR action ILIKE $" + intToString(whereCount) + ")"
+		p := intToString(whereCount)
+		query += " AND (u.username ILIKE $" + p + " OR al.username_snapshot ILIKE $" + p + " OR al.action ILIKE $" + p + ")"
+		countQuery += " AND (EXISTS (SELECT 1 FROM users WHERE id = user_id AND username ILIKE $" + p + ") OR username_snapshot ILIKE $" + p + " OR action ILIKE $" + p + ")"
 		args = append(args, "%"+search+"%")
 	}
 
