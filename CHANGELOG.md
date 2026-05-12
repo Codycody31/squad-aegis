@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-10
+## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-12
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -20,6 +20,8 @@
 
 ### Misc
 
+- fix(db): allow user deletion without breaking audit history ([82d3108](https://github.com/Codycody31/squad-aegis/commit/82d3108e8b52ea18a674e8c50cb1d27fe300112d))
+- fix(web): add clipboard util for HTTP fallback and update copy actions ([2e9d9e3](https://github.com/Codycody31/squad-aegis/commit/2e9d9e374e7cb295deb6a6ae52bb3b7c17c22de4))
 - fix(plugins): avoid panic on nil event data; prefer flat player fields ([25fc92a](https://github.com/Codycody31/squad-aegis/commit/25fc92abdcafc7394a9d06072d6c52bcce51993c))
 - Merge branch 'master' of https://github.com/Codycody31/squad-aegis ([d0e1b80](https://github.com/Codycody31/squad-aegis/commit/d0e1b80be49a6619b7d909f094d03fb4ca6ecf25))
 - chore: add centralized API error handling utility and enhance server validation ([49efac8](https://github.com/Codycody31/squad-aegis/commit/49efac8728aa380598eb654560694f2c1f235197))
