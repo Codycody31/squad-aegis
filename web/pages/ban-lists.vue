@@ -70,13 +70,13 @@ const getBanListCfgUrl = (banListId: string) => {
 // Helper function to copy cfg URL to clipboard
 const copyCfgUrl = async (banListId: string) => {
     const url = getBanListCfgUrl(banListId);
-    try {
-        await navigator.clipboard.writeText(url);
+    const ok = await copyToClipboard(url);
+    if (ok) {
         toast({
             title: "URL Copied",
             description: "Ban list CFG URL copied to clipboard",
         });
-    } catch (err) {
+    } else {
         toast({
             title: "Copy Failed",
             description: "Failed to copy URL to clipboard",

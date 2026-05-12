@@ -18,8 +18,9 @@ const props = defineProps<{
 
 const copied = ref<string | null>(null);
 
-function copyToClipboard(text: string, field: string) {
-  navigator.clipboard.writeText(text);
+async function handleCopy(text: string, field: string) {
+  const ok = await copyToClipboard(text);
+  if (!ok) return;
   copied.value = field;
   setTimeout(() => {
     copied.value = null;
@@ -167,7 +168,7 @@ const hasLinkedIdentities = computed(() => {
               variant="ghost"
               size="icon"
               class="h-8 w-8"
-              @click="copyToClipboard(player.steam_id, 'steam')"
+              @click="handleCopy(player.steam_id, 'steam')"
             >
               <Check v-if="copied === 'steam'" class="h-4 w-4 text-green-500" />
               <Copy v-else class="h-4 w-4" />
@@ -185,7 +186,7 @@ const hasLinkedIdentities = computed(() => {
               variant="ghost"
               size="icon"
               class="h-8 w-8"
-              @click="copyToClipboard(player.eos_id, 'eos')"
+              @click="handleCopy(player.eos_id, 'eos')"
             >
               <Check v-if="copied === 'eos'" class="h-4 w-4 text-green-500" />
               <Copy v-else class="h-4 w-4" />

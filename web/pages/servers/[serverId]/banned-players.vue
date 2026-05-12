@@ -1477,18 +1477,22 @@ const banCfgUrl = computed(() => {
     return url;
 });
 
-function copyBanCfgUrl() {
-    if (!canCopyConfigUrl.value) {
-        // On HTTP, just open the popover to show the URL
-        showBanCfgPopover.value = true;
+async function copyBanCfgUrl() {
+    const ok = await copyToClipboard(banCfgUrl.value);
+    if (ok) {
+        toast({
+            title: "Success",
+            description: "Ban configuration URL copied to clipboard",
+        });
         return;
     }
 
-    navigator.clipboard.writeText(banCfgUrl.value);
-
+    // Fallback: open the popover to show the URL for manual copy
+    showBanCfgPopover.value = true;
     toast({
-        title: "Success",
-        description: "Ban configuration URL copied to clipboard",
+        title: "Copy failed",
+        description: "Clipboard unavailable — copy the URL manually.",
+        variant: "destructive",
     });
 }
 
