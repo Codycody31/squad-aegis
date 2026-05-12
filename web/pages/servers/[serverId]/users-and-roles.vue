@@ -1041,18 +1041,22 @@ const adminCfgUrl = computed(() => {
     return url;
 });
 
-function copyAdminCfgUrl() {
-    if (!canCopyConfigUrl.value) {
-        // On HTTP, just open the popover to show the URL
-        showAdminCfgPopover.value = true;
+async function copyAdminCfgUrl() {
+    const ok = await copyToClipboard(adminCfgUrl.value);
+    if (ok) {
+        toast({
+            title: "Success",
+            description: "Admin configuration URL copied to clipboard",
+        });
         return;
     }
 
-    navigator.clipboard.writeText(adminCfgUrl.value);
-
+    // Fallback: open the popover to show the URL for manual copy
+    showAdminCfgPopover.value = true;
     toast({
-        title: "Success",
-        description: "Admin configuration URL copied to clipboard",
+        title: "Copy failed",
+        description: "Clipboard unavailable — copy the URL manually.",
+        variant: "destructive",
     });
 }
 

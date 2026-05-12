@@ -340,13 +340,6 @@ function hasDetailedChanges(changes: any): boolean {
   return false;
 }
 
-// Copy text to clipboard
-function copyToClipboard(text: string) {
-  if (typeof window !== "undefined" && window.navigator?.clipboard) {
-    window.navigator.clipboard.writeText(text);
-  }
-}
-
 // Setup initial data load
 onMounted(() => {
   fetchAuditLogs();

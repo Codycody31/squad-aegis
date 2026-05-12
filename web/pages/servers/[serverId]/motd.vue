@@ -244,7 +244,7 @@
                         <Icon v-else name="lucide:refresh-cw" class="h-4 w-4 mr-2" />
                         Refresh
                     </Button>
-                    <Button variant="outline" size="sm" @click="copyToClipboard">
+                    <Button variant="outline" size="sm" @click="copyMotdToClipboard">
                         <Icon name="lucide:copy" class="h-4 w-4 mr-2" />
                         Copy
                     </Button>
@@ -476,18 +476,18 @@ const refreshPreview = async () => {
     }
 };
 
-const copyToClipboard = async () => {
+const copyMotdToClipboard = async () => {
     if (!previewContent.value) {
         await refreshPreview();
     }
 
-    try {
-        await navigator.clipboard.writeText(previewContent.value);
+    const ok = await copyToClipboard(previewContent.value);
+    if (ok) {
         toast({
             title: "Copied",
             description: "MOTD content copied to clipboard",
         });
-    } catch (error) {
+    } else {
         toast({
             title: "Error",
             description: "Failed to copy to clipboard",

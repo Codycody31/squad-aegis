@@ -68,9 +68,10 @@ func (s *Server) GetGlobalAuditLogs(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
-	// Build the base query
+	// Build the base query. COALESCE prefers the live username, falls back to the
+	// snapshot captured at write time for deleted users.
 	query := `
-		SELECT al.id, al.server_id, s.name as server_name, al.user_id, u.username, al.action, al.changes, al.timestamp
+		SELECT al.id, al.server_id, s.name as server_name, al.user_id, COALESCE(u.username, al.username_snapshot), al.action, al.changes, al.timestamp
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
 		LEFT JOIN servers s ON al.server_id = s.id
@@ -112,12 +113,13 @@ func (s *Server) GetGlobalAuditLogs(c *gin.Context) {
 		args = append(args, action)
 	}
 
-	// Add search filter
+	// Add search filter. Also search the username snapshot so deleted users
+	// remain findable by name.
 	if search := c.Query("search"); search != "" {
 		paramCount++
 		searchPattern := "%" + search + "%"
-		query += fmt.Sprintf(" AND (u.username ILIKE $%d OR al.action ILIKE $%d OR s.name ILIKE $%d)", paramCount, paramCount, paramCount)
-		countQuery += fmt.Sprintf(" AND (EXISTS (SELECT 1 FROM users WHERE id = user_id AND username ILIKE $%d) OR action ILIKE $%d OR EXISTS (SELECT 1 FROM servers WHERE id = server_id AND name ILIKE $%d))", paramCount, paramCount, paramCount)
+		query += fmt.Sprintf(" AND (u.username ILIKE $%d OR al.username_snapshot ILIKE $%d OR al.action ILIKE $%d OR s.name ILIKE $%d)", paramCount, paramCount, paramCount, paramCount)
+		countQuery += fmt.Sprintf(" AND (EXISTS (SELECT 1 FROM users WHERE id = user_id AND username ILIKE $%d) OR username_snapshot ILIKE $%d OR action ILIKE $%d OR EXISTS (SELECT 1 FROM servers WHERE id = server_id AND name ILIKE $%d))", paramCount, paramCount, paramCount, paramCount)
 		args = append(args, searchPattern)
 	}
 
@@ -315,7 +317,7 @@ func (s *Server) GetGlobalAuditStats(c *gin.Context) {
 
 	// Get recent activity (last 10 logs)
 	rows, err = s.Dependencies.DB.QueryContext(ctx, `
-		SELECT al.id, al.server_id, s.name as server_name, al.user_id, u.username, al.action, al.changes, al.timestamp
+		SELECT al.id, al.server_id, s.name as server_name, al.user_id, COALESCE(u.username, al.username_snapshot), al.action, al.changes, al.timestamp
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
 		LEFT JOIN servers s ON al.server_id = s.id
@@ -353,7 +355,7 @@ func (s *Server) ExportGlobalAuditLogs(c *gin.Context) {
 
 	// Build query with filters (same as GetGlobalAuditLogs but without pagination)
 	query := `
-		SELECT al.id, al.server_id, s.name as server_name, al.user_id, u.username, al.action, al.changes, al.timestamp
+		SELECT al.id, al.server_id, s.name as server_name, al.user_id, COALESCE(u.username, al.username_snapshot), al.action, al.changes, al.timestamp
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
 		LEFT JOIN servers s ON al.server_id = s.id

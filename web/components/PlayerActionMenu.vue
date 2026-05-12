@@ -490,19 +490,20 @@ async function executePlayerAction() {
 }
 
 // Function to copy text to clipboard
-function copyToClipboard(text: string) {
-    if (process.client) {
-        navigator.clipboard
-            .writeText(text)
-            .then(() => {
-                toast({
-                    title: "Copied to clipboard",
-                    description: "The text has been copied to your clipboard.",
-                });
-            })
-            .catch((err) => {
-                console.error("Failed to copy text: ", err);
-            });
+async function handleCopy(text: string) {
+    if (!process.client) return;
+    const ok = await copyToClipboard(text);
+    if (ok) {
+        toast({
+            title: "Copied to clipboard",
+            description: "The text has been copied to your clipboard.",
+        });
+    } else {
+        toast({
+            title: "Copy failed",
+            description: "Unable to access the clipboard in this browser.",
+            variant: "destructive",
+        });
     }
 }
 </script>
@@ -528,11 +529,11 @@ function copyToClipboard(text: string) {
                     <span>View Player Profile</span>
                 </DropdownMenuItem>
             </RouterLink>
-            <DropdownMenuItem @click="copyToClipboard(player.steam_id)">
+            <DropdownMenuItem @click="handleCopy(player.steam_id)">
                 <Icon name="lucide:copy" class="mr-2 h-4 w-4 text-yellow-500" />
                 <span>Copy Steam ID</span>
             </DropdownMenuItem>
-            <DropdownMenuItem @click="copyToClipboard(getPlayerEOSID(player))">
+            <DropdownMenuItem @click="handleCopy(getPlayerEOSID(player))">
                 <Icon name="lucide:copy" class="mr-2 h-4 w-4 text-yellow-500" />
                 <span>Copy EOS ID</span>
             </DropdownMenuItem>
