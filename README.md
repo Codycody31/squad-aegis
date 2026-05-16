@@ -34,6 +34,42 @@ See [Acknowledgements](https://squad-aegis.com/docs/acknowledgements) for more d
 
 ![Dashboard](.github/images/dashboard.png)
 
+## Nix
+
+This repository ships a flake (`flake.nix`).
+
+```bash
+nix run github:Codycody31/squad-aegis   # run the server (frontend embedded)
+nix build .#squad-aegis                  # build the server binary
+nix build .#squad-aegis-web              # build only the static frontend
+nix develop                              # dev shell: go, pnpm, protoc, golangci-lint…
+```
+
+Deploy on NixOS via the exported module:
+
+```nix
+{
+  inputs.squad-aegis.url = "github:Codycody31/squad-aegis";
+
+  # In your NixOS configuration:
+  imports = [ squad-aegis.nixosModules.default ];
+  services.squad-aegis = {
+    enable = true;
+    openFirewall = true;
+    settings = {
+      APP_URL = "https://aegis.example.com";
+      DB_HOST = "127.0.0.1";
+      DB_NAME = "squad-aegis";
+      DB_USER = "squad-aegis";
+    };
+    # Secrets (DB_PASS, INITIAL_ADMIN_PASSWORD, S3 keys) — kept out of the store:
+    environmentFile = "/run/secrets/squad-aegis.env";
+  };
+}
+```
+
+The full set of `settings` keys mirrors [`.env.example`](.env.example).
+
 ## Contributing
 
 We welcome contributions!
