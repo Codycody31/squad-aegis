@@ -382,7 +382,7 @@ func (p *KillBroadcastPlugin) UpdateConfig(config map[string]interface{}) error 
 // HandleEvent handles events for the plugin
 func (p *KillBroadcastPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
 	data, ok := event.Data.(*event_manager.LogPlayerWoundedData)
-	if !ok {
+	if !ok || data == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

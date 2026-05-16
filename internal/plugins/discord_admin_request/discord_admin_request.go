@@ -236,7 +236,7 @@ func (p *DiscordAdminRequestPlugin) UpdateConfig(config map[string]interface{}) 
 // handleChatMessage processes chat messages looking for admin requests
 func (p *DiscordAdminRequestPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

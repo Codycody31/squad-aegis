@@ -217,7 +217,7 @@ func (p *DiscordFOBHABExplosionDamagePlugin) UpdateConfig(config map[string]inte
 // handleDeployableDamaged processes deployable damaged events
 func (p *DiscordFOBHABExplosionDamagePlugin) handleDeployableDamaged(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.LogDeployableDamagedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

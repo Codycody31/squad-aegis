@@ -187,7 +187,7 @@ func (p *RuleLookupPlugin) UpdateConfig(config map[string]interface{}) error {
 // handleChatMessage processes chat message events to detect rule lookup commands
 func (p *RuleLookupPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

@@ -291,7 +291,7 @@ func (p *CBLPlugin) UpdateConfig(config map[string]interface{}) error {
 // handlePlayerConnected processes player connected events
 func (p *CBLPlugin) handlePlayerConnected(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.LogPlayerConnectedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

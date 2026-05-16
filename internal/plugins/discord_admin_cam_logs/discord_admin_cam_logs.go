@@ -275,7 +275,7 @@ func (p *DiscordAdminCamLogsPlugin) UpdateConfig(config map[string]interface{}) 
 // handleAdminCameraEntry processes admin camera possession events
 func (p *DiscordAdminCamLogsPlugin) handleAdminCameraEntry(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconAdminCameraData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 
@@ -319,7 +319,7 @@ func (p *DiscordAdminCamLogsPlugin) handleAdminCameraEntry(rawEvent *plugin_mana
 // handleAdminCameraExit processes admin camera unpossession events
 func (p *DiscordAdminCamLogsPlugin) handleAdminCameraExit(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconAdminCameraData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

@@ -150,7 +150,7 @@ func (p *FogOfWarPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
 		return nil // Not interested in this event
 	}
 
-	if unifiedEvent, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok {
+	if unifiedEvent, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok && unifiedEvent != nil {
 		if unifiedEvent.EventType == "NEW_GAME" {
 			return p.handleNewGame(event)
 		}
