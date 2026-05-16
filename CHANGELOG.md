@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-12
+## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-16
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -20,6 +20,7 @@
 
 ### Misc
 
+- chore: Nix flake ([4181b2f](https://github.com/Codycody31/squad-aegis/commit/4181b2ffdccb2f1b3ed68d6bfcc28a6474d5a617))
 - fix(db): allow user deletion without breaking audit history ([82d3108](https://github.com/Codycody31/squad-aegis/commit/82d3108e8b52ea18a674e8c50cb1d27fe300112d))
 - fix(web): add clipboard util for HTTP fallback and update copy actions ([2e9d9e3](https://github.com/Codycody31/squad-aegis/commit/2e9d9e374e7cb295deb6a6ae52bb3b7c17c22de4))
 - fix(plugins): avoid panic on nil event data; prefer flat player fields ([25fc92a](https://github.com/Codycody31/squad-aegis/commit/25fc92abdcafc7394a9d06072d6c52bcce51993c))
