@@ -198,7 +198,7 @@ func (p *AutoTKWarnPlugin) UpdateConfig(config map[string]interface{}) error {
 // handleTeamkill processes teamkill events
 func (p *AutoTKWarnPlugin) handleTeamkill(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.LogPlayerWoundedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

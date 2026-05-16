@@ -110,10 +110,17 @@ func (s *Server) ServerMetricsHistory(c *gin.Context) {
 			return
 		}
 
-		// Validate that endTime is after startTime
-		if endTime.Before(startTime) || endTime.Equal(startTime) {
-			responses.BadRequest(c, "Invalid time range", &gin.H{"error": "endTime must be after startTime"})
+		// Validate that endTime is not before startTime
+		if endTime.Before(startTime) {
+			responses.BadRequest(c, "Invalid time range", &gin.H{"error": "endTime must not be before startTime"})
 			return
+		}
+
+		// If startTime == endTime (e.g. the same calendar date was selected on
+		// both ends of the picker), treat it as a full single-day window so the
+		// request still returns meaningful data instead of failing.
+		if endTime.Equal(startTime) {
+			endTime = startTime.Add(24 * time.Hour)
 		}
 
 		// Validate that the range is not too large (max 1 year)

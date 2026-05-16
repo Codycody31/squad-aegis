@@ -199,7 +199,7 @@ func (p *DiscordSquadCreatedPlugin) UpdateConfig(config map[string]interface{}) 
 // handleSquadCreated processes squad creation events
 func (p *DiscordSquadCreatedPlugin) handleSquadCreated(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconSquadCreatedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

@@ -347,7 +347,7 @@ func (p *SquadCreationBlockerPlugin) UpdateConfig(config map[string]interface{})
 // handleGameEvent processes unified game events (NEW_GAME, ROUND_ENDED)
 func (p *SquadCreationBlockerPlugin) handleGameEvent(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 
@@ -442,7 +442,7 @@ func (p *SquadCreationBlockerPlugin) handleRoundEnd() error {
 // handleSquadCreated processes SQUAD_CREATED events
 func (p *SquadCreationBlockerPlugin) handleSquadCreated(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconSquadCreatedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

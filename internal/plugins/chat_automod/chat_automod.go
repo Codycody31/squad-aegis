@@ -376,7 +376,7 @@ func (p *ChatAutoModPlugin) HandleEvent(event *plugin_manager.PluginEvent) error
 	}
 
 	chatEvent, ok := event.Data.(*event_manager.RconChatMessageData)
-	if !ok {
+	if !ok || chatEvent == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

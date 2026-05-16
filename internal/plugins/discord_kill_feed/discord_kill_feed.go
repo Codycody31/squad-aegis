@@ -208,7 +208,7 @@ func (p *DiscordKillFeedPlugin) UpdateConfig(config map[string]interface{}) erro
 // handlePlayerWounded processes player wounded events
 func (p *DiscordKillFeedPlugin) handlePlayerWounded(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.LogPlayerWoundedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 
@@ -233,6 +233,10 @@ func (p *DiscordKillFeedPlugin) handlePlayerWounded(rawEvent *plugin_manager.Plu
 
 // sendKillFeedEmbed sends the kill feed as a Discord embed
 func (p *DiscordKillFeedPlugin) sendKillFeedEmbed(event *event_manager.LogPlayerWoundedData) error {
+	if p.discordAPI == nil {
+		return fmt.Errorf("discord connector is not available")
+	}
+
 	channelID := p.getStringConfig("channel_id")
 	if channelID == "" {
 		return fmt.Errorf("channel_id not configured")

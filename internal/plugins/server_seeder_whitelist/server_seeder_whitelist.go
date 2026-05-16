@@ -321,7 +321,7 @@ func (p *ServerSeederWhitelistPlugin) Stop() error {
 func (p *ServerSeederWhitelistPlugin) HandleEvent(event *plugin_manager.PluginEvent) error {
 	switch event.Type {
 	case string(event_manager.EventTypeLogGameEventUnified):
-		if unifiedEvent, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok {
+		if unifiedEvent, ok := event.Data.(*event_manager.LogGameEventUnifiedData); ok && unifiedEvent != nil {
 			if unifiedEvent.EventType == "NEW_GAME" {
 				return p.handleNewGame(event)
 			}
@@ -465,7 +465,7 @@ func (p *ServerSeederWhitelistPlugin) handleChatMessage(rawEvent *plugin_manager
 	}
 
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

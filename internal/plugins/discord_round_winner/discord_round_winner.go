@@ -202,7 +202,7 @@ func (p *DiscordRoundWinnerPlugin) handleNewGame(rawEvent *plugin_manager.Plugin
 	// Handle both old and new event types for backwards compatibility
 	var winner, layer string
 
-	if unifiedEvent, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData); ok {
+	if unifiedEvent, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData); ok && unifiedEvent != nil {
 		if unifiedEvent.EventType == "ROUND_ENDED" {
 			winner = unifiedEvent.Winner
 			layer = unifiedEvent.Layer

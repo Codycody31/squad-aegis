@@ -272,7 +272,7 @@ func (p *ChatCommandsPlugin) parseCommands() error {
 // handleChatMessage processes chat message events to detect commands
 func (p *ChatCommandsPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

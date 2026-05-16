@@ -820,7 +820,7 @@ func (p *TeamBalancerPlugin) formatTeamNameForBroadcast(teamID int) string {
 // handleGameEvent processes unified game events (ROUND_ENDED, NEW_GAME)
 func (p *TeamBalancerPlugin) handleGameEvent(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 
@@ -1019,7 +1019,7 @@ func (p *TeamBalancerPlugin) handleNewGame(event *event_manager.LogGameEventUnif
 // handleChatMessage processes chat messages for commands
 func (p *TeamBalancerPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

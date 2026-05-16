@@ -204,7 +204,7 @@ func (p *DiscordRoundEndedPlugin) handleRoundEnded(rawEvent *plugin_manager.Plug
 	// Handle both old and new event types for backwards compatibility
 	var eventData *roundEndedEventData
 
-	if unifiedEvent, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData); ok {
+	if unifiedEvent, ok := rawEvent.Data.(*event_manager.LogGameEventUnifiedData); ok && unifiedEvent != nil {
 		if unifiedEvent.EventType == "ROUND_ENDED" {
 			eventData = &roundEndedEventData{
 				Winner:     unifiedEvent.Winner,

@@ -227,7 +227,7 @@ func (p *SwitchTeamsPlugin) HandleEvent(event *plugin_manager.PluginEvent) error
 // handleChatMessage processes chat message events to detect switch commands
 func (p *SwitchTeamsPlugin) handleChatMessage(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.RconChatMessageData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 

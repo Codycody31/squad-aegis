@@ -202,7 +202,7 @@ func (p *DiscordTeamkillPlugin) UpdateConfig(config map[string]interface{}) erro
 // handlePlayerWounded processes player wounded events
 func (p *DiscordTeamkillPlugin) handlePlayerWounded(rawEvent *plugin_manager.PluginEvent) error {
 	event, ok := rawEvent.Data.(*event_manager.LogPlayerWoundedData)
-	if !ok {
+	if !ok || event == nil {
 		return fmt.Errorf("invalid event data type")
 	}
 
