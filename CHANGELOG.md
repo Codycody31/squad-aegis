@@ -20,6 +20,8 @@
 
 ### Misc
 
+- fix(plugins,server): prevent nil-deref panics and same-date metric range error ([29c2199](https://github.com/Codycody31/squad-aegis/commit/29c219983180a9f4f749b60b2de1f92f4bef8384))
+- chore: bump docker compose dev image versions ([6c25786](https://github.com/Codycody31/squad-aegis/commit/6c25786cbc3ba3b6f726e4caa2a1241bfc9f2b9a))
 - chore: Nix flake ([4181b2f](https://github.com/Codycody31/squad-aegis/commit/4181b2ffdccb2f1b3ed68d6bfcc28a6474d5a617))
 - fix(db): allow user deletion without breaking audit history ([82d3108](https://github.com/Codycody31/squad-aegis/commit/82d3108e8b52ea18a674e8c50cb1d27fe300112d))
 - fix(web): add clipboard util for HTTP fallback and update copy actions ([2e9d9e3](https://github.com/Codycody31/squad-aegis/commit/2e9d9e374e7cb295deb6a6ae52bb3b7c17c22de4))
