@@ -359,5 +359,3 @@ When developing for Squad Aegis, keep these architectural principles in mind:
 4. **Scalability**: The system should handle multiple servers and high event volumes efficiently.
 
 5. **Security**: Be mindful of security considerations, especially in the RCON and API components.
-
-By understanding these diagrams and principles, developers can effectively contribute to and extend Squad Aegis.

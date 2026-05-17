@@ -2,14 +2,14 @@
 title: "Lua Scripting"
 ---
 
-Squad Aegis provides powerful Lua scripting capabilities within workflows, allowing you to implement complex logic, data processing, and server interactions using the Lua programming language.
+Lua steps run a script with access to the workflow context, RCON, persistent KV storage, logging, and JSON helpers. All functions live under the `workflow` namespace.
 
-## Overview
+## Available Namespaces
 
 Lua scripts in workflows have access to:
 
 - Complete workflow context (trigger events, variables, metadata)
-- RCON command execution capabilities
+- RCON command execution
 - Persistent KV (Key-Value) storage
 - Logging and debugging functions
 - JSON processing utilities
@@ -17,7 +17,7 @@ Lua scripts in workflows have access to:
 
 ## API Structure
 
-All workflow functions are organized under the `workflow` namespace for consistency and discoverability:
+All workflow functions are organized under the `workflow` namespace:
 
 - `workflow.log.*` - Logging functions
 - `workflow.variable.*` - Workflow variable operations
@@ -639,7 +639,7 @@ result.usage_count = usage_count
 
 ### Player Statistics Tracker
 
-Maintain comprehensive player statistics in the KV store:
+Maintain detailed player statistics in the KV store:
 
 ```lua
 local player_id = workflow.util.safe_get(workflow.trigger_event, "steam_id", "")

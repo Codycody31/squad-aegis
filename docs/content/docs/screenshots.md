@@ -2,16 +2,24 @@
 title: Screenshots
 ---
 
+A walkthrough of the main interfaces.
 
-Here are some screenshots showcasing the features and interface of Squad Aegis:
+![The global dashboard, listing every connected server and its status.](/assets/screenshots/dashboard-overview.png)
 
-![Dashboard Overview](/assets/screenshots/dashboard-overview.png)
-![Users Management](/assets/screenshots/users-management.png)
-![Backup & Restore](/assets/screenshots/backup-and-restore.png)
-![Connectors](/assets/screenshots/global-connectors.png)
-![Server - Dashboard](/assets/screenshots/server-dashboard.png)
-![Server - User & Roles](/assets/screenshots/server-user-and-roles.png)
-![Server - Console](/assets/screenshots/server-console.png)
-![Server - Feeds](/assets/screenshots/server-feeds.png)
-![Server - Audit Logs](/assets/screenshots/server-audit-logs.png)
-![Server - Plugins](/assets/screenshots/server-plugins.png)
+![User management: accounts, roles, and per-server access.](/assets/screenshots/users-management.png)
+
+![Backup and restore of server configuration and data.](/assets/screenshots/backup-and-restore.png)
+
+![Global connectors, including the Discord integration.](/assets/screenshots/global-connectors.png)
+
+![A single server's dashboard with live status and quick actions.](/assets/screenshots/server-dashboard.png)
+
+![Per-server users and roles.](/assets/screenshots/server-user-and-roles.png)
+
+![The web RCON console for a server.](/assets/screenshots/server-console.png)
+
+![Live event feeds for a server.](/assets/screenshots/server-feeds.png)
+
+![The audit log of administrative actions.](/assets/screenshots/server-audit-logs.png)
+
+![Plugins configured on a server.](/assets/screenshots/server-plugins.png)

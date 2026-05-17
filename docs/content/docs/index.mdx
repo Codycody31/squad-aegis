@@ -2,37 +2,28 @@
 title: What is Squad Aegis?
 ---
 
-**Squad Aegis** is a comprehensive control panel designed for efficient administration of Squad game servers. It provides server administrators with a centralized interface for managing multiple Squad servers through an intuitive web interface.
+Squad Aegis is a control panel for administering Squad game servers. It runs multiple servers from one web interface, with RCON access, role-based permissions, an event-driven plugin system, and an audit log of every administrative action.
 
-## Key Features
+## Features
 
-- **Multi-Server Management**: Supervise and control multiple Squad servers from a unified dashboard
-- **Role-Based Access Control**: Granular permission system ensuring secure administrative operations
-- **Web-Based RCON Interface**: Execute server commands through an intuitive graphical interface
-- **Comprehensive Audit Logging**: Track all administrative actions for security and accountability
+- **Multi-server management** - operate any number of Squad servers from a single dashboard.
+- **Role-based access control** - scoped permissions per user and per server.
+- **Web RCON** - run server commands from the browser.
+- **Audit logging** - every administrative action is recorded.
+- **Plugins and workflows** - react to in-game events with built-in workflows or native Go plugins.
 
-## System Requirements
+## Requirements
 
-- Docker Engine 20.10.0 or newer
-- Docker Compose V2
-- Minimum 1GB RAM
-- At least 10GB available storage
+Squad Aegis runs on Docker and depends on PostgreSQL, ClickHouse, and Valkey. See the [Installation Guide](/docs/installation) for exact versions and the minimum host requirements.
 
-## Technical Foundation
+## Built on
 
-Squad Aegis builds upon several open-source projects:
+- [`milutinke/sqcp`](https://github.com/milutinke/sqcp) - architecture reference.
+- [`SquadGO/squad-rcon-go`](https://github.com/SquadGO/squad-rcon-go) - RCON client.
+- [`Team-Silver-Sphere/SquadJS`](https://github.com/Team-Silver-Sphere/SquadJS) - log-parsing model and plugin compatibility target.
 
-- `sqcp` for core architecture inspiration
-- `squad-rcon-go` for RCON communication
-- `SquadJS` for log parsing and plugin compatibility
-- Specialized plugins like the Squad Lead Whitelister
+See [Acknowledgements](/docs/acknowledgements) for the full list and licenses.
 
-## Getting Started
+## Getting started
 
-For installation instructions, refer to our [Installation Guide](/docs/installation). The setup process involves:
-
-1. Cloning the repository
-2. Configuring environment variables
-3. Building the application
-4. Setting up Docker services
-5. Accessing the web interface
+Follow the [Installation Guide](/docs/installation): clone the repository, configure environment variables, start the Docker services, and sign in.

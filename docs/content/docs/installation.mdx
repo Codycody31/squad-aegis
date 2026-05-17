@@ -2,18 +2,17 @@
 title: Installation Guide
 ---
 
-This guide will walk you through installing and configuring **Squad Aegis**, the comprehensive control panel for Squad game server administration.
-It includes both a quick "run with Docker Compose" path and a more detailed manual build process.
+This page covers installing Squad Aegis with Docker Compose and building it from source. The Docker Compose path is the supported way to run it.
 
 ## Prerequisites
 
 Before installing Squad Aegis, ensure you have:
 
-- **Docker Engine** 20.10.0 or newer
-- **Docker Compose V2**
-- Minimum **4GB RAM**
-- At least **10GB available storage**
-- Basic knowledge of Docker and command-line operations
+- Docker Engine 20.10.0 or newer
+- Docker Compose V2
+- 4 GB RAM minimum
+- 10 GB available storage
+- Familiarity with Docker and the command line
 
 ## 1. Clone the Repository
 
@@ -69,11 +68,9 @@ DEBUG_PRETTY=true
 DEBUG_NO_COLOR=false
 ```
 
-⚠️ **Important Security Note:** Always change the default `INITIAL_ADMIN_PASSWORD` and database credentials before deployment.
+Security: change `INITIAL_ADMIN_PASSWORD` and every database credential before deploying. The values above are placeholders.
 
 ## 3. Running with Docker Compose
-
-You have two options depending on your needs:
 
 ### Option A: Quick Start (non-dev stack)
 
@@ -85,10 +82,10 @@ docker compose up -d
 
 This will start the following containers:
 
-- **PostgreSQL 14** – main application database
-- **ClickHouse 25.3** – analytics database
-- **Valkey 8.1.3** – caching / key-value store
-- **Squad Aegis Server** – main application
+- **PostgreSQL 14** - main application database
+- **ClickHouse 25.3** - analytics database
+- **Valkey 8.1.3** - caching / key-value store
+- **Squad Aegis Server** - main application
 
 ### Option B: Development stack
 
@@ -98,7 +95,7 @@ If you want to build locally and run alongside databases:
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-Just make sure to update the `.env` file and swap out the database connection settings.
+Update `.env` and the database connection settings before starting this stack.
 
 ## 4. (Optional) Build the Application Yourself
 
@@ -153,9 +150,7 @@ Check container health:
 docker ps
 ```
 
-Then open your browser:
-
-👉 [http://localhost:3113](http://localhost:3113)
+Open [http://localhost:3113](http://localhost:3113) in a browser.
 
 Log in with:
 
@@ -178,12 +173,14 @@ docker compose up -d
 
 ## 8. Data Persistence
 
-The following named volumes persist data between container restarts:
+The following named volumes persist data across container restarts:
 
-- `database` – PostgreSQL data
-- `clickhouse` – ClickHouse data
-- `valkey` – Valkey data
-- `data` – Squad Aegis config
+| Volume | Contents |
+| --- | --- |
+| `database` | PostgreSQL data |
+| `clickhouse` | ClickHouse data |
+| `valkey` | Valkey data |
+| `data` | Squad Aegis configuration |
 
 ## 9. Post-Installation Steps
 
@@ -223,6 +220,5 @@ docker compose logs -f squad-aegis
 
 ## Support
 
-- [Issue Tracker](https://github.com/Codycody31/squad-aegis/issues)
-- Project documentation
-- Contact the dev team via GitHub
+- Bug reports and feature requests: [Issue Tracker](https://github.com/Codycody31/squad-aegis/issues)
+- Documentation: this site
