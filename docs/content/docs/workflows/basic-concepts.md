@@ -4,7 +4,7 @@ title: "Basic Concepts"
 
 ## What are Workflows?
 
-Workflows in Squad Aegis provide a powerful automation system that allows you to create custom responses to in-game events. When specific events occur (like a player sending a chat message or a player joining the server), workflows can automatically execute a series of actions such as sending RCON commands, logging messages, or triggering notifications.
+Workflows automate responses to in-game events. When an event occurs - a chat message, a player connecting, a teamkill - a workflow can run a sequence of actions: RCON commands, log entries, notifications, or custom Lua.
 
 ## Basic Concepts
 

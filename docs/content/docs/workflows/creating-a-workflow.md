@@ -2,7 +2,7 @@
 title: "Creating a Workflow"
 ---
 
-This guide will walk you through creating your first workflow in Squad Aegis, from basic concepts to practical examples.
+This is a hands-on walkthrough of building workflows, from a one-step responder to a branching example. For the full list of step types and operators, see [Workflow Steps](/docs/workflows/workflow-steps).
 
 ## Understanding Triggers and Conditions
 
@@ -18,27 +18,7 @@ Triggers define what events will activate your workflow. Each trigger specifies:
 
 Conditions allow you to filter events and control when workflows execute. They use field names from the event data and operators to compare values.
 
-#### Condition Operators
-
-- `equals` - Exact match
-- `not_equals` - Does not match
-- `contains` - String contains substring
-- `not_contains` - String does not contain substring
-- `starts_with` - String starts with value
-- `ends_with` - String ends with value
-- `regex` - Regular expression match
-- `greater_than` - Numeric comparison (>)
-- `less_than` - Numeric comparison (<)
-- `greater_or_equal` - Numeric comparison (>=)
-- `less_or_equal` - Numeric comparison (<=)
-
-#### Field Access
-
-Fields can be accessed using dot notation for nested data:
-
-- `message` - Direct field access
-- `victim.steam_id` - Nested object field
-- `metadata.some_value` - JSON parsed field
+Condition operators and field-access syntax are listed in [Workflow Steps](/docs/workflows/workflow-steps#step-types).
 
 ## Example Workflows
 
@@ -181,93 +161,9 @@ Fields can be accessed using dot notation for nested data:
 - **Multiple Steps**: First logs the command, then broadcasts acknowledgment
 - **Security**: Ensures only admin chat commands are processed
 
-## Common Condition Examples
-
-### Message contains help command
-
-```json
-{
-  "field": "message",
-  "operator": "contains",
-  "value": "!help"
-}
-```
-
-### Admin chat only
-
-```json
-{
-  "field": "chat_type",
-  "operator": "equals",
-  "value": "ChatAdmin"
-}
-```
-
-### Specific player
-
-```json
-{
-  "field": "steam_id",
-  "operator": "equals",
-  "value": "76561198000000000"
-}
-```
-
-### Message starts with command prefix
-
-```json
-{
-  "field": "message",
-  "operator": "starts_with",
-  "value": "!"
-}
-```
-
-### High damage teamkill
-
-```json
-[
-  {
-    "field": "teamkill",
-    "operator": "equals",
-    "value": true
-  },
-  {
-    "field": "damage",
-    "operator": "greater_than",
-    "value": "50"
-  }
-]
-```
-
 ## Variables
 
 Variables allow workflows to store and share data across executions. They can be used in step configurations using `${variable_name}` syntax.
-
-### Built-in Variables
-
-#### Trigger Event Data
-
-Access trigger event fields using `${trigger_event.field_name}`:
-
-- `${trigger_event.player_name}` - Player who triggered the event
-- `${trigger_event.steam_id}` - Player's Steam ID
-- `${trigger_event.message}` - Chat message content
-- `${trigger_event.chat_type}` - Type of chat
-
-#### Step Results
-
-Access results from previous steps using `${step_results.step_id}`:
-
-- `${step_results.rcon_response.command}` - RCON command that was executed
-- `${step_results.rcon_response.response}` - RCON command response
-
-#### Workflow Variables
-
-Access custom variables using `${variables.variable_name}`:
-
-- `${variables.help_count}` - Custom counter
-- `${variables.last_player}` - Last player who triggered workflow
 
 ### Variable Examples
 
@@ -287,39 +183,13 @@ Access custom variables using `${variables.variable_name}`:
 }
 ```
 
+For the full variable replacement syntax and the available built-in fields, see [Workflow Steps](/docs/workflows/workflow-steps#variable-replacement).
+
 ## Error Handling
 
-Configure how workflows handle failures and errors.
-
-### Error Actions
-
-- `continue` - Continue to next step
-- `stop` - Stop workflow execution
-- `retry` - Retry the failed step
-
-### Workflow-Level Error Handling
-
-```json
-{
-  "error_handling": {
-    "default_action": "continue",
-    "max_retries": 3,
-    "retry_delay_ms": 1000
-  }
-}
-```
-
-### Step-Level Error Handling
-
-```json
-{
-  "on_error": {
-    "action": "retry",
-    "max_retries": 2,
-    "retry_delay_ms": 500
-  }
-}
-```
+Examples 1 and 2 above include `error_handling` (workflow-level) and
+`on_error` (step-level) blocks. For the full list of error actions and the
+configuration fields, see [Workflow Steps](/docs/workflows/workflow-steps#error-handling).
 
 ## Conditional Branching
 
@@ -404,7 +274,7 @@ This example demonstrates using **inline nested steps** directly within conditio
             "config": {
               "action_type": "discord_message",
               "webhook_url": "https://discord.com/api/webhooks/...",
-              "message": "🎉 VIP player **${trigger_event.player_suffix}** joined the server!"
+              "message": "VIP player **${trigger_event.player_suffix}** joined the server!"
             }
           }
         ],
@@ -457,7 +327,7 @@ This example demonstrates using **inline nested steps** directly within conditio
 
 - **Inline Steps**: VIP-specific steps are defined directly in the `true_steps` array
 - **Cleaner Structure**: No need for root-level steps that are only used conditionally
-- **Visual Clarity**: The editor shows ✓ for true branch (2 steps) and ✕ for false branch (1 step)
+- **Visual Clarity**: The editor labels each branch and shows its step count (two steps for true, one for false)
 - **Execution Flow**: Steps execute in order within their branch, then workflow continues sequentially
 
 **Execution Flow:**
@@ -490,7 +360,7 @@ When creating a condition step in the Squad Aegis UI:
    - Click "Add Inline Step" to create steps directly within the false branch
    - Use the step selector dropdown to reference existing root-level steps
    - Reorder steps using the up/down arrows (hover over steps to see controls)
-6. **Visual Feedback**: The editor shows visual indicators (✓ for true, ✕ for false) with step counts
+6. **Visual Feedback**: The editor labels each branch (true/false) and shows its step count
 7. **Test Both Branches**: Always test workflows to ensure both paths work correctly
 
 #### Inline Steps vs Step References

@@ -675,7 +675,7 @@ Every bundle is a zip archive:
 ```text
 my-extension.zip
 ├── manifest.json
-├── manifest.signed.json  # signed bundles only — see Bundle Signing
+├── manifest.signed.json  # signed bundles only - see Bundle Signing
 ├── manifest.sig          # signed bundles only
 ├── manifest.pub          # signed bundles only
 └── bin/

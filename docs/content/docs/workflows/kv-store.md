@@ -2,16 +2,7 @@
 title: "Persistent KV Store"
 ---
 
-The Persistent KV (Key-Value) Store provides workflows with a dedicated storage system that persists data across workflow executions and server restarts. Each workflow has its own isolated KV store accessible only through Lua scripts.
-
-## Overview
-
-The KV Store is designed for:
-
-- **Persistent Storage**: Data survives workflow executions and server restarts
-- **Workflow Isolation**: Each workflow has its own namespace - workflows cannot access each other's data
-- **Lua-Only Access**: Only accessible through Lua scripts, not directly through workflow actions
-- **Flexible Data Types**: Supports any JSON-serializable data (strings, numbers, booleans, tables, arrays)
+The persistent KV store gives each workflow storage that survives executions and server restarts. Each workflow has its own isolated namespace, accessible from Lua scripts but not from workflow actions.
 
 ## Key Features
 
@@ -25,7 +16,7 @@ Each workflow has its own isolated KV store. This ensures:
 - Simplified data management (no namespace collisions)
 
 ### Performance
-The KV store uses database indexes for efficient queries and supports atomic operations like `kv_increment()` to prevent race conditions.
+The KV store uses database indexes for efficient queries and supports atomic operations like `workflow.kv.increment()` to prevent race conditions.
 
 ## Use Cases
 
@@ -114,7 +105,7 @@ workflow.kv.set("leaderboard", leaderboard)
 
 ## Available Functions
 
-See the [Lua Scripting](/docs/workflows/lua-scripting#persistent-kv-store-functions) documentation for detailed function references.
+See the [Lua Scripting](/docs/workflows/lua-scripting) documentation for detailed function references.
 
 ### Core Operations
 - `workflow.kv.get(key, default)` - Retrieve a value
@@ -397,7 +388,7 @@ end
 
 ### Use Atomic Operations for Counters
 
-Prefer `kv_increment()` over get-modify-set patterns:
+Prefer `workflow.kv.increment()` over get-modify-set patterns:
 
 ```lua
 -- Good - atomic, no race conditions
