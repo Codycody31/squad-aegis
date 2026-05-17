@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-16
+## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-17
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -20,6 +20,7 @@
 
 ### Misc
 
+- docs: rewrite documentation in consistent reference voice ([c1a86aa](https://github.com/Codycody31/squad-aegis/commit/c1a86aa7f644ad807cff9c5d139d190b19b4f00a))
 - fix(plugins,server): prevent nil-deref panics and same-date metric range error ([29c2199](https://github.com/Codycody31/squad-aegis/commit/29c219983180a9f4f749b60b2de1f92f4bef8384))
 - chore: bump docker compose dev image versions ([6c25786](https://github.com/Codycody31/squad-aegis/commit/6c25786cbc3ba3b6f726e4caa2a1241bfc9f2b9a))
 - chore: Nix flake ([4181b2f](https://github.com/Codycody31/squad-aegis/commit/4181b2ffdccb2f1b3ed68d6bfcc28a6474d5a617))
