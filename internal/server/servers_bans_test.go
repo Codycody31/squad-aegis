@@ -166,7 +166,7 @@ func TestBuildServerBansCfgContent(t *testing.T) {
 		t.Fatalf("unexpected first line: %q", lines[0])
 	}
 
-	wantSecondLine := "System [SteamID 0] Banned:abcdef0123456789abcdef0123456789:" + strconv.FormatInt(expiry.Unix(), 10)
+	wantSecondLine := "N/A Banned:abcdef0123456789abcdef0123456789:" + strconv.FormatInt(expiry.Unix(), 10)
 	if lines[1] != wantSecondLine {
 		t.Fatalf("unexpected second line: %q", lines[1])
 	}

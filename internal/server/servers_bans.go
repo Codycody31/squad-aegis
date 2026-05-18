@@ -1195,14 +1195,15 @@ func buildServerBansCfgContent(bans []models.ServerBan) string {
 			continue
 		}
 
-		adminInfo := ban.AdminName
-		if adminInfo == "" {
-			adminInfo = "System"
-		}
-
-		adminSteamID := ban.AdminSteamID
-		if adminSteamID == "" {
-			adminSteamID = "0"
+		var prefix string
+		if ban.AdminName == "" {
+			prefix = "N/A"
+		} else {
+			adminSteamID := ban.AdminSteamID
+			if adminSteamID == "" {
+				adminSteamID = "0"
+			}
+			prefix = fmt.Sprintf("%s [SteamID %s]", ban.AdminName, adminSteamID)
 		}
 
 		expiryTimestamp := "0"
@@ -1217,8 +1218,8 @@ func buildServerBansCfgContent(bans []models.ServerBan) string {
 			reasonComment = " //Permanent ban"
 		}
 
-		banCfg.WriteString(fmt.Sprintf("%s [SteamID %s] Banned:%s:%s%s\n",
-			adminInfo, adminSteamID, bannedID, expiryTimestamp, reasonComment))
+		banCfg.WriteString(fmt.Sprintf("%s Banned:%s:%s%s\n",
+			prefix, bannedID, expiryTimestamp, reasonComment))
 	}
 
 	return banCfg.String()
