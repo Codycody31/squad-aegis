@@ -61,46 +61,38 @@ func NewLanguageFilters(region string, enableRacial, enableHomophobic, enableAbl
 	return f
 }
 
-// initBuiltInPatterns compiles all built-in regex patterns
+// initBuiltInPatterns compiles all built-in regex patterns.
+// Patterns are word-boundary anchored to prevent substring false positives
+// (e.g. "tard" inside "bastard"). Patterns with intentionally open-ended
+// suffixes keep only a leading \b so variant endings still match.
 func (f *LanguageFilters) initBuiltInPatterns() {
-	// Racial slurs - patterns designed to catch common variations and evasions
-	// These are intentionally broad to catch l33t speak and character substitutions
 	racialTerms := []string{
-		`n+[i1!|]+g+[e3]+r+s?`,               // n-word and variations
-		`n+[i1!|]+g+[a@4]+s?`,                // n-word alternate ending
-		`ch+[i1!|]+n+k+s?`,                   // anti-Asian slur
-		`g+[o0]+[o0]+k+s?`,                   // anti-Asian slur
-		`sp+[i1!|]+c+s?`,                     // anti-Hispanic slur
-		`w+[e3]+t+b+[a@4]+c+k+s?`,            // anti-Hispanic slur
-		`b+[e3]+[a@4]+n+[e3]+r+s?`,           // anti-Hispanic slur
-		`k+[i1!|]+k+[e3]+s?`,                 // antisemitic slur
-		`t+[o0]+w+[e3]+l+h+[e3]+[a@4]+d`,     // anti-Middle Eastern slur
-		`c+[a@4]+m+[e3]+l+j+[o0]+c+k+[e3]+y`, // anti-Middle Eastern slur
-		`s+[a@4]+n+d+n+[i1!|]+g+`,            // anti-Middle Eastern slur
-		`c+[o0]+[o0]+n+s?`,                   // racial slur (contextual)
-		`j+[i1!|]+g+[a@4]+b+[o0]+[o0]+`,      // racial slur
-		`p+[o0]+r+c+h+m+[o0]+n+k+[e3]+y`,     // racial slur
+		`\bn+[i1!|]+g+[e3]+r+s?\b`,           // n-word and variations
+		`\bn+[i1!|]+g+[a@4]+s?\b`,            // n-word alternate ending
+		`\bch+[i1!|]+n+k+s?\b`,               // anti-Asian slur
+		`\bg+[o0]+[o0]+k+s?\b`,               // anti-Asian slur
+		`\bsp+[i1!|]+c+s?\b`,                 // anti-Hispanic slur
+		`\bw+[e3]+t+b+[a@4]+c+k+s?\b`,        // anti-Hispanic slur
+		`\bb+[e3]+[a@4]+n+[e3]+r+s?\b`,       // anti-Hispanic slur
+		`\bk+[i1!|]+k+[e3]+s?\b`,             // antisemitic slur
+		`\bs+[a@4]+n+d+n+[i1!|]+g+`,          // anti-Middle Eastern slur (open-ended)
+		`\bj+[i1!|]+g+[a@4]+b+[o0]+[o0]+`,    // racial slur (open-ended)
+		`\bp+[o0]+r+c+h+m+[o0]+n+k+[e3]+y\b`, // racial slur
 	}
 
 	f.racialPatterns = compilePatterns(racialTerms)
 
-	// Homophobic slurs
 	homophobicTerms := []string{
-		`f+[a@4]+g+[o0]?[t+]?s?`,       // f-slur and variations
-		`f+[a@4]+g+g+[o0]+t+s?`,        // f-slur full form
-		`d+[y]+k+[e3]+s?`,              // lesbian slur
-		`t+r+[a@4]+n+n+[y1!|]+[e3]?s?`, // trans slur
-		`sh+[e3]+m+[a@4]+l+[e3]+s?`,    // trans slur
+		`\bf+[a@4]+g+[o0]?[t+]?s?\b`, // f-slur and variations
+		`\bf+[a@4]+g+g+[o0]+t+s?\b`,  // f-slur full form
 	}
 
 	f.homophobicPatterns = compilePatterns(homophobicTerms)
 
-	// Ableist slurs
 	ableistTerms := []string{
-		`r+[e3]+t+[a@4]+r+d+[e3]?d?s?`,       // r-word and variations
-		`t+[a@4]+r+d+s?`,                     // short form
-		`sp+[a@4]+z+z?`,                      // ableist term (UK specific)
-		`m+[o0]+n+g+[o0]?l?[o0]?[i1!|]?d?s?`, // ableist term
+		`\br+[e3]+t+[a@4]+r+d+[e3]?d?s?\b`,       // r-word and variations
+		`\bsp+[a@4]+z+z?\b`,                      // ableist term (UK specific)
+		`\bm+[o0]+n+g+[o0]+l+[o0]+[i1!|]+d+s?\b`, // ableist term (full "mongoloid" only)
 	}
 
 	f.ableistPatterns = compilePatterns(ableistTerms)
