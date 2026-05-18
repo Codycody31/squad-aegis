@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-18
+
+### ❤️ Thanks to all contributors! ❤️
+
+@Codycody31, @Insidious Fiddler
+
+### ✨ Features
+
+- feat(plugins): native plugin and connector runtime [[#206](https://github.com/Codycody31/squad-aegis/pull/206)]
+
+### 📈 Enhancement
+
+- refactor: expand server_rules title column to text [[#213](https://github.com/Codycody31/squad-aegis/pull/213)]
+
+### 📦️ Dependency
+
+- chore(deps): bump google.golang.org/grpc from 1.64.1 to 1.79.3 [[#214](https://github.com/Codycody31/squad-aegis/pull/214)]
+
+### Misc
+
+- feat(web): show CBL ban history on player profile ([25c95d8](https://github.com/Codycody31/squad-aegis/commit/25c95d86a9a93418ad38ee98d9b322a53ae8883c))
+- fix(automod): word-boundary anchoring and built-in slur-list audit ([c59aba4](https://github.com/Codycody31/squad-aegis/commit/c59aba4307233137f66a8c994a9b440992e00bba))
+- fix(server): emit 'N/A Banned:' for admin-less and remote bans ([b9773a3](https://github.com/Codycody31/squad-aegis/commit/b9773a3ca785c3dae8b6f3fc14943f333a8d9925))
+- docs: rewrite documentation in consistent reference voice ([c1a86aa](https://github.com/Codycody31/squad-aegis/commit/c1a86aa7f644ad807cff9c5d139d190b19b4f00a))
+- fix(plugins,server): prevent nil-deref panics and same-date metric range error ([29c2199](https://github.com/Codycody31/squad-aegis/commit/29c219983180a9f4f749b60b2de1f92f4bef8384))
+- chore: bump docker compose dev image versions ([6c25786](https://github.com/Codycody31/squad-aegis/commit/6c25786cbc3ba3b6f726e4caa2a1241bfc9f2b9a))
+- chore: Nix flake ([4181b2f](https://github.com/Codycody31/squad-aegis/commit/4181b2ffdccb2f1b3ed68d6bfcc28a6474d5a617))
+- fix(db): allow user deletion without breaking audit history ([82d3108](https://github.com/Codycody31/squad-aegis/commit/82d3108e8b52ea18a674e8c50cb1d27fe300112d))
+- fix(web): add clipboard util for HTTP fallback and update copy actions ([2e9d9e3](https://github.com/Codycody31/squad-aegis/commit/2e9d9e374e7cb295deb6a6ae52bb3b7c17c22de4))
+- fix(plugins): avoid panic on nil event data; prefer flat player fields ([25fc92a](https://github.com/Codycody31/squad-aegis/commit/25fc92abdcafc7394a9d06072d6c52bcce51993c))
+- Merge branch 'master' of https://github.com/Codycody31/squad-aegis ([d0e1b80](https://github.com/Codycody31/squad-aegis/commit/d0e1b80be49a6619b7d909f094d03fb4ca6ecf25))
+- chore: add centralized API error handling utility and enhance server validation ([49efac8](https://github.com/Codycody31/squad-aegis/commit/49efac8728aa380598eb654560694f2c1f235197))
+- chore(web): add pnpm config and remove vite temp package.json ([5d9bf81](https://github.com/Codycody31/squad-aegis/commit/5d9bf81369185f6577c5b957edaf1e4be79d5f89))
+- fix(config): pin S3 env/yaml path and add storage env vars ([7ef2da4](https://github.com/Codycody31/squad-aegis/commit/7ef2da490affb2c55acd05ddd7835db8c622382c))
+- chore(deps): bump go version to 1.25 ([76a44ef](https://github.com/Codycody31/squad-aegis/commit/76a44ef749727f8f1463bf47773b1128e7d8644e))
+- chore: security policy documentation ([14ed269](https://github.com/Codycody31/squad-aegis/commit/14ed2693ffbe65e1e075931d27cac45cceb4a0f7))
+
 ## [0.9.3](https://github.com/Codycody31/squad-aegis/releases/tag/0.9.3) - 2026-04-03
 
 ### ❤️ Thanks to all contributors! ❤️
