@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { useAuthStore } from "@/stores/auth";
-import type { PlayerProfile, CBLUser } from "~/types/player";
+import type { PlayerProfile, CBLUser, CBLBan } from "~/types/player";
 
 // Import new components
 import PlayerAlertBanner from "~/components/player-profile/PlayerAlertBanner.vue";
@@ -37,9 +37,20 @@ interface PlayerResponse {
   };
 }
 
+interface CBLBanEdge {
+  node: CBLBan | null;
+}
+interface CBLBanConnection {
+  edges: CBLBanEdge[] | null;
+}
+type CBLUserRaw = Omit<CBLUser, "activeBans" | "expiredBans"> & {
+  activeBans: CBLBanConnection | null;
+  expiredBans: CBLBanConnection | null;
+};
+
 interface CBLGraphQLResponse {
   data: {
-    steamUser: CBLUser | null;
+    steamUser: CBLUserRaw | null;
   };
   errors?: any[];
 }
@@ -106,6 +117,28 @@ async function fetchCBLData(steamId: string) {
         lastRefreshedReputationPoints
         lastRefreshedReputationRank
         reputationPointsMonthChange
+        activeBans: bans(orderBy: "created", orderDirection: DESC, expired: false) {
+          edges {
+            node {
+              id
+              created
+              expires
+              reason
+              banList { id name organisation { id name } }
+            }
+          }
+        }
+        expiredBans: bans(orderBy: "created", orderDirection: DESC, expired: true) {
+          edges {
+            node {
+              id
+              created
+              expires
+              reason
+              banList { id name organisation { id name } }
+            }
+          }
+        }
       }
     }
   `;
@@ -134,7 +167,20 @@ async function fetchCBLData(steamId: string) {
       throw new Error("GraphQL errors occurred");
     }
 
-    cblData.value = result.data.steamUser;
+    const raw = result.data.steamUser;
+    if (raw) {
+      const flatten = (conn: CBLBanConnection | null): CBLBan[] =>
+        (conn?.edges ?? [])
+          .map((e) => e.node)
+          .filter((n): n is CBLBan => n !== null);
+      cblData.value = {
+        ...raw,
+        activeBans: flatten(raw.activeBans),
+        expiredBans: flatten(raw.expiredBans),
+      };
+    } else {
+      cblData.value = null;
+    }
   } catch (err: any) {
     console.error("Failed to fetch CBL data:", err);
     cblData.value = null;

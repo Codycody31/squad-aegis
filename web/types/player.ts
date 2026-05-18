@@ -218,6 +218,21 @@ export interface PaginatedChatHistory {
   total_pages: number;
 }
 
+export interface CBLBan {
+  id: string;
+  created: string | null;
+  expires: string | null;
+  reason: string | null;
+  banList: {
+    id: string;
+    name: string;
+    organisation: {
+      id: string;
+      name: string;
+    } | null;
+  } | null;
+}
+
 export interface CBLUser {
   id: string;
   name: string;
@@ -229,4 +244,6 @@ export interface CBLUser {
   lastRefreshedReputationPoints: string;
   lastRefreshedReputationRank: string;
   reputationPointsMonthChange: number;
+  activeBans: CBLBan[];
+  expiredBans: CBLBan[];
 }

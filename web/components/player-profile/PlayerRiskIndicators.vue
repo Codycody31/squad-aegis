@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { Card, CardContent } from "~/components/ui/card";
 import { Badge } from "~/components/ui/badge";
 import {
@@ -11,12 +11,15 @@ import {
   Users,
   Ban,
   FileWarning,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-vue-next";
 import type {
   RiskIndicator,
   ViolationSummary,
   TeamkillMetrics,
   CBLUser,
+  CBLBan,
 } from "~/types/player";
 
 const props = defineProps<{
@@ -95,6 +98,26 @@ const recentFriendlyFire = computed(() => {
     (props.teamkillMetrics.recent_team_damage || 0)
   );
 });
+
+const showCblBans = ref(false);
+
+const cblActiveBans = computed<CBLBan[]>(() => props.cblData?.activeBans ?? []);
+const cblExpiredBans = computed<CBLBan[]>(
+  () => props.cblData?.expiredBans ?? []
+);
+const cblBanCount = computed(
+  () => cblActiveBans.value.length + cblExpiredBans.value.length
+);
+
+function cblBanOrg(b: CBLBan): string {
+  return b.banList?.organisation?.name || b.banList?.name || "Unknown source";
+}
+
+function cblBanDate(d: string | null): string {
+  if (!d) return "permanent";
+  const parsed = new Date(d);
+  return isNaN(parsed.getTime()) ? d : parsed.toLocaleDateString();
+}
 </script>
 
 <template>
@@ -109,6 +132,60 @@ const recentFriendlyFire = computed(() => {
         <Badge :variant="getCBLBadgeVariant(cblData.riskRating)" class="mt-1">
           {{ cblData.reputationPoints }} pts
         </Badge>
+      </CardContent>
+    </Card>
+
+    <!-- CBL Ban History -->
+    <Card v-if="cblData && cblBanCount > 0" class="col-span-2 md:col-span-4 lg:col-span-6">
+      <CardContent class="p-4">
+        <button
+          type="button"
+          class="flex w-full items-center justify-between text-left"
+          :aria-expanded="showCblBans"
+          @click="showCblBans = !showCblBans"
+        >
+          <span class="text-sm font-medium">
+            CBL Ban History
+            <span class="text-muted-foreground">
+              ({{ cblActiveBans.length }} active, {{ cblExpiredBans.length }} expired)
+            </span>
+          </span>
+          <span class="text-xs text-muted-foreground">
+            <ChevronUp v-if="showCblBans" class="h-4 w-4 text-muted-foreground" /><ChevronDown v-else class="h-4 w-4 text-muted-foreground" />
+          </span>
+        </button>
+
+        <div v-if="showCblBans" class="mt-3 space-y-2">
+          <div
+            v-for="b in cblActiveBans"
+            :key="b.id"
+            class="rounded border border-destructive/40 bg-destructive/5 p-2 text-sm"
+          >
+            <div class="flex items-center justify-between">
+              <Badge variant="destructive">Active</Badge>
+              <span class="text-xs text-muted-foreground">{{ cblBanOrg(b) }}</span>
+            </div>
+            <div class="mt-1">{{ b.reason || "No reason provided" }}</div>
+            <div class="mt-1 text-xs text-muted-foreground">
+              {{ cblBanDate(b.created) }} → {{ cblBanDate(b.expires) }}
+            </div>
+          </div>
+
+          <div
+            v-for="b in cblExpiredBans"
+            :key="b.id"
+            class="rounded border border-border bg-muted/30 p-2 text-sm text-muted-foreground"
+          >
+            <div class="flex items-center justify-between">
+              <Badge variant="secondary">Expired</Badge>
+              <span class="text-xs">{{ cblBanOrg(b) }}</span>
+            </div>
+            <div class="mt-1">{{ b.reason || "No reason provided" }}</div>
+            <div class="mt-1 text-xs">
+              {{ cblBanDate(b.created) }} → {{ cblBanDate(b.expires) }}
+            </div>
+          </div>
+        </div>
       </CardContent>
     </Card>
 
