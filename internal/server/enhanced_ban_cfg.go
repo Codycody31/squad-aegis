@@ -277,8 +277,8 @@ func (s *Server) processCSVBans(c *gin.Context, body io.Reader, banCfg *strings.
 			}
 		}
 
-		// Remote bans don't have admin info, so use "Remote" as admin name
-		banCfg.WriteString(fmt.Sprintf("Remote [SteamID 0] Banned:%s:%s //From remote source\n", steamID, expiry))
+		// Remote bans have no admin info, so use "N/A"
+		banCfg.WriteString(fmt.Sprintf("N/A Banned:%s:%s //From remote source\n", steamID, expiry))
 	}
 
 	return nil
@@ -326,8 +326,8 @@ func (s *Server) processTextBans(c *gin.Context, body io.Reader, banCfg *strings
 			expiryStr = "0"
 		}
 
-		// Remote bans don't have admin info, so use "Remote" as admin name
-		banCfg.WriteString(fmt.Sprintf("Remote [SteamID 0] Banned:%s:%s //From remote source\n", steamID, expiryStr))
+		// Remote bans have no admin info, so use "N/A"
+		banCfg.WriteString(fmt.Sprintf("N/A Banned:%s:%s //From remote source\n", steamID, expiryStr))
 	}
 
 	return scanner.Err()
