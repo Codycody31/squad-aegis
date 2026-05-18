@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-17
+## [0.10.0](https://github.com/Codycody31/squad-aegis/releases/tag/0.10.0) - 2026-05-18
 
 ### ❤️ Thanks to all contributors! ❤️
 
@@ -20,6 +20,9 @@
 
 ### Misc
 
+- feat(web): show CBL ban history on player profile ([25c95d8](https://github.com/Codycody31/squad-aegis/commit/25c95d86a9a93418ad38ee98d9b322a53ae8883c))
+- fix(automod): word-boundary anchoring and built-in slur-list audit ([c59aba4](https://github.com/Codycody31/squad-aegis/commit/c59aba4307233137f66a8c994a9b440992e00bba))
+- fix(server): emit 'N/A Banned:' for admin-less and remote bans ([b9773a3](https://github.com/Codycody31/squad-aegis/commit/b9773a3ca785c3dae8b6f3fc14943f333a8d9925))
 - docs: rewrite documentation in consistent reference voice ([c1a86aa](https://github.com/Codycody31/squad-aegis/commit/c1a86aa7f644ad807cff9c5d139d190b19b4f00a))
 - fix(plugins,server): prevent nil-deref panics and same-date metric range error ([29c2199](https://github.com/Codycody31/squad-aegis/commit/29c219983180a9f4f749b60b2de1f92f4bef8384))
 - chore: bump docker compose dev image versions ([6c25786](https://github.com/Codycody31/squad-aegis/commit/6c25786cbc3ba3b6f726e4caa2a1241bfc9f2b9a))
