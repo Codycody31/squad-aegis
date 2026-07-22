@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { Input } from "~/components/ui/input";
 import { Button } from "~/components/ui/button";
 import {
@@ -8,11 +8,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import PageHeader from "~/components/layout/PageHeader.vue";
+import PermissionButton from "~/components/PermissionButton.vue";
+import BroadcastDialog from "~/components/BroadcastDialog.vue";
+import { UI_PERMISSIONS } from "~/constants/permissions";
 
 definePageMeta({ middleware: ["auth"] });
 
 const route = useRoute();
-const serverId = route.params.serverId;
+const serverId = route.params.serverId as string;
 
 const loading = ref(false);
 const command = ref("");
@@ -34,6 +39,44 @@ interface CommandHistoryEntry {
 
 const commandHistory = ref<CommandHistoryEntry[]>([]);
 const showCommandHistory = ref(false);
+const showBroadcastDialog = ref(false);
+
+const HISTORY_LIMIT = 100;
+const historyStorageKey = `aegis:console:${serverId}:history`;
+
+function persistCommandHistory() {
+  if (!import.meta.client) return;
+  try {
+    localStorage.setItem(
+      historyStorageKey,
+      JSON.stringify(commandHistory.value.slice(0, HISTORY_LIMIT))
+    );
+  } catch {
+    // Storage unavailable or full — history just won't survive reloads.
+  }
+}
+
+function hydrateCommandHistory() {
+  if (!import.meta.client) return;
+  try {
+    const raw = localStorage.getItem(historyStorageKey);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    commandHistory.value = parsed
+      .filter((entry) => entry && typeof entry.command === "string")
+      .slice(0, HISTORY_LIMIT)
+      .map((entry) => ({
+        command: entry.command,
+        response: typeof entry.response === "string" ? entry.response : "",
+        timestamp: entry.timestamp ? new Date(entry.timestamp) : new Date(),
+      }));
+  } catch {
+    // Corrupt stored history — start fresh.
+  }
+}
+
+onMounted(hydrateCommandHistory);
 
 // CommandType enum to match backend commands package
 enum CommandType {
@@ -143,9 +186,11 @@ async function executeCommand() {
   });
 
   // Limit history size to prevent memory issues
-  if (commandHistory.value.length > 100) {
-    commandHistory.value = commandHistory.value.slice(0, 100);
+  if (commandHistory.value.length > HISTORY_LIMIT) {
+    commandHistory.value = commandHistory.value.slice(0, HISTORY_LIMIT);
   }
+
+  persistCommandHistory();
 
   loading.value = false;
 }
@@ -244,12 +289,241 @@ function reuseCommand(historyEntry: CommandHistoryEntry) {
 function clearCommandHistory() {
   commandHistory.value = [];
   showCommandHistory.value = false;
+  if (import.meta.client) {
+    try {
+      localStorage.removeItem(historyStorageKey);
+    } catch {
+      // Storage unavailable — nothing to clear.
+    }
+  }
 }
+
+// ---- Live server events (SSE) ----
+
+interface LiveEventLine {
+  id: number;
+  time: string;
+  type: string;
+  body: string;
+}
+
+const runtimeConfig = useRuntimeConfig();
+const sessionToken = useCookie<string | null>(
+  runtimeConfig.public.sessionCookieName
+);
+
+const EVENT_BUFFER_LIMIT = 500;
+const eventsEnabled = ref(false);
+const eventsStatus = ref<"off" | "live" | "reconnecting">("off");
+const liveEvents = ref<LiveEventLine[]>([]);
+const eventsContainer = ref<HTMLElement | null>(null);
+let eventSource: EventSource | null = null;
+let eventSeq = 0;
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  CHAT_MESSAGE: "CHAT",
+  CHAT_COMMAND: "CMD",
+  PLAYER_WARNED: "WARN",
+  PLAYER_KICKED: "KICK",
+  POSSESSED_ADMIN_CAMERA: "CAM+",
+  UNPOSSESSED_ADMIN_CAMERA: "CAM-",
+  SQUAD_CREATED: "SQUAD",
+  CONNECTION_CLOSED: "CONN",
+  CONNECTION_ERROR: "ERROR",
+};
+
+const EVENT_TYPE_STYLES: Record<string, string> = {
+  CHAT_MESSAGE: "event-type-blue",
+  CHAT_COMMAND: "event-type-blue",
+  PLAYER_WARNED: "event-type-orange",
+  PLAYER_KICKED: "event-type-red",
+  POSSESSED_ADMIN_CAMERA: "event-type-purple",
+  UNPOSSESSED_ADMIN_CAMERA: "event-type-purple",
+  SQUAD_CREATED: "event-type-green",
+  CONNECTION_CLOSED: "event-type-red",
+  CONNECTION_ERROR: "event-type-red",
+};
+
+function eventTypeLabel(type: string): string {
+  return EVENT_TYPE_LABELS[type] ?? type;
+}
+
+function eventTypeClass(type: string): string {
+  return EVENT_TYPE_STYLES[type] ?? "event-type-gray";
+}
+
+function formatEventTime(value: unknown): string {
+  let d = new Date();
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) d = parsed;
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function eventField(
+  data: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = data[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function formatEventBody(type: string, data: unknown): string {
+  const fallback = () => {
+    if (data === undefined || data === null) return "";
+    try {
+      return typeof data === "string" ? data : JSON.stringify(data);
+    } catch {
+      return String(data);
+    }
+  };
+
+  // Connection events carry arbitrary payloads (error string, object, or nothing).
+  if (type === "CONNECTION_CLOSED" || type === "CONNECTION_ERROR") {
+    const label =
+      type === "CONNECTION_CLOSED"
+        ? "RCON event connection closed"
+        : "RCON event connection error";
+    const detail = fallback();
+    return detail && detail !== "{}" && detail !== "null"
+      ? `${label} — ${detail}`
+      : label;
+  }
+
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return fallback();
+  }
+  const d = data as Record<string, unknown>;
+
+  switch (type) {
+    case "CHAT_MESSAGE":
+    case "CHAT_COMMAND": {
+      const player = eventField(d, "PlayerName");
+      const message = eventField(d, "Message");
+      if (!player || !message) return fallback();
+      const chat = eventField(d, "ChatType");
+      return `${chat ? `[${chat}] ` : ""}${player}: ${message}`;
+    }
+    case "PLAYER_WARNED": {
+      const player = eventField(d, "PlayerName");
+      if (!player) return fallback();
+      const message = eventField(d, "Message");
+      return message ? `${player} warned: ${message}` : `${player} warned`;
+    }
+    case "PLAYER_KICKED": {
+      const player = eventField(d, "PlayerName");
+      if (!player) return fallback();
+      const steamId = eventField(d, "SteamID");
+      return `${player} kicked${steamId ? ` (${steamId})` : ""}`;
+    }
+    case "POSSESSED_ADMIN_CAMERA":
+    case "UNPOSSESSED_ADMIN_CAMERA": {
+      const admin = eventField(d, "AdminName");
+      if (!admin) return fallback();
+      return type === "POSSESSED_ADMIN_CAMERA"
+        ? `${admin} entered admin camera`
+        : `${admin} left admin camera`;
+    }
+    case "SQUAD_CREATED": {
+      const player = eventField(d, "PlayerName");
+      const squadName = eventField(d, "SquadName");
+      if (!player || !squadName) return fallback();
+      const squadId = eventField(d, "SquadID");
+      const team = eventField(d, "TeamName");
+      return `${player} created squad ${
+        squadId ? `${squadId} ` : ""
+      }"${squadName}"${team ? ` (${team})` : ""}`;
+    }
+    default:
+      return fallback();
+  }
+}
+
+function appendLiveEvent(raw: unknown) {
+  if (typeof raw !== "object" || raw === null) return;
+  const ev = raw as Record<string, unknown>;
+  const type = typeof ev.Type === "string" ? ev.Type : "UNKNOWN";
+
+  const el = eventsContainer.value;
+  const wasAtBottom =
+    !el || el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+
+  liveEvents.value.push({
+    id: eventSeq++,
+    time: formatEventTime(ev.Time),
+    type,
+    body: formatEventBody(type, ev.Data),
+  });
+  if (liveEvents.value.length > EVENT_BUFFER_LIMIT) {
+    liveEvents.value.splice(0, liveEvents.value.length - EVENT_BUFFER_LIMIT);
+  }
+
+  if (wasAtBottom) {
+    nextTick(() => {
+      const node = eventsContainer.value;
+      if (node) node.scrollTop = node.scrollHeight;
+    });
+  }
+}
+
+function connectEvents() {
+  if (eventSource) return;
+  const token = sessionToken.value;
+  if (!token) {
+    eventsEnabled.value = false;
+    eventsStatus.value = "off";
+    return;
+  }
+
+  eventsEnabled.value = true;
+  eventsStatus.value = "reconnecting";
+
+  const url = `${
+    runtimeConfig.public.backendApi
+  }/servers/${serverId}/rcon/events?token=${encodeURIComponent(token)}`;
+  eventSource = new EventSource(url);
+  eventSource.onopen = () => {
+    eventsStatus.value = "live";
+  };
+  eventSource.onmessage = (message) => {
+    eventsStatus.value = "live";
+    try {
+      appendLiveEvent(JSON.parse(message.data));
+    } catch {
+      // Not JSON — skip the line.
+    }
+  };
+  eventSource.onerror = () => {
+    // EventSource reconnects on its own; just surface the state.
+    eventsStatus.value = "reconnecting";
+  };
+}
+
+function disconnectEvents() {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+  eventsEnabled.value = false;
+  eventsStatus.value = "off";
+}
+
+function toggleEvents() {
+  if (eventsEnabled.value) {
+    disconnectEvents();
+  } else {
+    connectEvents();
+  }
+}
+
+onBeforeUnmount(disconnectEvents);
 </script>
 
 <template>
-  <div class="console-page p-4">
-    <h1 class="text-2xl font-bold mb-4">Console</h1>
+  <div class="console-page p-4 md:p-6">
+    <PageHeader title="Console" />
 
     <!-- Replace the command input section with a responsive layout -->
     <div class="command-input-container mb-4">
@@ -273,6 +547,16 @@ function clearCommandHistory() {
         >
           History
         </Button>
+        <PermissionButton
+          :permission="UI_PERMISSIONS.CONSOLE_EXECUTE"
+          :server-id="serverId"
+          variant="outline"
+          class="command-button"
+          @click="showBroadcastDialog = true"
+        >
+          <Icon name="mdi:bullhorn" class="mr-2 h-4 w-4" />
+          Broadcast
+        </PermissionButton>
       </div>
     </div>
 
@@ -345,6 +629,69 @@ function clearCommandHistory() {
     <div class="terminal-output mt-4">
       <pre class="console-pre">{{ output }}</pre>
     </div>
+
+    <!-- Live server events -->
+    <Card class="mt-4">
+      <CardHeader class="pb-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle class="flex items-center gap-3 text-base">
+            Live server events
+            <span
+              class="flex items-center gap-1.5 text-xs font-normal text-muted-foreground"
+            >
+              <span
+                class="live-status-dot"
+                :class="{
+                  'live-status-live': eventsStatus === 'live',
+                  'live-status-reconnecting': eventsStatus === 'reconnecting',
+                  'live-status-off': eventsStatus === 'off',
+                }"
+              />
+              {{
+                eventsStatus === "live"
+                  ? "Live"
+                  : eventsStatus === "reconnecting"
+                    ? "Reconnecting…"
+                    : "Off"
+              }}
+            </span>
+          </CardTitle>
+          <Button variant="outline" size="sm" @click="toggleEvents">
+            {{ eventsEnabled ? "Disconnect" : "Connect" }}
+          </Button>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Server events (chat, admin actions) — executed commands are not
+          echoed here.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div ref="eventsContainer" class="live-events-container">
+          <div
+            v-if="liveEvents.length === 0"
+            class="py-4 text-center text-sm opacity-70"
+          >
+            {{
+              eventsEnabled
+                ? "Waiting for events…"
+                : "Connect to stream live server events."
+            }}
+          </div>
+          <div v-for="ev in liveEvents" :key="ev.id" class="live-event-line">
+            <span class="live-event-time">{{ ev.time }}</span>
+            <span class="live-event-type" :class="eventTypeClass(ev.type)">{{
+              eventTypeLabel(ev.type)
+            }}</span>
+            <span class="live-event-body">{{ ev.body }}</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <BroadcastDialog
+      v-model:open="showBroadcastDialog"
+      :server-id="serverId"
+    />
 
     <!-- All Commands Dialog -->
     <Dialog :open="showAllCommands" @update:open="showAllCommands = $event">
@@ -707,6 +1054,100 @@ function clearCommandHistory() {
 .history-response pre {
   font-family: monospace;
   font-size: 0.9rem;
+}
+
+/* Live server events pane */
+.live-events-container {
+  font-family: monospace;
+  font-size: 0.8rem;
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 10px;
+  height: 260px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.live-event-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 1px 0;
+}
+
+.live-event-time {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.live-event-type {
+  flex-shrink: 0;
+  border-radius: 3px;
+  padding: 0 0.35rem;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  min-width: 3.4rem;
+  text-align: center;
+}
+
+.live-event-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.event-type-blue {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
+.event-type-orange {
+  background-color: rgba(249, 115, 22, 0.2);
+  color: #fb923c;
+}
+
+.event-type-red {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.event-type-green {
+  background-color: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+.event-type-purple {
+  background-color: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+}
+
+.event-type-gray {
+  background-color: rgba(113, 113, 122, 0.2);
+  color: #a1a1aa;
+}
+
+.live-status-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+}
+
+.live-status-live {
+  background-color: #22c55e;
+}
+
+.live-status-reconnecting {
+  background-color: #f59e0b;
+}
+
+.live-status-off {
+  background-color: #71717a;
 }
 
 /* Add responsive styles for the command input container */
