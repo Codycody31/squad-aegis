@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "~/components/ui/card";
@@ -204,8 +205,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-4">
-    <h1 class="text-3xl font-bold mb-8">Account Settings</h1>
+  <div class="p-4 md:p-6">
+    <PageHeader title="Account Settings" />
 
     <div v-if="loading.fetchUser" class="text-center py-8">
       <div

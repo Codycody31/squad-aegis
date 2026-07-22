@@ -1,11 +1,9 @@
 <template>
-    <div class="p-4">
-        <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold">Server Settings</h1>
-            <p class="text-sm text-muted-foreground">
-                Manage your server configuration and settings
-            </p>
-        </div>
+    <div class="p-4 md:p-6">
+        <PageHeader
+            title="Server Settings"
+            description="Manage your server configuration and settings"
+        />
 
         <!-- Server Status Card -->
         <Card class="mb-4">
@@ -509,6 +507,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import { toast } from "~/components/ui/toast";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";

@@ -1,13 +1,10 @@
 <template>
-  <div class="p-6 space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold tracking-tight">Server Metrics</h1>
-        <p class="text-muted-foreground">
-          Performance metrics, player statistics, and server analytics
-        </p>
-      </div>
-      <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:space-x-2">
+  <div class="p-4 md:p-6 space-y-6">
+    <PageHeader
+      title="Server Metrics"
+      description="Performance metrics, player statistics, and server analytics"
+    >
+      <template #actions>
         <div class="flex items-center space-x-2">
           <Select
             v-if="!useCustomRange"
@@ -49,8 +46,8 @@
           <Icon name="mdi:refresh" class="h-4 w-4 mr-2" />
           Refresh
         </Button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Loading State -->
     <div v-if="loading" class="flex items-center justify-center py-12">
@@ -443,6 +440,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
