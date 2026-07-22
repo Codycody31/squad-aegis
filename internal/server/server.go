@@ -225,6 +225,7 @@ func NewRouter(server *Server) *gin.Engine {
 			serversGroup.GET("", server.ServersList)
 			serversGroup.POST("", server.AuthIsSuperAdmin(), server.ServersCreate)
 			serversGroup.GET("/user-roles", server.ServerUserRoles)
+			serversGroup.GET("/summary", server.ServersSummary)
 
 			serverGroup := serversGroup.Group("/:serverId")
 			{
