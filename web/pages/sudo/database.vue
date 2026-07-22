@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Button } from "~/components/ui/button";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import type { PostgreSQLStats, ClickHouseStats } from "~/types";
 
 definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
@@ -34,14 +35,17 @@ onMounted(fetchData);
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold">Database Statistics</h1>
-        <p class="text-muted-foreground">View database health and statistics</p>
-      </div>
-      <Button @click="fetchData"><Icon name="mdi:refresh" class="mr-2" />Refresh</Button>
-    </div>
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="Database"
+      description="PostgreSQL and ClickHouse health and statistics"
+    >
+      <template #actions>
+        <Button @click="fetchData">
+          <Icon name="mdi:refresh" class="mr-2" />Refresh
+        </Button>
+      </template>
+    </PageHeader>
 
     <div v-if="loading" class="flex items-center justify-center py-12">
       <div class="text-muted-foreground">Loading database statistics...</div>

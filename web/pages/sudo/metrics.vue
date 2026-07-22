@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import type { MetricsTimeline, ServerActivity } from "~/types";
 
@@ -32,8 +33,11 @@ onMounted(fetchData);
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <h1 class="text-3xl font-bold">Analytics Dashboard</h1>
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="Analytics"
+      description="Instance-wide activity across all servers."
+    />
 
     <div v-if="loading" class="flex items-center justify-center py-12">
       <div class="text-muted-foreground">Loading analytics...</div>

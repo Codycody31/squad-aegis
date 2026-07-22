@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import type { SystemConfig } from "~/types";
 
 definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
@@ -26,9 +27,11 @@ onMounted(fetchConfig);
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <h1 class="text-3xl font-bold">Configuration Viewer</h1>
-    <p class="text-muted-foreground">Read-only view of instance configuration (sensitive values masked)</p>
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="Configuration"
+      description="Read-only view of instance configuration (sensitive values masked)"
+    />
 
     <div v-if="loading" class="flex items-center justify-center py-12">
       <div class="text-muted-foreground">Loading configuration...</div>

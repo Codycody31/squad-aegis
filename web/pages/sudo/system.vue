@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import { Badge } from "~/components/ui/badge";
 import { Alert, AlertDescription } from "~/components/ui/alert";
 import type { SystemHealth } from "~/types";
@@ -37,8 +38,11 @@ const getStatusVariant = (status: string) => {
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <h1 class="text-3xl font-bold">System Health Monitor</h1>
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="System Health"
+      description="Live status of PostgreSQL, ClickHouse, Valkey, and storage."
+    />
 
     <div v-if="loading" class="flex items-center justify-center py-12">
       <div class="text-muted-foreground">Loading system health...</div>

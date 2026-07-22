@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "~/components/ui/dialog";
 import { toast } from "~/components/ui/toast";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import type { PluginPackage, SystemConfig } from "~/types";
 
 definePageMeta({
@@ -254,21 +255,18 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <div class="flex items-start justify-between gap-4">
-      <div>
-        <h1 class="text-3xl font-bold">Plugin Packages</h1>
-        <p class="text-muted-foreground">
-          Manage bundled plugins and sideload native executable plugin bundles that can later be enabled per server.
-        </p>
-      </div>
-      <div class="flex gap-2">
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="Plugin Packages"
+      description="Manage bundled plugins and sideload native executable plugin bundles that can later be enabled per server."
+    >
+      <template #actions>
         <Button variant="outline" @click="fetchInstalledPlugins">
           <Icon name="mdi:refresh" class="mr-2 h-4 w-4" />
           Refresh Installed
         </Button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <div
       v-if="!trustStoreConfigured && !unsafeSideloadEnabled"

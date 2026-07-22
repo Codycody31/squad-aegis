@@ -7,6 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~
 import { Checkbox } from "~/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "~/components/ui/dialog";
 import { Badge } from "~/components/ui/badge";
+import PageHeader from "~/components/layout/PageHeader.vue";
+import StatCard from "~/components/StatCard.vue";
 import type { StorageSummary, StorageFile } from "~/types";
 
 definePageMeta({
@@ -167,63 +169,45 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold">Storage Management</h1>
-        <p class="text-muted-foreground">Manage files and view storage usage</p>
-      </div>
-      <Button @click="fetchFiles" variant="outline">
-        <Icon name="mdi:refresh" class="mr-2 h-4 w-4" />
-        Refresh
-      </Button>
-    </div>
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="Storage"
+      description="Manage files and view storage usage"
+    >
+      <template #actions>
+        <Button @click="fetchFiles" variant="outline">
+          <Icon name="mdi:refresh" class="mr-2 h-4 w-4" />
+          Refresh
+        </Button>
+      </template>
+    </PageHeader>
 
     <!-- Storage Summary -->
     <div class="grid gap-4 md:grid-cols-4">
-      <Card>
-        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-sm font-medium">Total Size</CardTitle>
-          <Icon name="mdi:database" class="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div class="text-2xl font-bold">{{ summary?.total_size_readable || "0 B" }}</div>
-          <p class="text-xs text-muted-foreground">{{ summary?.total_files || 0 }} files</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-sm font-medium">Storage Type</CardTitle>
-          <Icon name="mdi:harddisk" class="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div class="text-2xl font-bold capitalize">{{ summary?.storage_type || "Unknown" }}</div>
-          <p class="text-xs text-muted-foreground">Backend storage</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-sm font-medium">File Types</CardTitle>
-          <Icon name="mdi:file-multiple" class="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div class="text-2xl font-bold">{{ Object.keys(summary?.files_by_type || {}).length }}</div>
-          <p class="text-xs text-muted-foreground">Different types</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-sm font-medium">Selected</CardTitle>
-          <Icon name="mdi:checkbox-marked" class="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div class="text-2xl font-bold">{{ selectedFiles.size }}</div>
-          <p class="text-xs text-muted-foreground">Files selected</p>
-        </CardContent>
-      </Card>
+      <StatCard
+        label="Total Size"
+        :value="summary?.total_size_readable || '0 B'"
+        :subline="`${summary?.total_files || 0} files`"
+        icon="mdi:database"
+      />
+      <StatCard
+        label="Storage Type"
+        :value="summary?.storage_type || 'Unknown'"
+        subline="Backend storage"
+        icon="mdi:harddisk"
+      />
+      <StatCard
+        label="File Types"
+        :value="Object.keys(summary?.files_by_type || {}).length"
+        subline="Different types"
+        icon="mdi:file-multiple"
+      />
+      <StatCard
+        label="Selected"
+        :value="selectedFiles.size"
+        subline="Files selected"
+        icon="mdi:checkbox-marked"
+      />
     </div>
 
     <!-- File Browser -->

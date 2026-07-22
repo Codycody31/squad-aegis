@@ -3,7 +3,8 @@ import { ref, onMounted } from "vue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
-import { Progress } from "~/components/ui/progress";
+import PageHeader from "~/components/layout/PageHeader.vue";
+import StatCard from "~/components/StatCard.vue";
 import type { MetricsOverview, SystemHealth } from "~/types";
 
 definePageMeta({
@@ -70,11 +71,11 @@ const getStatusBadgeVariant = (status: string) => {
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <div>
-      <h1 class="text-3xl font-bold">Instance Management</h1>
-      <p class="text-muted-foreground">Superadmin dashboard and system overview</p>
-    </div>
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="Instance Management"
+      description="Superadmin dashboard and system overview"
+    />
 
     <div v-if="loading" class="flex items-center justify-center py-12">
       <div class="text-muted-foreground">Loading dashboard...</div>
@@ -148,53 +149,30 @@ const getStatusBadgeVariant = (status: string) => {
       <div>
         <h2 class="text-xl font-semibold mb-4">Instance Metrics</h2>
         <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle class="text-sm font-medium">Total Servers</CardTitle>
-              <Icon name="mdi:server" class="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div class="text-2xl font-bold">{{ metricsOverview?.total_servers || 0 }}</div>
-              <p class="text-xs text-muted-foreground">
-                {{ metricsOverview?.active_servers || 0 }} active
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle class="text-sm font-medium">Storage Used</CardTitle>
-              <Icon name="mdi:database" class="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div class="text-2xl font-bold">{{ metricsOverview?.storage_used_readable || "0 B" }}</div>
-              <p class="text-xs text-muted-foreground">Total storage consumption</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle class="text-sm font-medium">Total Events</CardTitle>
-              <Icon name="mdi:chart-line" class="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div class="text-2xl font-bold">{{ metricsOverview?.total_events.toLocaleString() || 0 }}</div>
-              <p class="text-xs text-muted-foreground">
-                {{ metricsOverview?.events_this_week.toLocaleString() || 0 }} this week
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle class="text-sm font-medium">Total Players</CardTitle>
-              <Icon name="mdi:account-group" class="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div class="text-2xl font-bold">{{ metricsOverview?.total_players.toLocaleString() || 0 }}</div>
-              <p class="text-xs text-muted-foreground">Unique players tracked</p>
-            </CardContent>
-          </Card>
+          <StatCard
+            label="Total Servers"
+            :value="metricsOverview?.total_servers || 0"
+            :subline="`${metricsOverview?.active_servers || 0} active`"
+            icon="mdi:server"
+          />
+          <StatCard
+            label="Storage Used"
+            :value="metricsOverview?.storage_used_readable || '0 B'"
+            subline="Total storage consumption"
+            icon="mdi:database"
+          />
+          <StatCard
+            label="Total Events"
+            :value="metricsOverview?.total_events.toLocaleString() || 0"
+            :subline="`${metricsOverview?.events_this_week.toLocaleString() || 0} this week`"
+            icon="mdi:chart-line"
+          />
+          <StatCard
+            label="Total Players"
+            :value="metricsOverview?.total_players.toLocaleString() || 0"
+            subline="Unique players tracked"
+            icon="mdi:account-group"
+          />
         </div>
       </div>
 
