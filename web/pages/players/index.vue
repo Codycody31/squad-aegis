@@ -2,6 +2,7 @@
 import { ref, onMounted } from "vue";
 import { useAuthStore } from "@/stores/auth";
 
+import PageHeader from "~/components/layout/PageHeader.vue";
 import PlayersSearchHero from "~/components/players/PlayersSearchHero.vue";
 import PlayersQuickStats from "~/components/players/PlayersQuickStats.vue";
 import PlayersSearchResults from "~/components/players/PlayersSearchResults.vue";
@@ -113,11 +114,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="container mx-auto p-3 sm:p-4 lg:p-6">
-    <!-- Page Header -->
-    <div class="mb-4 sm:mb-6">
-      <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Player Profiles</h1>
-    </div>
+  <div class="p-4 md:p-6">
+    <PageHeader
+      title="Players"
+      description="Search player profiles, history, and suspected alt accounts."
+    />
 
     <!-- Search Hero (Primary Focus) -->
     <PlayersSearchHero
