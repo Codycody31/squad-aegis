@@ -1,143 +1,51 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
-import PermissionButton from "@/components/PermissionButton.vue";
-import { UI_PERMISSIONS } from "@/constants/permissions";
+import { onBeforeUnmount, onMounted, ref } from "vue";
+import PageHeader from "~/components/layout/PageHeader.vue";
+import BroadcastDialog from "~/components/BroadcastDialog.vue";
+import ServerStatusStrip from "~/components/server-dashboard/ServerStatusStrip.vue";
+import CurrentMapCard from "~/components/server-dashboard/CurrentMapCard.vue";
+import MapChangeDialog from "~/components/server-dashboard/MapChangeDialog.vue";
+import NextLayerDialog from "~/components/server-dashboard/NextLayerDialog.vue";
+import EndMatchDialog from "~/components/server-dashboard/EndMatchDialog.vue";
+import QuickActions from "~/components/server-dashboard/QuickActions.vue";
+import RecentJoinsCard from "~/components/server-dashboard/RecentJoinsCard.vue";
+import TeamsSummaryCard from "~/components/server-dashboard/TeamsSummaryCard.vue";
+import ServerInfoCard from "~/components/server-dashboard/ServerInfoCard.vue";
 import { Button } from "~/components/ui/button";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardFooter,
-    CardHeader,
-    CardTitle,
-} from "~/components/ui/card";
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "~/components/ui/table";
-import { Badge } from "~/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { Progress } from "~/components/ui/progress";
-import { useAuthStore } from "~/stores/auth";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "~/components/ui/dialog";
-import {
-    Command,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
-} from "~/components/ui/command";
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "~/components/ui/popover";
-import { toast } from "~/components/ui/toast";
+import type { RecentJoin, Team } from "~/components/server-dashboard/types";
 
 definePageMeta({ middleware: ["auth"] });
 
 const route = useRoute();
-const serverId = route.params.serverId;
-const authStore = useAuthStore();
+const serverId = route.params.serverId as string;
 
 // State variables
 const loading = ref(true);
 const error = ref<string | null>(null);
 const serverInfo = ref<any>(null);
-const playerCount = ref<{ current: number; max: number }>({
-    current: 0,
-    max: 64,
-});
-const activeTab = ref("overview");
 
 const rconServerInfo = ref<any>(null);
 const rconServerInfoLoading = ref(false);
 const rconServerInfoError = ref<string | null>(null);
 
-// New state variables for teams and squads
 const teamsData = ref<Team[]>([]);
 const loadingTeams = ref(false);
 const errorTeams = ref<string | null>(null);
 
-// State variables for recent joins
 const recentJoins = ref<RecentJoin[]>([]);
 const loadingRecentJoins = ref(false);
 const errorRecentJoins = ref<string | null>(null);
 
-// State variables for map change dialog
+// Dialog state
 const showMapChangeDialog = ref(false);
-const availableLayers = ref<
-    { name: string; mod: string; isVanilla: boolean }[]
->([]);
-const selectedLayer = ref("");
-const loadingLayers = ref(false);
-const changingLayer = ref(false);
-const layerComboboxOpen = ref(false);
-
-// State variables for next layer dialog
 const showNextLayerDialog = ref(false);
-const selectedNextLayer = ref("");
-const settingNextLayer = ref(false);
-const nextLayerComboboxOpen = ref(false);
-
-// State variables for end match confirmation
 const showEndMatchDialog = ref(false);
-const endingMatch = ref(false);
-
-// Define interfaces for teams and squads data
-interface Player {
-    steam_id: string;
-    name: string;
-    squadId: number | null;
-    isSquadLeader: boolean;
-    role: string;
-    kills?: number;
-    deaths?: number;
-    team?: string;
-    squad?: string;
-}
-
-interface Squad {
-    id: number;
-    name: string;
-    size: number;
-    locked: boolean;
-    leader: Player | null;
-    players: Player[];
-}
-
-interface Team {
-    id: number;
-    name: string;
-    squads: Squad[];
-    players: Player[]; // Unassigned players
-}
+const showBroadcastDialog = ref(false);
 
 interface TeamsResponse {
     data: {
         teams: Team[];
     };
-}
-
-// Interface for recent player joins
-interface RecentJoin {
-    id: string;
-    player_name: string;
-    steam_id?: string;
-    eos_id?: string;
-    joined_at: string;
 }
 
 interface RecentJoinsResponse {
@@ -148,8 +56,8 @@ interface RecentJoinsResponse {
 }
 
 // Fetch server information
-async function fetchServerInfo() {
-    loading.value = true;
+async function fetchServerInfo(background = false) {
+    if (!background) loading.value = true;
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
@@ -169,8 +77,7 @@ async function fetchServerInfo() {
         }
 
         if (responseData.value && responseData.value.data) {
-            const serverData = responseData.value.data;
-            serverInfo.value = serverData;
+            serverInfo.value = responseData.value.data;
         }
     } catch (err: any) {
         error.value = extractApiErrorMessage(err, "An error occurred while fetching server information");
@@ -180,7 +87,7 @@ async function fetchServerInfo() {
     }
 }
 
-// fetch server metrics
+// Fetch server metrics
 async function fetchServerMetrics() {
     const runtimeConfig = useRuntimeConfig();
 
@@ -199,12 +106,11 @@ async function fetchServerMetrics() {
 
     if (responseData.value && responseData.value.data) {
         serverInfo.value.metrics = responseData.value.data.metrics;
-        console.log(serverInfo.value);
     }
 }
 
-async function fetchRconServerInfo() {
-    rconServerInfoLoading.value = true;
+async function fetchRconServerInfo(background = false) {
+    if (!background) rconServerInfoLoading.value = true;
     rconServerInfoError.value = null;
 
     const runtimeConfig = useRuntimeConfig();
@@ -224,8 +130,7 @@ async function fetchRconServerInfo() {
         }
 
         if (responseData.value && responseData.value.data) {
-            const serverData = responseData.value.data.serverInfo;
-            rconServerInfo.value = serverData;
+            rconServerInfo.value = responseData.value.data.serverInfo;
         }
     } catch (err: any) {
         rconServerInfoError.value = extractApiErrorMessage(err, "An error occurred while fetching rcon server information");
@@ -236,8 +141,8 @@ async function fetchRconServerInfo() {
 }
 
 // Fetch teams and squads data
-async function fetchTeamsData() {
-    loadingTeams.value = true;
+async function fetchTeamsData(background = false) {
+    if (!background) loadingTeams.value = true;
     errorTeams.value = null;
 
     const runtimeConfig = useRuntimeConfig();
@@ -258,15 +163,6 @@ async function fetchTeamsData() {
 
         if (data.value && data.value.data) {
             teamsData.value = data.value.data.teams || [];
-
-            // Update player count based on actual data
-            if (teamsData.value.length > 0) {
-                const totalPlayers = teamsData.value.reduce((total, team) => {
-                    return total + getTeamPlayerCount(team);
-                }, 0);
-
-                playerCount.value.current = totalPlayers;
-            }
         }
     } catch (err: any) {
         errorTeams.value =
@@ -277,21 +173,9 @@ async function fetchTeamsData() {
     }
 }
 
-// Function to get player count in a team
-function getTeamPlayerCount(team: Team): number {
-    let count = team.players.length; // Unassigned players
-
-    // Add players in squads
-    team.squads.forEach((squad) => {
-        count += squad.players.length;
-    });
-
-    return count;
-}
-
 // Fetch recent server joins
-async function fetchRecentJoins() {
-    loadingRecentJoins.value = true;
+async function fetchRecentJoins(background = false) {
+    if (!background) loadingRecentJoins.value = true;
     errorRecentJoins.value = null;
 
     const runtimeConfig = useRuntimeConfig();
@@ -323,314 +207,61 @@ async function fetchRecentJoins() {
     }
 }
 
-// Get all connected players from teams data
-const connectedPlayers = computed(() => {
-    if (teamsData.value.length === 0) return [];
-
-    const allPlayers: Player[] = [];
-
-    teamsData.value.forEach((team) => {
-        // Add unassigned players
-        team.players.forEach((player) => {
-            allPlayers.push({
-                ...player,
-                team: team.name,
-                squad: "Unassigned",
-            });
-        });
-
-        // Add players in squads
-        team.squads.forEach((squad) => {
-            squad.players.forEach((player) => {
-                allPlayers.push({
-                    ...player,
-                    team: team.name,
-                    squad: squad.name,
-                });
-            });
-        });
-    });
-
-    return allPlayers;
-});
-
-// Add this computed property after the connectedPlayers computed property
-const formattedPlayerCount = computed(() => {
-    if (!rconServerInfo.value) return null;
-
-    // Get values from rconServerInfo
-    const playerCount = rconServerInfo.value.player_count || 0;
-    const maxPlayers = rconServerInfo.value.max_players || 0;
-    const publicQueue = rconServerInfo.value.public_queue || 0;
-    const playerReserveCount = rconServerInfo.value.player_reserve_count || 0;
-
-    // Calculate total queue and reserved slots
-    const totalQueue = publicQueue;
-
-    // Format as: "current(+queue)/max(reserved)"
-    if (totalQueue > 0) {
-        return `${playerCount}(+${totalQueue})/${maxPlayers - playerReserveCount}${
-            playerReserveCount !== 0 ? `(+${playerReserveCount})` : ""
-        }`;
-    }
-
-    // If no queue, just show current/max(reserved)
-    return `${playerCount}/${maxPlayers - playerReserveCount}${
-        playerReserveCount !== 0 ? `(+${playerReserveCount})` : ""
-    }`;
-});
-
-// Fetch available layers
-async function fetchAvailableLayers() {
-    loadingLayers.value = true;
-
-    const runtimeConfig = useRuntimeConfig();
-
-    try {
-        interface LayersResponse {
-            data: {
-                layers: { name: string; mod: string; isVanilla: boolean }[];
-            };
-        }
-
-        const { data: responseData, error: fetchError } =
-            await useAuthFetch<LayersResponse>(
-                `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/available-layers`,
-                {
-                    method: "GET",
-                },
-            );
-
-        if (fetchError.value) {
-            throw new Error(
-                extractApiErrorMessage(fetchError.value, "Failed to fetch available layers"),
-            );
-        }
-
-        if (responseData.value && responseData.value.data) {
-            availableLayers.value = responseData.value.data.layers || [];
-
-            // Set current layer as default selected
-            if (serverInfo.value?.metrics?.current?.map) {
-                selectedLayer.value = `${serverInfo.value.metrics.current.map}`;
-            }
-        }
-    } catch (err: any) {
-        toast({
-            title: "Error",
-            description: extractApiErrorMessage(err, "Failed to fetch available layers"),
-            variant: "destructive",
-        });
-        console.error(err);
-    } finally {
-        loadingLayers.value = false;
-    }
-}
-
-// Change server layer
-async function changeServerLayer() {
-    if (!selectedLayer.value) {
-        toast({
-            title: "Error",
-            description: "Please select a layer",
-            variant: "destructive",
-        });
-        return;
-    }
-
-    changingLayer.value = true;
-
-    const runtimeConfig = useRuntimeConfig();
-
-    try {
-        interface LayerChangeResponse {
-            data: {
-                success: boolean;
-                message?: string;
-            };
-        }
-
-        const { data: responseData, error: fetchError } =
-            await useAuthFetch<LayerChangeResponse>(
-                `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/change-layer`,
-                {
-                    method: "POST",
-                    body: {
-                        layer: selectedLayer.value,
-                    },
-                },
-            );
-
-        if (fetchError.value) {
-            throw new Error(
-                extractApiErrorMessage(fetchError.value, "Failed to change layer"),
-            );
-        }
-
-        toast({
-            title: "Success",
-            description: "Layer change initiated successfully",
-        });
-
-        // Close dialog and refresh server info
-        showMapChangeDialog.value = false;
-        fetchServerInfo();
-    } catch (err: any) {
-        toast({
-            title: "Error",
-            description: extractApiErrorMessage(err, "Failed to change layer"),
-            variant: "destructive",
-        });
-        console.error(err);
-    } finally {
-        changingLayer.value = false;
-    }
-}
-
-// Open layer change dialog
-function openMapChangeDialog() {
-    showMapChangeDialog.value = true;
-    fetchAvailableLayers();
-}
-
-// Set next layer function
-async function setNextLayer() {
-    if (!selectedNextLayer.value) {
-        toast({
-            title: "Error",
-            description: "Please select a layer",
-            variant: "destructive",
-        });
-        return;
-    }
-
-    settingNextLayer.value = true;
-
-    const runtimeConfig = useRuntimeConfig();
-
-    try {
-        interface LayerChangeResponse {
-            data: {
-                success: boolean;
-                message?: string;
-            };
-        }
-
-        const { data: responseData, error: fetchError } =
-            await useAuthFetch<LayerChangeResponse>(
-                `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/set-next-layer`,
-                {
-                    method: "POST",
-                    body: {
-                        layer: selectedNextLayer.value,
-                    },
-                },
-            );
-
-        if (fetchError.value) {
-            throw new Error(
-                extractApiErrorMessage(fetchError.value, "Failed to set next layer"),
-            );
-        }
-
-        toast({
-            title: "Success",
-            description: "Next layer set successfully",
-        });
-
-        // Close dialog and refresh server info
-        showNextLayerDialog.value = false;
-        fetchServerInfo();
-        fetchServerMetrics();
-    } catch (err: any) {
-        toast({
-            title: "Error",
-            description: extractApiErrorMessage(err, "Failed to set next layer"),
-            variant: "destructive",
-        });
-        console.error(err);
-    } finally {
-        settingNextLayer.value = false;
-    }
-}
-
-// Open next layer dialog
-function openNextLayerDialog() {
-    showNextLayerDialog.value = true;
-    fetchAvailableLayers();
-}
-
-// End match function
-async function endMatch() {
-    endingMatch.value = true;
-
-    const runtimeConfig = useRuntimeConfig();
-
-    try {
-        interface EndMatchResponse {
-            data: {
-                success: boolean;
-                message?: string;
-            };
-        }
-
-        const { data: responseData, error: fetchError } =
-            await useAuthFetch<EndMatchResponse>(
-                `${runtimeConfig.public.backendApi}/servers/${serverId}/rcon/execute`,
-                {
-                    method: "POST",
-                    body: {
-                        command: `AdminEndMatch`,
-                    },
-                },
-            );
-
-        if (fetchError.value) {
-            throw new Error(extractApiErrorMessage(fetchError.value, "Failed to end match"));
-        }
-
-        toast({
-            title: "Success",
-            description: "Match ended successfully",
-        });
-
-        // Close dialog and refresh server info
-        showEndMatchDialog.value = false;
-        fetchServerInfo();
-        fetchServerMetrics();
-    } catch (err: any) {
-        toast({
-            title: "Error",
-            description: extractApiErrorMessage(err, "Failed to end match"),
-            variant: "destructive",
-        });
-        console.error(err);
-    } finally {
-        endingMatch.value = false;
-    }
-}
-
-function refresh() {
-    fetchServerInfo();
-    fetchTeamsData();
+function refresh(background = false) {
+    fetchServerInfo(background);
+    fetchTeamsData(background);
     fetchServerMetrics();
-    fetchRconServerInfo();
-    fetchRecentJoins();
+    fetchRconServerInfo(background);
+    fetchRecentJoins(background);
 }
+
+// Visibility-gated auto-refresh
+const AUTO_REFRESH_INTERVAL_MS = 30_000;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+function startAutoRefresh() {
+    stopAutoRefresh();
+    refreshTimer = setInterval(() => refresh(true), AUTO_REFRESH_INTERVAL_MS);
+}
+
+function stopAutoRefresh() {
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+}
+
+function handleVisibilityChange() {
+    if (document.hidden) {
+        stopAutoRefresh();
+    } else {
+        refresh(true);
+        startAutoRefresh();
+    }
+}
+
+onMounted(() => {
+    startAutoRefresh();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+});
+
+onBeforeUnmount(() => {
+    stopAutoRefresh();
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+});
 
 refresh();
 </script>
 
 <template>
-    <div class="p-4">
-        <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold">Server Dashboard</h1>
-            <div class="flex items-center space-x-2">
-                <Button @click="refresh" :disabled="loading">
+    <div class="p-4 md:p-6">
+        <PageHeader title="Server Dashboard">
+            <template #actions>
+                <Button :disabled="loading" @click="refresh()">
                     {{ loading ? "Refreshing..." : "Refresh" }}
                 </Button>
-            </div>
-        </div>
+            </template>
+        </PageHeader>
 
         <div v-if="error" class="bg-red-500 text-white p-4 rounded mb-4">
             {{ error }}
@@ -643,776 +274,71 @@ refresh();
             <p>Loading server information...</p>
         </div>
 
-        <div v-else>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <!-- Server Info Card -->
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Server Information</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div class="space-y-2">
-                            <div class="flex justify-between">
-                                <span class="text-sm font-medium">Name:</span>
-                                <span class="text-sm">{{
-                                    serverInfo?.server?.name || "Unknown"
-                                }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-sm font-medium"
-                                    >IP Address:</span
-                                >
-                                <span class="text-sm">{{
-                                    serverInfo?.server?.ip_address || "Unknown"
-                                }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-sm font-medium"
-                                    >Game Port:</span
-                                >
-                                <span class="text-sm">{{
-                                    serverInfo?.server?.game_port || "Unknown"
-                                }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-sm font-medium"
-                                    >RCON IP Address:</span
-                                >
-                                <span class="text-sm">{{
-                                    serverInfo?.server?.rcon_ip_address ||
-                                    "Unknown"
-                                }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-sm font-medium"
-                                    >RCON Port:</span
-                                >
-                                <span class="text-sm">{{
-                                    serverInfo?.server?.rcon_port || "Unknown"
-                                }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-sm font-medium"
-                                    >Server Version:</span
-                                >
-                                <span class="text-sm">{{
-                                    rconServerInfo?.version ||
-                                    rconServerInfo?.game_version ||
-                                    "Unknown"
-                                }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-sm font-medium"
-                                    >License Status:</span
-                                >
-                                <span class="text-sm">
-                                    <Badge
-                                        :variant="
-                                            rconServerInfo?.licensed_server
-                                                ? 'default'
-                                                : 'destructive'
-                                        "
-                                        v-if="
-                                            rconServerInfo?.licensed_server !==
-                                            undefined
-                                        "
-                                    >
-                                        {{
-                                            rconServerInfo?.licensed_server
-                                                ? "Licensed"
-                                                : "Unlicensed"
-                                        }}
-                                    </Badge>
-                                    <span v-else>Unknown</span>
-                                </span>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
+        <div v-else class="space-y-4">
+            <ServerStatusStrip
+                :server-info="serverInfo"
+                :rcon-server-info="rconServerInfo"
+                :rcon-loading="rconServerInfoLoading"
+                :rcon-error="rconServerInfoError"
+            />
 
-                <!-- Current Map Card -->
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Current Map</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div class="text-center">
-                            <div
-                                class="relative w-full h-32 bg-gray-200 rounded-md mb-2 overflow-hidden"
-                            >
-                                <div
-                                    class="absolute inset-0 flex items-center justify-center text-gray-500"
-                                >
-                                    Map Preview
-                                </div>
-                                <img
-                                    :src="`https://raw.githubusercontent.com/mahtoid/SquadMaps/refs/heads/master/img/maps/thumbnails/${serverInfo.metrics?.current?.layer}.jpg`"
-                                    class="absolute inset-0 w-full h-full object-cover"
-                                />
-                            </div>
-                            <h3 class="text-lg font-medium">
-                                {{ serverInfo.metrics?.current?.map }}
-                                {{
-                                    serverInfo.metrics?.next
-                                        ? `-> ${serverInfo.metrics?.next?.map}`
-                                        : ""
-                                }}
-                            </h3>
-                            <div
-                                v-if="
-                                    serverInfo.metrics?.current?.factions
-                                "
-                                class="text-sm text-muted-foreground mt-2 space-y-1"
-                            >
-                                <div
-                                    v-if="serverInfo.metrics?.current?.factions[0]"
-                                    class="flex items-center justify-center gap-2"
-                                >
-                                    <Badge variant="outline">
-                                        {{ serverInfo.metrics.current.factions[0] }}
-                                    </Badge>
-                                    <span class="text-xs">vs</span>
-                                    <Badge
-                                        v-if="
-                                            serverInfo.metrics?.current?.factions[1]
-                                        "
-                                        variant="outline"
-                                    >
-                                        {{ serverInfo.metrics.current.factions[1] }}
-                                    </Badge>
-                                </div>
-                            </div>
-                            <p class="text-sm text-muted-foreground mt-2">
-                                <template
-                                    v-if="
-                                        rconServerInfo?.match_timeout * 60 -
-                                            rconServerInfo?.playtime >
-                                        0
-                                    "
-                                >
-                                    Time Remaining:
-                                    {{
-                                        Math.floor(
-                                            (rconServerInfo.match_timeout * 60 -
-                                                rconServerInfo.playtime) /
-                                                60,
-                                        )
-                                    }}
-                                    minutes
-                                </template>
-                                <template v-else>
-                                    Time Remaining: 0 minutes
-                                </template>
-                            </p>
-                        </div>
-                    </CardContent>
-                    <CardFooter>
-                        <div class="w-full grid grid-cols-3 gap-2">
-                            <PermissionButton
-                                :permission="UI_PERMISSIONS.MAPS_CHANGE"
-                                :server-id="serverId as string"
-                                variant="outline"
-                                size="sm"
-                                @click="openMapChangeDialog"
-                            >
-                                Change
-                            </PermissionButton>
-                            <PermissionButton
-                                :permission="UI_PERMISSIONS.MAPS_CHANGE"
-                                :server-id="serverId as string"
-                                variant="outline"
-                                size="sm"
-                                @click="openNextLayerDialog"
-                            >
-                                Set Next
-                            </PermissionButton>
-                            <Button
-                                variant="destructive"
-                                size="sm"
-                                @click="showEndMatchDialog = true"
-                            >
-                                End Match
-                            </Button>
-                        </div>
-                    </CardFooter>
-                </Card>
-
-                <!-- Player Count Card -->
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Player Count</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div class="text-center">
-                            <div class="text-3xl font-bold mb-2">
-                                {{
-                                    formattedPlayerCount ||
-                                    `${serverInfo.metrics?.players?.total} / ${serverInfo.metrics?.players?.max}`
-                                }}
-                            </div>
-                            <Progress
-                                :value="
-                                    (serverInfo.metrics?.players?.total /
-                                        serverInfo.metrics?.players?.max) *
-                                    100
-                                "
-                                class="h-2 mb-4"
-                            />
-                            <div class="grid grid-cols-2 gap-2">
-                                <div class="bg-blue-50 p-2 rounded-md">
-                                    <div
-                                        class="text-sm font-medium text-blue-700"
-                                    >
-                                        {{ teamsData[0]?.name || "Team 1" }}
-                                    </div>
-                                    <div
-                                        class="text-xl font-bold text-blue-800"
-                                    >
-                                        {{
-                                            serverInfo.metrics?.players
-                                                ?.teams?.[1] || 0
-                                        }}
-                                    </div>
-                                </div>
-                                <div class="bg-red-50 p-2 rounded-md">
-                                    <div
-                                        class="text-sm font-medium text-red-700"
-                                    >
-                                        {{ teamsData[1]?.name || "Team 2" }}
-                                    </div>
-                                    <div class="text-xl font-bold text-red-800">
-                                        {{
-                                            serverInfo.metrics?.players
-                                                ?.teams?.[2] || 0
-                                        }}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <CurrentMapCard
+                    :server-id="serverId"
+                    :server-info="serverInfo"
+                    :rcon-server-info="rconServerInfo"
+                    @change-map="showMapChangeDialog = true"
+                    @set-next="showNextLayerDialog = true"
+                    @end-match="showEndMatchDialog = true"
+                />
+                <QuickActions
+                    :server-id="serverId"
+                    @broadcast="showBroadcastDialog = true"
+                />
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <!-- Last 5 Server Joins Card -->
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Last 5 Server Joins</CardTitle>
-                        <CardDescription
-                            >Most recent players who joined the
-                            server</CardDescription
-                        >
-                    </CardHeader>
-                    <CardContent>
-                        <div
-                            v-if="
-                                loadingRecentJoins && recentJoins.length === 0
-                            "
-                            class="text-center py-4"
-                        >
-                            <div
-                                class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
-                            ></div>
-                            <p class="text-sm">Loading recent joins...</p>
-                        </div>
-                        <div
-                            v-else-if="errorRecentJoins"
-                            class="text-red-500 text-sm py-2"
-                        >
-                            {{ errorRecentJoins }}
-                        </div>
-                        <div
-                            v-else-if="recentJoins.length === 0"
-                            class="text-center py-4"
-                        >
-                            <p class="text-sm text-muted-foreground">
-                                No recent joins recorded
-                            </p>
-                        </div>
-                        <Table v-else>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Player</TableHead>
-                                    <TableHead>Joined</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                <TableRow
-                                    v-for="join in recentJoins"
-                                    :key="join.id"
-                                >
-                                    <TableCell>
-                                        <div class="font-medium">
-                                            {{ join.player_name }}
-                                        </div>
-                                    </TableCell>
-                                    <TableCell>
-                                        <span
-                                            class="text-sm text-muted-foreground"
-                                        >
-                                            {{
-                                                new Date(
-                                                    join.joined_at,
-                                                ).toLocaleTimeString()
-                                            }}
-                                        </span>
-                                    </TableCell>
-                                </TableRow>
-                            </TableBody>
-                        </Table>
-                    </CardContent>
-                </Card>
-
-                <!-- Teams & Squads Card -->
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Teams & Squads</CardTitle>
-                        <CardDescription
-                            >Team balance and squad
-                            distribution</CardDescription
-                        >
-                    </CardHeader>
-                    <CardContent>
-                        <div
-                            v-if="loadingTeams && teamsData.length === 0"
-                            class="text-center py-4"
-                        >
-                            <div
-                                class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
-                            ></div>
-                            <p class="text-sm">Loading teams data...</p>
-                        </div>
-                        <div
-                            v-else-if="errorTeams"
-                            class="text-red-500 text-sm py-2"
-                        >
-                            {{ errorTeams }}
-                        </div>
-                        <div
-                            v-else-if="teamsData.length === 0"
-                            class="text-center py-4"
-                        >
-                            <p class="text-sm text-muted-foreground">
-                                No teams data available
-                            </p>
-                        </div>
-                        <div v-else class="space-y-4">
-                            <div>
-                                <h3 class="text-sm font-medium mb-2">
-                                    Team Balance
-                                </h3>
-                                <div
-                                    class="flex h-4 mb-2 bg-gray-200 rounded-full overflow-hidden"
-                                >
-                                    <template v-if="teamsData.length >= 2">
-                                        <div
-                                            class="h-full bg-blue-500 transition-all duration-300"
-                                            :style="`width: ${Math.max(
-                                                5,
-                                                ((serverInfo.metrics?.players
-                                                    ?.teams?.[
-                                                    teamsData[0]?.id
-                                                ] || 0) /
-                                                    Math.max(
-                                                        1,
-                                                        serverInfo.metrics
-                                                            ?.players?.max ||
-                                                            64,
-                                                    )) *
-                                                    100,
-                                            )}%`"
-                                        ></div>
-                                        <div
-                                            class="h-full bg-red-500 transition-all duration-300"
-                                            :style="`width: ${Math.max(
-                                                5,
-                                                ((serverInfo.metrics?.players
-                                                    ?.teams?.[
-                                                    teamsData[1]?.id
-                                                ] || 0) /
-                                                    Math.max(
-                                                        1,
-                                                        serverInfo.metrics
-                                                            ?.players?.max ||
-                                                            64,
-                                                    )) *
-                                                    100,
-                                            )}%`"
-                                        ></div>
-                                    </template>
-                                    <template v-else>
-                                        <div
-                                            class="h-full bg-blue-500 w-1/2"
-                                        ></div>
-                                        <div
-                                            class="h-full bg-red-500 w-1/2"
-                                        ></div>
-                                    </template>
-                                </div>
-                                <div class="flex justify-between text-xs">
-                                    <span
-                                        v-for="team in teamsData"
-                                        :key="team.id"
-                                    >
-                                        {{ team.name }}:
-                                        {{
-                                            serverInfo.metrics?.players
-                                                ?.teams?.[team.id] || 0
-                                        }}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div>
-                                <h3 class="text-sm font-medium mb-2">
-                                    Squad Distribution
-                                </h3>
-                                <div class="space-y-2">
-                                    <div
-                                        v-for="team in teamsData"
-                                        :key="team.id"
-                                    >
-                                        <h4 class="text-xs font-medium mb-1">
-                                            {{ team.name }}
-                                        </h4>
-                                        <div
-                                            v-for="squad in team.squads"
-                                            :key="squad.id"
-                                            class="mb-2"
-                                        >
-                                            <div
-                                                class="flex justify-between text-xs mb-1"
-                                            >
-                                                <span>{{ squad.name }}</span>
-                                                <span
-                                                    >{{
-                                                        squad.players.length
-                                                    }}
-                                                    / 9</span
-                                                >
-                                            </div>
-                                            <Progress
-                                                :modelValue="
-                                                    Math.min(
-                                                        100,
-                                                        Math.round(
-                                                            (squad.players
-                                                                .length /
-                                                                9) *
-                                                                100,
-                                                        ),
-                                                    )
-                                                "
-                                                class="h-2"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </CardContent>
-                    <CardFooter>
-                        <NuxtLink
-                            :to="`/servers/${serverId}/teams-and-squads`"
-                            class="w-full"
-                        >
-                            <Button variant="outline" size="sm" class="w-full">
-                                Manage Teams & Squads
-                            </Button>
-                        </NuxtLink>
-                    </CardFooter>
-                </Card>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <RecentJoinsCard
+                    :joins="recentJoins"
+                    :loading="loadingRecentJoins"
+                    :error="errorRecentJoins"
+                />
+                <TeamsSummaryCard
+                    :server-id="serverId"
+                    :teams="teamsData"
+                    :server-info="serverInfo"
+                    :loading="loadingTeams"
+                    :error="errorTeams"
+                />
             </div>
 
-            <!-- Quick Actions -->
-            <Card class="mb-4">
-                <CardHeader>
-                    <CardTitle>Quick Actions</CardTitle>
-                    <CardDescription
-                        >Common server management tasks</CardDescription
-                    >
-                </CardHeader>
-                <CardContent>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <NuxtLink
-                            :to="`/servers/${serverId}/console`"
-                            class="w-full"
-                        >
-                            <Button
-                                variant="outline"
-                                class="w-full h-full flex flex-col items-center justify-center p-4"
-                            >
-                                <div class="text-xl mb-2">💻</div>
-                                <div class="text-sm">Console</div>
-                            </Button>
-                        </NuxtLink>
-                        <NuxtLink
-                            :to="`/servers/${serverId}/banned-players`"
-                            class="w-full"
-                        >
-                            <Button
-                                variant="outline"
-                                class="w-full h-full flex flex-col items-center justify-center p-4"
-                            >
-                                <div class="text-xl mb-2">🚫</div>
-                                <div class="text-sm">Bans</div>
-                            </Button>
-                        </NuxtLink>
-                        <NuxtLink
-                            :to="`/servers/${serverId}/users-and-roles`"
-                            class="w-full"
-                        >
-                            <Button
-                                variant="outline"
-                                class="w-full h-full flex flex-col items-center justify-center p-4"
-                            >
-                                <div class="text-xl mb-2">👥</div>
-                                <div class="text-sm">Users & Roles</div>
-                            </Button>
-                        </NuxtLink>
-                        <NuxtLink
-                            :to="`/servers/${serverId}/audit-logs`"
-                            class="w-full"
-                        >
-                            <Button
-                                variant="outline"
-                                class="w-full h-full flex flex-col items-center justify-center p-4"
-                            >
-                                <div class="text-xl mb-2">📋</div>
-                                <div class="text-sm">Audit Logs</div>
-                            </Button>
-                        </NuxtLink>
-                    </div>
-                </CardContent>
-            </Card>
+            <ServerInfoCard
+                :server="serverInfo?.server"
+                :version="rconServerInfo?.version || rconServerInfo?.game_version"
+                :licensed="rconServerInfo?.licensed_server"
+            />
         </div>
 
-        <!-- Map Change Dialog -->
-        <Dialog v-model:open="showMapChangeDialog">
-            <DialogContent class="sm:max-w-[425px]">
-                <DialogHeader>
-                    <DialogTitle>Change Server Layer</DialogTitle>
-                    <DialogDescription>
-                        Select a new layer to change to. This will immediately
-                        change the layer on the server.
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div class="py-4">
-                    <div v-if="loadingLayers" class="text-center py-4">
-                        <div
-                            class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
-                        ></div>
-                        <p class="text-sm">Loading available layers...</p>
-                    </div>
-                    <div
-                        v-else-if="availableLayers.length === 0"
-                        class="text-center py-4"
-                    >
-                        <p class="text-sm text-muted-foreground">
-                            No layers available
-                        </p>
-                    </div>
-                    <div v-else>
-                        <div class="space-y-4">
-                            <div class="space-y-2">
-                                <label class="text-sm font-medium">Select Layer</label>
-                                <Popover v-model:open="layerComboboxOpen">
-                                    <PopoverTrigger as-child>
-                                        <Button
-                                            variant="outline"
-                                            role="combobox"
-                                            :aria-expanded="layerComboboxOpen"
-                                            class="w-full justify-between"
-                                        >
-                                            {{ selectedLayer || "Search for a layer..." }}
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-2 h-4 w-4 shrink-0 opacity-50"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent class="w-[--reka-popover-trigger-width] p-0">
-                                        <Command>
-                                            <CommandInput placeholder="Search layers..." />
-                                            <CommandEmpty>No layer found.</CommandEmpty>
-                                            <CommandList>
-                                                <CommandGroup>
-                                                    <CommandItem
-                                                        v-for="layer in availableLayers"
-                                                        :key="layer.name"
-                                                        :value="layer.name"
-                                                        @select="selectedLayer = layer.name; layerComboboxOpen = false"
-                                                    >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 h-4 w-4" :class="selectedLayer === layer.name ? 'opacity-100' : 'opacity-0'"><path d="M20 6 9 17l-5-5"/></svg>
-                                                        {{ layer.name }}
-                                                    </CommandItem>
-                                                </CommandGroup>
-                                            </CommandList>
-                                        </Command>
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <DialogFooter>
-                    <Button
-                        variant="outline"
-                        @click="showMapChangeDialog = false"
-                        >Cancel</Button
-                    >
-                    <Button
-                        @click="changeServerLayer"
-                        :disabled="
-                            loadingLayers || changingLayer || !selectedLayer
-                        "
-                    >
-                        {{ changingLayer ? "Changing..." : "Change Layer" }}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-
-        <!-- Set Next Layer Dialog -->
-        <Dialog v-model:open="showNextLayerDialog">
-            <DialogContent class="sm:max-w-[425px]">
-                <DialogHeader>
-                    <DialogTitle>Set Next Layer</DialogTitle>
-                    <DialogDescription>
-                        Select the next layer to be loaded after the current
-                        match ends.
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div class="py-4">
-                    <div v-if="loadingLayers" class="text-center py-4">
-                        <div
-                            class="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full mx-auto mb-2"
-                        ></div>
-                        <p class="text-sm">Loading available layers...</p>
-                    </div>
-                    <div
-                        v-else-if="availableLayers.length === 0"
-                        class="text-center py-4"
-                    >
-                        <p class="text-sm text-muted-foreground">
-                            No layers available
-                        </p>
-                    </div>
-                    <div v-else>
-                        <div class="space-y-4">
-                            <div class="space-y-2">
-                                <label class="text-sm font-medium">Select Next Layer</label>
-                                <Popover v-model:open="nextLayerComboboxOpen">
-                                    <PopoverTrigger as-child>
-                                        <Button
-                                            variant="outline"
-                                            role="combobox"
-                                            :aria-expanded="nextLayerComboboxOpen"
-                                            class="w-full justify-between"
-                                        >
-                                            {{ selectedNextLayer || "Search for a layer..." }}
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-2 h-4 w-4 shrink-0 opacity-50"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent class="w-[--reka-popover-trigger-width] p-0">
-                                        <Command>
-                                            <CommandInput placeholder="Search layers..." />
-                                            <CommandEmpty>No layer found.</CommandEmpty>
-                                            <CommandList>
-                                                <CommandGroup>
-                                                    <CommandItem
-                                                        v-for="layer in availableLayers"
-                                                        :key="layer.name"
-                                                        :value="layer.name"
-                                                        @select="selectedNextLayer = layer.name; nextLayerComboboxOpen = false"
-                                                    >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 h-4 w-4" :class="selectedNextLayer === layer.name ? 'opacity-100' : 'opacity-0'"><path d="M20 6 9 17l-5-5"/></svg>
-                                                        {{ layer.name }}
-                                                    </CommandItem>
-                                                </CommandGroup>
-                                            </CommandList>
-                                        </Command>
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-                            <div
-                                v-if="serverInfo?.metrics?.next?.map"
-                                class="p-3 bg-blue-50 rounded-md"
-                            >
-                                <p class="text-sm font-medium text-blue-900">
-                                    Current Next Layer:
-                                </p>
-                                <p class="text-sm text-blue-700">
-                                    {{ serverInfo.metrics.next.map }}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <DialogFooter>
-                    <Button
-                        variant="outline"
-                        @click="showNextLayerDialog = false"
-                        >Cancel</Button
-                    >
-                    <Button
-                        @click="setNextLayer"
-                        :disabled="
-                            loadingLayers ||
-                            settingNextLayer ||
-                            !selectedNextLayer
-                        "
-                    >
-                        {{ settingNextLayer ? "Setting..." : "Set Next Layer" }}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-
-        <!-- End Match Confirmation Dialog -->
-        <Dialog v-model:open="showEndMatchDialog">
-            <DialogContent class="sm:max-w-[425px]">
-                <DialogHeader>
-                    <DialogTitle>End Current Match</DialogTitle>
-                    <DialogDescription>
-                        Are you sure you want to end the current match? This
-                        will immediately end the match and transition to the
-                        next layer.
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div class="py-4">
-                    <div
-                        class="p-4 bg-yellow-50 border border-yellow-200 rounded-md"
-                    >
-                        <p class="text-sm text-yellow-800">
-                            <strong>Warning:</strong> This action cannot be
-                            undone. All players will be moved to the next layer
-                            immediately.
-                        </p>
-                    </div>
-                </div>
-
-                <DialogFooter>
-                    <Button
-                        variant="outline"
-                        @click="showEndMatchDialog = false"
-                        >Cancel</Button
-                    >
-                    <Button
-                        variant="destructive"
-                        @click="endMatch"
-                        :disabled="endingMatch"
-                    >
-                        {{ endingMatch ? "Ending..." : "End Match" }}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <MapChangeDialog
+            v-model:open="showMapChangeDialog"
+            :server-id="serverId"
+            :current-layer="serverInfo?.metrics?.current?.map"
+            @completed="refresh(true)"
+        />
+        <NextLayerDialog
+            v-model:open="showNextLayerDialog"
+            :server-id="serverId"
+            :current-next-layer="serverInfo?.metrics?.next?.map"
+            @completed="refresh(true)"
+        />
+        <EndMatchDialog
+            v-model:open="showEndMatchDialog"
+            :server-id="serverId"
+            @completed="refresh(true)"
+        />
+        <BroadcastDialog
+            v-model:open="showBroadcastDialog"
+            :server-id="serverId"
+        />
     </div>
 </template>
-
-<style scoped>
-/* Add any page-specific styles here */
-</style>
