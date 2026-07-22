@@ -98,7 +98,19 @@ export interface ViolationSummary {
   last_action?: string;
 }
 
+// NonCompetitiveTeamkills holds friendly fire on seeding/training layers, split
+// so the UI can show where it happened. Excluded from the headline metrics.
+export interface NonCompetitiveTeamkills {
+  seeding_teamkills: number;
+  training_teamkills: number;
+  seeding_team_wounds: number;
+  training_team_wounds: number;
+  seeding_team_damage: number;
+  training_team_damage: number;
+}
+
 export interface TeamkillMetrics {
+  // Headline fields count competitive (real-match) play only.
   total_teamkills: number;
   teamkills_per_session: number;
   teamkill_ratio: number;
@@ -107,6 +119,11 @@ export interface TeamkillMetrics {
   total_team_damage: number;
   recent_team_wounds: number;
   recent_team_damage: number;
+  // Seeding/training friendly fire, excluded from the fields above.
+  non_competitive: NonCompetitiveTeamkills;
+  // Raw all-context totals, for transparency.
+  all_teamkills: number;
+  all_teamkill_ratio: number;
 }
 
 export interface RiskIndicator {
@@ -119,6 +136,7 @@ export interface RiskIndicator {
     | "prior_bans"
     | "high_violations"
     | "multiple_violations"
+    | "non_competitive_tks"
     | "cbl_flagged"
     | "ip_shared";
   severity: "critical" | "high" | "medium" | "low";

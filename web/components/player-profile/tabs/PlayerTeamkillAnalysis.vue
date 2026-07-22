@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
   Table,
@@ -25,6 +25,13 @@ const error = ref<string | null>(null);
 
 const victims = ref<TeamkillVictim[]>([]);
 const tkWeapons = ref<{ weapon: string; tk_count: number }[]>([]);
+
+// Teamkills on seeding/training layers, excluded from the match figures above.
+const excludedTeamkills = computed(() => {
+  const nc = props.metrics.non_competitive;
+  if (!nc) return 0;
+  return (nc.seeding_teamkills || 0) + (nc.training_teamkills || 0);
+});
 
 async function fetchTeamkillAnalysis() {
   loading.value = true;
@@ -85,13 +92,19 @@ watch(
 
 <template>
   <div class="space-y-6">
-    <!-- Summary Cards -->
+    <!-- Summary Cards (competitive / real-match only) -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <Card>
         <CardContent class="p-4 text-center">
-          <div class="text-xs text-muted-foreground mb-1">Total TKs</div>
+          <div class="text-xs text-muted-foreground mb-1">Match TKs</div>
           <div class="text-2xl font-bold text-destructive">
             {{ metrics.total_teamkills }}
+          </div>
+          <div
+            v-if="excludedTeamkills > 0"
+            class="text-[11px] text-muted-foreground/70"
+          >
+            +{{ excludedTeamkills }} on seed/training
           </div>
         </CardContent>
       </Card>
@@ -126,6 +139,15 @@ watch(
         </CardContent>
       </Card>
     </div>
+
+    <p
+      v-if="excludedTeamkills > 0"
+      class="text-xs text-muted-foreground"
+    >
+      {{ excludedTeamkills }} teamkill{{ excludedTeamkills === 1 ? "" : "s" }} on
+      seeding/training layers (e.g. Jensen's Range) are excluded from the figures
+      above.
+    </p>
 
     <div v-if="loading" class="flex justify-center py-8">
       <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />

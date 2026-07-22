@@ -16,6 +16,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
+	"go.codycody31.dev/squad-aegis/internal/squadlayers"
 )
 
 // FeedEvent represents a formatted event for the feeds
@@ -89,7 +90,8 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 		case "chat":
 			eventTypes = append(eventTypes, event_manager.EventTypeRconChatMessage)
 		case "connections":
-			eventTypes = append(eventTypes,
+			eventTypes = append(
+				eventTypes,
 				event_manager.EventTypeLogPlayerConnected,
 				event_manager.EventTypeLogJoinSucceeded,
 				event_manager.EventTypeLogPlayerDisconnected,
@@ -259,6 +261,7 @@ func (s *Server) formatEventForFeed(event event_manager.Event, feedTypes []strin
 				"attacker_eos":   woundedData.AttackerEOS,
 				"weapon":         woundedData.Weapon,
 				"damage":         woundedData.Damage,
+				"category":       s.currentLayerCategory(event.ServerID),
 			}
 		}
 
@@ -267,6 +270,36 @@ func (s *Server) formatEventForFeed(event event_manager.Event, feedTypes []strin
 	}
 
 	return feedEvent
+}
+
+// currentLayerCategory returns the play-context category ("competitive",
+// "seeding" or "training") for the layer currently live on the server, based on
+// the most recent NEW_GAME event. Best-effort: any lookup failure (or missing
+// ClickHouse) falls back to competitive so live teamkills are never hidden.
+func (s *Server) currentLayerCategory(serverID uuid.UUID) string {
+	if s.Dependencies.Clickhouse == nil {
+		return string(squadlayers.CategoryCompetitive)
+	}
+
+	var layer, mapClassname, layerClassname *string
+	row := s.Dependencies.Clickhouse.QueryRow(context.Background(), `
+		SELECT layer, map_classname, layer_classname
+		FROM squad_aegis.server_new_game_events
+		WHERE server_id = ?
+		ORDER BY event_time DESC
+		LIMIT 1
+	`, serverID)
+	if err := row.Scan(&layer, &mapClassname, &layerClassname); err != nil {
+		return string(squadlayers.CategoryCompetitive)
+	}
+
+	names := make([]string, 0, 3)
+	for _, p := range []*string{layer, mapClassname, layerClassname} {
+		if p != nil {
+			names = append(names, *p)
+		}
+	}
+	return string(squadlayers.ClassifyLayer(names...))
 }
 
 // ServerFeedsHistory returns historical feed data
@@ -678,27 +711,33 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 		return []FeedEvent{}, nil
 	}
 
-	query := `
-		SELECT 
-			chain_id,
-			event_time,
-			victim_name,
-			attacker_name,
-			attacker_steam,
-			attacker_eos,
-			weapon,
-			damage
-		FROM squad_aegis.server_player_wounded_events 
-		WHERE server_id = ? AND teamkill = 1`
+	// Match each teamkill to the layer that was live when it happened, so the
+	// feed can label seeding/training TKs (excluded from the headline metrics).
+	categoryExpr := squadlayers.LayerCategorySQL("g.layer", "g.map_classname", "g.layer_classname")
+	query := fmt.Sprintf(`
+		SELECT
+			d.chain_id,
+			d.event_time,
+			d.victim_name,
+			d.attacker_name,
+			d.attacker_steam,
+			d.attacker_eos,
+			d.weapon,
+			d.damage,
+			%s AS category
+		FROM squad_aegis.server_player_wounded_events AS d
+		ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
+			ON d.server_id = g.server_id AND d.event_time >= g.event_time
+		WHERE d.server_id = ? AND d.teamkill = 1`, categoryExpr)
 
 	args := []interface{}{serverId}
 
 	if beforeTime != nil {
-		query += " AND event_time < ?"
+		query += " AND d.event_time < ?"
 		args = append(args, *beforeTime)
 	}
 
-	query += " ORDER BY event_time DESC LIMIT ?"
+	query += " ORDER BY d.event_time DESC LIMIT ?"
 	args = append(args, limit)
 
 	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, args...)
@@ -716,8 +755,9 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 		var attackerSteam, attackerEos *string
 		var weapon string
 		var damage float32
+		var category string
 
-		err := rows.Scan(&chainId, &eventTime, &victimName, &attackerName, &attackerSteam, &attackerEos, &weapon, &damage)
+		err := rows.Scan(&chainId, &eventTime, &victimName, &attackerName, &attackerSteam, &attackerEos, &weapon, &damage, &category)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to scan teamkill row")
 			continue
@@ -733,6 +773,7 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 			"attacker_name": attackerName,
 			"weapon":        weapon,
 			"damage":        damage,
+			"category":      category,
 		}
 
 		if attackerSteam != nil {

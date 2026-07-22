@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
+	"go.codycody31.dev/squad-aegis/internal/squadlayers"
 )
 
 // PlayerProfile represents a player's comprehensive profile
@@ -107,16 +108,38 @@ type ViolationSummary struct {
 	LastAction *time.Time `json:"last_action,omitempty"`
 }
 
-// TeamkillMetrics represents detailed teamkill statistics
+// TeamkillMetrics represents detailed teamkill statistics.
+//
+// The headline fields (TotalTeamkills, TeamkillRatio, RecentTeamkills and the
+// team wound/damage counts) cover COMPETITIVE (real-match) play only. Teamkills
+// on seeding or training layers (e.g. Jensen's Range) carry no admin signal, so
+// they are split out into NonCompetitive and excluded from these figures and
+// from the risk flags. AllTeamkills/AllTeamkillRatio keep the raw all-context
+// totals for transparency.
 type TeamkillMetrics struct {
-	TotalTeamkills      int64   `json:"total_teamkills"`
+	TotalTeamkills      int64   `json:"total_teamkills"` // Competitive TKs
 	TeamkillsPerSession float64 `json:"teamkills_per_session"`
-	TeamkillRatio       float64 `json:"teamkill_ratio"`     // TKs / total kills
-	RecentTeamkills     int64   `json:"recent_teamkills"`   // Last 7 days
-	TotalTeamWounds     int64   `json:"total_team_wounds"`  // Times downed a teammate
-	TotalTeamDamage     int64   `json:"total_team_damage"`  // Times damaged a teammate
-	RecentTeamWounds    int64   `json:"recent_team_wounds"` // Team wounds in last 7 days
-	RecentTeamDamage    int64   `json:"recent_team_damage"` // Team damage in last 7 days
+	TeamkillRatio       float64 `json:"teamkill_ratio"`     // Competitive TKs / competitive kills
+	RecentTeamkills     int64   `json:"recent_teamkills"`   // Competitive TKs, last 7 days
+	TotalTeamWounds     int64   `json:"total_team_wounds"`  // Competitive team wounds
+	TotalTeamDamage     int64   `json:"total_team_damage"`  // Competitive team damage
+	RecentTeamWounds    int64   `json:"recent_team_wounds"` // Competitive team wounds, last 7 days
+	RecentTeamDamage    int64   `json:"recent_team_damage"` // Competitive team damage, last 7 days
+
+	NonCompetitive   NonCompetitiveTeamkills `json:"non_competitive"`    // Excluded seeding/training friendly fire
+	AllTeamkills     int64                   `json:"all_teamkills"`      // Raw TKs across every layer
+	AllTeamkillRatio float64                 `json:"all_teamkill_ratio"` // Raw TKs / all kills
+}
+
+// NonCompetitiveTeamkills breaks the excluded friendly fire into seeding vs
+// training so the UI can show where it happened.
+type NonCompetitiveTeamkills struct {
+	SeedingTeamkills   int64 `json:"seeding_teamkills"`
+	TrainingTeamkills  int64 `json:"training_teamkills"`
+	SeedingTeamWounds  int64 `json:"seeding_team_wounds"`
+	TrainingTeamWounds int64 `json:"training_team_wounds"`
+	SeedingTeamDamage  int64 `json:"seeding_team_damage"`
+	TrainingTeamDamage int64 `json:"training_team_damage"`
 }
 
 // RiskIndicator represents a risk flag for admin attention
@@ -517,7 +540,8 @@ func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern s
 
 	// Join/disconnected/possess subqueries search name, steam, eos, and epic.
 	// Remaining subqueries search name, steam, and eos.
-	rows, err := s.Dependencies.Clickhouse.Query(ctx, query,
+	rows, err := s.Dependencies.Clickhouse.Query(
+		ctx, query,
 		searchPattern, searchPattern, searchPattern, searchPattern, // join_succeeded
 		searchPattern, searchPattern, searchPattern, searchPattern, // disconnected
 		searchPattern, searchPattern, searchPattern, searchPattern, // possess
@@ -788,7 +812,7 @@ func (s *Server) PlayerGet(c *gin.Context) {
 	}
 
 	// Teamkill metrics
-	tkMetrics, err := s.getPlayerTeamkillMetrics(c, lookupPlayerID, lookupIsSteamID, profile.TotalSessions, profile.Statistics.Kills)
+	tkMetrics, err := s.getPlayerTeamkillMetrics(c, lookupPlayerID, lookupIsSteamID, profile.TotalSessions)
 	if err == nil {
 		profile.TeamkillMetrics = *tkMetrics
 	}
@@ -968,13 +992,16 @@ func (s *Server) PlayersStats(c *gin.Context) {
 		),
 		teamkill_stats AS (
 			SELECT
-				attacker_steam,
-				attacker_eos,
-				attacker_name,
+				d.attacker_steam AS attacker_steam,
+				d.attacker_eos AS attacker_eos,
+				d.attacker_name AS attacker_name,
 				count(*) as teamkills
-			FROM squad_aegis.server_player_died_events
-			WHERE teamkill = 1 AND (attacker_steam != '' OR attacker_eos != '')
-			GROUP BY attacker_steam, attacker_eos, attacker_name
+			FROM squad_aegis.server_player_died_events AS d
+			ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
+				ON d.server_id = g.server_id AND d.event_time >= g.event_time
+			WHERE d.teamkill = 1 AND (d.attacker_steam != '' OR d.attacker_eos != '')
+				AND ` + squadlayers.LayerCategorySQL("g.layer", "g.map_classname", "g.layer_classname") + ` = '` + string(squadlayers.CategoryCompetitive) + `'
+			GROUP BY d.attacker_steam, d.attacker_eos, d.attacker_name
 		),
 		normalized_stats AS (
 			SELECT
@@ -1213,14 +1240,19 @@ func (s *Server) PlayersStats(c *gin.Context) {
 	}
 
 	// Get overall statistics - do it in two steps for ClickHouse compatibility
-	// First get event counts
-	eventStatsQuery := `
+	// First get event counts. Teamkills count competitive play only: each row is
+	// matched to its live layer via an ASOF join and seeding/training TKs are
+	// excluded (the ASOF LEFT JOIN keeps every left row, so the kill/death
+	// counts are unaffected).
+	eventStatsQuery := fmt.Sprintf(`
 		SELECT
 			count(*) as total_kills,
 			count(*) as total_deaths,
-			countIf(teamkill = 1) as total_teamkills
-		FROM squad_aegis.server_player_died_events
-	`
+			countIf(d.teamkill = 1 AND %s = '%s') as total_teamkills
+		FROM squad_aegis.server_player_died_events AS d
+		ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
+			ON d.server_id = g.server_id AND d.event_time >= g.event_time
+	`, squadlayers.LayerCategorySQL("g.layer", "g.map_classname", "g.layer_classname"), squadlayers.CategoryCompetitive)
 
 	row := s.Dependencies.Clickhouse.QueryRow(ctx, eventStatsQuery)
 	_ = row.Scan(
@@ -2163,65 +2195,122 @@ func (s *Server) getPlayerViolationSummary(c *gin.Context, playerID string, isSt
 	return &summary, nil
 }
 
-// getPlayerTeamkillMetrics retrieves detailed teamkill statistics
-func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSteamID bool, totalSessions int64, totalKills int64) (*TeamkillMetrics, error) {
-	whereClause := "attacker_steam = ?"
+// getPlayerTeamkillMetrics retrieves detailed teamkill statistics, split by the
+// layer each teamkill occurred on. Each friendly-fire row is matched to the
+// layer that was live when it happened via an ASOF join against the most recent
+// NEW_GAME event for that server, then classified competitive/seeding/training.
+// The headline metrics count competitive play only; seeding and training
+// (Jensen's Range) friendly fire is reported separately and excluded from the
+// TK rate and risk flags.
+func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSteamID bool, totalSessions int64) (*TeamkillMetrics, error) {
+	attackerCol := "attacker_steam"
 	if !isSteamID {
-		whereClause = "attacker_eos = ?"
+		attackerCol = "attacker_eos"
 	}
+	categoryExpr := squadlayers.LayerCategorySQL("g.layer", "g.map_classname", "g.layer_classname")
 
 	var metrics TeamkillMetrics
 
-	// Total teamkills from died events
-	tkQuery := fmt.Sprintf(`
-		SELECT
-			count(*) as total_teamkills,
-			countIf(event_time >= now() - INTERVAL 7 DAY) as recent_teamkills
-		FROM squad_aegis.server_player_died_events
-		WHERE teamkill = 1 AND (%s)
-	`, whereClause)
+	// segment runs a teamkill count for one events table, grouped by the layer
+	// category, and hands each (category, total, recent) bucket to assign.
+	segment := func(table string, assign func(category string, total, recent int64)) {
+		query := fmt.Sprintf(`
+			SELECT
+				%s AS category,
+				count(*) AS total,
+				countIf(d.event_time >= now() - INTERVAL 7 DAY) AS recent
+			FROM squad_aegis.%s AS d
+			ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
+				ON d.server_id = g.server_id AND d.event_time >= g.event_time
+			WHERE d.teamkill = 1 AND d.%s = ?
+			GROUP BY category
+		`, categoryExpr, table, attackerCol)
 
-	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), tkQuery, playerID)
-	if err := row.Scan(&metrics.TotalTeamkills, &metrics.RecentTeamkills); err != nil {
-		// Continue with zeros if error
+		rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID)
+		if err != nil {
+			return
+		}
+		for rows.Next() {
+			var category string
+			var total, recent int64
+			if err := rows.Scan(&category, &total, &recent); err != nil {
+				continue
+			}
+			assign(category, total, recent)
+		}
+		rows.Close()
 	}
 
-	// Total team wounds from wounded events
-	woundQuery := fmt.Sprintf(`
+	// Teamkills (died events)
+	segment("server_player_died_events", func(category string, total, recent int64) {
+		metrics.AllTeamkills += total
+		switch category {
+		case string(squadlayers.CategorySeeding):
+			metrics.NonCompetitive.SeedingTeamkills += total
+		case string(squadlayers.CategoryTraining):
+			metrics.NonCompetitive.TrainingTeamkills += total
+		default:
+			metrics.TotalTeamkills += total
+			metrics.RecentTeamkills += recent
+		}
+	})
+
+	// Team wounds (wounded events)
+	segment("server_player_wounded_events", func(category string, total, recent int64) {
+		switch category {
+		case string(squadlayers.CategorySeeding):
+			metrics.NonCompetitive.SeedingTeamWounds += total
+		case string(squadlayers.CategoryTraining):
+			metrics.NonCompetitive.TrainingTeamWounds += total
+		default:
+			metrics.TotalTeamWounds += total
+			metrics.RecentTeamWounds += recent
+		}
+	})
+
+	// Team damage (damaged events)
+	segment("server_player_damaged_events", func(category string, total, recent int64) {
+		switch category {
+		case string(squadlayers.CategorySeeding):
+			metrics.NonCompetitive.SeedingTeamDamage += total
+		case string(squadlayers.CategoryTraining):
+			metrics.NonCompetitive.TrainingTeamDamage += total
+		default:
+			metrics.TotalTeamDamage += total
+			metrics.RecentTeamDamage += recent
+		}
+	})
+
+	// Kills split by layer for the ratio denominators: the TK rate compares
+	// competitive TKs against competitive kills (same identity scope as the
+	// numerator above).
+	var competitiveKills, allKills int64
+	killQuery := fmt.Sprintf(`
 		SELECT
-			count(*) as total_team_wounds,
-			countIf(event_time >= now() - INTERVAL 7 DAY) as recent_team_wounds
-		FROM squad_aegis.server_player_wounded_events
-		WHERE teamkill = 1 AND (%s)
-	`, whereClause)
+			countIf(%s = '%s') AS competitive_kills,
+			count(*) AS all_kills
+		FROM squad_aegis.server_player_died_events AS d
+		ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
+			ON d.server_id = g.server_id AND d.event_time >= g.event_time
+		WHERE d.%s = ?
+	`, categoryExpr, squadlayers.CategoryCompetitive, attackerCol)
+	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), killQuery, playerID)
+	// Leaves the denominators at zero on error, yielding a 0 ratio.
+	_ = row.Scan(&competitiveKills, &allKills)
 
-	row = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), woundQuery, playerID)
-	if err := row.Scan(&metrics.TotalTeamWounds, &metrics.RecentTeamWounds); err != nil {
-		// Continue with zeros if error
-	}
-
-	// Total team damage from damaged events
-	damageQuery := fmt.Sprintf(`
-		SELECT
-			count(*) as total_team_damage,
-			countIf(event_time >= now() - INTERVAL 7 DAY) as recent_team_damage
-		FROM squad_aegis.server_player_damaged_events
-		WHERE teamkill = 1 AND (%s)
-	`, whereClause)
-
-	row = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), damageQuery, playerID)
-	if err := row.Scan(&metrics.TotalTeamDamage, &metrics.RecentTeamDamage); err != nil {
-		// Continue with zeros if error
-	}
-
-	// Calculate per-session rate
+	// Per-session rate (competitive TKs across all sessions)
 	if totalSessions > 0 {
 		metrics.TeamkillsPerSession = float64(metrics.TotalTeamkills) / float64(totalSessions)
 	}
 
-	// Calculate TK ratio (TKs / total kills)
-	if totalKills > 0 {
-		metrics.TeamkillRatio = float64(metrics.TotalTeamkills) / float64(totalKills)
+	// Competitive TK ratio (competitive TKs / competitive kills)
+	if competitiveKills > 0 {
+		metrics.TeamkillRatio = float64(metrics.TotalTeamkills) / float64(competitiveKills)
+	}
+
+	// Raw all-context ratio (for transparency / tooltips)
+	if allKills > 0 {
+		metrics.AllTeamkillRatio = float64(metrics.AllTeamkills) / float64(allKills)
 	}
 
 	return &metrics, nil
@@ -2351,7 +2440,8 @@ func (s *Server) getPlayerNameHistory(c *gin.Context, playerID string, isSteamID
 	`, seedWhereClause, seedPlayerWhereClause, seedAttackerWhereClause, seedVictimWhereClause)
 
 	// Pass playerID for each seed source (6 sources)
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query,
+	rows, err := s.Dependencies.Clickhouse.Query(
+		c.Request.Context(), query,
 		playerID, playerID, playerID, // join, connected, disconnected
 		playerID,           // possess
 		playerID, playerID, // died (attacker, victim)
@@ -2517,6 +2607,18 @@ func (s *Server) calculateRiskIndicators(profile *PlayerProfile) []RiskIndicator
 			Type:        "recent_teamkills",
 			Severity:    "high",
 			Description: fmt.Sprintf("%d teamkills in the last 7 days", profile.TeamkillMetrics.RecentTeamkills),
+		})
+	}
+
+	// Note teamkills excluded from the rate because they happened on
+	// seeding/training layers (informational, so admins know the rate is scoped)
+	excludedTeamkills := profile.TeamkillMetrics.NonCompetitive.SeedingTeamkills +
+		profile.TeamkillMetrics.NonCompetitive.TrainingTeamkills
+	if excludedTeamkills > 0 {
+		indicators = append(indicators, RiskIndicator{
+			Type:        "non_competitive_tks",
+			Severity:    "low",
+			Description: fmt.Sprintf("%d teamkill(s) on seeding/training layers excluded from TK rate", excludedTeamkills),
 		})
 	}
 
@@ -3250,7 +3352,8 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 
 		eventKey := entry.EventType + ":" + entry.EventID
 		if entry.EventID == "" {
-			eventKey = fmt.Sprintf("%s:%s:%s:%s:%.3f:%s",
+			eventKey = fmt.Sprintf(
+				"%s:%s:%s:%s:%.3f:%s",
 				entry.EventType,
 				entry.EventTime.UTC().Format(time.RFC3339Nano),
 				entry.ServerID,

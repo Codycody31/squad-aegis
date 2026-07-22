@@ -13,6 +13,7 @@ import {
   FileWarning,
   ChevronDown,
   ChevronUp,
+  Crosshair,
 } from "lucide-vue-next";
 import type {
   RiskIndicator,
@@ -96,6 +97,44 @@ const recentFriendlyFire = computed(() => {
     (props.teamkillMetrics.recent_teamkills || 0) +
     (props.teamkillMetrics.recent_team_wounds || 0) +
     (props.teamkillMetrics.recent_team_damage || 0)
+  );
+});
+
+// Teamkill context: how many teamkills count toward the (competitive) TK rate
+// vs. how many were excluded because they happened on seeding/training layers.
+const competitiveTeamkills = computed(
+  () => props.teamkillMetrics.total_teamkills || 0
+);
+
+const seedingTeamkills = computed(
+  () => props.teamkillMetrics.non_competitive?.seeding_teamkills ?? 0
+);
+const trainingTeamkills = computed(
+  () => props.teamkillMetrics.non_competitive?.training_teamkills ?? 0
+);
+const excludedTeamkills = computed(
+  () => seedingTeamkills.value + trainingTeamkills.value
+);
+
+const tkContextTotal = computed(
+  () => competitiveTeamkills.value + excludedTeamkills.value
+);
+
+function contextPct(count: number): number {
+  return tkContextTotal.value > 0 ? (count / tkContextTotal.value) * 100 : 0;
+}
+
+// Friendly fire (TKs + wounds + damage) excluded from the headline card.
+const excludedFriendlyFire = computed(() => {
+  const nc = props.teamkillMetrics.non_competitive;
+  if (!nc) return 0;
+  return (
+    (nc.seeding_teamkills || 0) +
+    (nc.training_teamkills || 0) +
+    (nc.seeding_team_wounds || 0) +
+    (nc.training_team_wounds || 0) +
+    (nc.seeding_team_damage || 0) +
+    (nc.training_team_damage || 0)
   );
 });
 
@@ -189,7 +228,7 @@ function cblBanDate(d: string | null): string {
       </CardContent>
     </Card>
 
-    <!-- Teamkill Rate -->
+    <!-- Teamkill Rate (competitive / real-match only) -->
     <Card class="col-span-1">
       <CardContent class="p-4 text-center">
         <div class="text-xs text-muted-foreground mb-1">TK Rate</div>
@@ -206,7 +245,15 @@ function cblBanDate(d: string | null): string {
           {{ tkPercentage }}%
         </div>
         <div class="text-xs text-muted-foreground">
-          {{ teamkillMetrics.total_teamkills }} total TKs
+          {{ competitiveTeamkills }} match TK{{
+            competitiveTeamkills === 1 ? "" : "s"
+          }}
+        </div>
+        <div
+          v-if="excludedTeamkills > 0"
+          class="text-[11px] text-muted-foreground/70"
+        >
+          +{{ excludedTeamkills }} on seed/training
         </div>
       </CardContent>
     </Card>
@@ -228,6 +275,12 @@ function cblBanDate(d: string | null): string {
         </div>
         <div class="text-xs text-muted-foreground">
           {{ recentFriendlyFire }} recent
+        </div>
+        <div
+          v-if="excludedFriendlyFire > 0"
+          class="text-[11px] text-muted-foreground/70"
+        >
+          +{{ excludedFriendlyFire }} seed/training
         </div>
       </CardContent>
     </Card>
@@ -297,6 +350,69 @@ function cblBanDate(d: string | null): string {
         <div class="text-xs text-muted-foreground">aliases</div>
       </CardContent>
     </Card>
+  </div>
+
+  <!-- Teamkill context: what counts toward the rate vs. what was excluded -->
+  <div
+    v-if="excludedTeamkills > 0"
+    class="mb-6 rounded-lg border border-border bg-card p-4"
+  >
+    <div class="mb-3 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <Crosshair class="h-4 w-4 text-muted-foreground" />
+        <span class="text-sm font-medium">Teamkill context</span>
+      </div>
+      <span class="text-xs text-muted-foreground">
+        {{ competitiveTeamkills }} of {{ tkContextTotal }} count toward TK rate
+      </span>
+    </div>
+
+    <div class="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        v-if="competitiveTeamkills > 0"
+        class="bg-destructive motion-safe:transition-all"
+        :style="{ width: contextPct(competitiveTeamkills) + '%' }"
+      />
+      <div
+        v-if="seedingTeamkills > 0"
+        class="bg-muted-foreground/50 motion-safe:transition-all"
+        :style="{ width: contextPct(seedingTeamkills) + '%' }"
+      />
+      <div
+        v-if="trainingTeamkills > 0"
+        class="bg-muted-foreground/30 motion-safe:transition-all"
+        :style="{ width: contextPct(trainingTeamkills) + '%' }"
+      />
+    </div>
+
+    <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+      <span class="inline-flex items-center gap-1.5">
+        <span class="h-2 w-2 rounded-full bg-destructive" />
+        <span class="text-foreground">Match</span>
+        <span class="text-muted-foreground">{{ competitiveTeamkills }}</span>
+      </span>
+      <span
+        v-if="seedingTeamkills > 0"
+        class="inline-flex items-center gap-1.5"
+      >
+        <span class="h-2 w-2 rounded-full bg-muted-foreground/50" />
+        <span class="text-foreground">Seeding</span>
+        <span class="text-muted-foreground">{{ seedingTeamkills }}</span>
+      </span>
+      <span
+        v-if="trainingTeamkills > 0"
+        class="inline-flex items-center gap-1.5"
+      >
+        <span class="h-2 w-2 rounded-full bg-muted-foreground/30" />
+        <span class="text-foreground">Training</span>
+        <span class="text-muted-foreground">{{ trainingTeamkills }}</span>
+      </span>
+    </div>
+
+    <p class="mt-2 text-xs text-muted-foreground">
+      Seeding and training teamkills (e.g. Jensen's Range) don't count toward the
+      TK rate or risk flags.
+    </p>
   </div>
 
   <!-- Risk Indicator Badges -->
