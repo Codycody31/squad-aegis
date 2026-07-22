@@ -14,6 +14,12 @@ import {
   formatChartTooltipTime,
   toChartTime,
 } from "./time";
+import {
+  chartTooltipDomStyles,
+  readToken,
+  statusColors,
+  useChartTheme,
+} from "./theme";
 
 interface DataPoint {
   timestamp: string;
@@ -32,9 +38,11 @@ let chart: Line | null = null;
 
 // Get line color based on TPS performance
 const getLineColor = (avgTps: number) => {
-  if (avgTps >= 40) return "#059669"; // Darker green for good performance (40+)
-  if (avgTps >= 25) return "#d97706"; // Darker orange for warning (25-40)
-  return "#dc2626"; // Darker red for danger (sub 25)
+  const colors = statusColors();
+
+  if (avgTps >= 40) return colors.good; // Good performance (40+)
+  if (avgTps >= 25) return colors.warn; // Warning (25-40)
+  return colors.danger; // Danger (sub 25)
 };
 
 // Get performance status text
@@ -49,12 +57,12 @@ const buildChartData = () =>
     time: toChartTime(point.timestamp),
     value: point.value,
     performance: getPerformanceStatus(point.value),
-    color:
-      point.value >= 40 ? "#059669" : point.value >= 25 ? "#d97706" : "#dc2626",
+    color: getLineColor(point.value),
   }));
 
 const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
   const timestamps = props.data.map((point) => point.timestamp);
+  const colors = statusColors();
 
   const avgTps =
     props.data.reduce((sum, d) => sum + d.value, 0) / props.data.length;
@@ -71,7 +79,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
       shape: "circle",
       style: {
         fill: lineColor,
-        stroke: "#fff",
+        stroke: readToken("--background"),
         lineWidth: 2,
       },
     },
@@ -87,8 +95,8 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
         start: ["min", 0],
         end: ["max", 25],
         style: {
-          fill: "#fecaca", // More vibrant red background for danger zone
-          fillOpacity: 0.5,
+          fill: colors.danger, // Red background for danger zone
+          fillOpacity: 0.2,
         },
       },
       {
@@ -96,8 +104,8 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
         start: ["min", 25],
         end: ["max", 40],
         style: {
-          fill: "#fed7aa", // More vibrant orange background for warning zone
-          fillOpacity: 0.5,
+          fill: colors.warn, // Orange background for warning zone
+          fillOpacity: 0.2,
         },
       },
       {
@@ -105,8 +113,8 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
         start: ["min", 40],
         end: ["max", 100],
         style: {
-          fill: "#bbf7d0", // More vibrant green background for good zone
-          fillOpacity: 0.5,
+          fill: colors.good, // Green background for good zone
+          fillOpacity: 0.2,
         },
       },
       // Threshold lines
@@ -115,7 +123,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
         start: ["min", 25],
         end: ["max", 25],
         style: {
-          stroke: "#dc2626",
+          stroke: colors.danger,
           lineWidth: 2,
           lineDash: [4, 4],
           opacity: 0.8,
@@ -126,7 +134,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
           offsetY: -10,
           style: {
             fontSize: 11,
-            fill: "#dc2626",
+            fill: colors.danger,
             fontWeight: "bold",
           },
         },
@@ -136,7 +144,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
         start: ["min", 40],
         end: ["max", 40],
         style: {
-          stroke: "#d97706",
+          stroke: colors.warn,
           lineWidth: 2,
           lineDash: [4, 4],
           opacity: 0.8,
@@ -147,7 +155,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
           offsetY: -10,
           style: {
             fontSize: 11,
-            fill: "#d97706",
+            fill: colors.warn,
             fontWeight: "bold",
           },
         },
@@ -157,7 +165,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
         start: ["min", 60],
         end: ["max", 60],
         style: {
-          stroke: "#059669",
+          stroke: colors.good,
           lineWidth: 3,
           lineDash: [5, 5],
           opacity: 0.9,
@@ -167,7 +175,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
           position: "end",
           style: {
             fontSize: 12,
-            fill: "#059669",
+            fill: colors.good,
             fontWeight: "bold",
           },
         },
@@ -177,20 +185,21 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
     yAxis: {
       title: {
         text: "TPS (Ticks Per Second)",
-        style: chartAxisTitleStyle,
+        style: chartAxisTitleStyle(),
       },
       label: {
-        style: chartAxisLabelStyle,
+        style: chartAxisLabelStyle(),
       },
       grid: {
         line: {
-          style: chartGridLineStyle,
+          style: chartGridLineStyle(),
         },
       },
       min: 0,
       max: Math.max(65, Math.max(...props.data.map((d) => d.value)) + 5),
     },
     tooltip: {
+      domStyles: chartTooltipDomStyles(),
       customContent: (title, items) => {
         if (!items || items.length === 0) return "";
         const time = items[0].data.time;
@@ -239,18 +248,21 @@ const updateChart = () => {
   chart.update(getChartOptions(chartData));
 };
 
+// Destroy and recreate so options (and theme colors) are rebuilt
+const rebuildChart = () => {
+  if (chart) {
+    chart.destroy();
+    chart = null;
+  }
+  createChart();
+};
+
 // Watch for data changes
 watch(() => props.data, updateChart, { deep: true });
-watch(
-  () => props.period,
-  () => {
-    if (chart) {
-      chart.destroy();
-      chart = null;
-    }
-    createChart();
-  }
-);
+watch(() => props.period, rebuildChart);
+
+// Re-render with fresh colors when the theme changes
+useChartTheme(rebuildChart);
 
 // Lifecycle
 onMounted(() => {

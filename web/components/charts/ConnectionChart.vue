@@ -14,6 +14,12 @@ import {
   formatChartTooltipTime,
   toChartTime,
 } from "./time";
+import {
+  chartPalette,
+  chartTooltipDomStyles,
+  readToken,
+  useChartTheme,
+} from "./theme";
 
 interface ConnectionValue {
   connections: number;
@@ -62,6 +68,8 @@ const buildChartData = () =>
 
 const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
   const timestamps = props.data.map((point) => point.timestamp);
+  const [connectionsColor, disconnectionsColor] = chartPalette();
+  const pointStroke = readToken("--background");
 
   return {
     data: [chartData, chartData],
@@ -73,7 +81,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
     geometryOptions: [
       {
         geometry: "line",
-        color: "#10b981",
+        color: connectionsColor,
         lineStyle: {
           lineWidth: 2,
         },
@@ -81,8 +89,8 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
           size: 3,
           shape: "circle",
           style: {
-            fill: "#10b981",
-            stroke: "#fff",
+            fill: connectionsColor,
+            stroke: pointStroke,
             lineWidth: 1,
           },
         },
@@ -90,7 +98,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
       },
       {
         geometry: "line",
-        color: "#ef4444",
+        color: disconnectionsColor,
         lineStyle: {
           lineWidth: 2,
         },
@@ -98,8 +106,8 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
           size: 3,
           shape: "circle",
           style: {
-            fill: "#ef4444",
-            stroke: "#fff",
+            fill: disconnectionsColor,
+            stroke: pointStroke,
             lineWidth: 1,
           },
         },
@@ -112,19 +120,19 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
         title: {
           text: "Connections",
           style: {
-            ...chartAxisTitleStyle,
-            fill: "#10b981",
+            ...chartAxisTitleStyle(),
+            fill: connectionsColor,
           },
         },
         label: {
           style: {
-            ...chartAxisLabelStyle,
-            fill: "#10b981",
+            ...chartAxisLabelStyle(),
+            fill: connectionsColor,
           },
         },
         grid: {
           line: {
-            style: chartGridLineStyle,
+            style: chartGridLineStyle(),
           },
         },
         min: 0,
@@ -133,14 +141,14 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
         title: {
           text: "Disconnections",
           style: {
-            ...chartAxisTitleStyle,
-            fill: "#ef4444",
+            ...chartAxisTitleStyle(),
+            fill: disconnectionsColor,
           },
         },
         label: {
           style: {
-            ...chartAxisLabelStyle,
-            fill: "#ef4444",
+            ...chartAxisLabelStyle(),
+            fill: disconnectionsColor,
           },
         },
         min: 0,
@@ -155,6 +163,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
       },
     },
     tooltip: {
+      domStyles: chartTooltipDomStyles(),
       customContent: (title, items) => {
         if (!items || items.length === 0) return "";
         const time = items[0].data.time;
@@ -206,15 +215,21 @@ const updateChart = () => {
   chart.update(getChartOptions(chartData));
 };
 
-// Watch for data changes
-watch(() => props.data, updateChart, { deep: true });
-watch(() => props.period, () => {
+// Destroy and recreate so options (and theme colors) are rebuilt
+const rebuildChart = () => {
   if (chart) {
     chart.destroy();
     chart = null;
   }
   createChart();
-});
+};
+
+// Watch for data changes
+watch(() => props.data, updateChart, { deep: true });
+watch(() => props.period, rebuildChart);
+
+// Re-render with fresh colors when the theme changes
+useChartTheme(rebuildChart);
 
 // Lifecycle
 onMounted(() => {
