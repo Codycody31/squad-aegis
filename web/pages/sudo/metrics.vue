@@ -7,7 +7,6 @@ import type { MetricsTimeline, ServerActivity } from "~/types";
 definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
 
 const runtimeConfig = useRuntimeConfig();
-const authStore = useAuthStore();
 
 const loading = ref(true);
 const timeline = ref<MetricsTimeline | null>(null);
@@ -17,12 +16,8 @@ const fetchData = async () => {
   loading.value = true;
   try {
     const [timelineRes, activitiesRes] = await Promise.all([
-      $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/metrics/timeline`, {
-        headers: { Authorization: `Bearer ${authStore.token}` },
-      }),
-      $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/metrics/servers`, {
-        headers: { Authorization: `Bearer ${authStore.token}` },
-      }),
+      useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/metrics/timeline`),
+      useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/metrics/servers`),
     ]);
     timeline.value = timelineRes.data.data;
     activities.value = activitiesRes.data.data;

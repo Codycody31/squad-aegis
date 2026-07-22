@@ -67,35 +67,15 @@ async function fetchCombatHistory() {
   loading.value = true;
   error.value = null;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
     const params = new URLSearchParams({
       page: page.value.toString(),
       limit: limit.value.toString(),
     });
 
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/${props.playerId}/combat?${params}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
+    const data = await useAuthFetchImperative<any>(
+      `${runtimeConfig.public.backendApi}/players/${props.playerId}/combat?${params}`
     );
-
-    if (!response.ok) throw new Error("Failed to fetch combat history");
-
-    const data = await response.json();
     events.value = data.data.events || [];
     hasMore.value = data.data.has_more ?? false;
   } catch (err: any) {

@@ -61,43 +61,19 @@ async function fetchAltGroups(resetPage = false) {
   loading.value = true;
   error.value = null;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/alt-groups?page=${page.value}&limit=${limit}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      }
+    const data = await useAuthFetchImperative<{
+      data: AltAccountGroupsResponse;
+    }>(
+      `${runtimeConfig.public.backendApi}/players/alt-groups?page=${page.value}&limit=${limit}`
     );
-
-    if (response.status === 403) {
-      navigateTo("/players");
-      return;
-    }
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch alt account groups");
-    }
-
-    const data: { data: AltAccountGroupsResponse } = await response.json();
     altGroups.value = data.data.alt_groups || [];
     totalGroups.value = data.data.total_groups || 0;
   } catch (err: any) {
+    if (err?.response?.status === 403 || err?.statusCode === 403) {
+      navigateTo("/players");
+      return;
+    }
     error.value = extractApiErrorMessage(err, "Failed to load alt account groups");
   } finally {
     loading.value = false;

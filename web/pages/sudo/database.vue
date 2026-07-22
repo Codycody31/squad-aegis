@@ -9,7 +9,6 @@ import type { PostgreSQLStats, ClickHouseStats } from "~/types";
 definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
 
 const runtimeConfig = useRuntimeConfig();
-const authStore = useAuthStore();
 
 const loading = ref(true);
 const pgStats = ref<PostgreSQLStats | null>(null);
@@ -19,12 +18,8 @@ const fetchData = async () => {
   loading.value = true;
   try {
     const [pgRes, chRes] = await Promise.all([
-      $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/database/postgresql`, {
-        headers: { Authorization: `Bearer ${authStore.token}` },
-      }),
-      $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/database/clickhouse`, {
-        headers: { Authorization: `Bearer ${authStore.token}` },
-      }),
+      useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/database/postgresql`),
+      useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/database/clickhouse`),
     ]);
     pgStats.value = pgRes.data.data;
     chStats.value = chRes.data.data;

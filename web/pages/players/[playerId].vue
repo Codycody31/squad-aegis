@@ -62,36 +62,10 @@ async function fetchPlayerProfile() {
 
   const playerId = route.params.playerId as string;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/${playerId}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      }
+    const data = await useAuthFetchImperative<PlayerResponse>(
+      `${runtimeConfig.public.backendApi}/players/${playerId}`
     );
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to fetch player profile");
-    }
-
-    const data: PlayerResponse = await response.json();
     player.value = data.data.player;
   } catch (err: any) {
     error.value =

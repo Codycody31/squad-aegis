@@ -67,34 +67,10 @@ interface StatsResponse {
 async function fetchPlayerStats() {
   statsLoading.value = true;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    statsLoading.value = false;
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/stats`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      }
+    const data = await useAuthFetchImperative<StatsResponse>(
+      `${runtimeConfig.public.backendApi}/players/stats`
     );
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch player statistics");
-    }
-
-    const data: StatsResponse = await response.json();
     stats.value = data.data.stats;
   } catch (err: any) {
     console.error("Failed to load statistics:", err);
@@ -113,37 +89,10 @@ async function searchPlayers() {
   error.value = null;
   hasSearched.value = true;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    players.value = [];
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players?search=${encodeURIComponent(searchQuery.value)}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      }
+    const data = await useAuthFetchImperative<PlayersResponse>(
+      `${runtimeConfig.public.backendApi}/players?search=${encodeURIComponent(searchQuery.value)}`
     );
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to search players");
-    }
-
-    const data: PlayersResponse = await response.json();
     players.value = data.data.players || [];
   } catch (err: any) {
     error.value = extractApiErrorMessage(err, "An error occurred while searching");

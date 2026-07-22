@@ -832,7 +832,6 @@ function getEvidenceCounts(ban: BannedPlayer | null) {
 // Function to download evidence file
 async function downloadEvidenceFile(filePath: string, fileName: string) {
     const runtimeConfig = useRuntimeConfig();
-    const sessionCookie = useCookie(runtimeConfig.public.sessionCookieName as string);
 
     try {
         // Extract file ID from path (last part before extension)
@@ -842,17 +841,9 @@ async function downloadEvidenceFile(filePath: string, fileName: string) {
         }
 
         const url = `${runtimeConfig.public.backendApi}/servers/${serverId}/evidence/files/${fileId}`;
-        const response = await fetch(url, {
-            headers: {
-                Authorization: `Bearer ${sessionCookie.value}`,
-            },
+        const blob = await useAuthFetchImperative<Blob>(url, {
+            responseType: "blob",
         });
-
-        if (!response.ok) {
-            throw new Error("Failed to download file");
-        }
-
-        const blob = await response.blob();
         const downloadUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = downloadUrl;

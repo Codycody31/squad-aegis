@@ -64,26 +64,11 @@ async function fetchPluginData() {
     loading.value = true;
     try {
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
-        const response = await fetch(
+        const result = await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            },
         );
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to fetch plugin data");
-        }
-
-        const result = await response.json();
         if (result.data.data && Array.isArray(result.data.data)) {
             dataItems.value = result.data.data;
         } else {
@@ -113,30 +98,17 @@ async function addDataItem() {
 
     try {
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
-        const response = await fetch(
+        await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data`,
             {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
+                body: {
                     key: newData.value.key,
                     value: newData.value.value,
-                }),
+                },
             },
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to add data item");
-        }
 
         toast({
             title: "Success",
@@ -168,35 +140,22 @@ async function updateDataItem() {
 
     try {
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
         // If key changed, delete old key first
         if (editData.value.key !== editData.value.originalKey) {
             await deleteDataItemByKey(editData.value.originalKey, false);
         }
 
-        const response = await fetch(
+        await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data`,
             {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
+                body: {
                     key: editData.value.key,
                     value: editData.value.value,
-                }),
+                },
             },
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to update data item");
-        }
 
         toast({
             title: "Success",
@@ -218,25 +177,13 @@ async function updateDataItem() {
 async function deleteDataItemByKey(key: string, showToast = true) {
     try {
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
-        const response = await fetch(
+        await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data/${encodeURIComponent(key)}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to delete data item");
-        }
 
         if (showToast) {
             toast({
@@ -279,25 +226,13 @@ async function clearAllData() {
 
     try {
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
-        const response = await fetch(
+        await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/plugins/${props.pluginId}/data`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to clear plugin data");
-        }
 
         toast({
             title: "Success",

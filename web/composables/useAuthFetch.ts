@@ -53,11 +53,11 @@ export async function useAuthFetchImperative<T>(url: string, options?: any): Pro
 
   try {
     return await $fetch<T>(url, {
+      ...options,
       headers: {
         Authorization: `Bearer ${sessionCookie.value}`,
         ...options?.headers,
       },
-      ...options,
     })
   } catch (error: any) {
     // Handle 401 Unauthorized - session expired or invalid
