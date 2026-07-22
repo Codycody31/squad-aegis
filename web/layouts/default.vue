@@ -2,6 +2,7 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import AppSidebar from "@/components/AppSidebar.vue";
 import Header from "@/components/Header.vue";
+import CommandPalette from "@/components/CommandPalette.vue";
 import rootNavigationItems from "@/navigation";
 import serverNavigationItems from "@/navigation/server";
 import type { NavigationItem } from "~/types";
@@ -70,5 +71,6 @@ watch(route, () => {
       <Header />
       <NuxtPage />
     </SidebarInset>
+    <CommandPalette />
   </SidebarProvider>
 </template>
