@@ -302,7 +302,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRoute } from "vue-router";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Textarea } from "~/components/ui/textarea";
@@ -333,7 +333,6 @@ interface MOTDConfig {
 }
 
 const route = useRoute();
-const { toast } = useToast();
 
 const runtimeConfig = useRuntimeConfig();
 const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);

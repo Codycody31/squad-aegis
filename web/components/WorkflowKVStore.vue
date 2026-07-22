@@ -23,7 +23,7 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
 import { Badge } from "~/components/ui/badge";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import JSONInput from "~/components/JSONInput.vue";
 
 interface KVPair {
@@ -38,7 +38,6 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-const { toast } = useToast();
 
 const loading = ref(false);
 const kvPairs = ref<KVPair[]>([]);

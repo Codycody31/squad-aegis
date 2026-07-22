@@ -4,7 +4,7 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import type { Player } from "~/types";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
 
@@ -13,7 +13,6 @@ definePageMeta({ middleware: ["auth"] });
 const authStore = useAuthStore();
 const route = useRoute();
 const serverId = route.params.serverId;
-const { toast } = useToast();
 
 const loading = ref(true);
 const error = ref<string | null>(null);

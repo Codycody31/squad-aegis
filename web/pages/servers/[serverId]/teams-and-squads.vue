@@ -4,7 +4,7 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
 import SquadActionMenu from "~/components/SquadActionMenu.vue";
 import BulkPlayerActionMenu from "~/components/BulkPlayerActionMenu.vue";
@@ -17,7 +17,6 @@ definePageMeta({ middleware: ["auth"] });
 
 const route = useRoute();
 const serverId = route.params.serverId;
-const { toast } = useToast();
 
 const loading = ref(true);
 const error = ref<string | null>(null);

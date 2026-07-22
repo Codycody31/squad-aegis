@@ -25,11 +25,10 @@ import {
     SelectTrigger,
     SelectValue,
 } from "~/components/ui/select";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import type { Player } from "~/types";
 import { UI_PERMISSIONS } from "~/constants/permissions";
 
-const { toast } = useToast();
 const authStore = useAuthStore();
 
 const props = defineProps<{

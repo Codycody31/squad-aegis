@@ -314,7 +314,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { useToast } from "@/components/ui/toast";
+import { toast } from "@/components/ui/toast";
 import WorkflowEditor from "@/components/WorkflowEditor.vue";
 import WorkflowExecutionTimeline from "@/components/WorkflowExecutionTimeline.vue";
 import WorkflowKVStore from "@/components/WorkflowKVStore.vue";
@@ -359,7 +359,6 @@ interface Workflow {
 
 const route = useRoute();
 const router = useRouter();
-const { toast } = useToast();
 
 // Route params
 const serverId = route.params.serverId as string;

@@ -509,7 +509,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -529,7 +529,6 @@ definePageMeta({ middleware: ["auth"] });
 
 const route = useRoute();
 const router = useRouter();
-const { toast } = useToast();
 
 const runtimeConfig = useRuntimeConfig();
 const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);

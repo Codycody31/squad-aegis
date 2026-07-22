@@ -6,7 +6,7 @@ import { FileText, Layers, Download, Code, Upload, Save, ChevronDown, ChevronUp,
 import RuleComponent from '~/components/RuleComponent.vue'
 import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card"
-import { useToast } from "~/components/ui/toast"
+import { toast } from "~/components/ui/toast"
 import { useAuthStore } from "~/stores/auth"
 import { UI_PERMISSIONS } from "~/constants/permissions"
 
@@ -41,7 +41,6 @@ interface ServerRule {
 
 const route = useRoute();
 const serverId = route.params.serverId as string;
-const { toast } = useToast();
 const authStore = useAuthStore();
 
 // Check if user can manage rules using the PBAC permission system

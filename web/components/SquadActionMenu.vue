@@ -15,10 +15,9 @@ import {
     DialogHeader,
     DialogTitle,
 } from "~/components/ui/dialog";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import { RCON_PERMISSIONS } from "~/constants/permissions";
 
-const { toast } = useToast();
 
 interface Squad {
     id: number;

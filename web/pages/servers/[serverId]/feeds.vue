@@ -420,7 +420,7 @@ import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Badge } from "~/components/ui/badge";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
 import type { Player } from "~/types";
 import { Icon } from "#components";
@@ -431,7 +431,6 @@ definePageMeta({
 
 const route = useRoute();
 const serverId = route.params.serverId as string;
-const { toast } = useToast();
 
 // Reactive state
 const activeTab = ref("chat");

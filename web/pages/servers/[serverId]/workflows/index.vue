@@ -44,7 +44,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "~/components/ui/select";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import {
     Sheet,
     SheetContent,
@@ -98,7 +98,6 @@ interface Workflow {
 
 const route = useRoute();
 const serverId = route.params.serverId as string;
-const { toast } = useToast();
 
 // State
 const loading = ref<boolean>(true);
