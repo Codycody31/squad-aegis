@@ -15,51 +15,24 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { ChevronsUpDown, Plus } from "lucide-vue-next";
+import { ChevronsUpDown } from "lucide-vue-next";
 
-import { ref } from "vue";
 import type { Server } from "~/types";
-
-const props = defineProps<{
-  servers: Server[];
-}>();
+import { useServersStore } from "@/stores/servers";
 
 const emit = defineEmits<{
   (e: "click"): void;
 }>();
 
-const uiStore = useUiStore();
+const serversStore = useServersStore();
 const { isMobile } = useSidebar();
 const router = useRouter();
 
 const onServerSelect = (server: Server) => {
-  uiStore.setActiveServer(server);
-  useRouter().push(`/servers/${server.id}`);
+  serversStore.setActiveServerId(server.id);
+  router.push(`/servers/${server.id}`);
   emit("click");
 };
-
-const handleServerChange = (serverId: string | undefined) => {
-  if (!serverId) {
-    uiStore.setActiveServer(null);
-    return;
-  }
-
-  const server = props.servers.find((server) => server.id === serverId);
-  if (server) {
-    uiStore.setActiveServer(server);
-  } else {
-    uiStore.setActiveServer(null);
-  }
-};
-
-watch(
-  () => router.currentRoute.value.params.serverId,
-  (newServerId) => {
-    handleServerChange(newServerId as string);
-  }
-);
-
-handleServerChange(router.currentRoute.value.params.serverId as string);
 </script>
 
 <template>
@@ -71,26 +44,26 @@ handleServerChange(router.currentRoute.value.params.serverId as string);
             size="lg"
             class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
           >
-            <Avatar class="h-8 w-8 rounded-lg" v-if="uiStore.activeServer">
+            <Avatar class="h-8 w-8 rounded-lg" v-if="serversStore.activeServer">
               <AvatarImage
-                :src="`/api/images/avatar?username=${uiStore.activeServer?.name}&width=256&height=256&gridsize=8`"
-                :alt="uiStore.activeServer?.name"
+                :src="`/api/images/avatar?username=${serversStore.activeServer?.name}&width=256&height=256&gridsize=8`"
+                :alt="serversStore.activeServer?.name"
               />
               <AvatarFallback class="rounded-lg">
-                {{ uiStore.activeServer?.name?.slice(0, 2)?.toUpperCase() || "CN" }}
+                {{ serversStore.activeServer?.name?.slice(0, 2)?.toUpperCase() || "CN" }}
               </AvatarFallback>
             </Avatar>
             <div
               class="grid flex-1 text-left text-sm leading-tight"
-              v-if="uiStore.activeServer"
+              v-if="serversStore.activeServer"
             >
               <span class="truncate font-semibold">
-                {{ uiStore.activeServer?.name }}
+                {{ serversStore.activeServer?.name }}
               </span>
               <span class="truncate text-xs">{{
-                uiStore.activeServer?.ip_address +
+                serversStore.activeServer?.ip_address +
                 ":" +
-                uiStore.activeServer?.game_port
+                serversStore.activeServer?.game_port
               }}</span>
             </div>
             <div class="grid flex-1 text-left text-sm leading-tight" v-else>
@@ -109,7 +82,7 @@ handleServerChange(router.currentRoute.value.params.serverId as string);
             Servers
           </DropdownMenuLabel>
           <DropdownMenuItem
-            v-for="(server, index) in props.servers"
+            v-for="server in serversStore.servers"
             :key="server.name"
             class="gap-2 p-2"
             @click="onServerSelect(server)"

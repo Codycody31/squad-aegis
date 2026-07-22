@@ -40,19 +40,18 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import type { NavigationItem, Server } from "~/types";
+import type { NavigationItem } from "~/types";
 import { useAuthStore } from "@/stores/auth";
+import { useServersStore } from "@/stores/servers";
 
 defineProps<{ navigationItems: NavigationItem[] }>();
 
 const runtimeConfig = useRuntimeConfig();
 const route = useRoute();
 const pathname = computed(() => route.path);
-const servers = ref<Server[]>([]);
 const sidebar = useSidebar();
 const authStore = useAuthStore();
-const activeServer = ref<Server | null>(null);
-const userServerRoles = ref<{ [serverId: string]: string[] }>({});
+const serversStore = useServersStore();
 
 // About Dialog
 const isAboutDialogOpen = ref(false);
@@ -62,9 +61,9 @@ const githubRepoUrl = "https://github.com/Codycody31/squad-aegis"; // From git r
 
 const fetchVersionInfo = async () => {
   try {
-    const response = await $fetch<{ data: { version: string } }>(
-      "http://localhost:3113/api/"
-    );
+    const response = await useAuthFetchImperative<{
+      data: { version: string };
+    }>(`${runtimeConfig.public.backendApi}/`);
     appVersion.value = response.data.version;
   } catch (error) {
     console.error("Failed to fetch version info:", error);
@@ -111,43 +110,10 @@ const shouldShowNavItem = (item: NavigationItem): boolean => {
     return true;
   }
 
-  const serverId = activeServer.value?.id;
+  const serverId = serversStore.activeServerId;
   if (!serverId) return false;
 
   return authStore.hasAnyPermission(serverId, ...(item.permissions ?? []));
-};
-
-// Fetch servers
-const fetchServers = async () => {
-  interface ServerResponse {
-    data?: {
-      servers: Server[];
-    };
-  }
-
-  const response = await useFetch<ServerResponse>(
-    `${runtimeConfig.public.backendApi}/servers`,
-    {
-      headers: {
-        Authorization: `Bearer ${
-          useCookie(runtimeConfig.public.sessionCookieName).value
-        }`,
-      },
-    }
-  );
-
-  if (response.error.value) {
-    console.error("Error fetching servers:", response.error.value);
-  } else {
-    servers.value = response.data.value?.data?.servers ?? [];
-
-    // If we're on a server route, find the active server
-    if (route.params.serverId) {
-      const serverId = route.params.serverId as string;
-      activeServer.value =
-        servers.value.find((server) => server.id === serverId) || null;
-    }
-  }
 };
 
 const logout = () => {
@@ -155,25 +121,12 @@ const logout = () => {
   document.cookie = `${runtimeConfig.public.sessionCookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
   navigateTo("/login");
 };
-
-// Watch for route changes to update active server
-watch(route, async () => {
-  if (route.params.serverId) {
-    const serverId = route.params.serverId as string;
-    activeServer.value =
-      servers.value.find((server) => server.id === serverId) || null;
-  } else {
-    activeServer.value = null;
-  }
-});
-
-await fetchServers();
 </script>
 
 <template>
   <Sidebar collapsible="icon">
     <SidebarHeader>
-      <ServerSwitcher :servers="servers" @click="closeSidebarOnMobile" />
+      <ServerSwitcher @click="closeSidebarOnMobile" />
     </SidebarHeader>
     <SidebarContent class="overflow-x-hidden">
       <SidebarGroup>

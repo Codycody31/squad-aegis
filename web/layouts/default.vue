@@ -7,7 +7,19 @@ import serverNavigationItems from "@/navigation/server";
 import type { NavigationItem } from "~/types";
 
 const route = useRoute();
+const serversStore = useServersStore();
 let navigationItems = ref<NavigationItem[]>(rootNavigationItems);
+
+serversStore.fetchServers();
+
+const syncActiveServer = () => {
+  const serverId = Array.isArray(route.params.serverId)
+    ? route.params.serverId[0]
+    : route.params.serverId;
+  serversStore.setActiveServerId(serverId || null);
+};
+syncActiveServer();
+watch(() => route.params.serverId, syncActiveServer);
 
 // Function to process server navigation items with the current serverId
 const getServerNavItems = (serverId: string) => {
