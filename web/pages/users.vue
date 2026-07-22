@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -7,35 +7,8 @@ import { Badge } from "~/components/ui/badge";
 import PageHeader from "~/components/layout/PageHeader.vue";
 import DataTable from "~/components/data-table/DataTable.vue";
 import type { DataTableColumn } from "~/components/data-table/types";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "~/components/ui/dialog";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "~/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/ui/select";
-import { Checkbox } from "~/components/ui/checkbox";
-import { useForm } from "vee-validate";
-import { toTypedSchema } from "@vee-validate/zod";
-import * as z from "zod";
+import UserFormDialog from "~/components/users/UserFormDialog.vue";
+import type { User } from "~/components/users/types";
 import { useAuthStore } from "@/stores/auth";
 import { toast } from "~/components/ui/toast";
 
@@ -44,82 +17,15 @@ const runtimeConfig = useRuntimeConfig();
 const loading = ref(true);
 const users = ref<User[]>([]);
 const searchQuery = ref("");
-const showAddUserDialog = ref(false);
-const showEditUserDialog = ref(false);
-const addUserLoading = ref(false);
-const editUserLoading = ref(false);
+const dialogOpen = ref(false);
+const dialogMode = ref<"create" | "edit">("create");
 const editingUser = ref<User | null>(null);
-
-interface User {
-  id: string;
-  steam_id: string;
-  name: string;
-  username: string;
-  super_admin: boolean;
-  created_at: string;
-  updated_at: string;
-}
 
 interface UsersResponse {
   data: {
     users: User[];
   };
 }
-
-// Form schema for adding a user
-const addFormSchema = toTypedSchema(
-  z.object({
-    steam_id: z
-      .string()
-      .min(1, "Steam ID is required")
-      .regex(/^\d+$/, "Steam ID must contain only numbers"),
-    name: z.string().min(1, "Name is required"),
-    username: z
-      .string()
-      .min(1, "Username is required")
-      .regex(
-        /^[a-z0-9_]{1,32}$/,
-        "Username must be 1-32 characters long, all lowercase, and only contain a-z, 0-9, and _"
-      ),
-    password: z.string().min(8, "Password must be at least 8 characters"),
-    superAdmin: z.boolean().default(false),
-  })
-);
-
-// Form schema for editing a user
-const editFormSchema = toTypedSchema(
-  z.object({
-    steam_id: z
-      .string()
-      .optional()
-      .refine((val) => !val || val === "" || /^\d{17}$/.test(val), {
-        message: "Steam ID must be exactly 17 digits",
-      }),
-    name: z.string().min(1, "Name is required"),
-    superAdmin: z.boolean().default(false),
-  })
-);
-
-// Setup forms
-const addForm = useForm({
-  validationSchema: addFormSchema,
-  initialValues: {
-    steam_id: "",
-    name: "",
-    username: "",
-    password: "",
-    superAdmin: false,
-  },
-});
-
-const editForm = useForm({
-  validationSchema: editFormSchema,
-  initialValues: {
-    steam_id: "",
-    name: "",
-    superAdmin: false,
-  },
-});
 
 // Computed property for filtered users
 const filteredUsers = computed(() => {
@@ -141,31 +47,25 @@ async function fetchUsers() {
   loading.value = true;
 
   try {
-    const { data, error: fetchError } = await useAuthFetch<UsersResponse>(
-      `${runtimeConfig.public.backendApi}/users`,
-      {
-        method: "GET",
-      }
+    const response = await useAuthFetchImperative<UsersResponse>(
+      `${runtimeConfig.public.backendApi}/users`
     );
 
-    if (fetchError.value) {
-      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to fetch users data"));
-    }
+    users.value = response.data?.users || [];
 
-    if (data.value && data.value.data) {
-      users.value = data.value.data.users || [];
-
-      // Sort by creation date (most recent first)
-      users.value.sort((a, b) => {
-        return (
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-      });
-    }
+    // Sort by creation date (most recent first)
+    users.value.sort((a, b) => {
+      return (
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    });
   } catch (err: any) {
     toast({
       title: "Error",
-      description: extractApiErrorMessage(err, "An error occurred while fetching users data"),
+      description: extractApiErrorMessage(
+        err,
+        "An error occurred while fetching users data"
+      ),
       variant: "destructive",
     });
   } finally {
@@ -173,111 +73,18 @@ async function fetchUsers() {
   }
 }
 
-// Function to add a user
-async function addUser(values: any) {
-  const { steam_id, name, username, password, superAdmin } = values;
-
-  addUserLoading.value = true;
-
-  try {
-    const { data, error: fetchError } = await useAuthFetch(
-      `${runtimeConfig.public.backendApi}/users`,
-      {
-        method: "POST",
-        body: {
-          steam_id,
-          name,
-          username,
-          password,
-          super_admin: superAdmin,
-        },
-      }
-    );
-
-    if (fetchError.value) {
-      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to add user"));
-    }
-
-    // Reset form and close dialog
-    addForm.resetForm();
-    showAddUserDialog.value = false;
-
-    toast({
-      title: "Success",
-      description: "User added successfully",
-    });
-
-    // Refresh the users list
-    fetchUsers();
-  } catch (err: any) {
-    toast({
-      title: "Failed to Add User",
-      description: extractApiErrorMessage(err, "An error occurred while adding the user"),
-      variant: "destructive",
-    });
-  } finally {
-    addUserLoading.value = false;
-  }
+// Function to open add dialog
+function openAddDialog() {
+  dialogMode.value = "create";
+  editingUser.value = null;
+  dialogOpen.value = true;
 }
 
 // Function to open edit dialog
 function openEditDialog(user: User) {
+  dialogMode.value = "edit";
   editingUser.value = user;
-  
-  // Set the form values directly
-  editForm.setFieldValue('name', user.name);
-  editForm.setFieldValue('steam_id', user.steam_id);
-  editForm.setFieldValue('superAdmin', user.super_admin);
-  
-  showEditUserDialog.value = true;
-}
-
-// Function to edit a user
-async function editUser(values: any) {
-  if (!editingUser.value) return;
-
-  const { steam_id, name, superAdmin } = values;
-
-  editUserLoading.value = true;
-
-  try {
-    const { data, error: fetchError } = await useAuthFetch(
-      `${runtimeConfig.public.backendApi}/users/${editingUser.value.id}`,
-      {
-        method: "PUT",
-        body: {
-          steam_id,
-          name,
-          super_admin: superAdmin,
-        },
-      }
-    );
-
-    if (fetchError.value) {
-      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to update user"));
-    }
-
-    // Reset form and close dialog
-    editForm.resetForm();
-    showEditUserDialog.value = false;
-    editingUser.value = null;
-
-    toast({
-      title: "Success",
-      description: "User updated successfully",
-    });
-
-    // Refresh the users list
-    fetchUsers();
-  } catch (err: any) {
-    toast({
-      title: "Failed to Update User",
-      description: extractApiErrorMessage(err, "An error occurred while updating the user"),
-      variant: "destructive",
-    });
-  } finally {
-    editUserLoading.value = false;
-  }
+  dialogOpen.value = true;
 }
 
 // Function to delete a user
@@ -289,16 +96,12 @@ async function deleteUser(userId: string) {
   loading.value = true;
 
   try {
-    const { data, error: fetchError } = await useAuthFetch(
+    await useAuthFetchImperative(
       `${runtimeConfig.public.backendApi}/users/${userId}`,
       {
         method: "DELETE",
       }
     );
-
-    if (fetchError.value) {
-      throw new Error(extractApiErrorMessage(fetchError.value, "Failed to delete user"));
-    }
 
     toast({
       title: "Success",
@@ -310,7 +113,10 @@ async function deleteUser(userId: string) {
   } catch (err: any) {
     toast({
       title: "Failed to Delete User",
-      description: extractApiErrorMessage(err, "An error occurred while deleting the user"),
+      description: extractApiErrorMessage(
+        err,
+        "An error occurred while deleting the user"
+      ),
       variant: "destructive",
     });
   } finally {
@@ -333,14 +139,6 @@ const columns: DataTableColumn<User>[] = [
 
 fetchUsers();
 
-// Watch for dialog close to reset form
-watch(showEditUserDialog, (isOpen) => {
-  if (!isOpen) {
-    editForm.resetForm();
-    editingUser.value = null;
-  }
-});
-
 // Manual refresh function
 function refreshData() {
   fetchUsers();
@@ -354,206 +152,31 @@ function refreshData() {
       description="Manage who can sign in to Squad Aegis."
     >
       <template #actions>
-        <Form
-          v-slot="{ handleSubmit }"
-          as=""
-          keep-values
-          :validation-schema="addFormSchema"
-          :initial-values="{
-            steam_id: '',
-            name: '',
-            username: '',
-            password: '',
-            superAdmin: false,
-          }"
+        <Button
+          v-if="authStore.user?.super_admin"
+          class="w-full sm:w-auto text-sm sm:text-base"
+          @click="openAddDialog"
         >
-          <Dialog v-model:open="showAddUserDialog" v-if="authStore.user?.super_admin">
-            <DialogTrigger asChild>
-              <Button class="w-full sm:w-auto text-sm sm:text-base">Add User</Button>
-            </DialogTrigger>
-            <DialogContent
-              class="w-[95vw] sm:max-w-[425px] max-h-[90vh] overflow-y-auto p-4 sm:p-6"
-            >
-              <DialogHeader>
-                <DialogTitle class="text-base sm:text-lg">Add New User</DialogTitle>
-                <DialogDescription class="text-xs sm:text-sm">
-                  Enter the details of the user you want to add.
-                </DialogDescription>
-              </DialogHeader>
-              <form id="dialogForm" @submit="handleSubmit($event, addUser)">
-                <div class="grid gap-4 py-4">
-                  <FormField name="steam_id" v-slot="{ componentField }">
-                    <FormItem>
-                      <FormLabel>Steam ID</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="76561198012345678"
-                          v-bind="componentField"
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  </FormField>
-                  <FormField name="name" v-slot="{ componentField }">
-                    <FormItem>
-                      <FormLabel>Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="John Doe" v-bind="componentField" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  </FormField>
-                  <FormField name="username" v-slot="{ componentField }">
-                    <FormItem>
-                      <FormLabel>Username</FormLabel>
-                      <FormControl>
-                        <Input placeholder="johndoe" v-bind="componentField" />
-                      </FormControl>
-                      <FormDescription>
-                        Must be 1-32 characters, lowercase, and only contain
-                        a-z, 0-9, and _
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  </FormField>
-                  <FormField name="password" v-slot="{ componentField }">
-                    <FormItem>
-                      <FormLabel>Password</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="password"
-                          placeholder="********"
-                          v-bind="componentField"
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Must be at least 8 characters
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  </FormField>
-                  <FormField name="superAdmin" v-slot="{ value, handleChange }">
-                    <FormItem
-                      class="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4"
-                    >
-                      <FormControl>
-                        <Checkbox
-                          :model-value="value"
-                          @update:model-value="handleChange"
-                        />
-                      </FormControl>
-                      <div class="space-y-1 leading-none">
-                        <FormLabel>Super Admin</FormLabel>
-                        <FormDescription>
-                          Grant super admin privileges to this user
-                        </FormDescription>
-                        <FormMessage />
-                      </div>
-                    </FormItem>
-                  </FormField>
-                </div>
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    @click="showAddUserDialog = false"
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" :disabled="addUserLoading">
-                    {{ addUserLoading ? "Adding..." : "Add User" }}
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </Form>
+          Add User
+        </Button>
 
         <Button
-          @click="refreshData"
           :disabled="loading"
           variant="outline"
           class="w-full sm:w-auto text-sm sm:text-base"
+          @click="refreshData"
         >
           {{ loading ? "Refreshing..." : "Refresh" }}
         </Button>
       </template>
     </PageHeader>
 
-    <!-- Edit User Dialog -->
-    <Dialog v-model:open="showEditUserDialog">
-          <DialogContent class="w-[95vw] sm:max-w-[425px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
-            <DialogHeader>
-              <DialogTitle class="text-base sm:text-lg">Edit User</DialogTitle>
-              <DialogDescription class="text-xs sm:text-sm">
-                Update the user's information.
-              </DialogDescription>
-            </DialogHeader>
-            <form @submit.prevent="editUser(editForm.values)">
-              <div class="grid gap-4 py-4">
-                <div>
-                  <label class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Name
-                  </label>
-                  <Input 
-                    v-model="editForm.values.name"
-                    @input="editForm.setFieldValue('name', $event.target.value)"
-                    placeholder="John Doe" 
-                    class="mt-1"
-                  />
-                  <p v-if="editForm.errors.value.name" class="text-sm text-red-500 mt-1">
-                    {{ editForm.errors.value.name }}
-                  </p>
-                </div>
-                
-                <div>
-                  <label class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Steam ID
-                  </label>
-                  <Input 
-                    v-model="editForm.values.steam_id"
-                    @input="editForm.setFieldValue('steam_id', $event.target.value.replace(/[^0-9]/g, ''))"
-                    placeholder="76561198012345678" 
-                    class="mt-1"
-                  />
-                  <p class="text-sm text-muted-foreground mt-1">
-                    17-digit Steam ID (optional)
-                  </p>
-                  <p v-if="editForm.errors.value.steam_id" class="text-sm text-red-500 mt-1">
-                    {{ editForm.errors.value.steam_id }}
-                  </p>
-                </div>
-                
-                <div class="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                  <Checkbox
-                    :model-value="editForm.values.superAdmin"
-                    @update:model-value="editForm.setFieldValue('superAdmin', !editForm.values.superAdmin)"
-                  />
-                  <div class="space-y-1 leading-none">
-                    <label class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                      Super Admin
-                    </label>
-                    <p class="text-sm text-muted-foreground">
-                      Grant super admin privileges to this user
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div class="flex justify-end space-x-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  @click="showEditUserDialog = false"
-                >
-                  Cancel
-                </Button>
-                <Button type="submit" :disabled="editUserLoading">
-                  {{ editUserLoading ? "Updating..." : "Update User" }}
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-    </Dialog>
+    <UserFormDialog
+      v-model:open="dialogOpen"
+      :mode="dialogMode"
+      :user="editingUser"
+      @saved="fetchUsers"
+    />
 
     <Card class="mb-3 sm:mb-4">
       <CardHeader class="pb-2 sm:pb-3">
@@ -621,7 +244,6 @@ function refreshData() {
             </div>
           </template>
         </DataTable>
-
       </CardContent>
     </Card>
 
@@ -642,7 +264,3 @@ function refreshData() {
     </Card>
   </div>
 </template>
-
-<style scoped>
-/* Add any page-specific styles here */
-</style>

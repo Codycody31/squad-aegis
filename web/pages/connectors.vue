@@ -1,1079 +1,116 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from "vue";
-import type { SystemConfig, ConnectorInstance, ConnectorDefinition } from "~/types";
-import { initializeConfigFromSchema } from "~/composables/useConfigSchema";
+import { onMounted, ref } from "vue";
+import type { ConnectorDefinition, ConnectorInstance } from "~/types";
 import { Button } from "~/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "~/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "~/components/ui/table";
-import { Badge } from "~/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "~/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/ui/select";
-import { Input } from "~/components/ui/input";
-import { Label } from "~/components/ui/label";
-import { Switch } from "~/components/ui/switch";
 import { toast } from "~/components/ui/toast";
-import { useAuthStore } from "~/stores/auth";
-import {
-  Settings,
-  Plus,
-  Trash2,
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  Wifi,
-  WifiOff,
-  Upload,
-  RefreshCw,
-} from "lucide-vue-next";
-
-type ConnectorPackage = {
-  connector_id: string;
-  name: string;
-  description?: string;
-  version: string;
-  source: string;
-  distribution?: string;
-  official?: boolean;
-  install_state: string;
-  min_host_api_version?: number;
-  required_capabilities?: string[];
-  last_error?: string;
-  unsafe?: boolean;
-};
+import PageHeader from "~/components/layout/PageHeader.vue";
+import ConnectorCatalogTable from "~/components/connectors/ConnectorCatalogTable.vue";
+import ConfiguredConnectorsTable from "~/components/connectors/ConfiguredConnectorsTable.vue";
+import ConnectorConfigDialog from "~/components/connectors/ConnectorConfigDialog.vue";
+import { Plus, RefreshCw } from "lucide-vue-next";
 
 definePageMeta({
   middleware: ["auth", "sudo"],
 });
 
-const authStore = useAuthStore();
-
-// State variables
-const loading = ref(true);
-const connectors = ref<ConnectorInstance[]>([]);
 const availableConnectors = ref<ConnectorDefinition[]>([]);
-const selectedConnector = ref<string>("");
-const showAddDialog = ref(false);
-const showConfigDialog = ref(false);
-const currentConnector = ref<any>(null);
-const connectorConfig = ref<Record<string, any>>({});
 
-const connectorPackages = ref<ConnectorPackage[]>([]);
-const loadingPackages = ref(false);
-const uploadingPackage = ref(false);
-const selectedConnectorBundle = ref<File | null>(null);
-
-const systemPluginsConfig = ref<SystemConfig["plugins"] | null>(null);
-const deleteConnectorTarget = ref<any | null>(null);
-const deletePackageTarget = ref<ConnectorPackage | null>(null);
-
-const trustStoreConfigured = computed(
-  () => systemPluginsConfig.value?.trusted_signing_keys_set === true,
+const catalogTable = ref<InstanceType<typeof ConnectorCatalogTable> | null>(
+  null
 );
-const unsafeSideloadEnabled = computed(
-  () => systemPluginsConfig.value?.allow_unsafe_sideload === true,
-);
-const reverifyFailures = computed(() =>
-  connectorPackages.value.filter(
-    (pkg) =>
-      pkg.install_state === "error" &&
-      typeof pkg.last_error === "string" &&
-      pkg.last_error.includes("signature cannot be re-verified"),
-  ),
-);
+const configuredTable = ref<InstanceType<
+  typeof ConfiguredConnectorsTable
+> | null>(null);
 
-const fetchSystemPluginsConfig = async () => {
-  try {
-    if (!authStore.user?.super_admin) return;
-    const response = await useAuthFetchImperative<any>("/api/sudo/system/config");
-    const cfg = response.data?.data as SystemConfig | undefined;
-    systemPluginsConfig.value = cfg?.plugins ?? null;
-  } catch (error: any) {
-    console.error("Failed to load system plugin config:", error);
-    systemPluginsConfig.value = null;
-  }
-};
-
-/** Match a running instance id (e.g. `discord`) to an available definition (canonical or legacy). */
-const connectorDefForInstance = (instanceId: string) => {
-  return availableConnectors.value.find(
-    (c: any) =>
-      c.id === instanceId ||
-      (Array.isArray(c.legacy_ids) && c.legacy_ids.includes(instanceId)),
-  );
-};
-
-const getPackageStateVariant = (state: string) => {
-  switch (state) {
-    case "ready":
-      return "default";
-    case "pending_restart":
-      return "secondary";
-    case "error":
-      return "destructive";
-    default:
-      return "outline";
-  }
-};
-
-const getConnectorSourceLabel = (pkg: ConnectorPackage) => {
-  if (pkg.source === "bundled") return "Bundled";
-  return "Sideload Native";
-};
-
-const formatConnectorRuntime = (pkg: ConnectorPackage) => {
-  const parts: string[] = [];
-  if (pkg.min_host_api_version) {
-    parts.push(`API >= ${pkg.min_host_api_version}`);
-  }
-  if (pkg.required_capabilities?.length) {
-    parts.push(pkg.required_capabilities.join(", "));
-  }
-  return parts.join(" · ") || "—";
-};
-
-const refreshAll = async () => {
-  loading.value = true;
-  try {
-    await Promise.all([loadConnectors(), loadAvailableConnectors(), loadConnectorPackages()]);
-  } finally {
-    loading.value = false;
-  }
-};
-
-// Status color mapping
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case "running":
-      return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
-    case "stopped":
-      return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400";
-    case "error":
-      return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
-    case "starting":
-      return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400";
-    case "disabled":
-      return "bg-gray-100 text-gray-600 dark:bg-gray-900/20 dark:text-gray-500";
-    default:
-      return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400";
-  }
-};
-
-const getStatusIcon = (status: string) => {
-  switch (status) {
-    case "running":
-      return CheckCircle;
-    case "error":
-      return AlertCircle;
-    case "starting":
-      return Clock;
-    case "stopped":
-      return WifiOff;
-    default:
-      return Wifi;
-  }
-};
-
-// Load configured connectors
-const loadConnectors = async () => {
-  try {
-    const response = await useAuthFetchImperative("/api/connectors");
-    connectors.value = response.data.connectors || [];
-  } catch (error: any) {
-    console.error("Failed to load connectors:", error);
-    toast({
-      title: "Error",
-      description: "Failed to load connectors",
-      variant: "destructive",
-    });
-  }
-};
+const dialogOpen = ref(false);
+const dialogMode = ref<"create" | "edit">("create");
+const dialogConnector = ref<ConnectorInstance | null>(null);
 
 // Load available connector definitions
 const loadAvailableConnectors = async () => {
   try {
-    const response = await useAuthFetchImperative("/api/connectors/available");
+    const response = await useAuthFetchImperative<any>(
+      "/api/connectors/available"
+    );
     availableConnectors.value = response.data.connectors || [];
   } catch (error: any) {
     console.error("Failed to load available connectors:", error);
     toast({
       title: "Error",
-      description: error.data?.message || "Failed to load available connectors",
+      description:
+        error.data?.message || "Failed to load available connectors",
       variant: "destructive",
     });
   }
 };
 
-// Create new connector instance
-const createConnector = async () => {
-  if (!selectedConnector.value) {
-    toast({
-      title: "Error",
-      description: "Please select a connector",
-      variant: "destructive",
-    });
-    return;
-  }
-
-  try {
-    await useAuthFetchImperative("/api/connectors", {
-      method: "POST",
-      body: {
-        connector_id: selectedConnector.value,
-        config: connectorConfig.value,
-      },
-    });
-
-    toast({
-      title: "Success",
-      description: "Connector created successfully",
-    });
-
-    showAddDialog.value = false;
-    selectedConnector.value = "";
-    connectorConfig.value = {};
-    await loadConnectors();
-  } catch (error: any) {
-    console.error("Failed to create connector:", error);
-    toast({
-      title: "Error",
-      description: error.data?.message || "Failed to create connector",
-      variant: "destructive",
-    });
-  }
+const openAddDialog = () => {
+  dialogMode.value = "create";
+  dialogConnector.value = null;
+  dialogOpen.value = true;
 };
 
-// Delete connector instance
-const confirmDeleteConnector = (connector: any) => {
-  deleteConnectorTarget.value = connector;
+const configureConnector = (connector: ConnectorInstance) => {
+  dialogMode.value = "edit";
+  dialogConnector.value = connector;
+  dialogOpen.value = true;
 };
 
-const cancelDeleteConnector = () => {
-  deleteConnectorTarget.value = null;
+const refreshAll = async () => {
+  await Promise.all([
+    configuredTable.value?.refresh(),
+    catalogTable.value?.refresh(),
+    loadAvailableConnectors(),
+  ]);
 };
 
-const deleteConnector = async () => {
-  const connector = deleteConnectorTarget.value;
-  if (!connector) return;
-
-  try {
-    await useAuthFetchImperative(`/api/connectors/${connector.id}`, {
-      method: "DELETE",
-    });
-
-    toast({
-      title: "Success",
-      description: "Connector deleted successfully",
-    });
-
-    deleteConnectorTarget.value = null;
-    await loadConnectors();
-  } catch (error: any) {
-    console.error("Failed to delete connector:", error);
-    toast({
-      title: "Error",
-      description: error.data?.message || "Failed to delete connector",
-      variant: "destructive",
-    });
-  }
-};
-
-// Configure connector
-const configureConnector = (connector: any) => {
-  currentConnector.value = connector;
-  const baseConfig = (connector.config || {}) as Record<string, unknown>;
-  const connectorDef = connectorDefForInstance(connector.id);
-
-  connectorConfig.value = connectorDef?.config_schema?.fields
-    ? initializeConfigFromSchema(baseConfig, connectorDef.config_schema.fields)
-    : { ...baseConfig };
-  showConfigDialog.value = true;
-};
-
-// Save connector configuration
-const saveConnectorConfig = async () => {
-  if (!currentConnector.value) return;
-
-  try {
-    await useAuthFetchImperative(`/api/connectors/${currentConnector.value.id}`, {
-      method: "PUT",
-      body: {
-        config: connectorConfig.value,
-      },
-    });
-
-    toast({
-      title: "Success",
-      description: "Connector configuration updated successfully",
-    });
-
-    showConfigDialog.value = false;
-    currentConnector.value = null;
-    await loadConnectors();
-  } catch (error: any) {
-    console.error("Failed to update connector config:", error);
-    toast({
-      title: "Error",
-      description: error.data?.message || "Failed to update connector configuration",
-      variant: "destructive",
-    });
-  }
-};
-
-// Handle connector selection change
-const onConnectorSelect = (connectorId: any) => {
-  selectedConnector.value = connectorId || "";
-  const connector = availableConnectors.value.find(c => c.id === connectorId);
-  if (connector?.config_schema?.fields) {
-    connectorConfig.value = initializeConfigFromSchema({}, connector.config_schema.fields);
-  }
-};
-
-const loadConnectorPackages = async () => {
-  loadingPackages.value = true;
-  try {
-    const response = await useAuthFetchImperative<any>("/api/connectors/packages/installed");
-    connectorPackages.value = response.data?.connectors || [];
-  } catch (error: any) {
-    console.error("Failed to load connector packages:", error);
-    toast({
-      title: "Error",
-      description: error.data?.message || "Failed to load installed connector packages",
-      variant: "destructive",
-    });
-  } finally {
-    loadingPackages.value = false;
-  }
-};
-
-const onConnectorBundleSelected = (event: Event) => {
-  const input = event.target as HTMLInputElement;
-  selectedConnectorBundle.value = input.files?.[0] || null;
-};
-
-// pendingUnsafeConnectorBundle holds a bundle the operator tried to upload
-// that came back from the backend with needs_confirm_unsafe=true. The
-// confirm dialog uses this to show context and re-submit with the
-// confirm_unsafe=true query param when the operator acknowledges the risk.
-const pendingUnsafeConnectorBundle = ref<File | null>(null);
-const pendingUnsafeConnectorMessage = ref<string>("");
-
-const submitConnectorUpload = async (bundle: File, confirmUnsafe: boolean) => {
-  const formData = new FormData();
-  formData.append("bundle", bundle);
-
-  const url = confirmUnsafe
-    ? "/api/connectors/packages/upload?confirm_unsafe=true"
-    : "/api/connectors/packages/upload";
-
-  return useAuthFetchImperative<any>(url, {
-    method: "POST",
-    body: formData,
-  });
-};
-
-const uploadConnectorBundle = async () => {
-  if (!selectedConnectorBundle.value) {
-    toast({
-      title: "Missing bundle",
-      description: "Choose a connector .zip bundle to upload",
-      variant: "destructive",
-    });
-    return;
-  }
-
-  uploadingPackage.value = true;
-  const bundle = selectedConnectorBundle.value;
-  try {
-    const response = await submitConnectorUpload(bundle, false);
-
-    toast({
-      title: "Uploaded",
-      description: response.message || "Connector package uploaded successfully",
-    });
-
-    selectedConnectorBundle.value = null;
-    await Promise.all([loadConnectorPackages(), loadAvailableConnectors()]);
-  } catch (error: any) {
-    // needs_confirm_unsafe in the structured error means the bundle is
-    // unsigned; show a confirm dialog rather than just a toast.
-    const needsConfirm = !!error?.data?.data?.needs_confirm_unsafe;
-    if (needsConfirm) {
-      pendingUnsafeConnectorBundle.value = bundle;
-      pendingUnsafeConnectorMessage.value =
-        error?.data?.message ||
-        "This connector bundle is unsigned. Confirm to install anyway.";
-      uploadingPackage.value = false;
-      return;
-    }
-    console.error("Failed to upload connector bundle:", error);
-    toast({
-      title: "Error",
-      description: error.data?.message || "Failed to upload connector bundle",
-      variant: "destructive",
-    });
-  } finally {
-    uploadingPackage.value = false;
-  }
-};
-
-const confirmUnsafeConnectorUpload = async () => {
-  const bundle = pendingUnsafeConnectorBundle.value;
-  if (!bundle) {
-    return;
-  }
-  uploadingPackage.value = true;
-  try {
-    const response = await submitConnectorUpload(bundle, true);
-    toast({
-      title: "Uploaded",
-      description: response.message || "Connector package uploaded successfully",
-    });
-    selectedConnectorBundle.value = null;
-    pendingUnsafeConnectorBundle.value = null;
-    pendingUnsafeConnectorMessage.value = "";
-    await Promise.all([loadConnectorPackages(), loadAvailableConnectors()]);
-  } catch (error: any) {
-    console.error("Failed to upload unsigned connector bundle:", error);
-    toast({
-      title: "Error",
-      description: error.data?.message || "Failed to upload connector bundle",
-      variant: "destructive",
-    });
-  } finally {
-    uploadingPackage.value = false;
-  }
-};
-
-const cancelUnsafeConnectorUpload = () => {
-  pendingUnsafeConnectorBundle.value = null;
-  pendingUnsafeConnectorMessage.value = "";
-};
-
-const confirmDeleteConnectorPackage = (pkg: ConnectorPackage) => {
-  deletePackageTarget.value = pkg;
-};
-
-const cancelDeleteConnectorPackage = () => {
-  deletePackageTarget.value = null;
-};
-
-const deleteConnectorPackage = async () => {
-  const pkg = deletePackageTarget.value;
-  if (!pkg) return;
-
-  try {
-    await useAuthFetchImperative(`/api/connectors/packages/installed/${encodeURIComponent(pkg.connector_id)}`, {
-      method: "DELETE",
-    });
-    toast({
-      title: "Deleted",
-      description: "Connector package removed",
-    });
-    deletePackageTarget.value = null;
-    await Promise.all([loadConnectorPackages(), loadAvailableConnectors()]);
-  } catch (error: any) {
-    console.error("Failed to delete connector package:", error);
-    toast({
-      title: "Error",
-      description: error.data?.message || "Failed to delete connector package",
-      variant: "destructive",
-    });
-  }
-};
-
-onMounted(async () => {
-  loading.value = true;
-  try {
-    await Promise.all([
-      loadConnectors(),
-      loadAvailableConnectors(),
-      loadConnectorPackages(),
-      fetchSystemPluginsConfig(),
-    ]);
-  } finally {
-    loading.value = false;
-  }
-});
+onMounted(loadAvailableConnectors);
 </script>
 
 <template>
-  <div class="p-3 sm:p-4">
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-3 sm:mb-4">
-      <div>
-        <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Global Connectors</h1>
-        <p class="text-xs sm:text-sm text-muted-foreground mt-1">
-          Manage global service connectors (Discord, Slack, etc.)
-        </p>
-      </div>
-      <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-        <Button variant="outline" class="w-full sm:w-auto text-sm sm:text-base" @click="refreshAll">
+  <div class="p-4 md:p-6">
+    <PageHeader
+      title="Global Connectors"
+      description="Manage global service connectors (Discord, Slack, etc.)"
+    >
+      <template #actions>
+        <Button
+          variant="outline"
+          class="w-full sm:w-auto text-sm sm:text-base"
+          @click="refreshAll"
+        >
           <RefreshCw class="w-4 h-4 mr-2" />
           Refresh
         </Button>
-        <Dialog v-model:open="showAddDialog">
-        <DialogTrigger as-child>
-          <Button class="w-full sm:w-auto text-sm sm:text-base">
-            <Plus class="w-4 h-4 mr-2" />
-            Add Connector
-          </Button>
-        </DialogTrigger>
-        <DialogContent class="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
-          <DialogHeader>
-            <DialogTitle class="text-base sm:text-lg">Add New Connector</DialogTitle>
-            <DialogDescription class="text-xs sm:text-sm">
-              Select a connector type and configure its settings.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div class="space-y-4">
-            <div>
-              <Label for="connector-select">Connector Type</Label>
-              <Select :model-value="selectedConnector" @update:model-value="onConnectorSelect">
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a connector type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem 
-                    v-for="connector in availableConnectors" 
-                    :key="connector.id" 
-                    :value="connector.id"
-                  >
-                    <div class="flex flex-col">
-                      <span class="font-medium">{{ connector.name }}</span>
-                      <span class="text-sm text-muted-foreground">{{ connector.description }}</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        <Button
+          class="w-full sm:w-auto text-sm sm:text-base"
+          @click="openAddDialog"
+        >
+          <Plus class="w-4 h-4 mr-2" />
+          Add Connector
+        </Button>
+      </template>
+    </PageHeader>
 
-            <!-- Dynamic configuration fields -->
-            <div v-if="selectedConnector" class="space-y-4">
-              <h4 class="font-medium">Configuration</h4>
-              <div 
-                v-for="field in availableConnectors.find(c => c.id === selectedConnector)?.config_schema?.fields || []"
-                :key="field.name"
-                class="space-y-2"
-              >
-                <Label :for="`config-${field.name}`">
-                  {{ field.name }}
-                  <span v-if="field.required" class="text-red-500">*</span>
-                </Label>
-                <p v-if="field.description" class="text-sm text-muted-foreground">
-                  {{ field.description }}
-                </p>
-                
-                <!-- String/Text input -->
-                <Input
-                  v-if="field.type === 'string'"
-                  :id="`config-${field.name}`"
-                  v-model="connectorConfig[field.name]"
-                  :type="field.sensitive || field.name.toLowerCase().includes('password') ? 'password' : 'text'"
-                  :placeholder="field.sensitive ? 'Enter sensitive value...' : ''"
-                />
-                
-                <!-- Number input -->
-                <Input
-                  v-else-if="field.type === 'int' || field.type === 'number'"
-                  :id="`config-${field.name}`"
-                  v-model.number="connectorConfig[field.name]"
-                  type="number"
-                />
-                
-                <!-- Boolean switch -->
-                <div v-else-if="field.type === 'bool'" class="flex items-center space-x-2">
-                  <Switch
-                    :id="`config-${field.name}`"
-                    :model-value="connectorConfig[field.name]"
-                    @update:model-value="connectorConfig[field.name] = $event"
-                  />
-                  <Label :for="`config-${field.name}`">{{ field.name }}</Label>
-                </div>
+    <div class="space-y-4 sm:space-y-6">
+      <ConnectorCatalogTable
+        ref="catalogTable"
+        @changed="loadAvailableConnectors"
+      />
 
-                <!-- Unsupported field type fallback -->
-                <p v-else class="text-xs text-yellow-700 dark:text-yellow-400">
-                  Unsupported field type "{{ field.type }}". This connector cannot be configured from the UI; edit it via API or contact your administrator.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" @click="showAddDialog = false">Cancel</Button>
-            <Button @click="createConnector">Create Connector</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      </div>
+      <ConfiguredConnectorsTable
+        ref="configuredTable"
+        :available-connectors="availableConnectors"
+        @configure="configureConnector"
+      />
     </div>
 
-    <div
-      v-if="authStore.user?.super_admin && !trustStoreConfigured && !unsafeSideloadEnabled"
-      class="mb-4 rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
-    >
-      <div class="flex items-start gap-2">
-        <AlertCircle class="mt-0.5 h-5 w-5 flex-shrink-0" />
-        <div>
-          <p class="font-medium">No trusted connector signing keys configured</p>
-          <p class="mt-1">
-            <code>plugins.trusted_signing_keys</code> is empty and
-            <code>plugins.allow_unsafe_sideload</code> is disabled. No connector bundles can be uploaded
-            until one of these is set.
-          </p>
-        </div>
-      </div>
-    </div>
-    <div
-      v-else-if="authStore.user?.super_admin && !trustStoreConfigured && unsafeSideloadEnabled"
-      class="mb-4 rounded-md border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm text-yellow-700 dark:text-yellow-300"
-    >
-      <div class="flex items-start gap-2">
-        <AlertCircle class="mt-0.5 h-5 w-5 flex-shrink-0" />
-        <div>
-          <p class="font-medium">Unsafe sideloads are enabled</p>
-          <p class="mt-1">
-            Any uploaded connector bundle will load without signature verification. Do not use this in production.
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <div
-      v-if="reverifyFailures.length > 0"
-      class="mb-4 rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
-    >
-      <div class="flex items-start gap-2">
-        <AlertCircle class="mt-0.5 h-5 w-5 flex-shrink-0" />
-        <div>
-          <p class="font-medium">
-            {{ reverifyFailures.length }}
-            connector {{ reverifyFailures.length === 1 ? "package" : "packages" }} failed signature re-verification
-          </p>
-          <p class="mt-1">
-            Re-sign and re-upload these bundles, or update
-            <code>plugins.trusted_signing_keys</code> to include the signing key.
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Sideloaded connector packages -->
-    <Card class="mb-4 sm:mb-6">
-      <CardHeader class="pb-2 sm:pb-3">
-        <CardTitle class="text-base sm:text-lg">Sideloaded connector packages</CardTitle>
-        <CardDescription class="text-xs sm:text-sm">
-          Upload a signed <code class="rounded bg-muted px-1 text-xs">.zip</code> bundle containing
-          <code class="rounded bg-muted px-1 text-xs">manifest.json</code> and one or more Linux
-          subprocess connector executables. Then add a connector instance above if the connector needs config.
-        </CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-4">
-        <div class="flex flex-col gap-3 md:flex-row md:items-center">
-          <Input type="file" accept=".zip" @change="onConnectorBundleSelected" />
-          <Button :disabled="uploadingPackage || !selectedConnectorBundle" @click="uploadConnectorBundle">
-            <Upload class="w-4 h-4 mr-2" />
-            {{ uploadingPackage ? "Uploading…" : "Upload bundle" }}
-          </Button>
-          <Button variant="ghost" size="sm" :disabled="loadingPackages" @click="loadConnectorPackages">
-            <RefreshCw class="w-4 h-4 mr-1" />
-            Packages
-          </Button>
-        </div>
-        <p class="text-xs sm:text-sm text-muted-foreground">
-          Bundles must be signed with a key in <code>plugins.trusted_signing_keys</code>, unless
-          <code>plugins.allow_unsafe_sideload</code> is enabled. After upload, restart Aegis if the package says pending restart.
-        </p>
-
-        <div v-if="loadingPackages" class="py-6 text-center text-muted-foreground text-sm">
-          Loading installed packages…
-        </div>
-        <div v-else-if="connectorPackages.length === 0" class="text-sm text-muted-foreground py-2">
-          No sideloaded connector packages installed.
-        </div>
-        <div v-else class="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead class="text-xs sm:text-sm">Package</TableHead>
-                <TableHead class="text-xs sm:text-sm">Source</TableHead>
-                <TableHead class="text-xs sm:text-sm">Version</TableHead>
-                <TableHead class="text-xs sm:text-sm">State</TableHead>
-                <TableHead class="hidden lg:table-cell text-xs sm:text-sm">Runtime</TableHead>
-                <TableHead class="hidden lg:table-cell text-xs sm:text-sm">Last error</TableHead>
-                <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="pkg in connectorPackages" :key="pkg.connector_id">
-                <TableCell>
-                  <div class="flex flex-col max-w-[220px] sm:max-w-xs">
-                    <span class="font-medium text-sm truncate">{{ pkg.name || pkg.connector_id }}</span>
-                    <span class="text-xs text-muted-foreground truncate" :title="pkg.connector_id">{{ pkg.connector_id }}</span>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div class="flex flex-wrap gap-1">
-                    <Badge variant="outline" class="text-xs">{{ getConnectorSourceLabel(pkg) }}</Badge>
-                    <Badge v-if="pkg.official" variant="default" class="text-xs">Official</Badge>
-                    <Badge v-if="pkg.unsafe" variant="destructive" class="text-xs">Unsafe</Badge>
-                  </div>
-                </TableCell>
-                <TableCell class="text-sm">{{ pkg.version || "—" }}</TableCell>
-                <TableCell>
-                  <Badge :variant="getPackageStateVariant(pkg.install_state)" class="text-xs capitalize">
-                    {{ String(pkg.install_state || "").replace(/_/g, " ") }}
-                  </Badge>
-                </TableCell>
-                <TableCell class="hidden lg:table-cell text-xs text-muted-foreground">
-                  {{ formatConnectorRuntime(pkg) }}
-                </TableCell>
-                <TableCell class="hidden lg:table-cell">
-                  <span v-if="pkg.last_error" class="text-xs text-destructive line-clamp-2">{{ pkg.last_error }}</span>
-                  <span v-else class="text-xs text-muted-foreground">None</span>
-                </TableCell>
-                <TableCell class="text-right">
-                  <Button
-                    v-if="pkg.source === 'native'"
-                    size="sm"
-                    variant="destructive"
-                    @click="confirmDeleteConnectorPackage(pkg)"
-                  >
-                    Delete
-                  </Button>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
-
-    <!-- Connectors List -->
-    <Card>
-      <CardHeader class="pb-2 sm:pb-3">
-        <CardTitle class="text-base sm:text-lg">Active Connectors</CardTitle>
-        <CardDescription class="text-xs sm:text-sm">
-          Global service connectors available to all plugins
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div v-if="loading" class="flex items-center justify-center py-6 sm:py-8">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        </div>
-        
-        <div v-else-if="connectors.length === 0" class="text-center py-6 sm:py-8">
-          <p class="text-sm sm:text-base text-muted-foreground">No connector instances configured</p>
-          <p class="text-xs text-muted-foreground mt-2">
-            Use <span class="font-medium">Add Connector</span> to enable Discord or other registered connectors.
-          </p>
-        </div>
-        
-        <template v-else>
-          <!-- Desktop Table View -->
-          <div class="hidden md:block w-full overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead class="text-xs sm:text-sm">Type</TableHead>
-                  <TableHead class="text-xs sm:text-sm">Name</TableHead>
-                  <TableHead class="text-xs sm:text-sm">Status</TableHead>
-                  <TableHead class="text-xs sm:text-sm">Enabled</TableHead>
-                  <TableHead class="text-xs sm:text-sm">Last Error</TableHead>
-                  <TableHead class="text-right text-xs sm:text-sm">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="connector in connectors" :key="connector.id" class="hover:bg-muted/50">
-                  <TableCell>
-                    <div class="flex items-center space-x-2">
-                      <component :is="getStatusIcon(connector.status)" class="w-4 h-4" />
-                      <span class="font-medium text-sm sm:text-base">{{ connector.id }}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div class="flex flex-col">
-                      <span class="text-sm sm:text-base">{{ connectorDefForInstance(connector.id)?.name || connector.id }}</span>
-                      <span class="text-xs sm:text-sm text-muted-foreground">
-                        {{ connectorDefForInstance(connector.id)?.description }}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge :class="getStatusColor(connector.status)" class="text-xs">
-                      <component :is="getStatusIcon(connector.status)" class="w-3 h-3 mr-1" />
-                      {{ connector.status }}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Switch :model-value="connector.enabled" disabled />
-                  </TableCell>
-                  <TableCell>
-                    <span 
-                      v-if="connector.last_error" 
-                      class="text-xs sm:text-sm text-red-600 dark:text-red-400"
-                      :title="connector.last_error"
-                    >
-                      {{ connector.last_error.length > 50 ? connector.last_error.substring(0, 50) + '...' : connector.last_error }}
-                    </span>
-                    <span v-else class="text-xs sm:text-sm text-muted-foreground">None</span>
-                  </TableCell>
-                  <TableCell class="text-right">
-                    <div class="flex items-center justify-end space-x-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        @click="configureConnector(connector)"
-                        class="text-xs"
-                      >
-                        <Settings class="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        @click="confirmDeleteConnector(connector)"
-                        class="text-xs"
-                      >
-                        <Trash2 class="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </div>
-
-          <!-- Mobile Card View -->
-          <div class="md:hidden space-y-3">
-            <div
-              v-for="connector in connectors"
-              :key="connector.id"
-              class="border rounded-lg p-3 sm:p-4 hover:bg-muted/30 transition-colors"
-            >
-              <div class="flex items-start justify-between gap-2 mb-2">
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 mb-1">
-                    <component :is="getStatusIcon(connector.status)" class="w-4 h-4" />
-                    <span class="font-semibold text-sm sm:text-base">{{ connector.id }}</span>
-                  </div>
-                  <div class="space-y-1.5">
-                    <div>
-                      <span class="text-xs text-muted-foreground">Name: </span>
-                      <span class="text-xs sm:text-sm">{{ connectorDefForInstance(connector.id)?.name || connector.id }}</span>
-                    </div>
-                    <div v-if="connectorDefForInstance(connector.id)?.description">
-                      <span class="text-xs text-muted-foreground">Description: </span>
-                      <span class="text-xs sm:text-sm">{{ connectorDefForInstance(connector.id)?.description }}</span>
-                    </div>
-                    <div class="flex items-center gap-2 mt-2">
-                      <Badge :class="getStatusColor(connector.status)" class="text-xs">
-                        <component :is="getStatusIcon(connector.status)" class="w-3 h-3 mr-1" />
-                        {{ connector.status }}
-                      </Badge>
-                      <div class="flex items-center gap-1">
-                        <Switch :model-value="connector.enabled" disabled />
-                        <span class="text-xs text-muted-foreground">{{ connector.enabled ? 'Enabled' : 'Disabled' }}</span>
-                      </div>
-                    </div>
-                    <div v-if="connector.last_error" class="mt-2">
-                      <span class="text-xs text-muted-foreground">Last Error: </span>
-                      <span class="text-xs text-red-600 dark:text-red-400 break-words">
-                        {{ connector.last_error.length > 100 ? connector.last_error.substring(0, 100) + '...' : connector.last_error }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="flex items-center justify-end gap-2 pt-2 border-t">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  @click="configureConnector(connector)"
-                  class="h-8 text-xs flex-1"
-                >
-                  <Settings class="w-3 h-3 mr-1" />
-                  Configure
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  @click="confirmDeleteConnector(connector)"
-                  class="h-8 text-xs flex-1"
-                >
-                  <Trash2 class="w-3 h-3 mr-1" />
-                  Delete
-                </Button>
-              </div>
-            </div>
-          </div>
-        </template>
-      </CardContent>
-    </Card>
-
-    <!-- Configuration Dialog -->
-    <Dialog v-model:open="showConfigDialog">
-      <DialogContent class="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
-        <DialogHeader>
-          <DialogTitle class="text-base sm:text-lg">Configure {{ currentConnector?.id }} Connector</DialogTitle>
-          <DialogDescription class="text-xs sm:text-sm">
-            Update the configuration for this connector.
-          </DialogDescription>
-        </DialogHeader>
-        
-        <div v-if="currentConnector" class="space-y-4">
-          <div 
-            v-for="field in connectorDefForInstance(currentConnector.id)?.config_schema?.fields || []"
-            :key="field.name"
-            class="space-y-2"
-          >
-            <Label :for="`edit-config-${field.name}`">
-              {{ field.name }}
-              <span v-if="field.required" class="text-red-500">*</span>
-            </Label>
-            <p v-if="field.description" class="text-sm text-muted-foreground">
-              {{ field.description }}
-            </p>
-            
-            <!-- String/Text input -->
-            <Input
-              v-if="field.type === 'string'"
-              :id="`edit-config-${field.name}`"
-              v-model="connectorConfig[field.name]"
-              :type="field.sensitive || field.name.toLowerCase().includes('password') ? 'password' : 'text'"
-              :placeholder="field.sensitive && connectorConfig[field.name] === '***MASKED***' ? 'Leave empty to keep current value' : field.sensitive ? 'Enter new sensitive value...' : ''"
-            />
-            
-            <!-- Number input -->
-            <Input
-              v-else-if="field.type === 'int' || field.type === 'number'"
-              :id="`edit-config-${field.name}`"
-              v-model.number="connectorConfig[field.name]"
-              type="number"
-            />
-            
-            <!-- Boolean switch -->
-            <div v-else-if="field.type === 'bool'" class="flex items-center space-x-2">
-              <Switch
-                :id="`edit-config-${field.name}`"
-                :model-value="connectorConfig[field.name]"
-                @update:model-value="connectorConfig[field.name] = $event"
-              />
-              <Label :for="`edit-config-${field.name}`">{{ field.name }}</Label>
-            </div>
-
-            <!-- Unsupported field type fallback -->
-            <p v-else class="text-xs text-yellow-700 dark:text-yellow-400">
-              Unsupported field type "{{ field.type }}". This connector cannot be configured from the UI; edit it via API or contact your administrator.
-            </p>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" @click="showConfigDialog = false">Cancel</Button>
-          <Button @click="saveConnectorConfig">Save Configuration</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog
-      :open="deleteConnectorTarget !== null"
-      @update:open="(open) => !open && cancelDeleteConnector()"
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete connector instance?</DialogTitle>
-          <DialogDescription>
-            Delete the connector instance
-            <span class="font-medium">"{{ deleteConnectorTarget?.id }}"</span>?
-            Any plugin that depends on this connector will stop receiving it.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" @click="cancelDeleteConnector">Cancel</Button>
-          <Button variant="destructive" @click="deleteConnector">Delete</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog
-      :open="deletePackageTarget !== null"
-      @update:open="(open) => !open && cancelDeleteConnectorPackage()"
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete connector package?</DialogTitle>
-          <DialogDescription>
-            Delete the sideloaded connector package
-            <span class="font-medium">"{{ deletePackageTarget?.name || deletePackageTarget?.connector_id }}"</span>?
-            Remove any running connector instance for this id first. The package's
-            executable binary will be removed from disk.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" @click="cancelDeleteConnectorPackage">Cancel</Button>
-          <Button variant="destructive" @click="deleteConnectorPackage">Delete</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog
-      :open="pendingUnsafeConnectorBundle !== null"
-      @update:open="(open) => !open && cancelUnsafeConnectorUpload()"
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Install unsigned connector?</DialogTitle>
-          <DialogDescription>
-            <p class="mb-2">
-              This connector bundle is <strong>unsigned</strong> or its signature
-              cannot be verified against the configured trust store.
-            </p>
-            <p class="mb-2 text-xs">
-              {{ pendingUnsafeConnectorMessage }}
-            </p>
-            <p class="text-xs">
-              Installing unsigned bundles bypasses signature verification. Only
-              proceed for trusted local builds or sandboxed test environments.
-            </p>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" @click="cancelUnsafeConnectorUpload">Cancel</Button>
-          <Button
-            variant="destructive"
-            :disabled="uploadingPackage"
-            @click="confirmUnsafeConnectorUpload"
-          >
-            {{ uploadingPackage ? "Installing…" : "Install unsigned" }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConnectorConfigDialog
+      v-model:open="dialogOpen"
+      :mode="dialogMode"
+      :available-connectors="availableConnectors"
+      :connector="dialogConnector"
+      @saved="configuredTable?.refresh()"
+    />
   </div>
 </template>
