@@ -15,6 +15,10 @@ type Server struct {
 	RconPort      int       `json:"rcon_port"`
 	RconPassword  string    `json:"-"`
 
+	// Enabled controls whether the app maintains background connections
+	// (RCON, log watcher, player tracker) to this server. Disabled == "offline".
+	Enabled bool `json:"enabled"`
+
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`     // "local", "sftp", "ftp"
 	LogHost          *string `json:"log_host,omitempty"`            // Host for SFTP/FTP
@@ -217,6 +221,9 @@ type ServerCreateRequest struct {
 	RconPort      int     `json:"rcon_port"`
 	RconPassword  string  `json:"rcon_password"`
 
+	// Enabled controls whether background connections are maintained. Optional; defaults to true.
+	Enabled *bool `json:"enabled,omitempty"`
+
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`
 	LogHost          *string `json:"log_host,omitempty"`
@@ -267,6 +274,9 @@ type ServerUpdateRequest struct {
 	RconIpAddress *string `json:"rcon_ip_address"`
 	RconPort      int     `json:"rcon_port" binding:"required"`
 	RconPassword  string  `json:"rcon_password"`
+
+	// Enabled controls whether background connections are maintained. Optional; defaults to true.
+	Enabled *bool `json:"enabled,omitempty"`
 
 	// Log configuration fields
 	LogSourceType    *string `json:"log_source_type,omitempty"`

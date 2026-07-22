@@ -461,6 +461,12 @@ func (s *Server) ServerRconForceRestart(c *gin.Context) {
 		return
 	}
 
+	// Refuse to revive the RCON connection for a disabled (offline) server.
+	if !server.Enabled {
+		responses.BadRequest(c, "Server is disabled", &gin.H{"error": "Server is marked offline; enable it before restarting RCON"})
+		return
+	}
+
 	// First disconnect from the server
 	log.Info().Str("server_id", serverId.String()).Msg("Forcing RCON connection disconnect")
 	err = s.Dependencies.RconManager.DisconnectFromServer(serverId, true)

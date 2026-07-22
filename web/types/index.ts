@@ -24,6 +24,8 @@ export interface Server {
   game_port: number;
   rcon_ip_address: string | null;
   rcon_port: number;
+  // When false, the app maintains no background connections to this server ("offline").
+  enabled: boolean;
   // Log & file access
   log_source_type: "local" | "sftp" | "ftp" | null;
   log_host: string | null;

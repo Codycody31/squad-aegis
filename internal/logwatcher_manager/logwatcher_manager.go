@@ -343,7 +343,7 @@ func (m *LogwatcherManager) ConnectToAllServers(ctx context.Context, db *sql.DB)
 		SELECT id, log_source_type, squad_game_path, log_host, log_port, log_username,
 		       log_password, log_poll_frequency, log_read_from_start
 		FROM servers
-		WHERE log_source_type IS NOT NULL AND squad_game_path IS NOT NULL AND squad_game_path != ''
+		WHERE enabled = TRUE AND log_source_type IS NOT NULL AND squad_game_path IS NOT NULL AND squad_game_path != ''
 	`)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query servers for log connections")

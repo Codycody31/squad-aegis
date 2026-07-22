@@ -1026,7 +1026,7 @@ func (m *RconManager) ConnectToAllServers(ctx context.Context, db *sql.DB) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, ip_address, rcon_ip_address, rcon_port, rcon_password
 		FROM servers
-		WHERE rcon_port > 0 AND rcon_password != ''
+		WHERE enabled = TRUE AND rcon_port > 0 AND rcon_password != ''
 	`)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query servers for RCON connections")

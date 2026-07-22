@@ -62,6 +62,7 @@ interface Server {
   game_port: number;
   rcon_ip_address: string | null;
   rcon_port: number;
+  enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -679,8 +680,9 @@ function refreshData() {
                   class="hover:bg-muted/50"
                 >
                   <TableCell>
-                    <div class="font-medium text-sm sm:text-base">
+                    <div class="flex items-center gap-2 font-medium text-sm sm:text-base">
                       {{ server.name }}
+                      <Badge v-if="!server.enabled" variant="secondary">Offline</Badge>
                     </div>
                   </TableCell>
                   <TableCell class="text-xs sm:text-sm">{{ server.ip_address }}</TableCell>
@@ -724,8 +726,9 @@ function refreshData() {
             >
               <div class="flex items-start justify-between gap-2 mb-2">
                 <div class="flex-1 min-w-0">
-                  <div class="font-semibold text-sm sm:text-base mb-1">
+                  <div class="flex items-center gap-2 font-semibold text-sm sm:text-base mb-1">
                     {{ server.name }}
+                    <Badge v-if="!server.enabled" variant="secondary">Offline</Badge>
                   </div>
                   <div class="space-y-1.5">
                     <div>

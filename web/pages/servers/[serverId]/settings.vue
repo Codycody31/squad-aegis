@@ -80,6 +80,26 @@
             <CardContent>
                 <form @submit.prevent="updateServer" class="space-y-4">
                     <div class="grid gap-4">
+                        <div class="grid grid-cols-4 items-start gap-4">
+                            <label for="enabled" class="text-right pt-1"
+                                >Enabled</label
+                            >
+                            <div class="col-span-3 flex items-start gap-3">
+                                <Switch
+                                    id="enabled"
+                                    :model-value="serverForm.enabled"
+                                    @update:model-value="serverForm.enabled = $event"
+                                />
+                                <p class="text-xs text-muted-foreground">
+                                    When enabled, the app maintains RCON, log
+                                    watcher, and player-tracker connections to
+                                    this server. Turn it off to mark the server
+                                    offline and stop all background connections
+                                    and their log/I/O noise.
+                                </p>
+                            </div>
+                        </div>
+
                         <div class="grid grid-cols-4 items-center gap-4">
                             <label for="name" class="text-right"
                                 >Server Name</label
@@ -495,6 +515,7 @@ import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Checkbox } from "~/components/ui/checkbox";
+import { Switch } from "~/components/ui/switch";
 import {
     Dialog,
     DialogContent,
@@ -523,6 +544,9 @@ const serverForm = ref({
     rcon_ip_address: "",
     rcon_port: "",
     rcon_password: "",
+
+    // When false, the server is "offline": no background RCON/log/tracker connections.
+    enabled: true,
 
     // Log configuration fields
     log_source_type: "",
@@ -561,6 +585,8 @@ const fetchServerDetails = async () => {
                 game_port: data.data.server.game_port,
                 rcon_port: data.data.server.rcon_port,
                 rcon_password: "",
+
+                enabled: data.data.server.enabled ?? true,
 
                 // Log configuration fields
                 log_source_type: data.data.server.log_source_type || "",

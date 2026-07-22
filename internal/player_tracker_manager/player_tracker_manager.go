@@ -99,7 +99,7 @@ func (ptm *PlayerTrackerManager) ConnectToAllServers(ctx context.Context, db *sq
 	rows, err := db.QueryContext(ctx, `
 		SELECT id
 		FROM servers
-		WHERE rcon_port > 0 AND rcon_password != ''
+		WHERE enabled = TRUE AND rcon_port > 0 AND rcon_password != ''
 	`)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to query servers for player tracker connections")

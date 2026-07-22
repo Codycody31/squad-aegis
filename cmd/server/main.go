@@ -228,6 +228,7 @@ func run(ctx context.Context) error {
 		RconManager:          rconManager,
 		EventManager:         eventManager,
 		LogwatcherManager:    logwatcherManager,
+		PlayerTrackerManager: playerTrackerManager,
 		PluginManager:        pluginManager,
 		WorkflowManager:      workflowManager,
 		RemoteBanSyncService: core.NewRemoteBanSyncService(database, database),

@@ -16,12 +16,12 @@ import (
 func CreateServer(ctx context.Context, database db.Executor, server *models.Server) (*models.Server, error) {
 	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 	sql, args, err := psql.Insert("servers").Columns(
-		"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
+		"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
 		"log_source_type", "log_host", "log_port", "log_username", "log_password",
 		"log_poll_frequency", "log_read_from_start", "squad_game_path",
 		"created_at", "updated_at",
 	).Values(
-		server.Id, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword,
+		server.Id, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword, server.Enabled,
 		server.LogSourceType, server.LogHost, server.LogPort, server.LogUsername, server.LogPassword,
 		server.LogPollFrequency, server.LogReadFromStart, server.SquadGamePath,
 		server.CreatedAt, server.UpdatedAt,
@@ -48,7 +48,7 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 
 	if isSuperAdmin {
 		sql, args, err = psql.Select(
-			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
+			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
 			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
@@ -58,7 +58,7 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 		}
 	} else {
 		sql, args, err = psql.Select(
-			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
+			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
 			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
@@ -79,7 +79,7 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 	for rows.Next() {
 		var server models.Server
 		err = rows.Scan(
-			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword,
+			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword, &server.Enabled,
 			&server.LogSourceType, &server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword,
 			&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath,
 			&server.CreatedAt, &server.UpdatedAt,
@@ -97,7 +97,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 	if user == nil {
 		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
 		sql, args, err := psql.Select(
-			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
+			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
 			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
@@ -138,7 +138,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 
 	if isSuperAdmin {
 		sql, args, err = psql.Select(
-			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
+			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
 			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
@@ -148,7 +148,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 		}
 	} else {
 		sql, args, err = psql.Select(
-			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password",
+			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
 			"log_source_type", "log_host", "log_port", "log_username", "log_password",
 			"log_poll_frequency", "log_read_from_start", "squad_game_path",
 			"created_at", "updated_at",
@@ -168,7 +168,7 @@ func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID
 
 	for rows.Next() {
 		err = rows.Scan(
-			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword,
+			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword, &server.Enabled,
 			&server.LogSourceType, &server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword,
 			&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath,
 			&server.CreatedAt, &server.UpdatedAt,
@@ -351,12 +351,12 @@ func UpdateServer(ctx context.Context, db *sql.DB, server *models.Server) error 
 		SET name = $1, ip_address = $2, game_port = $3, rcon_ip_address = $4, rcon_port = $5, rcon_password = $6,
 		    log_source_type = $7, log_host = $8, log_port = $9, log_username = $10,
 		    log_password = $11, log_poll_frequency = $12, log_read_from_start = $13,
-		    squad_game_path = $14, updated_at = $15
-		WHERE id = $16
+		    squad_game_path = $14, enabled = $15, updated_at = $16
+		WHERE id = $17
 	`, server.Name, server.IpAddress, server.GamePort, server.RconIpAddress, server.RconPort, server.RconPassword,
 		server.LogSourceType, server.LogHost, server.LogPort, server.LogUsername,
 		server.LogPassword, server.LogPollFrequency, server.LogReadFromStart,
-		server.SquadGamePath, time.Now(), server.Id)
+		server.SquadGamePath, server.Enabled, time.Now(), server.Id)
 
 	if err != nil {
 		return fmt.Errorf("failed to update server: %w", err)

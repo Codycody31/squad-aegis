@@ -106,6 +106,12 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		request.LogPollFrequency = &defaultPoll
 	}
 
+	// Servers are enabled (online) by default unless explicitly disabled.
+	enabled := true
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+	}
+
 	serverToCreate := models.Server{
 		Id:            uuid.New(),
 		Name:          request.Name,
@@ -114,6 +120,7 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		RconIpAddress: request.RconIpAddress,
 		RconPort:      request.RconPort,
 		RconPassword:  request.RconPassword,
+		Enabled:       enabled,
 
 		// Log configuration fields
 		LogSourceType:    request.LogSourceType,
@@ -140,12 +147,20 @@ func (s *Server) ServersCreate(c *gin.Context) {
 		ipAddress = *server.RconIpAddress
 	}
 
-	// Connect to RCON
-	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
+	// Only establish background connections when the server is enabled.
+	if server.Enabled {
+		// Connect to RCON
+		_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
 
-	// Connect to logwatcher if log configuration is provided
-	if server.LogSourceType != nil && server.SquadGamePath != nil {
-		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, buildLogSourceConfig(server))
+		// Connect to logwatcher if log configuration is provided
+		if server.LogSourceType != nil && server.SquadGamePath != nil {
+			_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, buildLogSourceConfig(server))
+		}
+
+		// Start player tracking
+		if err := s.Dependencies.PlayerTrackerManager.CreateTrackerForServer(server.Id); err != nil {
+			log.Warn().Err(err).Str("serverId", server.Id.String()).Msg("Failed to create player tracker for server")
+		}
 	}
 
 	responses.Success(c, "Server created successfully", &gin.H{"server": server})
@@ -832,6 +847,13 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 	server.LogReadFromStart = request.LogReadFromStart
 	server.SquadGamePath = request.SquadGamePath
 
+	// Enabled defaults to true when omitted (keeps existing behavior for clients
+	// that don't send the field).
+	server.Enabled = true
+	if request.Enabled != nil {
+		server.Enabled = *request.Enabled
+	}
+
 	// Update server in database
 	if err := core.UpdateServer(c.Request.Context(), s.Dependencies.DB, server); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to update server"})
@@ -843,15 +865,28 @@ func (s *Server) ServerUpdate(c *gin.Context) {
 		ipAddress = *server.RconIpAddress
 	}
 
-	// Reconnect RCON with new credentials
-	_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
+	if server.Enabled {
+		// Reconnect RCON with new credentials
+		_ = s.Dependencies.RconManager.ConnectToServer(server.Id, ipAddress, server.RconPort, server.RconPassword)
 
-	// Reconnect logwatcher if log configuration is provided
-	if server.LogSourceType != nil && server.SquadGamePath != nil {
-		_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, buildLogSourceConfig(server))
+		// Reconnect logwatcher if log configuration is provided
+		if server.LogSourceType != nil && server.SquadGamePath != nil {
+			_ = s.Dependencies.LogwatcherManager.ConnectToServer(server.Id, buildLogSourceConfig(server))
+		} else {
+			// Disconnect from logwatcher if log configuration is removed
+			_ = s.Dependencies.LogwatcherManager.DisconnectFromServer(server.Id)
+		}
+
+		// Ensure player tracking is running
+		if err := s.Dependencies.PlayerTrackerManager.CreateTrackerForServer(server.Id); err != nil {
+			log.Warn().Err(err).Str("serverId", server.Id.String()).Msg("Failed to create player tracker for server")
+		}
 	} else {
-		// Disconnect from logwatcher if log configuration is removed
+		// Server marked offline: tear down all background connections so we stop
+		// hammering an unreachable/disabled server with network I/O.
+		_ = s.Dependencies.RconManager.DisconnectFromServer(server.Id, true)
 		_ = s.Dependencies.LogwatcherManager.DisconnectFromServer(server.Id)
+		_ = s.Dependencies.PlayerTrackerManager.RemoveTracker(server.Id)
 	}
 
 	// Create audit log entry
@@ -883,6 +918,12 @@ func (s *Server) ServerLogwatcherRestart(c *gin.Context) {
 	server, err := core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	// Refuse to revive background connections for a disabled (offline) server.
+	if !server.Enabled {
+		responses.BadRequest(c, "Server is disabled", &gin.H{"error": "Server is marked offline; enable it before restarting the log watcher"})
 		return
 	}
 

@@ -14,6 +14,7 @@ import (
 	"go.codycody31.dev/squad-aegis/internal/event_manager"
 	"go.codycody31.dev/squad-aegis/internal/logwatcher_manager"
 	"go.codycody31.dev/squad-aegis/internal/permissions"
+	"go.codycody31.dev/squad-aegis/internal/player_tracker_manager"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/rcon_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/web"
@@ -40,6 +41,7 @@ type Dependencies struct {
 	RconManager          *rcon_manager.RconManager
 	EventManager         *event_manager.EventManager
 	LogwatcherManager    *logwatcher_manager.LogwatcherManager
+	PlayerTrackerManager *player_tracker_manager.PlayerTrackerManager
 	PluginManager        *plugin_manager.PluginManager
 	WorkflowManager      *workflow_manager.WorkflowManager
 	RemoteBanSyncService *core.RemoteBanSyncService
