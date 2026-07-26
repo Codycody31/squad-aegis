@@ -31,38 +31,16 @@ async function fetchRelatedPlayers() {
   error.value = null;
   permissionDenied.value = false;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/${props.playerId}/related`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
+    const data = await useAuthFetchImperative<any>(
+      `${runtimeConfig.public.backendApi}/players/${props.playerId}/related`
     );
-
-    if (response.status === 403) {
-      permissionDenied.value = true;
-      loading.value = false;
-      return;
-    }
-
-    if (!response.ok) throw new Error("Failed to fetch related players");
-
-    const data = await response.json();
     relatedPlayers.value = data.data.related_players || [];
   } catch (err: any) {
+    if (err?.response?.status === 403 || err?.statusCode === 403) {
+      permissionDenied.value = true;
+      return;
+    }
     error.value = extractApiErrorMessage(err);
   } finally {
     loading.value = false;

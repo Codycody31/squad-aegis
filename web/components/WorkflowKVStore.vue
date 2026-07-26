@@ -23,7 +23,7 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Textarea } from "~/components/ui/textarea";
 import { Badge } from "~/components/ui/badge";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import JSONInput from "~/components/JSONInput.vue";
 
 interface KVPair {
@@ -38,7 +38,6 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-const { toast } = useToast();
 
 const loading = ref(false);
 const kvPairs = ref<KVPair[]>([]);
@@ -120,30 +119,17 @@ async function addKVPair() {
         }
 
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
-        const response = await fetch(
+        await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv`,
             {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
+                body: {
                     key: newKV.value.key,
                     value: parsedValue,
-                }),
+                },
             },
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to add KV pair");
-        }
 
         toast({
             title: "Success",
@@ -183,35 +169,22 @@ async function updateKVPair() {
         }
 
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
         // If key changed, delete old key and create new one
         if (editKV.value.key !== editKV.value.originalKey) {
             await deleteKVPairByKey(editKV.value.originalKey, false);
         }
 
-        const response = await fetch(
+        await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv`,
             {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
+                body: {
                     key: editKV.value.key,
                     value: parsedValue,
-                }),
+                },
             },
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to update KV pair");
-        }
 
         toast({
             title: "Success",
@@ -233,25 +206,13 @@ async function updateKVPair() {
 async function deleteKVPairByKey(key: string, showToast = true) {
     try {
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
-        const response = await fetch(
+        await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv/${encodeURIComponent(key)}`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to delete KV pair");
-        }
 
         if (showToast) {
             toast({
@@ -294,25 +255,13 @@ async function clearAllKV() {
 
     try {
         const runtimeConfig = useRuntimeConfig();
-        const cookieToken = useCookie(
-            runtimeConfig.public.sessionCookieName as string,
-        );
-        const token = cookieToken.value;
 
-        const response = await fetch(
+        await useAuthFetchImperative<any>(
             `${runtimeConfig.public.backendApi}/servers/${props.serverId}/workflows/${props.workflowId}/kv`,
             {
                 method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || "Failed to clear KV store");
-        }
 
         toast({
             title: "Success",

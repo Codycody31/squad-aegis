@@ -1,11 +1,9 @@
 <template>
-    <div class="p-4">
-        <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold">MOTD Configuration</h1>
-            <p class="text-sm text-muted-foreground">
-                Configure the Message of the Day for your server
-            </p>
-        </div>
+    <div class="p-4 md:p-6">
+        <PageHeader
+            title="MOTD Configuration"
+            description="Configure the Message of the Day for your server"
+        />
 
         <!-- Credentials Warning -->
         <Card v-if="!hasUploadAccess" class="mb-4 border-yellow-500">
@@ -302,7 +300,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRoute } from "vue-router";
-import { useToast } from "~/components/ui/toast";
+import PageHeader from "~/components/layout/PageHeader.vue";
+import { toast } from "~/components/ui/toast";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Textarea } from "~/components/ui/textarea";
@@ -333,11 +332,6 @@ interface MOTDConfig {
 }
 
 const route = useRoute();
-const { toast } = useToast();
-
-const runtimeConfig = useRuntimeConfig();
-const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-const token = cookieToken.value;
 
 const serverId = route.params.serverId as string;
 
@@ -380,12 +374,9 @@ const formatDate = (dateString: string) => {
 
 const fetchConfig = async () => {
     try {
-        const response = await fetch(`/api/servers/${serverId}/motd`, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
-        const data = await response.json();
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}/motd`,
+        );
 
         if (data.code === 200) {
             config.value = { ...config.value, ...data.data.config };
@@ -395,7 +386,10 @@ const fetchConfig = async () => {
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to fetch MOTD configuration",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to fetch MOTD configuration",
+            ),
             variant: "destructive",
         });
     }
@@ -404,29 +398,27 @@ const fetchConfig = async () => {
 const saveConfig = async () => {
     isSaving.value = true;
     try {
-        const response = await fetch(`/api/servers/${serverId}/motd`, {
-            method: "PUT",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}/motd`,
+            {
+                method: "PUT",
+                body: {
+                    prefix_text: config.value.prefix_text,
+                    suffix_text: config.value.suffix_text,
+                    auto_generate_from_rules: config.value.auto_generate_from_rules,
+                    include_rule_descriptions: config.value.include_rule_descriptions,
+                    upload_enabled: config.value.upload_enabled,
+                    auto_upload_on_change: config.value.auto_upload_on_change,
+                    use_log_credentials: config.value.use_log_credentials,
+                    upload_host: config.value.upload_host || null,
+                    upload_port: config.value.upload_port || null,
+                    upload_username: config.value.upload_username || null,
+                    upload_password: config.value.upload_password || null,
+                    upload_protocol: config.value.upload_protocol || null,
+                },
             },
-            body: JSON.stringify({
-                prefix_text: config.value.prefix_text,
-                suffix_text: config.value.suffix_text,
-                auto_generate_from_rules: config.value.auto_generate_from_rules,
-                include_rule_descriptions: config.value.include_rule_descriptions,
-                upload_enabled: config.value.upload_enabled,
-                auto_upload_on_change: config.value.auto_upload_on_change,
-                use_log_credentials: config.value.use_log_credentials,
-                upload_host: config.value.upload_host || null,
-                upload_port: config.value.upload_port || null,
-                upload_username: config.value.upload_username || null,
-                upload_password: config.value.upload_password || null,
-                upload_protocol: config.value.upload_protocol || null,
-            }),
-        });
+        );
 
-        const data = await response.json();
         if (data.code === 200) {
             toast({
                 title: "Success",
@@ -443,7 +435,10 @@ const saveConfig = async () => {
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to save configuration",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to save configuration",
+            ),
             variant: "destructive",
         });
     } finally {
@@ -454,12 +449,9 @@ const saveConfig = async () => {
 const refreshPreview = async () => {
     isLoadingPreview.value = true;
     try {
-        const response = await fetch(`/api/servers/${serverId}/motd/preview`, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
-        const data = await response.json();
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}/motd/preview`,
+        );
 
         if (data.code === 200) {
             previewContent.value = data.data.content;
@@ -468,7 +460,10 @@ const refreshPreview = async () => {
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to generate preview",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to generate preview",
+            ),
             variant: "destructive",
         });
     } finally {
@@ -499,13 +494,10 @@ const copyMotdToClipboard = async () => {
 const testConnection = async () => {
     isTestingConnection.value = true;
     try {
-        const response = await fetch(`/api/servers/${serverId}/motd/test-connection`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
-        const data = await response.json();
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}/motd/test-connection`,
+            { method: "POST" },
+        );
 
         if (data.code === 200 && data.data.success) {
             toast({
@@ -521,8 +513,11 @@ const testConnection = async () => {
         }
     } catch (error) {
         toast({
-            title: "Error",
-            description: "Failed to test upload access",
+            title: "Access Failed",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to test upload access",
+            ),
             variant: "destructive",
         });
     } finally {
@@ -533,13 +528,10 @@ const testConnection = async () => {
 const uploadMOTD = async () => {
     isUploading.value = true;
     try {
-        const response = await fetch(`/api/servers/${serverId}/motd/upload`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
-        const data = await response.json();
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}/motd/upload`,
+            { method: "POST" },
+        );
 
         if (data.code === 200) {
             toast({
@@ -556,8 +548,11 @@ const uploadMOTD = async () => {
         }
     } catch (error) {
         toast({
-            title: "Error",
-            description: "Failed to upload MOTD",
+            title: "Upload Failed",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to upload MOTD",
+            ),
             variant: "destructive",
         });
     } finally {

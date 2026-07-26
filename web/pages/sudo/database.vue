@@ -4,12 +4,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
 import { Button } from "~/components/ui/button";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import type { PostgreSQLStats, ClickHouseStats } from "~/types";
 
 definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
 
 const runtimeConfig = useRuntimeConfig();
-const authStore = useAuthStore();
 
 const loading = ref(true);
 const pgStats = ref<PostgreSQLStats | null>(null);
@@ -19,12 +19,8 @@ const fetchData = async () => {
   loading.value = true;
   try {
     const [pgRes, chRes] = await Promise.all([
-      $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/database/postgresql`, {
-        headers: { Authorization: `Bearer ${authStore.token}` },
-      }),
-      $fetch<any>(`${runtimeConfig.public.backendApi}/sudo/database/clickhouse`, {
-        headers: { Authorization: `Bearer ${authStore.token}` },
-      }),
+      useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/database/postgresql`),
+      useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/database/clickhouse`),
     ]);
     pgStats.value = pgRes.data.data;
     chStats.value = chRes.data.data;
@@ -39,14 +35,17 @@ onMounted(fetchData);
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold">Database Statistics</h1>
-        <p class="text-muted-foreground">View database health and statistics</p>
-      </div>
-      <Button @click="fetchData"><Icon name="mdi:refresh" class="mr-2" />Refresh</Button>
-    </div>
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="Database"
+      description="PostgreSQL and ClickHouse health and statistics"
+    >
+      <template #actions>
+        <Button @click="fetchData">
+          <Icon name="mdi:refresh" class="mr-2" />Refresh
+        </Button>
+      </template>
+    </PageHeader>
 
     <div v-if="loading" class="flex items-center justify-center py-12">
       <div class="text-muted-foreground">Loading database statistics...</div>

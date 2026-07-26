@@ -2,6 +2,7 @@
 import { ref, onMounted } from "vue";
 import { useAuthStore } from "@/stores/auth";
 
+import PageHeader from "~/components/layout/PageHeader.vue";
 import PlayersSearchHero from "~/components/players/PlayersSearchHero.vue";
 import PlayersQuickStats from "~/components/players/PlayersQuickStats.vue";
 import PlayersSearchResults from "~/components/players/PlayersSearchResults.vue";
@@ -67,34 +68,10 @@ interface StatsResponse {
 async function fetchPlayerStats() {
   statsLoading.value = true;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    statsLoading.value = false;
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/stats`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      }
+    const data = await useAuthFetchImperative<StatsResponse>(
+      `${runtimeConfig.public.backendApi}/players/stats`
     );
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch player statistics");
-    }
-
-    const data: StatsResponse = await response.json();
     stats.value = data.data.stats;
   } catch (err: any) {
     console.error("Failed to load statistics:", err);
@@ -113,37 +90,10 @@ async function searchPlayers() {
   error.value = null;
   hasSearched.value = true;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    players.value = [];
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players?search=${encodeURIComponent(searchQuery.value)}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      }
+    const data = await useAuthFetchImperative<PlayersResponse>(
+      `${runtimeConfig.public.backendApi}/players?search=${encodeURIComponent(searchQuery.value)}`
     );
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to search players");
-    }
-
-    const data: PlayersResponse = await response.json();
     players.value = data.data.players || [];
   } catch (err: any) {
     error.value = extractApiErrorMessage(err, "An error occurred while searching");
@@ -164,11 +114,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="container mx-auto p-3 sm:p-4 lg:p-6">
-    <!-- Page Header -->
-    <div class="mb-4 sm:mb-6">
-      <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Player Profiles</h1>
-    </div>
+  <div class="p-4 md:p-6">
+    <PageHeader
+      title="Players"
+      description="Search player profiles, history, and suspected alt accounts."
+    />
 
     <!-- Search Hero (Primary Focus) -->
     <PlayersSearchHero

@@ -14,6 +14,12 @@ import {
   formatChartTooltipTime,
   toChartTime,
 } from "./time";
+import {
+  chartPalette,
+  chartTooltipDomStyles,
+  readToken,
+  useChartTheme,
+} from "./theme";
 
 interface DataPoint {
   timestamp: string;
@@ -38,12 +44,13 @@ const buildChartData = () =>
 
 const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
   const timestamps = props.data.map((point) => point.timestamp);
+  const [seriesColor] = chartPalette();
 
   return {
     data: chartData,
     xField: "time",
     yField: "value",
-    color: "#f59e0b",
+    color: seriesColor,
     smooth: false,
     lineStyle: {
       lineWidth: 2,
@@ -52,8 +59,8 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
       size: 3,
       shape: "circle",
       style: {
-        fill: "#f59e0b",
-        stroke: "#fff",
+        fill: seriesColor,
+        stroke: readToken("--background"),
         lineWidth: 1,
       },
     },
@@ -65,19 +72,20 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
     yAxis: {
       title: {
         text: "Chat Messages",
-        style: chartAxisTitleStyle,
+        style: chartAxisTitleStyle(),
       },
       label: {
-        style: chartAxisLabelStyle,
+        style: chartAxisLabelStyle(),
       },
       grid: {
         line: {
-          style: chartGridLineStyle,
+          style: chartGridLineStyle(),
         },
       },
       min: 0,
     },
     tooltip: {
+      domStyles: chartTooltipDomStyles(),
       customContent: (title, items) => {
         if (!items || items.length === 0) return "";
         const time = items[0].data.time;
@@ -86,7 +94,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
           <div style="padding: 10px;">
             <div style="font-weight: 600; margin-bottom: 6px;">${formatChartTooltipTime(time)}</div>
             <div style="display: flex; justify-content: space-between; gap: 12px;">
-              <span style="color: #f59e0b;">Chat Messages</span>
+              <span style="color: ${seriesColor};">Chat Messages</span>
               <span>${items[0].value}</span>
             </div>
           </div>
@@ -98,7 +106,7 @@ const getChartOptions = (chartData: ReturnType<typeof buildChartData>) => {
       active: {
         style: {
           opacity: 0.8,
-          stroke: "#f59e0b",
+          stroke: seriesColor,
           lineWidth: 2,
         },
       },
@@ -135,15 +143,21 @@ const updateChart = () => {
   chart.update(getChartOptions(chartData));
 };
 
-// Watch for data changes
-watch(() => props.data, updateChart, { deep: true });
-watch(() => props.period, () => {
+// Destroy and recreate so options (and theme colors) are rebuilt
+const rebuildChart = () => {
   if (chart) {
     chart.destroy();
     chart = null;
   }
   createChart();
-});
+};
+
+// Watch for data changes
+watch(() => props.data, updateChart, { deep: true });
+watch(() => props.period, rebuildChart);
+
+// Re-render with fresh colors when the theme changes
+useChartTheme(rebuildChart);
 
 // Lifecycle
 onMounted(() => {

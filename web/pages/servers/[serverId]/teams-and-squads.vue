@@ -4,10 +4,12 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
 import SquadActionMenu from "~/components/SquadActionMenu.vue";
 import BulkPlayerActionMenu from "~/components/BulkPlayerActionMenu.vue";
+import PlayerContextPanel from "~/components/player-panel/PlayerContextPanel.vue";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import type { Player } from "~/types";
 import { Progress } from "~/components/ui/progress";
 import { Switch } from "~/components/ui/switch";
@@ -17,9 +19,9 @@ definePageMeta({ middleware: ["auth"] });
 
 const route = useRoute();
 const serverId = route.params.serverId;
-const { toast } = useToast();
 
 const loading = ref(true);
+const refreshing = ref(false);
 const error = ref<string | null>(null);
 const teams = ref<Team[]>([]);
 const refreshInterval = ref<NodeJS.Timeout | null>(null);
@@ -27,6 +29,14 @@ const activeTab = ref("");
 const searchQuery = ref("");
 const isAutoRefreshEnabled = ref(true);
 const lastUpdated = ref<number | null>(null);
+
+const REFRESH_INTERVAL_MS = 30000;
+const nextRefreshAt = ref<number | null>(null);
+const now = ref(Date.now());
+let ticker: NodeJS.Timeout | null = null;
+
+// Slide-over player context panel
+const { isOpen: panelOpen, selected: panelPlayer, openPanel } = usePlayerPanel();
 
 // Multi-select state
 const selectedPlayers = ref<Set<string>>(new Set());
@@ -56,8 +66,12 @@ interface TeamsResponse {
 }
 
 // Function to fetch teams and squads data
-async function fetchTeamsData() {
-    loading.value = true;
+// `background` refreshes (interval- or action-driven) skip the full-page spinner.
+async function fetchTeamsData(background = false) {
+    if (!background) {
+        loading.value = true;
+    }
+    refreshing.value = true;
     error.value = null;
 
     const runtimeConfig = useRuntimeConfig();
@@ -84,12 +98,14 @@ async function fetchTeamsData() {
                 activeTab.value = `team${teams.value[0].id}`;
             }
             lastUpdated.value = Date.now();
+            now.value = Date.now();
         }
     } catch (err: any) {
         error.value =
             extractApiErrorMessage(err, "An error occurred while fetching teams data");
     } finally {
         loading.value = false;
+        refreshing.value = false;
     }
 }
 
@@ -185,14 +201,29 @@ const filteredTeams = computed<Team[]>(() => {
 
 const lastUpdatedText = computed(() => {
     if (!lastUpdated.value) return "never";
-    const diffMs = Date.now() - lastUpdated.value;
-    const seconds = Math.floor(diffMs / 1000);
-    if (seconds < 5) return "just now";
+    const seconds = Math.max(
+        0,
+        Math.floor((now.value - lastUpdated.value) / 1000),
+    );
     if (seconds < 60) return `${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);
     return `${hours}h ago`;
+});
+
+// The "Updated Xs ago · next in Ys" text ticks once per second while
+// auto-refresh is on and the tab is visible.
+const refreshStatusText = computed(() => {
+    let text = `Updated ${lastUpdatedText.value}`;
+    if (isAutoRefreshEnabled.value && nextRefreshAt.value) {
+        const seconds = Math.max(
+            0,
+            Math.ceil((nextRefreshAt.value - now.value) / 1000),
+        );
+        text += ` · next in ${seconds}s`;
+    }
+    return text;
 });
 
 // Handle keyboard shortcuts
@@ -202,45 +233,84 @@ function handleKeyDown(event: KeyboardEvent) {
     }
 }
 
+function startTicker() {
+    if (ticker) return;
+    now.value = Date.now();
+    ticker = setInterval(() => {
+        now.value = Date.now();
+    }, 1000);
+}
+
+function stopTicker() {
+    if (ticker) {
+        clearInterval(ticker);
+        ticker = null;
+    }
+}
+
+function startAutoRefresh() {
+    stopAutoRefresh();
+    refreshInterval.value = setInterval(() => {
+        fetchTeamsData(true);
+        nextRefreshAt.value = Date.now() + REFRESH_INTERVAL_MS;
+    }, REFRESH_INTERVAL_MS);
+    nextRefreshAt.value = Date.now() + REFRESH_INTERVAL_MS;
+    startTicker();
+}
+
+function stopAutoRefresh() {
+    if (refreshInterval.value) {
+        clearInterval(refreshInterval.value);
+        refreshInterval.value = null;
+    }
+    nextRefreshAt.value = null;
+    stopTicker();
+}
+
+// Pause polling while the tab is hidden; on return, refresh immediately
+// and restart the interval, but only if the user left auto-refresh on.
+function handleVisibilityChange() {
+    if (document.visibilityState === "hidden") {
+        stopAutoRefresh();
+    } else if (isAutoRefreshEnabled.value) {
+        fetchTeamsData(true);
+        startAutoRefresh();
+    }
+}
+
 // Setup auto-refresh and keyboard listeners
 onMounted(() => {
     fetchTeamsData();
 
     if (isAutoRefreshEnabled.value) {
-        refreshInterval.value = setInterval(() => {
-            fetchTeamsData();
-        }, 30000);
+        startAutoRefresh();
     }
 
     // Add keyboard event listener
     window.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 });
 
 watch(isAutoRefreshEnabled, (enabled) => {
-    if (refreshInterval.value) {
-        clearInterval(refreshInterval.value);
-        refreshInterval.value = null;
-    }
-    if (enabled) {
-        refreshInterval.value = setInterval(() => {
-            fetchTeamsData();
-        }, 30000);
+    if (enabled && document.visibilityState !== "hidden") {
+        startAutoRefresh();
+    } else {
+        stopAutoRefresh();
     }
 });
 
-// Clear interval and remove keyboard listener on component unmount
+// Clear intervals and remove listeners on component unmount
 onUnmounted(() => {
-    if (refreshInterval.value) {
-        clearInterval(refreshInterval.value);
-    }
-    
-    // Remove keyboard event listener
+    stopAutoRefresh();
+
+    // Remove event listeners
     window.removeEventListener("keydown", handleKeyDown);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
 });
 
-// Manual refresh function
+// Manual/action-driven refresh (background, no full-page spinner)
 function refreshData() {
-    fetchTeamsData();
+    fetchTeamsData(true);
 }
 
 function getPlayerSelectionKey(player: Player): string {
@@ -271,6 +341,12 @@ function togglePlayerSelection(player: Player, event: MouseEvent) {
         if (selectedPlayers.value.size === 0) {
             isSelectionMode.value = false;
         }
+        return;
+    }
+
+    // Plain left-click outside selection mode opens the context panel
+    if (!isSelectionMode.value) {
+        openPanel(player);
     }
 }
 
@@ -312,60 +388,63 @@ function getSelectedPlayerObjects(): Player[] {
         @action-completed="refreshData"
         @clear-selection="clearSelection"
     >
-        <div class="p-4">
-            <div
-                class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4"
-            >
-                <div>
-                    <h1 class="text-2xl font-bold">Teams & Squads</h1>
-                    <div class="text-xs opacity-60 mt-1">
-                        Updated {{ lastUpdatedText }}
-                        <span v-if="isSelectionMode" class="ml-2 text-primary font-semibold">
-                            • {{ selectedPlayers.size }} player{{
-                                selectedPlayers.size !== 1 ? "s" : ""
-                            }}
-                            selected (Right-click for actions)
-                        </span>
-                    </div>
-                </div>
-                <div class="flex gap-2 items-center w-full md:w-auto">
-                    <div class="relative flex-1 md:flex-none md:w-72">
-                        <Icon
-                            name="lucide:search"
-                            class="absolute left-2 top-2.5 h-4 w-4 opacity-60"
-                        />
-                        <Input
-                            v-model="searchQuery"
-                            placeholder="Search players, roles, squads"
-                            class="pl-8"
-                        />
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <Label for="autorefresh" class="text-sm whitespace-nowrap"
-                            >Auto-refresh</Label
-                        >
-                        <Switch
-                            id="autorefresh"
-                            v-model:checked="isAutoRefreshEnabled"
-                        />
-                    </div>
-                    <Button
+        <div class="p-4 md:p-6">
+            <PageHeader title="Teams & Squads" :description="refreshStatusText">
+                <template #title-extra>
+                    <span
                         v-if="isSelectionMode"
-                        @click="clearSelection"
-                        variant="outline"
+                        class="text-sm font-semibold text-primary whitespace-nowrap"
                     >
-                        Clear Selection
-                    </Button>
-                    <Button @click="refreshData" :disabled="loading">
-                        <Icon
-                            v-if="loading"
-                            name="lucide:loader-2"
-                            class="h-4 w-4 mr-2 animate-spin"
-                        />
-                        {{ loading ? "Refreshing..." : "Refresh" }}
-                    </Button>
-                </div>
-            </div>
+                        {{ selectedPlayers.size }} player{{
+                            selectedPlayers.size !== 1 ? "s" : ""
+                        }}
+                        selected (Right-click for actions)
+                    </span>
+                </template>
+                <template #actions>
+                    <div
+                        class="flex w-full flex-wrap items-center gap-2 sm:w-auto"
+                    >
+                        <div class="relative flex-1 md:flex-none md:w-72">
+                            <Icon
+                                name="lucide:search"
+                                class="absolute left-2 top-2.5 h-4 w-4 opacity-60"
+                            />
+                            <Input
+                                v-model="searchQuery"
+                                placeholder="Search players, roles, squads"
+                                class="pl-8"
+                            />
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <Label
+                                for="autorefresh"
+                                class="text-sm whitespace-nowrap"
+                                >Auto-refresh</Label
+                            >
+                            <Switch
+                                id="autorefresh"
+                                v-model:checked="isAutoRefreshEnabled"
+                            />
+                        </div>
+                        <Button
+                            v-if="isSelectionMode"
+                            @click="clearSelection"
+                            variant="outline"
+                        >
+                            Clear Selection
+                        </Button>
+                        <Button @click="refreshData" :disabled="refreshing">
+                            <Icon
+                                v-if="refreshing"
+                                name="lucide:loader-2"
+                                class="h-4 w-4 mr-2 animate-spin"
+                            />
+                            {{ refreshing ? "Refreshing..." : "Refresh" }}
+                        </Button>
+                    </div>
+                </template>
+            </PageHeader>
 
         <div v-if="error" class="bg-red-500 text-white p-4 rounded mb-4">
             {{ error }}
@@ -521,31 +600,20 @@ function getSelectedPlayerObjects(): Player[] {
                                                                     "
                                                                     >★</span
                                                                 >
-                                                                <div class="flex flex-col flex-1">
-                                                                    <span
-                                                                        :class="
-                                                                            isSquadLeaderWithIncorrectRole(
-                                                                                player,
-                                                                            )
-                                                                                ? 'text-red-500 font-semibold break-words'
-                                                                                : 'break-words'
-                                                                        "
-                                                                    >
-                                                                        {{
-                                                                            player.name
-                                                                        }}
-                                                                    </span>
-                                                                    <span
-                                                                        v-if="
-                                                                            isSquadLeaderWithIncorrectRole(
-                                                                                player,
-                                                                            )
-                                                                        "
-                                                                        class="text-[10px] text-red-500 bg-red-100 dark:bg-red-900 px-1 rounded w-fit mt-0.5"
-                                                                    >
-                                                                        WRONG ROLE
-                                                                    </span>
-                                                                </div>
+                                                                <span
+                                                                    class="flex-1"
+                                                                    :class="
+                                                                        isSquadLeaderWithIncorrectRole(
+                                                                            player,
+                                                                        )
+                                                                            ? 'text-red-500 font-semibold break-words'
+                                                                            : 'break-words'
+                                                                    "
+                                                                >
+                                                                    {{
+                                                                        player.name
+                                                                    }}
+                                                                </span>
                                                             </div>
                                                         </td>
                                                         <td class="py-2 whitespace-nowrap">
@@ -562,6 +630,16 @@ function getSelectedPlayerObjects(): Player[] {
                                                                     player.role ||
                                                                     "Rifleman"
                                                                 }}
+                                                            </span>
+                                                            <span
+                                                                v-if="
+                                                                    isSquadLeaderWithIncorrectRole(
+                                                                        player,
+                                                                    )
+                                                                "
+                                                                class="ml-1 text-[10px] text-red-500 bg-red-100 dark:bg-red-900 px-1 rounded"
+                                                            >
+                                                                WRONG ROLE
                                                             </span>
                                                         </td>
                                                         <td class="py-2 text-right whitespace-nowrap" @click.stop>
@@ -663,6 +741,13 @@ function getSelectedPlayerObjects(): Player[] {
         </div>
         </div>
     </BulkPlayerActionMenu>
+
+    <PlayerContextPanel
+        v-model:open="panelOpen"
+        :player="panelPlayer"
+        :server-id="serverId as string"
+        @action-completed="refreshData"
+    />
 </template>
 
 <style scoped>

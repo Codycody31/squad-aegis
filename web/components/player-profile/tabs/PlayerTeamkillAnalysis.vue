@@ -37,30 +37,10 @@ async function fetchTeamkillAnalysis() {
   loading.value = true;
   error.value = null;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/${props.playerId}/teamkills`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
+    const data = await useAuthFetchImperative<any>(
+      `${runtimeConfig.public.backendApi}/players/${props.playerId}/teamkills`
     );
-
-    if (!response.ok) throw new Error("Failed to fetch teamkill analysis");
-
-    const data = await response.json();
     victims.value = data.data.victims || [];
     tkWeapons.value = data.data.tk_weapons || [];
   } catch (err: any) {

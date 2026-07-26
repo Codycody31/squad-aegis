@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Card, CardContent } from "~/components/ui/card";
+import StatCard from "~/components/StatCard.vue";
 
 interface PlayerStats {
   total_players: number;
@@ -25,48 +25,31 @@ function formatNumber(num: number): string {
 </script>
 
 <template>
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-    <!-- Loading State -->
-    <template v-if="loading">
-      <Card v-for="i in 4" :key="i">
-        <CardContent class="py-3 px-4">
-          <div class="animate-pulse">
-            <div class="h-3 bg-muted rounded w-16 mb-1"></div>
-            <div class="h-5 bg-muted rounded w-12"></div>
-          </div>
-        </CardContent>
-      </Card>
-    </template>
-
-    <!-- Stats Cards -->
-    <template v-else-if="stats">
-      <Card>
-        <CardContent class="py-3 px-4">
-          <p class="text-xs text-muted-foreground">Players</p>
-          <p class="text-lg font-semibold">{{ formatNumber(stats.total_players) }}</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent class="py-3 px-4">
-          <p class="text-xs text-muted-foreground">Kills</p>
-          <p class="text-lg font-semibold">{{ formatNumber(stats.total_kills) }}</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent class="py-3 px-4">
-          <p class="text-xs text-muted-foreground">Deaths</p>
-          <p class="text-lg font-semibold">{{ formatNumber(stats.total_deaths) }}</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent class="py-3 px-4">
-          <p class="text-xs text-muted-foreground">Teamkills</p>
-          <p class="text-lg font-semibold text-destructive">{{ formatNumber(stats.total_teamkills) }}</p>
-        </CardContent>
-      </Card>
-    </template>
+  <div v-if="loading || stats" class="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+    <StatCard
+      label="Players"
+      :value="stats ? formatNumber(stats.total_players) : undefined"
+      :loading="loading"
+      icon="mdi:account-group"
+    />
+    <StatCard
+      label="Kills"
+      :value="stats ? formatNumber(stats.total_kills) : undefined"
+      :loading="loading"
+      icon="mdi:target"
+    />
+    <StatCard
+      label="Deaths"
+      :value="stats ? formatNumber(stats.total_deaths) : undefined"
+      :loading="loading"
+      icon="mdi:skull-outline"
+    />
+    <StatCard
+      label="Teamkills"
+      :value="stats ? formatNumber(stats.total_teamkills) : undefined"
+      :loading="loading"
+      icon="mdi:alert-octagon-outline"
+      icon-class="bg-destructive/10 text-destructive"
+    />
   </div>
 </template>

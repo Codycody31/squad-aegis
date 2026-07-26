@@ -34,6 +34,8 @@ import type {
   AltAccountGroupsResponse,
 } from "~/types/player";
 
+import PageHeader from "~/components/layout/PageHeader.vue";
+
 const authStore = useAuthStore();
 const runtimeConfig = useRuntimeConfig();
 const router = useRouter();
@@ -61,43 +63,19 @@ async function fetchAltGroups(resetPage = false) {
   loading.value = true;
   error.value = null;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/alt-groups?page=${page.value}&limit=${limit}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      }
+    const data = await useAuthFetchImperative<{
+      data: AltAccountGroupsResponse;
+    }>(
+      `${runtimeConfig.public.backendApi}/players/alt-groups?page=${page.value}&limit=${limit}`
     );
-
-    if (response.status === 403) {
-      navigateTo("/players");
-      return;
-    }
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch alt account groups");
-    }
-
-    const data: { data: AltAccountGroupsResponse } = await response.json();
     altGroups.value = data.data.alt_groups || [];
     totalGroups.value = data.data.total_groups || 0;
   } catch (err: any) {
+    if (err?.response?.status === 403 || err?.statusCode === 403) {
+      navigateTo("/players");
+      return;
+    }
     error.value = extractApiErrorMessage(err, "Failed to load alt account groups");
   } finally {
     loading.value = false;
@@ -186,21 +164,21 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="container mx-auto p-3 sm:p-4 lg:p-6">
+  <div class="p-4 md:p-6">
     <!-- Header -->
-    <div class="flex items-center gap-3 mb-6">
+    <div class="flex items-start gap-3">
       <Button variant="ghost" size="icon" @click="router.push('/players')">
         <ChevronLeft class="h-5 w-5" />
       </Button>
-      <div>
-        <h1 class="text-xl sm:text-2xl font-bold flex items-center gap-2">
+      <PageHeader
+        class="flex-1"
+        title="Suspected Alt Accounts"
+        description="Players who have connected from the same IP address"
+      >
+        <template #title-extra>
           <Users class="h-6 w-6 text-orange-500" />
-          Suspected Alt Accounts
-        </h1>
-        <p class="text-sm text-muted-foreground mt-1">
-          Players who have connected from the same IP address
-        </p>
-      </div>
+        </template>
+      </PageHeader>
     </div>
 
     <!-- Warning Banner -->

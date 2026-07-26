@@ -1,11 +1,9 @@
 <template>
-    <div class="p-4">
-        <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold">Server Settings</h1>
-            <p class="text-sm text-muted-foreground">
-                Manage your server configuration and settings
-            </p>
-        </div>
+    <div class="p-4 md:p-6">
+        <PageHeader
+            title="Server Settings"
+            description="Manage your server configuration and settings"
+        />
 
         <!-- Server Status Card -->
         <Card class="mb-4">
@@ -509,7 +507,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { useToast } from "~/components/ui/toast";
+import PageHeader from "~/components/layout/PageHeader.vue";
+import { toast } from "~/components/ui/toast";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -529,11 +528,6 @@ definePageMeta({ middleware: ["auth"] });
 
 const route = useRoute();
 const router = useRouter();
-const { toast } = useToast();
-
-const runtimeConfig = useRuntimeConfig();
-const cookieToken = useCookie(runtimeConfig.public.sessionCookieName as string);
-const token = cookieToken.value;
 
 const serverId = route.params.serverId;
 const serverStatus = ref<any>(null);
@@ -570,12 +564,9 @@ const selectedLogSourceType = ref<string>("");
 // Fetch server details
 const fetchServerDetails = async () => {
     try {
-        const response = await fetch(`/api/servers/${serverId}`, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
-        });
-        const data = await response.json();
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}`,
+        );
 
         if (data.code === 200) {
             serverForm.value = {
@@ -605,7 +596,10 @@ const fetchServerDetails = async () => {
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to fetch server details",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to fetch server details",
+            ),
             variant: "destructive",
         });
     }
@@ -613,14 +607,15 @@ const fetchServerDetails = async () => {
 
 // fetch server status
 const fetchServerStatus = async () => {
-    const response = await fetch(`/api/servers/${serverId}/status?log_probe=1`, {
-        headers: {
-            Authorization: `Bearer ${token}`,
-        },
-    });
-    const data = await response.json();
-    if (data.code === 200) {
-        serverStatus.value = data.data.status;
+    try {
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}/status?log_probe=1`,
+        );
+        if (data.code === 200) {
+            serverStatus.value = data.data.status;
+        }
+    } catch {
+        // Status probe failures were previously silent; keep them non-fatal.
     }
 };
 
@@ -655,16 +650,14 @@ const updateServer = async () => {
                 : null,
         };
 
-        const response = await fetch(`/api/servers/${serverId}`, {
-            method: "PUT",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}`,
+            {
+                method: "PUT",
+                body: payload,
             },
-            body: JSON.stringify(payload),
-        });
+        );
 
-        const data = await response.json();
         if (data.code === 200) {
             toast({
                 title: "Success",
@@ -683,7 +676,10 @@ const updateServer = async () => {
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to update server",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to update server",
+            ),
             variant: "destructive",
         });
     } finally {
@@ -695,18 +691,13 @@ const updateServer = async () => {
 const restartRcon = async () => {
     isRestarting.value = true;
     try {
-        const response = await fetch(
+        const data = await useAuthFetchImperative<any>(
             `/api/servers/${serverId}/rcon/force-restart`,
             {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
-        const data = await response.json();
         if (data.code === 200) {
             toast({
                 title: "Success",
@@ -726,7 +717,10 @@ const restartRcon = async () => {
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to restart RCON connection",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to restart RCON connection",
+            ),
             variant: "destructive",
         });
     } finally {
@@ -738,18 +732,13 @@ const restartRcon = async () => {
 const restartLogWatcher = async () => {
     isRestarting.value = true;
     try {
-        const response = await fetch(
+        const data = await useAuthFetchImperative<any>(
             `/api/servers/${serverId}/logwatcher/restart`,
             {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
             },
         );
 
-        const data = await response.json();
         if (data.code === 200) {
             toast({
                 title: "Success",
@@ -769,7 +758,10 @@ const restartLogWatcher = async () => {
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to restart log watcher",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to restart log watcher",
+            ),
             variant: "destructive",
         });
     } finally {
@@ -786,14 +778,13 @@ const confirmDelete = () => {
 const deleteServer = async () => {
     isDeleting.value = true;
     try {
-        const response = await fetch(`/api/servers/${serverId}`, {
-            method: "DELETE",
-            headers: {
-                Authorization: `Bearer ${token}`,
+        const data = await useAuthFetchImperative<any>(
+            `/api/servers/${serverId}`,
+            {
+                method: "DELETE",
             },
-        });
+        );
 
-        const data = await response.json();
         if (data.code === 200) {
             toast({
                 title: "Success",
@@ -811,7 +802,10 @@ const deleteServer = async () => {
     } catch (error) {
         toast({
             title: "Error",
-            description: "Failed to delete server",
+            description: extractApiErrorMessage(
+                error,
+                "Failed to delete server",
+            ),
             variant: "destructive",
         });
     } finally {

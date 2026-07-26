@@ -14,6 +14,12 @@ import {
   formatChartTooltipTime,
   toChartTime,
 } from "./time";
+import {
+  chartPalette,
+  chartTooltipDomStyles,
+  readToken,
+  useChartTheme,
+} from "./theme";
 
 interface PlayerCountValue {
   player_count: number;
@@ -82,12 +88,12 @@ const getChartOptions = (chartData: any[]) => {
     yField: "value",
     seriesField: "type",
     smooth: false,
-    color: ["#3b82f6", "#f59e0b", "#10b981"],
+    color: chartPalette().slice(0, 3),
     point: {
       size: 3,
       shape: "circle",
       style: {
-        stroke: "#fff",
+        stroke: readToken("--background"),
         lineWidth: 1,
       },
     },
@@ -101,19 +107,20 @@ const getChartOptions = (chartData: any[]) => {
     yAxis: {
       title: {
         text: "Players",
-        style: chartAxisTitleStyle,
+        style: chartAxisTitleStyle(),
       },
       label: {
-        style: chartAxisLabelStyle,
+        style: chartAxisLabelStyle(),
       },
       grid: {
         line: {
-          style: chartGridLineStyle,
+          style: chartGridLineStyle(),
         },
       },
       min: 0,
     },
     tooltip: {
+      domStyles: chartTooltipDomStyles(),
       customContent: (title, items) => {
         if (!items || items.length === 0) return "";
         const time = items[0].data.time;
@@ -161,18 +168,21 @@ const updateChart = () => {
   chart.update(getChartOptions(chartData));
 };
 
+// Destroy and recreate so options (and theme colors) are rebuilt
+const rebuildChart = () => {
+  if (chart) {
+    chart.destroy();
+    chart = null;
+  }
+  createChart();
+};
+
 // Watch for data changes
 watch(() => props.data, updateChart, { deep: true });
-watch(
-  () => props.period,
-  () => {
-    if (chart) {
-      chart.destroy();
-      chart = null;
-    }
-    createChart();
-  }
-);
+watch(() => props.period, rebuildChart);
+
+// Re-render with fresh colors when the theme changes
+useChartTheme(rebuildChart);
 
 // Lifecycle
 onMounted(() => {

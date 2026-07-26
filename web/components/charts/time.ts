@@ -1,20 +1,22 @@
+import { chartAxisTextColor, chartGridColor } from "./theme";
+
 type ChartTimeValue = string | number | Date;
 
-export const chartAxisLabelStyle = {
+export const chartAxisLabelStyle = () => ({
   fontSize: 11,
-  fill: "#666",
-};
+  fill: chartAxisTextColor(),
+});
 
-export const chartAxisTitleStyle = {
+export const chartAxisTitleStyle = () => ({
   fontSize: 12,
-  fill: "#666",
-};
+  fill: chartAxisTextColor(),
+});
 
-export const chartGridLineStyle = {
-  stroke: "#e5e7eb",
+export const chartGridLineStyle = () => ({
+  stroke: chartGridColor(),
   lineWidth: 1,
   lineDash: [4, 5] as number[],
-};
+});
 
 const shortTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
@@ -136,10 +138,10 @@ export const buildTimeMeta = (timestamps: ChartTimeValue[]) => ({
 export const buildTimeAxis = (timestamps: ChartTimeValue[]) => ({
   title: {
     text: "Time",
-    style: chartAxisTitleStyle,
+    style: chartAxisTitleStyle(),
   },
   label: {
-    style: chartAxisLabelStyle,
+    style: chartAxisLabelStyle(),
     autoRotate: false,
     autoHide: true,
     formatter: (value: string) => formatChartAxisTime(value, timestamps),

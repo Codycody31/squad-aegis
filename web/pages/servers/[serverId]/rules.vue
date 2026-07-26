@@ -4,9 +4,10 @@ import { generateUUID } from '~/utils/uuid'
 import { onBeforeRouteLeave } from 'vue-router'
 import { FileText, Layers, Download, Code, Upload, Save, ChevronDown, ChevronUp, Minimize2, Maximize2, Plus } from 'lucide-vue-next'
 import RuleComponent from '~/components/RuleComponent.vue'
+import PageHeader from "~/components/layout/PageHeader.vue";
 import { Button } from "~/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card"
-import { useToast } from "~/components/ui/toast"
+import { toast } from "~/components/ui/toast"
 import { useAuthStore } from "~/stores/auth"
 import { UI_PERMISSIONS } from "~/constants/permissions"
 
@@ -41,7 +42,6 @@ interface ServerRule {
 
 const route = useRoute();
 const serverId = route.params.serverId as string;
-const { toast } = useToast();
 const authStore = useAuthStore();
 
 // Check if user can manage rules using the PBAC permission system
@@ -781,90 +781,86 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="rules-builder p-6 max-w-6xl mx-auto">
+  <div class="rules-builder p-4 md:p-6 max-w-6xl mx-auto">
     <!-- Header -->
-    <div class="mb-6">
-      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 class="text-2xl font-bold mb-2">Rules Builder</h1>
-          <p class="text-muted-foreground">Create and manage server rules with numbered sections and subsections</p>
-        </div>
-        
-        <div class="flex items-center gap-2">
-          <!-- Import Button -->
-          <div v-if="canManage" class="relative">
-            <input
-              type="file"
-              ref="fileInput"
-              @change="handleFileImport"
-              accept=".json,.txt"
-              class="hidden"
-            />
-            <Button
-              @click="fileInput?.click()"
-              variant="outline"
-              size="sm"
-              class="flex items-center"
-            >
-              <Upload class="w-4 h-4 mr-2" />
-              Import
-            </Button>
-          </div>
-          
-          <!-- Save Button -->
+    <PageHeader
+      title="Rules Builder"
+      description="Create and manage server rules with numbered sections and subsections"
+    >
+      <template #actions>
+        <!-- Import Button -->
+        <div v-if="canManage" class="relative">
+          <input
+            type="file"
+            ref="fileInput"
+            @change="handleFileImport"
+            accept=".json,.txt"
+            class="hidden"
+          />
           <Button
-            v-if="canManage"
-            @click="saveAllRules"
-            :disabled="isSaving || (!hasUnsavedChanges && deletedRuleIds.length === 0)"
-            :variant="(hasUnsavedChanges || deletedRuleIds.length > 0) ? 'default' : 'outline'"
+            @click="fileInput?.click()"
+            variant="outline"
             size="sm"
             class="flex items-center"
           >
-            <span v-if="isSaving" class="h-4 w-4 mr-2 animate-spin">
-              <svg class="animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            </span>
-            <Save v-else class="h-4 w-4 mr-2" />
-            {{ isSaving ? 'Saving...' : 'Save' }}
+            <Upload class="w-4 h-4 mr-2" />
+            Import
           </Button>
-          
-          <!-- Export Dropdown -->
-          <div class="relative">
-            <Button
-              @click="showExportDropdown = !showExportDropdown"
-              variant="outline"
-              size="sm"
-              class="flex items-center"
+        </div>
+
+        <!-- Save Button -->
+        <Button
+          v-if="canManage"
+          @click="saveAllRules"
+          :disabled="isSaving || (!hasUnsavedChanges && deletedRuleIds.length === 0)"
+          :variant="(hasUnsavedChanges || deletedRuleIds.length > 0) ? 'default' : 'outline'"
+          size="sm"
+          class="flex items-center"
+        >
+          <span v-if="isSaving" class="h-4 w-4 mr-2 animate-spin">
+            <svg class="animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          </span>
+          <Save v-else class="h-4 w-4 mr-2" />
+          {{ isSaving ? 'Saving...' : 'Save' }}
+        </Button>
+
+        <!-- Export Dropdown -->
+        <div class="relative">
+          <Button
+            @click="showExportDropdown = !showExportDropdown"
+            variant="outline"
+            size="sm"
+            class="flex items-center"
+          >
+            <Download class="w-4 h-4 mr-2" />
+            Export
+          </Button>
+
+          <div
+            v-if="showExportDropdown"
+            class="absolute right-0 mt-2 w-40 bg-background border rounded-lg shadow-lg z-10"
+          >
+            <button
+              @click="exportAsText"
+              class="w-full text-left px-3 py-2 hover:bg-accent flex items-center text-sm"
             >
-              <Download class="w-4 h-4 mr-2" />
-              Export
-            </Button>
-            
-            <div 
-              v-if="showExportDropdown"
-              class="absolute right-0 mt-2 w-40 bg-background border rounded-lg shadow-lg z-10"
+              <FileText class="w-4 h-4 mr-2" />
+              Text
+            </button>
+            <button
+              @click="exportAsJson"
+              class="w-full text-left px-3 py-2 hover:bg-accent flex items-center text-sm"
             >
-              <button
-                @click="exportAsText"
-                class="w-full text-left px-3 py-2 hover:bg-accent flex items-center text-sm"
-              >
-                <FileText class="w-4 h-4 mr-2" />
-                Text
-              </button>
-              <button
-                @click="exportAsJson"
-                class="w-full text-left px-3 py-2 hover:bg-accent flex items-center text-sm"
-              >
-                <Code class="w-4 h-4 mr-2" />
-                JSON
-              </button>
-            </div>
+              <Code class="w-4 h-4 mr-2" />
+              JSON
+            </button>
           </div>
         </div>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Preview Panel (moved to top, collapsed by default) -->
     <Card class="mb-6">

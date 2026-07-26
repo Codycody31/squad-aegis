@@ -1,13 +1,26 @@
 <template>
-  <div class="flex flex-col h-[calc(100vh-6rem)] sm:h-[calc(100vh-8rem)] p-3 sm:p-6">
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 flex-shrink-0 gap-3">
-      <div>
-        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Live Feeds</h1>
-        <p class="text-sm sm:text-base text-muted-foreground">
-          Real-time chat messages, player connections, and teamkills
-        </p>
-      </div>
-      <div class="flex items-center space-x-2">
+  <div class="flex flex-col h-[calc(100vh-6rem)] sm:h-[calc(100vh-8rem)] p-4 md:p-6">
+    <PageHeader
+      title="Feeds"
+      description="Real-time chat messages, player connections, and teamkills"
+      class="flex-shrink-0"
+    >
+      <template #title-extra>
+        <span class="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+          <span
+            class="h-2 w-2 rounded-full"
+            :class="
+              isConnected
+                ? 'bg-green-500'
+                : connecting
+                ? 'bg-yellow-500 animate-pulse'
+                : 'bg-red-500'
+            "
+          ></span>
+          {{ isConnected ? "Live" : connecting ? "Connecting" : "Disconnected" }}
+        </span>
+      </template>
+      <template #actions>
         <Button
           variant="outline"
           size="sm"
@@ -25,8 +38,8 @@
           <Icon name="mdi:delete" class="h-4 w-4 sm:mr-2" />
           <span class="hidden sm:inline">Clear All</span>
         </Button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Connection Status -->
     <div v-if="connecting || error" class="mb-3 sm:mb-4 flex-shrink-0">
@@ -67,30 +80,30 @@
           <span class="hidden sm:inline">Chat Messages</span>
           <span class="sm:hidden">Chat</span>
           <span
-            v-if="hasUnread.chat"
-            class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
+            v-if="unreadCounts.chat > 0"
+            class="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-red-500 px-1 text-[10px] font-semibold leading-none text-white"
             title="New messages available"
-          ></span>
+          >{{ unreadCounts.chat > 99 ? "99+" : unreadCounts.chat }}</span>
         </TabsTrigger>
         <TabsTrigger value="connections" class="relative text-xs sm:text-sm">
           <Icon name="mdi:account-multiple" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
           <span class="hidden sm:inline">Player Connections</span>
           <span class="sm:hidden">Connections</span>
           <span
-            v-if="hasUnread.connections"
-            class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
+            v-if="unreadCounts.connections > 0"
+            class="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-red-500 px-1 text-[10px] font-semibold leading-none text-white"
             title="New connections available"
-          ></span>
+          >{{ unreadCounts.connections > 99 ? "99+" : unreadCounts.connections }}</span>
         </TabsTrigger>
         <TabsTrigger value="teamkills" class="relative text-xs sm:text-sm">
           <Icon name="mdi:skull" class="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
           <span class="hidden sm:inline">Teamkills</span>
           <span class="sm:hidden">TKs</span>
           <span
-            v-if="hasUnread.teamkills"
-            class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 bg-red-500 rounded-full border-2 border-background animate-pulse"
+            v-if="unreadCounts.teamkills > 0"
+            class="absolute -top-1.5 -right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-background bg-red-500 px-1 text-[10px] font-semibold leading-none text-white"
             title="New teamkills available"
-          ></span>
+          >{{ unreadCounts.teamkills > 99 ? "99+" : unreadCounts.teamkills }}</span>
         </TabsTrigger>
       </TabsList>
 
@@ -99,7 +112,12 @@
         <div class="flex flex-col h-full space-y-3 sm:space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-shrink-0 gap-2">
             <h3 class="text-base sm:text-lg font-semibold">Chat Messages</h3>
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center gap-2">
+              <Input
+                v-model="filters.chat"
+                placeholder="Filter chat..."
+                class="h-8 w-40 sm:w-56 text-xs sm:text-sm"
+              />
               <Button variant="outline" size="sm" @click="scrollToBottom('chat')" class="text-xs sm:text-sm">
                 <Icon name="mdi:arrow-down" class="h-4 w-4 sm:mr-2" />
                 <span class="hidden sm:inline">Bottom</span>
@@ -111,7 +129,16 @@
             </div>
           </div>
           <Card class="flex-1 flex flex-col min-h-0">
-          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
+          <CardContent class="relative p-0 flex-1 flex flex-col min-h-0">
+            <button
+              v-if="!isAtBottom.chat && unreadCounts.chat > 0"
+              type="button"
+              class="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-colors hover:bg-primary/90"
+              @click="scrollToBottom('chat')"
+            >
+              <Icon name="mdi:arrow-down" class="h-3.5 w-3.5" />
+              {{ unreadCounts.chat }} new · jump to latest
+            </button>
             <div
               ref="chatContainer"
               @scroll="(e) => handleScroll(e, 'chat')"
@@ -142,7 +169,7 @@
               </div>
               <div v-else class="space-y-2 p-3 sm:p-4">
                 <div
-                  v-for="message in chatMessages"
+                  v-for="message in filteredChatMessages"
                   :key="message.id"
                   class="flex items-start gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
                 >
@@ -154,7 +181,15 @@
                   </div>
                   <div class="flex-1 min-w-0">
                     <div class="flex flex-wrap items-center gap-2 mb-1.5">
-                      <p class="font-semibold text-sm sm:text-base">
+                      <button
+                        v-if="message.data.steam_id || message.data.eos_id"
+                        type="button"
+                        class="font-semibold text-sm sm:text-base text-left hover:underline cursor-pointer"
+                        @click="openPanel(createPlayerFromFeedData(message.data, message.data.player_name))"
+                      >
+                        {{ message.data.player_name }}
+                      </button>
+                      <p v-else class="font-semibold text-sm sm:text-base">
                         {{ message.data.player_name }}
                       </p>
                       <Badge
@@ -194,13 +229,29 @@
         <div class="flex flex-col h-full space-y-3 sm:space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-shrink-0 gap-2">
             <h3 class="text-base sm:text-lg font-semibold">Player Connections</h3>
-            <Button variant="outline" size="sm" @click="clearFeed('connections')" class="text-xs sm:text-sm">
-              <Icon name="mdi:delete" class="h-4 w-4 sm:mr-2" />
-              <span class="hidden sm:inline">Clear</span>
-            </Button>
+            <div class="flex items-center gap-2">
+              <Input
+                v-model="filters.connections"
+                placeholder="Filter connections..."
+                class="h-8 w-40 sm:w-56 text-xs sm:text-sm"
+              />
+              <Button variant="outline" size="sm" @click="clearFeed('connections')" class="text-xs sm:text-sm">
+                <Icon name="mdi:delete" class="h-4 w-4 sm:mr-2" />
+                <span class="hidden sm:inline">Clear</span>
+              </Button>
+            </div>
           </div>
           <Card class="flex-1 flex flex-col min-h-0">
-          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
+          <CardContent class="relative p-0 flex-1 flex flex-col min-h-0">
+            <button
+              v-if="!isAtBottom.connections && unreadCounts.connections > 0"
+              type="button"
+              class="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-colors hover:bg-primary/90"
+              @click="scrollToBottom('connections')"
+            >
+              <Icon name="mdi:arrow-down" class="h-3.5 w-3.5" />
+              {{ unreadCounts.connections }} new · jump to latest
+            </button>
             <div
               ref="connectionsContainer"
               @scroll="(e) => handleScroll(e, 'connections')"
@@ -229,7 +280,7 @@
               </div>
               <div v-else class="space-y-2 p-3 sm:p-4">
                 <div
-                  v-for="connection in connections"
+                  v-for="connection in filteredConnections"
                   :key="connection.id"
                   class="flex items-start gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
                 >
@@ -256,7 +307,22 @@
                   </div>
                   <div class="flex-1 min-w-0">
                     <div class="flex flex-wrap items-center gap-2 mb-1.5">
-                      <p class="font-semibold text-sm sm:text-base">
+                      <button
+                        v-if="connection.data.steam_id || connection.data.eos_id"
+                        type="button"
+                        class="font-semibold text-sm sm:text-base text-left hover:underline cursor-pointer"
+                        @click="openPanel(createPlayerFromFeedData(
+                          connection.data,
+                          connection.data.player_suffix || connection.data.player_controller,
+                          connection.data.action === 'disconnected'
+                        ))"
+                      >
+                        {{
+                          connection.data.player_suffix ||
+                          connection.data.player_controller
+                        }}
+                      </button>
+                      <p v-else class="font-semibold text-sm sm:text-base">
                         {{
                           connection.data.player_suffix ||
                           connection.data.player_controller
@@ -309,7 +375,12 @@
         <div class="flex flex-col h-full space-y-3 sm:space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-shrink-0 gap-2">
             <h3 class="text-base sm:text-lg font-semibold">Teamkills</h3>
-            <div class="flex items-center space-x-2">
+            <div class="flex items-center gap-2">
+              <Input
+                v-model="filters.teamkills"
+                placeholder="Filter teamkills..."
+                class="h-8 w-40 sm:w-56 text-xs sm:text-sm"
+              />
               <Button
                 variant="outline"
                 size="sm"
@@ -326,7 +397,16 @@
             </div>
           </div>
           <Card class="flex-1 flex flex-col min-h-0">
-          <CardContent class="p-0 flex-1 flex flex-col min-h-0">
+          <CardContent class="relative p-0 flex-1 flex flex-col min-h-0">
+            <button
+              v-if="!isAtBottom.teamkills && unreadCounts.teamkills > 0"
+              type="button"
+              class="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg transition-colors hover:bg-primary/90"
+              @click="scrollToBottom('teamkills')"
+            >
+              <Icon name="mdi:arrow-down" class="h-3.5 w-3.5" />
+              {{ unreadCounts.teamkills }} new · jump to latest
+            </button>
             <div
               ref="teamkillsContainer"
               @scroll="(e) => handleScroll(e, 'teamkills')"
@@ -355,7 +435,7 @@
               </div>
               <div v-else class="space-y-2 p-3 sm:p-4">
                 <div
-                  v-for="teamkill in teamkills"
+                  v-for="teamkill in filteredTeamkills"
                   :key="teamkill.id"
                   class="flex items-start gap-3 p-3 rounded-lg border bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-900/50 hover:bg-red-100/70 dark:hover:bg-red-950/30 transition-colors"
                 >
@@ -367,7 +447,15 @@
                   <div class="flex-1 min-w-0">
                     <div class="flex flex-wrap items-center gap-2 mb-2">
                       <div class="flex items-center gap-1.5 flex-wrap">
-                        <p class="font-semibold text-sm sm:text-base text-red-700 dark:text-red-400">
+                        <button
+                          v-if="teamkill.data.attacker_steam || teamkill.data.attacker_eos"
+                          type="button"
+                          class="font-semibold text-sm sm:text-base text-left text-red-700 dark:text-red-400 hover:underline cursor-pointer"
+                          @click="openPanel(createPlayerFromFeedData(teamkill.data, teamkill.data.attacker_name))"
+                        >
+                          {{ teamkill.data.attacker_name }}
+                        </button>
+                        <p v-else class="font-semibold text-sm sm:text-base text-red-700 dark:text-red-400">
                           {{ teamkill.data.attacker_name }}
                         </p>
                         <Icon name="mdi:arrow-right" class="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0" />
@@ -411,6 +499,12 @@
         </div>
       </TabsContent>
     </Tabs>
+
+    <PlayerContextPanel
+      v-model:open="panelOpen"
+      :player="panelPlayer"
+      :server-id="serverId"
+    />
   </div>
 </template>
 
@@ -418,10 +512,13 @@
 import { ref, onMounted, onUnmounted, nextTick, computed, watch } from "vue";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Badge } from "~/components/ui/badge";
-import { useToast } from "~/components/ui/toast";
+import { toast } from "~/components/ui/toast";
 import PlayerActionMenu from "~/components/PlayerActionMenu.vue";
+import PlayerContextPanel from "~/components/player-panel/PlayerContextPanel.vue";
+import PageHeader from "~/components/layout/PageHeader.vue";
 import type { Player } from "~/types";
 import { Icon } from "#components";
 
@@ -431,7 +528,6 @@ definePageMeta({
 
 const route = useRoute();
 const serverId = route.params.serverId as string;
-const { toast } = useToast();
 
 // Reactive state
 const activeTab = ref("chat");
@@ -474,11 +570,76 @@ const isAtBottom = ref({
   teamkills: true,
 });
 
-// Unread notifications per feed type
-const hasUnread = ref({
-  chat: false,
-  connections: false,
-  teamkills: false,
+// Unread counts per feed type (accumulated while scrolled up or on another tab)
+const unreadCounts = ref({
+  chat: 0,
+  connections: 0,
+  teamkills: 0,
+});
+
+// Slide-over player context panel
+const { isOpen: panelOpen, selected: panelPlayer, openPanel } = usePlayerPanel();
+
+// Per-tab client-side filters (persisted in sessionStorage)
+const filters = ref({
+  chat: "",
+  connections: "",
+  teamkills: "",
+});
+
+const filterTabs = ["chat", "connections", "teamkills"] as const;
+const filterStorageKey = (tab: string) => `aegis:feeds:${serverId}:filter:${tab}`;
+
+watch(
+  filters,
+  (value) => {
+    for (const tab of filterTabs) {
+      sessionStorage.setItem(filterStorageKey(tab), value[tab]);
+    }
+  },
+  { deep: true }
+);
+
+const filteredChatMessages = computed(() => {
+  const query = filters.value.chat.trim().toLowerCase();
+  if (!query) return chatMessages.value;
+  return chatMessages.value.filter((message) => {
+    const data = message.data || {};
+    return (
+      String(data.player_name || "").toLowerCase().includes(query) ||
+      String(data.message || "").toLowerCase().includes(query) ||
+      String(data.steam_id || "").toLowerCase().includes(query)
+    );
+  });
+});
+
+const filteredConnections = computed(() => {
+  const query = filters.value.connections.trim().toLowerCase();
+  if (!query) return connections.value;
+  return connections.value.filter((connection) => {
+    const data = connection.data || {};
+    const name = data.player_suffix || data.player_controller || "";
+    return (
+      String(name).toLowerCase().includes(query) ||
+      String(data.steam_id || "").toLowerCase().includes(query) ||
+      String(data.eos_id || "").toLowerCase().includes(query) ||
+      String(data.ip_address || "").toLowerCase().includes(query) ||
+      String(data.action || "").toLowerCase().includes(query)
+    );
+  });
+});
+
+const filteredTeamkills = computed(() => {
+  const query = filters.value.teamkills.trim().toLowerCase();
+  if (!query) return teamkills.value;
+  return teamkills.value.filter((teamkill) => {
+    const data = teamkill.data || {};
+    return (
+      String(data.attacker_name || "").toLowerCase().includes(query) ||
+      String(data.victim_name || "").toLowerCase().includes(query) ||
+      String(data.weapon || "").toLowerCase().includes(query)
+    );
+  });
 });
 
 
@@ -496,10 +657,10 @@ const loadInitialHistoricalData = async () => {
     scrollToBottom("chat");
     scrollToBottom("connections");
     scrollToBottom("teamkills");
-    // Clear unread notifications on initial load
-    hasUnread.value.chat = false;
-    hasUnread.value.connections = false;
-    hasUnread.value.teamkills = false;
+    // Clear unread counts on initial load
+    unreadCounts.value.chat = 0;
+    unreadCounts.value.connections = 0;
+    unreadCounts.value.teamkills = 0;
   }, 100);
 };
 
@@ -569,9 +730,9 @@ const handleScroll = async (event: Event, feedType: string) => {
   const atBottom = scrollHeight - scrollTop - clientHeight < 100;
   isAtBottom.value[feedType as keyof typeof isAtBottom.value] = atBottom;
 
-  // Clear unread notification if user scrolls to bottom
+  // Clear unread count if user scrolls to bottom
   if (atBottom) {
-    hasUnread.value[feedType as keyof typeof hasUnread.value] = false;
+    unreadCounts.value[feedType as keyof typeof unreadCounts.value] = 0;
   }
 
   // Load older data when scrolling near the top
@@ -713,11 +874,15 @@ const handleFeedEvent = (event: any) => {
       if (chatMessages.value.length > maxEvents) {
         chatMessages.value = chatMessages.value.slice(-maxEvents);
       }
-      // Set unread notification if user is not at bottom or not viewing this tab
+      // Count unread if user is not at bottom or not viewing this tab
       if (!isAtBottom.value.chat || activeTab.value !== "chat") {
-        hasUnread.value.chat = true;
+        unreadCounts.value.chat++;
       }
-      if (isAtBottom.value.chat && activeTab.value === "chat") {
+      if (
+        isAtBottom.value.chat &&
+        activeTab.value === "chat" &&
+        !filters.value.chat.trim()
+      ) {
         nextTick(() => scrollToBottom("chat"));
       }
       break;
@@ -727,11 +892,15 @@ const handleFeedEvent = (event: any) => {
       if (connections.value.length > maxEvents) {
         connections.value = connections.value.slice(-maxEvents);
       }
-      // Set unread notification if user is not at bottom or not viewing this tab
+      // Count unread if user is not at bottom or not viewing this tab
       if (!isAtBottom.value.connections || activeTab.value !== "connections") {
-        hasUnread.value.connections = true;
+        unreadCounts.value.connections++;
       }
-      if (isAtBottom.value.connections && activeTab.value === "connections") {
+      if (
+        isAtBottom.value.connections &&
+        activeTab.value === "connections" &&
+        !filters.value.connections.trim()
+      ) {
         nextTick(() => scrollToBottom("connections"));
       }
       break;
@@ -741,11 +910,15 @@ const handleFeedEvent = (event: any) => {
       if (teamkills.value.length > maxEvents) {
         teamkills.value = teamkills.value.slice(-maxEvents);
       }
-      // Set unread notification if user is not at bottom or not viewing this tab
+      // Count unread if user is not at bottom or not viewing this tab
       if (!isAtBottom.value.teamkills || activeTab.value !== "teamkills") {
-        hasUnread.value.teamkills = true;
+        unreadCounts.value.teamkills++;
       }
-      if (isAtBottom.value.teamkills && activeTab.value === "teamkills") {
+      if (
+        isAtBottom.value.teamkills &&
+        activeTab.value === "teamkills" &&
+        !filters.value.teamkills.trim()
+      ) {
         nextTick(() => scrollToBottom("teamkills"));
       }
       break;
@@ -759,19 +932,19 @@ const clearFeed = (feedType: string) => {
       chatMessages.value = [];
       oldestChatTime.value = null;
       hasMoreChat.value = true;
-      hasUnread.value.chat = false;
+      unreadCounts.value.chat = 0;
       break;
     case "connections":
       connections.value = [];
       oldestConnectionTime.value = null;
       hasMoreConnections.value = true;
-      hasUnread.value.connections = false;
+      unreadCounts.value.connections = 0;
       break;
     case "teamkills":
       teamkills.value = [];
       oldestTeamkillTime.value = null;
       hasMoreTeamkills.value = true;
-      hasUnread.value.teamkills = false;
+      unreadCounts.value.teamkills = 0;
       break;
   }
 };
@@ -813,8 +986,8 @@ const scrollToBottom = (feedType: string) => {
   if (container) {
     container.scrollTop = container.scrollHeight;
     isAtBottom.value[feedType as keyof typeof isAtBottom.value] = true;
-    // Clear unread notification when scrolling to bottom
-    hasUnread.value[feedType as keyof typeof hasUnread.value] = false;
+    // Clear unread count when scrolling to bottom
+    unreadCounts.value[feedType as keyof typeof unreadCounts.value] = 0;
   }
 };
 
@@ -905,13 +1078,21 @@ watch(activeTab, async (newTab) => {
   // Add a small delay to ensure the tab content is fully rendered
   setTimeout(() => {
     scrollToBottom(newTab);
-    // Clear unread notification when switching to a tab (scrollToBottom already clears it, but ensure it's cleared)
-    hasUnread.value[newTab as keyof typeof hasUnread.value] = false;
+    // Clear unread count when switching to a tab (scrollToBottom already clears it, but ensure it's cleared)
+    unreadCounts.value[newTab as keyof typeof unreadCounts.value] = 0;
   }, 50);
 });
 
 // Lifecycle
 onMounted(async () => {
+  // Restore persisted per-tab filters
+  for (const tab of filterTabs) {
+    const saved = sessionStorage.getItem(filterStorageKey(tab));
+    if (saved) {
+      filters.value[tab] = saved;
+    }
+  }
+
   loading.value = true;
   try {
     // Load historical data first

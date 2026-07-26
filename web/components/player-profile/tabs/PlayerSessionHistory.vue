@@ -45,35 +45,15 @@ async function fetchSessions() {
   loading.value = true;
   error.value = null;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
     const params = new URLSearchParams({
       page: page.value.toString(),
       limit: limit.value.toString(),
     });
 
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/${props.playerId}/sessions?${params}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
+    const data = await useAuthFetchImperative<any>(
+      `${runtimeConfig.public.backendApi}/players/${props.playerId}/sessions?${params}`
     );
-
-    if (!response.ok) throw new Error("Failed to fetch session history");
-
-    const data = await response.json();
     sessions.value = data.data.sessions || [];
     canViewIP.value = data.data.can_view_ip || false;
   } catch (err: any) {

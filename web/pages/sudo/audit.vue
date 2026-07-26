@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "~/components/ui/table";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Button } from "~/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
+import PageHeader from "~/components/layout/PageHeader.vue";
+import DataTable from "~/components/data-table/DataTable.vue";
+import type { DataTableColumn } from "~/components/data-table/types";
 import type { GlobalAuditLog } from "~/types";
 
 definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
@@ -18,17 +25,31 @@ const actionFilter = ref("all");
 const currentPage = ref(1);
 const totalPages = ref(1);
 
+const columns: DataTableColumn<GlobalAuditLog>[] = [
+  {
+    key: "timestamp",
+    label: "Timestamp",
+    accessor: (log) => new Date(log.timestamp).toLocaleString(),
+  },
+  { key: "server_name", label: "Server", accessor: (log) => log.server_name || "N/A" },
+  { key: "username", label: "User", accessor: (log) => log.username || "System" },
+  { key: "action", label: "Action" },
+];
+
 const fetchLogs = async () => {
   loading.value = true;
   try {
-    const res = await useAuthFetchImperative<any>(`${runtimeConfig.public.backendApi}/sudo/audit/logs`, {
-      params: {
-        page: currentPage.value,
-        limit: 50,
-        search: searchQuery.value,
-        action: actionFilter.value,
-      },
-    });
+    const res = await useAuthFetchImperative<any>(
+      `${runtimeConfig.public.backendApi}/sudo/audit/logs`,
+      {
+        params: {
+          page: currentPage.value,
+          limit: 50,
+          search: searchQuery.value,
+          action: actionFilter.value,
+        },
+      }
+    );
     logs.value = res.data.logs;
     totalPages.value = res.data.pagination.total_pages;
   } catch (err: any) {
@@ -42,57 +63,69 @@ onMounted(fetchLogs);
 </script>
 
 <template>
-  <div class="p-6 space-y-6">
-    <h1 class="text-3xl font-bold">Global Audit Logs</h1>
+  <div class="space-y-6 p-4 md:p-6">
+    <PageHeader
+      title="Global Audit Logs"
+      description="Admin actions across every server on this instance."
+    />
 
     <Card>
       <CardHeader>
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between gap-2">
           <div>
             <CardTitle>Audit Logs</CardTitle>
-            <CardDescription>View all admin actions across all servers</CardDescription>
+            <CardDescription>
+              View all admin actions across all servers
+            </CardDescription>
           </div>
           <div class="flex items-center gap-2">
-            <Input v-model="searchQuery" placeholder="Search..." class="w-64" @input="fetchLogs" />
-            <Button @click="fetchLogs" size="sm"><Icon name="mdi:refresh" /></Button>
+            <Input
+              v-model="searchQuery"
+              placeholder="Search..."
+              class="w-64"
+              @input="fetchLogs"
+            />
+            <Button @click="fetchLogs" size="sm">
+              <Icon name="mdi:refresh" />
+            </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        <div v-if="loading" class="flex items-center justify-center py-12">
-          <div class="text-muted-foreground">Loading logs...</div>
-        </div>
+        <DataTable
+          :columns="columns"
+          :rows="logs"
+          row-key="id"
+          sort-mode="server"
+          :loading="loading && logs.length === 0"
+          empty-text="No audit logs found."
+        />
 
-        <div v-else>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Timestamp</TableHead>
-                <TableHead>Server</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="log in logs" :key="log.id">
-                <TableCell>{{ new Date(log.timestamp).toLocaleString() }}</TableCell>
-                <TableCell>{{ log.server_name || "N/A" }}</TableCell>
-                <TableCell>{{ log.username || "System" }}</TableCell>
-                <TableCell>{{ log.action }}</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-
-          <div v-if="totalPages > 1" class="flex items-center justify-between mt-4">
-            <div class="text-sm text-muted-foreground">Page {{ currentPage }} of {{ totalPages }}</div>
-            <div class="flex gap-2">
-              <Button @click="currentPage--; fetchLogs()" :disabled="currentPage === 1" size="sm">Previous</Button>
-              <Button @click="currentPage++; fetchLogs()" :disabled="currentPage === totalPages" size="sm">Next</Button>
-            </div>
+        <div
+          v-if="totalPages > 1"
+          class="mt-4 flex items-center justify-between"
+        >
+          <div class="text-sm text-muted-foreground">
+            Page {{ currentPage }} of {{ totalPages }}
+          </div>
+          <div class="flex gap-2">
+            <Button
+              @click="currentPage--; fetchLogs()"
+              :disabled="currentPage === 1"
+              size="sm"
+            >
+              Previous
+            </Button>
+            <Button
+              @click="currentPage++; fetchLogs()"
+              :disabled="currentPage === totalPages"
+              size="sm"
+            >
+              Next
+            </Button>
           </div>
         </div>
       </CardContent>
     </Card>
   </div>
 </template>
-

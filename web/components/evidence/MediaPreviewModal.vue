@@ -49,11 +49,9 @@ async function loadTextContent() {
   loadError.value = null;
 
   try {
-    const response = await fetch(props.previewUrl, {
-      credentials: "include",
+    textContent.value = await useAuthFetchImperative<string>(props.previewUrl, {
+      responseType: "text",
     });
-    if (!response.ok) throw new Error("Failed to load text content");
-    textContent.value = await response.text();
   } catch (error) {
     loadError.value = "Failed to load file content";
     textContent.value = "";

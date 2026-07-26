@@ -4,7 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { Button } from "~/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { useAuthStore } from "@/stores/auth";
-import type { PlayerProfile, CBLUser, CBLBan } from "~/types/player";
+import type { PlayerProfile } from "~/types/player";
+import PageHeader from "~/components/layout/PageHeader.vue";
 
 // Import new components
 import PlayerAlertBanner from "~/components/player-profile/PlayerAlertBanner.vue";
@@ -28,8 +29,7 @@ const router = useRouter();
 const loading = ref(true);
 const error = ref<string | null>(null);
 const player = ref<PlayerProfile | null>(null);
-const cblData = ref<CBLUser | null>(null);
-const cblLoading = ref(false);
+const { cblData, cblLoading, fetchCBLData, reset: resetCBL } = useCBL();
 
 interface PlayerResponse {
   data: {
@@ -37,155 +37,23 @@ interface PlayerResponse {
   };
 }
 
-interface CBLBanEdge {
-  node: CBLBan | null;
-}
-interface CBLBanConnection {
-  edges: CBLBanEdge[] | null;
-}
-type CBLUserRaw = Omit<CBLUser, "activeBans" | "expiredBans"> & {
-  activeBans: CBLBanConnection | null;
-  expiredBans: CBLBanConnection | null;
-};
-
-interface CBLGraphQLResponse {
-  data: {
-    steamUser: CBLUserRaw | null;
-  };
-  errors?: any[];
-}
-
 async function fetchPlayerProfile() {
   loading.value = true;
   error.value = null;
-  cblData.value = null;
+  resetCBL();
 
   const playerId = route.params.playerId as string;
 
-  const cookieToken = useCookie(
-    runtimeConfig.public.sessionCookieName as string
-  );
-  const token = cookieToken.value;
-
-  if (!token) {
-    error.value = "Authentication required";
-    loading.value = false;
-    return;
-  }
-
   try {
-    const response = await fetch(
-      `${runtimeConfig.public.backendApi}/players/${playerId}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        credentials: "include",
-      }
+    const data = await useAuthFetchImperative<PlayerResponse>(
+      `${runtimeConfig.public.backendApi}/players/${playerId}`
     );
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to fetch player profile");
-    }
-
-    const data: PlayerResponse = await response.json();
     player.value = data.data.player;
   } catch (err: any) {
     error.value =
       extractApiErrorMessage(err, "An error occurred while fetching player profile");
   } finally {
     loading.value = false;
-  }
-}
-
-async function fetchCBLData(steamId: string) {
-  cblLoading.value = true;
-
-  const query = `
-    query Search($id: String!) {
-      steamUser(id: $id) {
-        id
-        name
-        avatarFull
-        reputationPoints
-        riskRating
-        reputationRank
-        lastRefreshedInfo
-        lastRefreshedReputationPoints
-        lastRefreshedReputationRank
-        reputationPointsMonthChange
-        activeBans: bans(orderBy: "created", orderDirection: DESC, expired: false) {
-          edges {
-            node {
-              id
-              created
-              expires
-              reason
-              banList { id name organisation { id name } }
-            }
-          }
-        }
-        expiredBans: bans(orderBy: "created", orderDirection: DESC, expired: true) {
-          edges {
-            node {
-              id
-              created
-              expires
-              reason
-              banList { id name organisation { id name } }
-            }
-          }
-        }
-      }
-    }
-  `;
-
-  try {
-    const response = await fetch("https://communitybanlist.com/graphql", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query,
-        variables: {
-          id: steamId,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch CBL data");
-    }
-
-    const result: CBLGraphQLResponse = await response.json();
-
-    if (result.errors && result.errors.length > 0) {
-      throw new Error("GraphQL errors occurred");
-    }
-
-    const raw = result.data.steamUser;
-    if (raw) {
-      const flatten = (conn: CBLBanConnection | null): CBLBan[] =>
-        (conn?.edges ?? [])
-          .map((e) => e.node)
-          .filter((n): n is CBLBan => n !== null);
-      cblData.value = {
-        ...raw,
-        activeBans: flatten(raw.activeBans),
-        expiredBans: flatten(raw.expiredBans),
-      };
-    } else {
-      cblData.value = null;
-    }
-  } catch (err: any) {
-    console.error("Failed to fetch CBL data:", err);
-    cblData.value = null;
-  } finally {
-    cblLoading.value = false;
   }
 }
 
@@ -227,20 +95,14 @@ watch(
 </script>
 
 <template>
-  <div class="container mx-auto p-3 sm:p-4 lg:p-6">
-    <!-- Back button and title -->
-    <div
-      class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-4 sm:mb-6"
-    >
-      <Button
-        variant="outline"
-        @click="router.push('/players')"
-        class="w-full sm:w-auto"
-      >
-        &larr; Back to Search
-      </Button>
-      <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold">Player Profile</h1>
-    </div>
+  <div class="p-4 md:p-6">
+    <PageHeader title="Player Profile">
+      <template #actions>
+        <Button variant="outline" @click="router.push('/players')">
+          &larr; Back to Search
+        </Button>
+      </template>
+    </PageHeader>
 
     <!-- Loading state -->
     <div v-if="loading" class="flex justify-center items-center py-12">
