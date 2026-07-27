@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_audit_logs_username_snapshot_trgm;

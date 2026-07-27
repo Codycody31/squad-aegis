@@ -1713,6 +1713,7 @@ func (api *eventAPI) SubscribeToEvents(eventTypes []string, handler func(*Plugin
 
 // logAPI implements LogAPI interface
 type logAPI struct {
+	ctx              context.Context
 	serverID         uuid.UUID
 	instanceID       uuid.UUID
 	pluginName       string
@@ -1723,8 +1724,9 @@ type logAPI struct {
 	eventManager     *event_manager.EventManager
 }
 
-func NewLogAPI(serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string, clickhouseClient *clickhouse.Client, db *sql.DB, eventManager *event_manager.EventManager) LogAPI {
+func NewLogAPI(ctx context.Context, serverID, instanceID uuid.UUID, pluginName, pluginID, logLevel string, clickhouseClient *clickhouse.Client, db *sql.DB, eventManager *event_manager.EventManager) LogAPI {
 	return &logAPI{
+		ctx:              ctx,
 		serverID:         serverID,
 		instanceID:       instanceID,
 		pluginName:       pluginName,
@@ -1794,14 +1796,14 @@ func (api *logAPI) recordPluginLog(level, message string, errorMsg *string, fiel
 		}
 	}
 
-	insertQuery := `
+	insertQuery := `/* sa.plugin.logs.write */
 		INSERT INTO squad_aegis.plugin_logs (
 			timestamp, server_id, plugin_instance_id,
 			level, message, error_message, fields
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(api.ctx, 5*time.Second)
 	defer cancel()
 
 	if err := api.clickhouseClient.Exec(ctx, insertQuery,

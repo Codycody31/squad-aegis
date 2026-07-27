@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_server_workflow_executions_trigger_data_gin;

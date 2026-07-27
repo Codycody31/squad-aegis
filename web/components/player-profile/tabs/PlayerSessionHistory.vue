@@ -26,6 +26,7 @@ import {
   Play,
 } from "lucide-vue-next";
 import type { SessionHistoryEntry } from "~/types/player";
+import type { PageInfo } from "~/types";
 import { formatSessionDuration } from "~/utils/formatters";
 
 const props = defineProps<{
@@ -38,8 +39,17 @@ const error = ref<string | null>(null);
 
 const sessions = ref<SessionHistoryEntry[]>([]);
 const canViewIP = ref(false);
-const page = ref(1);
-const limit = ref(50);
+const {
+  limit,
+  cursor,
+  page,
+  canGoPrevious,
+  canGoNext,
+  setPageInfo,
+  reset: resetPagination,
+  next: advancePage,
+  previous: returnToPreviousPage,
+} = useCursorPagination(50);
 
 async function fetchSessions() {
   loading.value = true;
@@ -47,15 +57,24 @@ async function fetchSessions() {
 
   try {
     const params = new URLSearchParams({
-      page: page.value.toString(),
       limit: limit.value.toString(),
     });
+    if (cursor.value) {
+      params.set("cursor", cursor.value);
+    }
 
-    const data = await useAuthFetchImperative<any>(
+    const data = await useAuthFetchImperative<{
+      data: {
+        sessions: SessionHistoryEntry[];
+        can_view_ip: boolean;
+        page_info: PageInfo;
+      };
+    }>(
       `${runtimeConfig.public.backendApi}/players/${props.playerId}/sessions?${params}`
     );
     sessions.value = data.data.sessions || [];
     canViewIP.value = data.data.can_view_ip || false;
+    setPageInfo(data.data.page_info);
   } catch (err: any) {
     error.value = extractApiErrorMessage(err);
   } finally {
@@ -81,13 +100,13 @@ function getTimeAgo(dateString: string): string {
 }
 
 function nextPage() {
-  page.value++;
-  fetchSessions();
+  if (advancePage()) {
+    fetchSessions();
+  }
 }
 
 function prevPage() {
-  if (page.value > 1) {
-    page.value--;
+  if (returnToPreviousPage()) {
     fetchSessions();
   }
 }
@@ -101,7 +120,7 @@ watch(
   (newPlayerId, oldPlayerId) => {
     if (!newPlayerId || newPlayerId === oldPlayerId) return;
 
-    page.value = 1;
+    resetPagination();
     sessions.value = [];
     canViewIP.value = false;
     fetchSessions();
@@ -148,7 +167,7 @@ watch(
             <TableBody>
               <TableRow
                 v-for="(session, index) in sessions"
-                :key="index"
+                :key="`${session.server_id}-${session.connect_time}-${index}`"
                 class="hover:bg-muted/50"
               >
                 <TableCell>
@@ -229,7 +248,7 @@ watch(
         <div class="md:hidden space-y-3">
           <div
             v-for="(session, index) in sessions"
-            :key="index"
+            :key="`${session.server_id}-${session.connect_time}-${index}`"
             class="border rounded-lg p-3 hover:bg-muted/30 transition-colors"
           >
             <div class="flex items-center justify-between mb-2">
@@ -282,27 +301,31 @@ watch(
           </div>
         </div>
 
-        <!-- Pagination -->
-        <div class="flex items-center justify-between mt-4 pt-4 border-t">
-          <div class="text-sm text-muted-foreground">Page {{ page }}</div>
-          <div class="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="page <= 1"
-              @click="prevPage"
-            >
-              <ChevronLeft class="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="sessions.length < limit"
-              @click="nextPage"
-            >
-              <ChevronRight class="h-4 w-4" />
-            </Button>
-          </div>
+      </div>
+
+      <!-- Keep Previous available when a once-valid final page becomes empty. -->
+      <div
+        v-if="canGoPrevious || canGoNext"
+        class="flex items-center justify-between mt-4 pt-4 border-t"
+      >
+        <div class="text-sm text-muted-foreground">Page {{ page }}</div>
+        <div class="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="!canGoPrevious || loading"
+            @click="prevPage"
+          >
+            <ChevronLeft class="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="!canGoNext || loading"
+            @click="nextPage"
+          >
+            <ChevronRight class="h-4 w-4" />
+          </Button>
         </div>
       </div>
     </CardContent>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted, watch } from "vue";
 import {
   Card,
   CardContent,
@@ -12,7 +12,7 @@ import { Button } from "~/components/ui/button";
 import PageHeader from "~/components/layout/PageHeader.vue";
 import DataTable from "~/components/data-table/DataTable.vue";
 import type { DataTableColumn } from "~/components/data-table/types";
-import type { GlobalAuditLog } from "~/types";
+import type { GlobalAuditLog, PageInfo } from "~/types";
 
 definePageMeta({ middleware: ["auth", "sudo"], layout: "sudo" });
 
@@ -22,8 +22,18 @@ const loading = ref(true);
 const logs = ref<GlobalAuditLog[]>([]);
 const searchQuery = ref("");
 const actionFilter = ref("all");
-const currentPage = ref(1);
-const totalPages = ref(1);
+const {
+  limit,
+  cursor,
+  page: currentPage,
+  canGoPrevious,
+  canGoNext,
+  setPageInfo,
+  reset: resetPagination,
+  next: advancePage,
+  previous: returnToPreviousPage,
+} = useCursorPagination(50);
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 const columns: DataTableColumn<GlobalAuditLog>[] = [
   {
@@ -39,19 +49,25 @@ const columns: DataTableColumn<GlobalAuditLog>[] = [
 const fetchLogs = async () => {
   loading.value = true;
   try {
-    const res = await useAuthFetchImperative<any>(
+    const res = await useAuthFetchImperative<{
+      data: {
+        logs: GlobalAuditLog[];
+        page_info: PageInfo;
+      };
+    }>(
       `${runtimeConfig.public.backendApi}/sudo/audit/logs`,
       {
         params: {
-          page: currentPage.value,
-          limit: 50,
+          limit: limit.value,
+          cursor: cursor.value || undefined,
           search: searchQuery.value,
-          action: actionFilter.value,
+          action:
+            actionFilter.value === "all" ? undefined : actionFilter.value,
         },
       }
     );
-    logs.value = res.data.logs;
-    totalPages.value = res.data.pagination.total_pages;
+    logs.value = res.data.logs || [];
+    setPageInfo(res.data.page_info);
   } catch (err: any) {
     console.error("Error fetching audit logs:", err);
   } finally {
@@ -59,7 +75,37 @@ const fetchLogs = async () => {
   }
 };
 
+function nextPage() {
+  if (advancePage()) {
+    fetchLogs();
+  }
+}
+
+function previousPage() {
+  if (returnToPreviousPage()) {
+    fetchLogs();
+  }
+}
+
+watch(searchQuery, () => {
+  resetPagination();
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+  }
+  searchTimer = setTimeout(fetchLogs, 350);
+});
+
+watch(actionFilter, () => {
+  resetPagination();
+  fetchLogs();
+});
+
 onMounted(fetchLogs);
+onUnmounted(() => {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+  }
+});
 </script>
 
 <template>
@@ -83,7 +129,6 @@ onMounted(fetchLogs);
               v-model="searchQuery"
               placeholder="Search..."
               class="w-64"
-              @input="fetchLogs"
             />
             <Button @click="fetchLogs" size="sm">
               <Icon name="mdi:refresh" />
@@ -102,23 +147,23 @@ onMounted(fetchLogs);
         />
 
         <div
-          v-if="totalPages > 1"
+          v-if="canGoPrevious || canGoNext"
           class="mt-4 flex items-center justify-between"
         >
           <div class="text-sm text-muted-foreground">
-            Page {{ currentPage }} of {{ totalPages }}
+            Page {{ currentPage }} · {{ logs.length }} entries
           </div>
           <div class="flex gap-2">
             <Button
-              @click="currentPage--; fetchLogs()"
-              :disabled="currentPage === 1"
+              @click="previousPage"
+              :disabled="!canGoPrevious || loading"
               size="sm"
             >
               Previous
             </Button>
             <Button
-              @click="currentPage++; fetchLogs()"
-              :disabled="currentPage === totalPages"
+              @click="nextPage"
+              :disabled="!canGoNext || loading"
               size="sm"
             >
               Next

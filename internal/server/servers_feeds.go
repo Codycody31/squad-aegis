@@ -161,7 +161,7 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 			return
 		case event := <-subscriber.Channel:
 			// Format event for feeds
-			feedEvent := s.formatEventForFeed(event, feedTypes)
+			feedEvent := s.formatEventForFeed(ctx, event, feedTypes)
 			if feedEvent == nil {
 				continue
 			}
@@ -183,7 +183,7 @@ func (s *Server) ServerFeeds(c *gin.Context) {
 }
 
 // formatEventForFeed formats an event for the feeds interface
-func (s *Server) formatEventForFeed(event event_manager.Event, feedTypes []string) *FeedEvent {
+func (s *Server) formatEventForFeed(ctx context.Context, event event_manager.Event, feedTypes []string) *FeedEvent {
 	feedEvent := &FeedEvent{
 		ID:        event.ID.String(),
 		Timestamp: event.Timestamp,
@@ -261,7 +261,7 @@ func (s *Server) formatEventForFeed(event event_manager.Event, feedTypes []strin
 				"attacker_eos":   woundedData.AttackerEOS,
 				"weapon":         woundedData.Weapon,
 				"damage":         woundedData.Damage,
-				"category":       s.currentLayerCategory(event.ServerID),
+				"category":       s.currentLayerCategory(ctx, event.ServerID),
 			}
 		}
 
@@ -276,13 +276,14 @@ func (s *Server) formatEventForFeed(event event_manager.Event, feedTypes []strin
 // "seeding" or "training") for the layer currently live on the server, based on
 // the most recent NEW_GAME event. Best-effort: any lookup failure (or missing
 // ClickHouse) falls back to competitive so live teamkills are never hidden.
-func (s *Server) currentLayerCategory(serverID uuid.UUID) string {
+func (s *Server) currentLayerCategory(ctx context.Context, serverID uuid.UUID) string {
 	if s.Dependencies.Clickhouse == nil {
 		return string(squadlayers.CategoryCompetitive)
 	}
 
 	var layer, mapClassname, layerClassname *string
-	row := s.Dependencies.Clickhouse.QueryRow(context.Background(), `
+	row := s.Dependencies.Clickhouse.QueryRow(ctx, `
+		/* sa.feeds.current_layer */
 		SELECT layer, map_classname, layer_classname
 		FROM squad_aegis.server_new_game_events
 		WHERE server_id = ?
@@ -342,16 +343,26 @@ func (s *Server) ServerFeedsHistory(c *gin.Context) {
 	if s.Dependencies.Clickhouse != nil {
 		switch feedType {
 		case "chat":
-			events, err = s.getHistoricalChatMessagesWithPagination(serverId, limit, beforeTime)
+			events, err = s.getHistoricalChatMessagesWithPagination(c.Request.Context(), serverId, limit, beforeTime)
 		case "connections":
-			events, err = s.getHistoricalConnectionsWithPagination(serverId, limit, beforeTime)
+			events, err = s.getHistoricalConnectionsWithPagination(c.Request.Context(), serverId, limit, beforeTime)
 		case "teamkills":
-			events, err = s.getHistoricalTeamkillsWithPagination(serverId, limit, beforeTime)
+			events, err = s.getHistoricalTeamkillsWithPagination(c.Request.Context(), serverId, limit, beforeTime)
 		default:
 			// Get all types
-			chatEvents, _ := s.getHistoricalChatMessagesWithPagination(serverId, limit/3, beforeTime)
-			connEvents, _ := s.getHistoricalConnectionsWithPagination(serverId, limit/3, beforeTime)
-			tkEvents, _ := s.getHistoricalTeamkillsWithPagination(serverId, limit/3, beforeTime)
+			var chatEvents, connEvents, tkEvents []FeedEvent
+			chatEvents, err = s.getHistoricalChatMessagesWithPagination(c.Request.Context(), serverId, limit/3, beforeTime)
+			if err != nil {
+				break
+			}
+			connEvents, err = s.getHistoricalConnectionsWithPagination(c.Request.Context(), serverId, limit/3, beforeTime)
+			if err != nil {
+				break
+			}
+			tkEvents, err = s.getHistoricalTeamkillsWithPagination(c.Request.Context(), serverId, limit/3, beforeTime)
+			if err != nil {
+				break
+			}
 
 			events = append(events, chatEvents...)
 			events = append(events, connEvents...)
@@ -401,12 +412,13 @@ func contains(slice []string, item string) bool {
 }
 
 // getHistoricalChatMessagesWithPagination retrieves chat message history with pagination
-func (s *Server) getHistoricalChatMessagesWithPagination(serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
+func (s *Server) getHistoricalChatMessagesWithPagination(ctx context.Context, serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
 	if s.Dependencies.Clickhouse == nil {
 		return []FeedEvent{}, nil
 	}
 
 	query := `
+		/* sa.feeds.chat */
 		SELECT 
 			message_id,
 			sent_at,
@@ -428,7 +440,7 @@ func (s *Server) getHistoricalChatMessagesWithPagination(serverId uuid.UUID, lim
 	query += " ORDER BY sent_at DESC LIMIT ?"
 	args = append(args, limit)
 
-	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, args...)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -446,8 +458,7 @@ func (s *Server) getHistoricalChatMessagesWithPagination(serverId uuid.UUID, lim
 
 		err := rows.Scan(&messageId, &sentAt, &playerName, &steamId, &eosId, &message, &chatType)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to scan chat message row")
-			continue
+			return nil, fmt.Errorf("scan chat feed row: %w", err)
 		}
 
 		events = append(events, FeedEvent{
@@ -464,11 +475,14 @@ func (s *Server) getHistoricalChatMessagesWithPagination(serverId uuid.UUID, lim
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read chat feed rows: %w", err)
+	}
 	return events, nil
 }
 
 // getHistoricalConnectionsWithPagination retrieves connection history with pagination
-func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
+func (s *Server) getHistoricalConnectionsWithPagination(ctx context.Context, serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
 	if s.Dependencies.Clickhouse == nil {
 		return []FeedEvent{}, nil
 	}
@@ -479,6 +493,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 
 	if beforeTime != nil {
 		query = `
+			/* sa.feeds.connections */
 			SELECT * FROM (
 				SELECT 
 					chain_id as id,
@@ -516,6 +531,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 		args = []interface{}{serverId, *beforeTime, serverId, *beforeTime, serverId, *beforeTime, limit}
 	} else {
 		query = `
+			/* sa.feeds.connections */
 			SELECT * FROM (
 				SELECT 
 					chain_id as id,
@@ -553,7 +569,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 		args = []interface{}{serverId, serverId, serverId, limit}
 	}
 
-	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, args...)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -570,8 +586,7 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 
 		err := rows.Scan(&id, &eventTime, &action, &playerController, &ip, &steam, &eos)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to scan connection row")
-			continue
+			return nil, fmt.Errorf("scan connection feed row: %w", err)
 		}
 
 		// Build data map with proper null handling
@@ -601,6 +616,9 @@ func (s *Server) getHistoricalConnectionsWithPagination(serverId uuid.UUID, limi
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read connection feed rows: %w", err)
+	}
 	return events, nil
 }
 
@@ -628,7 +646,7 @@ func (s *Server) ServerRecentJoins(c *gin.Context) {
 		limit = 5
 	}
 
-	joins, err := s.getRecentServerJoins(serverId, limit)
+	joins, err := s.getRecentServerJoins(c.Request.Context(), serverId, limit)
 	if err != nil {
 		responses.BadRequest(c, "Failed to retrieve recent joins", &gin.H{"error": err.Error()})
 		return
@@ -650,12 +668,13 @@ type RecentJoin struct {
 }
 
 // getRecentServerJoins retrieves the most recent player joins from ClickHouse
-func (s *Server) getRecentServerJoins(serverId uuid.UUID, limit int) ([]RecentJoin, error) {
+func (s *Server) getRecentServerJoins(ctx context.Context, serverId uuid.UUID, limit int) ([]RecentJoin, error) {
 	if s.Dependencies.Clickhouse == nil {
 		return []RecentJoin{}, nil
 	}
 
 	query := `
+		/* sa.feeds.recent_joins */
 		SELECT
 			chain_id,
 			player_suffix,
@@ -667,7 +686,7 @@ func (s *Server) getRecentServerJoins(serverId uuid.UUID, limit int) ([]RecentJo
 		ORDER BY event_time DESC
 		LIMIT ?`
 
-	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, serverId, limit)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, serverId, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -682,8 +701,7 @@ func (s *Server) getRecentServerJoins(serverId uuid.UUID, limit int) ([]RecentJo
 
 		err := rows.Scan(&chainId, &playerSuffix, &steam, &eos, &eventTime)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to scan recent join row")
-			continue
+			return nil, fmt.Errorf("scan recent join row: %w", err)
 		}
 
 		join := RecentJoin{
@@ -702,11 +720,14 @@ func (s *Server) getRecentServerJoins(serverId uuid.UUID, limit int) ([]RecentJo
 		joins = append(joins, join)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read recent join rows: %w", err)
+	}
 	return joins, nil
 }
 
 // getHistoricalTeamkillsWithPagination retrieves teamkill history with pagination
-func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
+func (s *Server) getHistoricalTeamkillsWithPagination(ctx context.Context, serverId uuid.UUID, limit int, beforeTime *time.Time) ([]FeedEvent, error) {
 	if s.Dependencies.Clickhouse == nil {
 		return []FeedEvent{}, nil
 	}
@@ -715,6 +736,7 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 	// feed can label seeding/training TKs (excluded from the headline metrics).
 	categoryExpr := squadlayers.LayerCategorySQL("g.layer", "g.map_classname", "g.layer_classname")
 	query := fmt.Sprintf(`
+		/* sa.feeds.teamkills */
 		SELECT
 			d.chain_id,
 			d.event_time,
@@ -740,7 +762,7 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 	query += " ORDER BY d.event_time DESC LIMIT ?"
 	args = append(args, limit)
 
-	rows, err := s.Dependencies.Clickhouse.Query(context.Background(), query, args...)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -759,8 +781,7 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 
 		err := rows.Scan(&chainId, &eventTime, &victimName, &attackerName, &attackerSteam, &attackerEos, &weapon, &damage, &category)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to scan teamkill row")
-			continue
+			return nil, fmt.Errorf("scan teamkill feed row: %w", err)
 		}
 
 		// Use Steam ID as fallback if attacker name is empty
@@ -791,5 +812,8 @@ func (s *Server) getHistoricalTeamkillsWithPagination(serverId uuid.UUID, limit 
 		})
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read teamkill feed rows: %w", err)
+	}
 	return events, nil
 }

@@ -5,6 +5,9 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
+	"strconv"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -28,7 +31,17 @@ func (ml *migrationsLogger) Verbose() bool {
 }
 
 func PostgresDSN(host string, port int, user, pass, name string) string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", user, pass, host, port, name)
+	dsn := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, pass),
+		Host:   net.JoinHostPort(host, strconv.Itoa(port)),
+		Path:   name,
+	}
+	query := dsn.Query()
+	query.Set("application_name", "squad-aegis")
+	query.Set("sslmode", "disable")
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
 }
 
 func Migrate(database *sql.DB, verbose bool) error {

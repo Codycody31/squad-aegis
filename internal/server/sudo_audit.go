@@ -4,12 +4,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.codycody31.dev/squad-aegis/internal/pagination"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
+
+const globalAuditCursorKind = "audit.global"
 
 // GlobalAuditLogEntry represents an audit log entry with server information
 type GlobalAuditLogEntry struct {
@@ -47,147 +51,150 @@ type UserActionCount struct {
 	Count    int64     `json:"count"`
 }
 
+type globalAuditFilters struct {
+	ServerID  *uuid.UUID `json:"server_id"`
+	UserID    *uuid.UUID `json:"user_id"`
+	Action    string     `json:"action"`
+	Search    string     `json:"search"`
+	StartDate string     `json:"start_date"`
+	EndDate   string     `json:"end_date"`
+	DateRange string     `json:"date_range"`
+}
+
 // GetGlobalAuditLogs returns audit logs across all servers
 func (s *Server) GetGlobalAuditLogs(c *gin.Context) {
 	ctx := c.Request.Context()
+	limit, ok := parseCursorLimit(c, 50, 100)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
+	}
 
-	// Parse pagination parameters
-	page := 1
-	limit := 50
-	if pageStr := c.Query("page"); pageStr != "" {
-		fmt.Sscanf(pageStr, "%d", &page)
-		if page < 1 {
-			page = 1
+	filters := globalAuditFilters{
+		Action:    normalizedAllFilter(c.Query("action")),
+		Search:    strings.ToLower(strings.TrimSpace(c.Query("search"))),
+		StartDate: strings.TrimSpace(c.Query("start_date")),
+		EndDate:   strings.TrimSpace(c.Query("end_date")),
+		DateRange: normalizedAllFilter(c.Query("date_filter")),
+	}
+	if raw := normalizedAllFilter(c.Query("server_id")); raw != "" {
+		value, err := uuid.Parse(raw)
+		if err != nil {
+			responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+			return
+		}
+		filters.ServerID = &value
+	}
+	if raw := normalizedAllFilter(c.Query("user_id")); raw != "" {
+		value, err := uuid.Parse(raw)
+		if err != nil {
+			responses.BadRequest(c, "Invalid user ID", &gin.H{"error": err.Error()})
+			return
+		}
+		filters.UserID = &value
+	}
+	filterHash := pagination.MustFilterHash(filters)
+	var cursorValues *auditCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &auditCursorValues{}
+		if err := pagination.Decode(encodedCursor, globalAuditCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
 		}
 	}
-	if limitStr := c.Query("limit"); limitStr != "" {
-		fmt.Sscanf(limitStr, "%d", &limit)
-		if limit < 1 || limit > 100 {
-			limit = 50
-		}
-	}
-	offset := (page - 1) * limit
 
 	// Build the base query. COALESCE prefers the live username, falls back to the
 	// snapshot captured at write time for deleted users.
 	query := `
+		/* sa.audit.list */
 		SELECT al.id, al.server_id, s.name as server_name, al.user_id, COALESCE(u.username, al.username_snapshot), al.action, al.changes, al.timestamp
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
 		LEFT JOIN servers s ON al.server_id = s.id
 		WHERE 1=1
 	`
-	countQuery := `
-		SELECT COUNT(*)
-		FROM audit_logs al
-		WHERE 1=1
-	`
 	args := []interface{}{}
 	paramCount := 0
 
 	// Add filters
-	if serverID := c.Query("server_id"); serverID != "" && serverID != "all" {
-		srvID, err := uuid.Parse(serverID)
-		if err == nil {
-			paramCount++
-			query += fmt.Sprintf(" AND al.server_id = $%d", paramCount)
-			countQuery += fmt.Sprintf(" AND server_id = $%d", paramCount)
-			args = append(args, srvID)
-		}
+	if filters.ServerID != nil {
+		paramCount++
+		query += fmt.Sprintf(" AND al.server_id = $%d", paramCount)
+		args = append(args, *filters.ServerID)
 	}
 
-	if userID := c.Query("user_id"); userID != "" && userID != "all" {
-		usrID, err := uuid.Parse(userID)
-		if err == nil {
-			paramCount++
-			query += fmt.Sprintf(" AND al.user_id = $%d", paramCount)
-			countQuery += fmt.Sprintf(" AND user_id = $%d", paramCount)
-			args = append(args, usrID)
-		}
+	if filters.UserID != nil {
+		paramCount++
+		query += fmt.Sprintf(" AND al.user_id = $%d", paramCount)
+		args = append(args, *filters.UserID)
 	}
 
-	if action := c.Query("action"); action != "" && action != "all" {
+	if filters.Action != "" {
 		paramCount++
 		query += fmt.Sprintf(" AND al.action = $%d", paramCount)
-		countQuery += fmt.Sprintf(" AND action = $%d", paramCount)
-		args = append(args, action)
+		args = append(args, filters.Action)
 	}
 
 	// Add search filter. Also search the username snapshot so deleted users
 	// remain findable by name.
-	if search := c.Query("search"); search != "" {
+	if filters.Search != "" {
 		paramCount++
-		searchPattern := "%" + search + "%"
-		query += fmt.Sprintf(" AND (u.username ILIKE $%d OR al.username_snapshot ILIKE $%d OR al.action ILIKE $%d OR s.name ILIKE $%d)", paramCount, paramCount, paramCount, paramCount)
-		countQuery += fmt.Sprintf(" AND (EXISTS (SELECT 1 FROM users WHERE id = user_id AND username ILIKE $%d) OR username_snapshot ILIKE $%d OR action ILIKE $%d OR EXISTS (SELECT 1 FROM servers WHERE id = server_id AND name ILIKE $%d))", paramCount, paramCount, paramCount, paramCount)
+		searchPattern := "%" + filters.Search + "%"
+		query += fmt.Sprintf(` AND (
+			lower(al.action) LIKE $%[1]d OR
+			lower(COALESCE(al.username_snapshot, '')) LIKE $%[1]d OR
+			EXISTS (SELECT 1 FROM users au WHERE au.id = al.user_id AND lower(au.username) LIKE $%[1]d) OR
+			EXISTS (SELECT 1 FROM servers aus WHERE aus.id = al.server_id AND lower(aus.name) LIKE $%[1]d)
+		)`, paramCount)
 		args = append(args, searchPattern)
 	}
 
 	// Add date range filters
-	if startDate := c.Query("start_date"); startDate != "" {
-		if t, err := time.Parse("2006-01-02", startDate); err == nil {
-			paramCount++
-			query += fmt.Sprintf(" AND al.timestamp >= $%d", paramCount)
-			countQuery += fmt.Sprintf(" AND timestamp >= $%d", paramCount)
-			args = append(args, t)
+	if filters.StartDate != "" {
+		value, err := time.Parse("2006-01-02", filters.StartDate)
+		if err != nil {
+			responses.BadRequest(c, "Invalid start date", &gin.H{"error": err.Error()})
+			return
 		}
+		paramCount++
+		query += fmt.Sprintf(" AND al.timestamp >= $%d", paramCount)
+		args = append(args, value)
 	}
 
-	if endDate := c.Query("end_date"); endDate != "" {
-		if t, err := time.Parse("2006-01-02", endDate); err == nil {
-			// Add 1 day to include the entire end date
-			t = t.Add(24 * time.Hour)
-			paramCount++
-			query += fmt.Sprintf(" AND al.timestamp < $%d", paramCount)
-			countQuery += fmt.Sprintf(" AND timestamp < $%d", paramCount)
-			args = append(args, t)
+	if filters.EndDate != "" {
+		value, err := time.Parse("2006-01-02", filters.EndDate)
+		if err != nil {
+			responses.BadRequest(c, "Invalid end date", &gin.H{"error": err.Error()})
+			return
 		}
+		paramCount++
+		query += fmt.Sprintf(" AND al.timestamp < $%d", paramCount)
+		args = append(args, value.AddDate(0, 0, 1))
 	}
 
 	// Add date filter shortcuts
-	if dateFilter := c.Query("date_filter"); dateFilter != "" && dateFilter != "all" {
-		var timeFilter time.Time
-		now := time.Now()
-
-		switch dateFilter {
-		case "today":
-			timeFilter = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		case "yesterday":
-			yesterday := now.AddDate(0, 0, -1)
-			timeFilter = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, now.Location())
-		case "week":
-			timeFilter = now.AddDate(0, 0, -7)
-		case "month":
-			timeFilter = now.AddDate(0, -1, 0)
-		}
-
-		if !timeFilter.IsZero() {
-			paramCount++
-			query += fmt.Sprintf(" AND al.timestamp >= $%d", paramCount)
-			countQuery += fmt.Sprintf(" AND timestamp >= $%d", paramCount)
-			args = append(args, timeFilter)
-		}
+	if start := auditDateStart(filters.DateRange, time.Now()); start != nil {
+		paramCount++
+		query += fmt.Sprintf(" AND al.timestamp >= $%d", paramCount)
+		args = append(args, *start)
+	}
+	if cursorValues != nil {
+		paramCount++
+		timestampParam := paramCount
+		args = append(args, cursorValues.Timestamp)
+		paramCount++
+		idParam := paramCount
+		args = append(args, cursorValues.ID)
+		query += fmt.Sprintf(" AND (al.timestamp, al.id) < ($%d, $%d)", timestampParam, idParam)
 	}
 
-	// Get total count
-	var totalCount int
-	err := s.Dependencies.DB.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount)
-	if err != nil {
-		responses.InternalServerError(c, fmt.Errorf("failed to count audit logs: %w", err), nil)
-		return
-	}
-
-	// Add ordering and pagination
 	paramCount++
-	query += fmt.Sprintf(" ORDER BY al.timestamp DESC LIMIT $%d", paramCount)
-	args = append(args, limit)
-	paramCount++
-	query += fmt.Sprintf(" OFFSET $%d", paramCount)
-	args = append(args, offset)
+	query += fmt.Sprintf(" ORDER BY al.timestamp DESC, al.id DESC LIMIT $%d", paramCount)
+	args = append(args, limit+1)
 
-	// Execute the query
+	started := time.Now()
 	rows, err := s.Dependencies.DB.QueryContext(ctx, query, args...)
 	if err != nil {
+		logAuditQuery("sa.audit.list", started, 0, err)
 		responses.InternalServerError(c, fmt.Errorf("failed to query audit logs: %w", err), nil)
 		return
 	}
@@ -210,7 +217,9 @@ func (s *Server) GetGlobalAuditLogs(c *gin.Context) {
 			&log.Timestamp,
 		)
 		if err != nil {
-			continue
+			logAuditQuery("sa.audit.list", started, len(logs), err)
+			responses.InternalServerError(c, fmt.Errorf("failed to scan audit log: %w", err), nil)
+			return
 		}
 
 		if serverName.Valid {
@@ -227,18 +236,22 @@ func (s *Server) GetGlobalAuditLogs(c *gin.Context) {
 
 		logs = append(logs, log)
 	}
-
-	// Calculate total pages
-	totalPages := (totalCount + limit - 1) / limit
+	if err := rows.Err(); err != nil {
+		logAuditQuery("sa.audit.list", started, len(logs), err)
+		responses.InternalServerError(c, fmt.Errorf("iterate audit logs: %w", err), nil)
+		return
+	}
+	logs, hasMore := pagination.TrimPage(logs, limit)
+	pageInfo, err := auditPageInfo(globalAuditCursorKind, filterHash, logs, hasMore)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	logAuditQuery("sa.audit.list", started, len(logs), nil)
 
 	responses.Success(c, "Global audit logs retrieved successfully", &gin.H{
-		"logs": logs,
-		"pagination": gin.H{
-			"page":        page,
-			"limit":       limit,
-			"total":       totalCount,
-			"total_pages": totalPages,
-		},
+		"logs":      logs,
+		"page_info": pageInfo,
 	})
 }
 
@@ -252,31 +265,22 @@ func (s *Server) GetGlobalAuditStats(c *gin.Context) {
 	stats.TopUsers = []UserActionCount{}
 	stats.RecentActivity = []GlobalAuditLogEntry{}
 
-	// Get total logs
-	s.Dependencies.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM audit_logs
-	`).Scan(&stats.TotalLogs)
-
-	// Get logs today
-	s.Dependencies.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM audit_logs
-		WHERE timestamp >= CURRENT_DATE
-	`).Scan(&stats.LogsToday)
-
-	// Get logs this week
-	s.Dependencies.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM audit_logs
-		WHERE timestamp >= CURRENT_DATE - INTERVAL '7 days'
-	`).Scan(&stats.LogsThisWeek)
-
-	// Get logs this month
-	s.Dependencies.DB.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM audit_logs
-		WHERE timestamp >= CURRENT_DATE - INTERVAL '30 days'
-	`).Scan(&stats.LogsThisMonth)
+	if err := s.Dependencies.DB.QueryRowContext(ctx, `
+		/* sa.audit.stats.headline */
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE timestamp >= CURRENT_DATE),
+			COUNT(*) FILTER (WHERE timestamp >= CURRENT_DATE - INTERVAL '7 days'),
+			COUNT(*) FILTER (WHERE timestamp >= CURRENT_DATE - INTERVAL '30 days')
+		FROM audit_logs
+	`).Scan(&stats.TotalLogs, &stats.LogsToday, &stats.LogsThisWeek, &stats.LogsThisMonth); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("query audit headline statistics: %w", err), nil)
+		return
+	}
 
 	// Get top actions
 	rows, err := s.Dependencies.DB.QueryContext(ctx, `
+		/* sa.audit.stats.actions */
 		SELECT action, COUNT(*) as count
 		FROM audit_logs
 		WHERE timestamp >= CURRENT_DATE - INTERVAL '30 days'
@@ -284,39 +288,63 @@ func (s *Server) GetGlobalAuditStats(c *gin.Context) {
 		ORDER BY count DESC
 		LIMIT 10
 	`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var ac ActionCount
-			if rows.Scan(&ac.Action, &ac.Count) == nil {
-				stats.TopActions = append(stats.TopActions, ac)
-			}
-		}
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("query top audit actions: %w", err), nil)
+		return
 	}
+	for rows.Next() {
+		var ac ActionCount
+		if err := rows.Scan(&ac.Action, &ac.Count); err != nil {
+			rows.Close()
+			responses.InternalServerError(c, fmt.Errorf("scan top audit action: %w", err), nil)
+			return
+		}
+		stats.TopActions = append(stats.TopActions, ac)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		responses.InternalServerError(c, fmt.Errorf("iterate top audit actions: %w", err), nil)
+		return
+	}
+	rows.Close()
 
 	// Get top users
 	rows, err = s.Dependencies.DB.QueryContext(ctx, `
-		SELECT al.user_id, u.username, COUNT(*) as count
+		/* sa.audit.stats.users */
+		SELECT al.user_id,
+		       COALESCE(MAX(u.username), MAX(al.username_snapshot), 'System'),
+		       COUNT(*) AS count
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
 		WHERE al.timestamp >= CURRENT_DATE - INTERVAL '30 days'
 		  AND al.user_id IS NOT NULL
-		GROUP BY al.user_id, u.username
+		GROUP BY al.user_id
 		ORDER BY count DESC
 		LIMIT 10
 	`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var uac UserActionCount
-			if rows.Scan(&uac.UserID, &uac.Username, &uac.Count) == nil {
-				stats.TopUsers = append(stats.TopUsers, uac)
-			}
-		}
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("query top audit users: %w", err), nil)
+		return
 	}
+	for rows.Next() {
+		var uac UserActionCount
+		if err := rows.Scan(&uac.UserID, &uac.Username, &uac.Count); err != nil {
+			rows.Close()
+			responses.InternalServerError(c, fmt.Errorf("scan top audit user: %w", err), nil)
+			return
+		}
+		stats.TopUsers = append(stats.TopUsers, uac)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		responses.InternalServerError(c, fmt.Errorf("iterate top audit users: %w", err), nil)
+		return
+	}
+	rows.Close()
 
 	// Get recent activity (last 10 logs)
 	rows, err = s.Dependencies.DB.QueryContext(ctx, `
+		/* sa.audit.stats.recent */
 		SELECT al.id, al.server_id, s.name as server_name, al.user_id, COALESCE(u.username, al.username_snapshot), al.action, al.changes, al.timestamp
 		FROM audit_logs al
 		LEFT JOIN users u ON al.user_id = u.id
@@ -324,27 +352,36 @@ func (s *Server) GetGlobalAuditStats(c *gin.Context) {
 		ORDER BY al.timestamp DESC
 		LIMIT 10
 	`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var log GlobalAuditLogEntry
-			var serverName, username sql.NullString
-
-			if rows.Scan(&log.ID, &log.ServerID, &serverName, &log.UserID, &username, &log.Action, &log.Changes, &log.Timestamp) == nil {
-				if serverName.Valid {
-					log.ServerName = serverName.String
-				} else {
-					log.ServerName = "N/A"
-				}
-				if username.Valid {
-					log.Username = username.String
-				} else {
-					log.Username = "System"
-				}
-				stats.RecentActivity = append(stats.RecentActivity, log)
-			}
-		}
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("query recent audit activity: %w", err), nil)
+		return
 	}
+	for rows.Next() {
+		var entry GlobalAuditLogEntry
+		var serverName, username sql.NullString
+		if err := rows.Scan(&entry.ID, &entry.ServerID, &serverName, &entry.UserID, &username, &entry.Action, &entry.Changes, &entry.Timestamp); err != nil {
+			rows.Close()
+			responses.InternalServerError(c, fmt.Errorf("scan recent audit activity: %w", err), nil)
+			return
+		}
+		if serverName.Valid {
+			entry.ServerName = serverName.String
+		} else {
+			entry.ServerName = "N/A"
+		}
+		if username.Valid {
+			entry.Username = username.String
+		} else {
+			entry.Username = "System"
+		}
+		stats.RecentActivity = append(stats.RecentActivity, entry)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		responses.InternalServerError(c, fmt.Errorf("iterate recent audit activity: %w", err), nil)
+		return
+	}
+	rows.Close()
 
 	responses.Success(c, "Audit statistics retrieved successfully", &gin.H{"data": stats})
 }

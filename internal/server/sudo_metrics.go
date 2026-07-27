@@ -1,8 +1,11 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -56,6 +59,324 @@ type TopServersResponse struct {
 	ByMessages []ServerActivityResponse `json:"by_messages"`
 }
 
+const sudoHybridEventCTEs = `
+	WITH
+		today() - toIntervalDay(?) AS start_day,
+		today() + 1 AS end_day,
+		ifNull(
+			(
+				SELECT argMax(first_fully_covered_day, updated_at)
+				FROM squad_aegis.sql_rollup_state
+				WHERE rollup_name = 'server_event_daily_counts'
+			),
+			toDate('2100-01-01')
+		) AS event_boundary,
+		ifNull(
+			(
+				SELECT argMax(first_fully_covered_day, updated_at)
+				FROM squad_aegis.sql_rollup_state
+				WHERE rollup_name = 'server_info_daily'
+			),
+			toDate('2100-01-01')
+		) AS info_boundary,
+		ifNull(
+			(
+				SELECT argMax(first_fully_covered_day, updated_at)
+				FROM squad_aegis.sql_rollup_state
+				WHERE rollup_name = 'server_player_daily_uniques'
+			),
+			toDate('2100-01-01')
+		) AS player_boundary,
+		ifNull(
+			(
+				SELECT argMax(first_fully_covered_day, updated_at)
+				FROM squad_aegis.sql_rollup_state
+				WHERE rollup_name = 'server_workflow_daily'
+			),
+			toDate('2100-01-01')
+		) AS workflow_boundary,
+		raw_event_counts AS (
+			SELECT toDate(sent_at) AS day, server_id, 'chat' AS event_type, count() AS event_count
+			FROM squad_aegis.server_player_chat_messages
+			WHERE sent_at >= toDateTime64(start_day, 3, 'UTC')
+			  AND sent_at < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY day, server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'connected', count()
+			FROM squad_aegis.server_player_connected_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'disconnected', count()
+			FROM squad_aegis.server_player_disconnected_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'wounded', count()
+			FROM squad_aegis.server_player_wounded_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'revived', count()
+			FROM squad_aegis.server_player_revived_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'possess', count()
+			FROM squad_aegis.server_player_possess_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'died', count()
+			FROM squad_aegis.server_player_died_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'damaged', count()
+			FROM squad_aegis.server_player_damaged_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'deployable_damaged', count()
+			FROM squad_aegis.server_deployable_damaged_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'admin_broadcast', count()
+			FROM squad_aegis.server_admin_broadcast_events
+			WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+
+			UNION ALL
+
+			SELECT toDate(event_time), server_id, 'round_ended', count()
+			FROM squad_aegis.server_game_events_unified
+			WHERE event_type = 'ROUND_ENDED'
+			  AND event_time >= toDateTime64(start_day, 3, 'UTC')
+			  AND event_time < toDateTime64(least(end_day, event_boundary), 3, 'UTC')
+			GROUP BY toDate(event_time), server_id
+		),
+		hybrid_event_counts AS (
+			SELECT day, server_id, event_type, event_count
+			FROM raw_event_counts
+
+			UNION ALL
+
+			SELECT day, server_id, event_type, sum(event_count)
+			FROM squad_aegis.server_event_daily_counts
+			WHERE day >= greatest(start_day, event_boundary)
+			  AND day < end_day
+			GROUP BY day, server_id, event_type
+		)
+`
+
+const sudoMetricsTimelineQuery = `/* sa.metrics.timeline */` + sudoHybridEventCTEs + `,
+	raw_info_states AS (
+		SELECT
+			toDate(event_time) AS day,
+			avgState(player_count) AS player_count_state
+		FROM squad_aegis.server_info_metrics
+		WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+		  AND event_time < toDateTime64(least(end_day, info_boundary), 3, 'UTC')
+		GROUP BY day
+	),
+	hybrid_info_states AS (
+		SELECT day, player_count_state
+		FROM raw_info_states
+
+		UNION ALL
+
+		SELECT day, player_count_state
+		FROM squad_aegis.server_info_daily
+		WHERE day >= greatest(start_day, info_boundary)
+		  AND day < end_day
+	),
+	event_metrics AS (
+		SELECT
+			day,
+			toInt64(sum(event_count)) AS total_events,
+			toInt64(sumIf(event_count, event_type = 'chat')) AS chat_messages
+		FROM hybrid_event_counts
+		GROUP BY day
+	),
+	player_metrics AS (
+		SELECT day, toInt64(avgMerge(player_count_state)) AS average_players
+		FROM hybrid_info_states
+		GROUP BY day
+	)
+	SELECT metric, day, value
+	FROM
+	(
+		SELECT 'events' AS metric, day, total_events AS value
+		FROM event_metrics
+
+		UNION ALL
+
+		SELECT 'chat' AS metric, day, chat_messages AS value
+		FROM event_metrics
+
+		UNION ALL
+
+		SELECT 'players' AS metric, day, average_players AS value
+		FROM player_metrics
+	)
+	ORDER BY day, metric
+`
+
+const sudoServerActivitiesQuery = `/* sa.metrics.server_activity */` + sudoHybridEventCTEs + `,
+	raw_player_states AS (
+		SELECT
+			server_id,
+			uniqExactState(
+				multiIf(
+					ifNull(steam, '') != '', concat('steam:', assumeNotNull(steam)),
+					ifNull(eos, '') != '', concat('eos:', assumeNotNull(eos)),
+					concat('epic:', assumeNotNull(epic))
+				)
+			) AS players_state
+		FROM squad_aegis.server_join_succeeded_events
+		WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+		  AND event_time < toDateTime64(least(end_day, player_boundary), 3, 'UTC')
+		  AND (
+			  ifNull(steam, '') != ''
+			  OR ifNull(eos, '') != ''
+			  OR ifNull(epic, '') != ''
+		  )
+		GROUP BY server_id
+	),
+	hybrid_player_states AS (
+		SELECT server_id, players_state
+		FROM raw_player_states
+
+		UNION ALL
+
+		SELECT server_id, players_state
+		FROM squad_aegis.server_player_daily_uniques
+		WHERE day >= greatest(start_day, player_boundary)
+		  AND day < end_day
+	),
+	raw_workflow_states AS (
+		SELECT server_id, uniqExactState(execution_id) AS executions_state
+		FROM squad_aegis.workflow_execution_logs
+		WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+		  AND event_time < toDateTime64(least(end_day, workflow_boundary), 3, 'UTC')
+		GROUP BY server_id
+	),
+	hybrid_workflow_states AS (
+		SELECT server_id, executions_state
+		FROM raw_workflow_states
+
+		UNION ALL
+
+		SELECT server_id, executions_state
+		FROM squad_aegis.server_workflow_daily
+		WHERE day >= greatest(start_day, workflow_boundary)
+		  AND day < end_day
+	),
+	raw_info_states AS (
+		SELECT
+			server_id,
+			avgState(player_count) AS player_count_state,
+			max(event_time) AS last_activity
+		FROM squad_aegis.server_info_metrics
+		WHERE event_time >= toDateTime64(start_day, 3, 'UTC')
+		  AND event_time < toDateTime64(least(end_day, info_boundary), 3, 'UTC')
+		GROUP BY server_id
+	),
+	hybrid_info_states AS (
+		SELECT server_id, player_count_state, last_activity
+		FROM raw_info_states
+
+		UNION ALL
+
+		SELECT server_id, player_count_state, last_activity
+		FROM squad_aegis.server_info_daily
+		WHERE day >= greatest(start_day, info_boundary)
+		  AND day < end_day
+	),
+	event_metrics AS (
+		SELECT
+			server_id,
+			toInt64(sum(event_count)) AS total_events,
+			toInt64(sumIf(event_count, event_type = 'chat')) AS chat_messages
+		FROM hybrid_event_counts
+		GROUP BY server_id
+	),
+	player_metrics AS (
+		SELECT server_id, toInt64(uniqExactMerge(players_state)) AS unique_players
+		FROM hybrid_player_states
+		GROUP BY server_id
+	),
+	workflow_metrics AS (
+		SELECT server_id, toInt64(uniqExactMerge(executions_state)) AS workflow_runs
+		FROM hybrid_workflow_states
+		GROUP BY server_id
+	),
+	info_metrics AS (
+		SELECT
+			server_id,
+			avgMerge(player_count_state) AS average_players,
+			max(last_activity) AS last_activity
+		FROM hybrid_info_states
+		GROUP BY server_id
+	),
+	all_server_ids AS (
+		SELECT DISTINCT server_id
+		FROM
+		(
+			SELECT server_id FROM event_metrics
+			UNION ALL
+			SELECT server_id FROM player_metrics
+			UNION ALL
+			SELECT server_id FROM workflow_metrics
+			UNION ALL
+			SELECT server_id FROM info_metrics
+		)
+	)
+	SELECT
+		ids.server_id,
+		ifNull(events.total_events, toInt64(0)) AS total_events,
+		ifNull(events.chat_messages, toInt64(0)) AS chat_messages,
+		ifNull(players.unique_players, toInt64(0)) AS unique_players,
+		ifNull(workflows.workflow_runs, toInt64(0)) AS workflow_runs,
+		ifNull(info.average_players, toFloat64(0)) AS average_players,
+		info.last_activity
+	FROM all_server_ids AS ids
+	LEFT JOIN event_metrics AS events ON events.server_id = ids.server_id
+	LEFT JOIN player_metrics AS players ON players.server_id = ids.server_id
+	LEFT JOIN workflow_metrics AS workflows ON workflows.server_id = ids.server_id
+	LEFT JOIN info_metrics AS info ON info.server_id = ids.server_id
+	ORDER BY total_events DESC, ids.server_id
+	SETTINGS join_use_nulls = 1
+`
+
 // GetMetricsOverview returns high-level instance metrics
 func (s *Server) GetMetricsOverview(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -84,8 +405,9 @@ func (s *Server) GetMetricsOverview(c *gin.Context) {
 
 		// Get total unique players tracked
 		err = s.Dependencies.Clickhouse.QueryRow(ctx, `
-			SELECT COUNT(DISTINCT steam_id) 
-			FROM squad_aegis.server_player_connected
+			SELECT uniqExact(if(ifNull(steam, '') != '', assumeNotNull(steam), assumeNotNull(eos)))
+			FROM squad_aegis.server_player_connected_events
+			WHERE ifNull(steam, '') != '' OR ifNull(eos, '') != ''
 		`).Scan(&overview.TotalPlayers)
 		if err != nil && err != sql.ErrNoRows {
 			overview.TotalPlayers = 0
@@ -99,11 +421,11 @@ func (s *Server) GetMetricsOverview(c *gin.Context) {
 		`).Scan(&chatCount)
 
 		s.Dependencies.Clickhouse.QueryRow(ctx, `
-			SELECT COUNT(*) FROM squad_aegis.server_player_connected
+			SELECT COUNT(*) FROM squad_aegis.server_player_connected_events
 		`).Scan(&playerCount)
 
 		s.Dependencies.Clickhouse.QueryRow(ctx, `
-			SELECT COUNT(*) FROM squad_aegis.server_player_wounded
+			SELECT COUNT(*) FROM squad_aegis.server_player_wounded_events
 		`).Scan(&woundedCount)
 
 		overview.TotalEvents = chatCount + playerCount + woundedCount
@@ -143,97 +465,55 @@ func (s *Server) GetMetricsOverview(c *gin.Context) {
 // GetMetricsTimeline returns time-series metrics data
 func (s *Server) GetMetricsTimeline(c *gin.Context) {
 	ctx := c.Request.Context()
-
-	// Get date range from query params
-	days := 7
-	if daysStr := c.Query("days"); daysStr != "" {
-		fmt.Sscanf(daysStr, "%d", &days)
-	}
-	if days > 90 {
-		days = 90
+	timeline := MetricsTimelineResponse{
+		EventsOverTime:  []MetricsTimelinePoint{},
+		ChatOverTime:    []MetricsTimelinePoint{},
+		PlayersOverTime: []MetricsTimelinePoint{},
 	}
 
-	var timeline MetricsTimelineResponse
-	// Initialize empty slices to avoid null
-	timeline.EventsOverTime = []MetricsTimelinePoint{}
-	timeline.ChatOverTime = []MetricsTimelinePoint{}
-	timeline.PlayersOverTime = []MetricsTimelinePoint{}
+	if s.Dependencies.Clickhouse == nil {
+		responses.Success(c, "Timeline metrics retrieved successfully", &gin.H{"data": timeline})
+		return
+	}
 
-	if s.Dependencies.Clickhouse != nil {
-		// Get events over time
-		rows, err := s.Dependencies.Clickhouse.Query(ctx, `
-			SELECT 
-				toDate(sent_at) as date,
-				COUNT(*) as count
-			FROM squad_aegis.server_player_chat_messages
-			WHERE sent_at >= now() - INTERVAL ? DAY
-			GROUP BY date
-			ORDER BY date
-		`, days)
+	days := parseSudoMetricsDays(c.Query("days"))
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, sudoMetricsTimelineQuery, days-1)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to get timeline metrics: %w", err), nil)
+		return
+	}
+	defer rows.Close()
 
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var date time.Time
-				var count int64
-				if err := rows.Scan(&date, &count); err == nil {
-					timeline.EventsOverTime = append(timeline.EventsOverTime, MetricsTimelinePoint{
-						Timestamp: date.Format("2006-01-02"),
-						Value:     count,
-					})
-				}
-			}
+	for rows.Next() {
+		var (
+			metric string
+			date   time.Time
+			value  int64
+		)
+		if err := rows.Scan(&metric, &date, &value); err != nil {
+			responses.InternalServerError(c, fmt.Errorf("failed to scan timeline metrics: %w", err), nil)
+			return
 		}
 
-		// Get chat messages over time
-		rows, err = s.Dependencies.Clickhouse.Query(ctx, `
-			SELECT 
-				toDate(sent_at) as date,
-				COUNT(*) as count
-			FROM squad_aegis.server_player_chat_messages
-			WHERE sent_at >= now() - INTERVAL ? DAY
-			GROUP BY date
-			ORDER BY date
-		`, days)
-
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var date time.Time
-				var count int64
-				if err := rows.Scan(&date, &count); err == nil {
-					timeline.ChatOverTime = append(timeline.ChatOverTime, MetricsTimelinePoint{
-						Timestamp: date.Format("2006-01-02"),
-						Value:     count,
-					})
-				}
-			}
+		point := MetricsTimelinePoint{
+			Timestamp: date.Format("2006-01-02"),
+			Value:     value,
 		}
-
-		// Get average player count over time
-		rows, err = s.Dependencies.Clickhouse.Query(ctx, `
-			SELECT 
-				toDate(event_time) as date,
-				toInt64(AVG(player_count)) as avg_players
-			FROM squad_aegis.server_info_metrics
-			WHERE event_time >= now() - INTERVAL ? DAY
-			GROUP BY date
-			ORDER BY date
-		`, days)
-
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var date time.Time
-				var count int64
-				if err := rows.Scan(&date, &count); err == nil {
-					timeline.PlayersOverTime = append(timeline.PlayersOverTime, MetricsTimelinePoint{
-						Timestamp: date.Format("2006-01-02"),
-						Value:     count,
-					})
-				}
-			}
+		switch metric {
+		case "events":
+			timeline.EventsOverTime = append(timeline.EventsOverTime, point)
+		case "chat":
+			timeline.ChatOverTime = append(timeline.ChatOverTime, point)
+		case "players":
+			timeline.PlayersOverTime = append(timeline.PlayersOverTime, point)
+		default:
+			responses.InternalServerError(c, fmt.Errorf("unknown timeline metric %q", metric), nil)
+			return
 		}
+	}
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to read timeline metrics: %w", err), nil)
+		return
 	}
 
 	responses.Success(c, "Timeline metrics retrieved successfully", &gin.H{"data": timeline})
@@ -243,84 +523,23 @@ func (s *Server) GetMetricsTimeline(c *gin.Context) {
 func (s *Server) GetServerActivities(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	activities := []ServerActivityResponse{} // Initialize empty slice
-
 	if s.Dependencies.Clickhouse == nil {
-		responses.Success(c, "Server activities retrieved successfully", &gin.H{"data": activities})
+		responses.Success(c, "Server activities retrieved successfully", &gin.H{"data": []ServerActivityResponse{}})
 		return
 	}
 
-	// Get server info from PostgreSQL
-	serverMap := make(map[uuid.UUID]string)
-	rows, err := s.Dependencies.DB.QueryContext(ctx, `SELECT id, name FROM servers`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id uuid.UUID
-			var name string
-			if rows.Scan(&id, &name) == nil {
-				serverMap[id] = name
-			}
-		}
-	}
-
-	// Get activity metrics from ClickHouse
-	chRows, err := s.Dependencies.Clickhouse.Query(ctx, `
-		SELECT 
-			server_id,
-			COUNT(*) as total_events,
-			COUNT(DISTINCT steam_id) as unique_players,
-			MAX(sent_at) as last_activity
-		FROM squad_aegis.server_player_chat_messages
-		WHERE sent_at >= now() - INTERVAL 30 DAY
-		GROUP BY server_id
-		ORDER BY total_events DESC
-	`)
-
+	activities, err := s.querySudoServerActivities(ctx, 30)
 	if err != nil {
 		responses.InternalServerError(c, fmt.Errorf("failed to get server activities: %w", err), nil)
 		return
 	}
-	defer chRows.Close()
 
-	for chRows.Next() {
-		var activity ServerActivityResponse
-		var serverID uuid.UUID
-		var lastActivity time.Time
-
-		if err := chRows.Scan(&serverID, &activity.TotalEvents, &activity.UniquePlayers, &lastActivity); err != nil {
-			continue
-		}
-
-		activity.ServerID = serverID.String()
-		activity.ServerName = serverMap[serverID]
-		if activity.ServerName == "" {
-			activity.ServerName = "Unknown Server"
-		}
-		activity.ChatMessages = activity.TotalEvents // For now, same as total events
-		activity.LastActivity = lastActivity.Format("2006-01-02 15:04:05")
-
-		// Get avg player count
-		var avgPlayers sql.NullFloat64
-		s.Dependencies.Clickhouse.QueryRow(ctx, `
-			SELECT AVG(player_count)
-			FROM squad_aegis.server_info_metrics
-			WHERE server_id = ? AND event_time >= now() - INTERVAL 30 DAY
-		`, serverID).Scan(&avgPlayers)
-
-		if avgPlayers.Valid {
-			activity.AvgPlayerCount = avgPlayers.Float64
-		}
-
-		// Get workflow runs
-		s.Dependencies.Clickhouse.QueryRow(ctx, `
-			SELECT COUNT(DISTINCT execution_id)
-			FROM squad_aegis.workflow_execution_logs
-			WHERE server_id = ? AND event_time >= now() - INTERVAL 30 DAY
-		`, serverID).Scan(&activity.WorkflowRuns)
-
-		activities = append(activities, activity)
+	serverNames, err := s.loadSudoServerNames(ctx)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to load server names: %w", err), nil)
+		return
 	}
+	applySudoServerNames(activities, serverNames)
 
 	responses.Success(c, "Server activities retrieved successfully", &gin.H{"data": activities})
 }
@@ -329,111 +548,149 @@ func (s *Server) GetServerActivities(c *gin.Context) {
 func (s *Server) GetTopServers(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var topServers TopServersResponse
-	// Initialize empty slices to avoid null
-	topServers.ByEvents = []ServerActivityResponse{}
-	topServers.ByPlayers = []ServerActivityResponse{}
-	topServers.ByMessages = []ServerActivityResponse{}
+	topServers := TopServersResponse{
+		ByEvents:   []ServerActivityResponse{},
+		ByPlayers:  []ServerActivityResponse{},
+		ByMessages: []ServerActivityResponse{},
+	}
 
 	if s.Dependencies.Clickhouse == nil {
 		responses.Success(c, "Top servers retrieved successfully", &gin.H{"data": topServers})
 		return
 	}
 
-	// Get server info from PostgreSQL
-	serverMap := make(map[uuid.UUID]string)
-	rows, err := s.Dependencies.DB.QueryContext(ctx, `SELECT id, name FROM servers`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id uuid.UUID
-			var name string
-			if rows.Scan(&id, &name) == nil {
-				serverMap[id] = name
-			}
-		}
+	activities, err := s.querySudoServerActivities(ctx, 7)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to get top server metrics: %w", err), nil)
+		return
 	}
-
-	// Top by events
-	chRows, err := s.Dependencies.Clickhouse.Query(ctx, `
-		SELECT 
-			server_id,
-			COUNT(*) as event_count
-		FROM squad_aegis.server_player_chat_messages
-		WHERE sent_at >= now() - INTERVAL 7 DAY
-		GROUP BY server_id
-		ORDER BY event_count DESC
-		LIMIT 10
-	`)
-
-	if err == nil {
-		defer chRows.Close()
-		for chRows.Next() {
-			var serverID uuid.UUID
-			var eventCount int64
-			if chRows.Scan(&serverID, &eventCount) == nil {
-				topServers.ByEvents = append(topServers.ByEvents, ServerActivityResponse{
-					ServerID:    serverID.String(),
-					ServerName:  serverMap[serverID],
-					TotalEvents: eventCount,
-				})
-			}
-		}
+	serverNames, err := s.loadSudoServerNames(ctx)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("failed to load server names: %w", err), nil)
+		return
 	}
+	applySudoServerNames(activities, serverNames)
 
-	// Top by unique players
-	chRows, err = s.Dependencies.Clickhouse.Query(ctx, `
-		SELECT 
-			server_id,
-			COUNT(DISTINCT steam_id) as unique_players
-		FROM squad_aegis.server_player_connected
-		WHERE time >= now() - INTERVAL 7 DAY
-		GROUP BY server_id
-		ORDER BY unique_players DESC
-		LIMIT 10
-	`)
-
-	if err == nil {
-		defer chRows.Close()
-		for chRows.Next() {
-			var serverID uuid.UUID
-			var playerCount int64
-			if chRows.Scan(&serverID, &playerCount) == nil {
-				topServers.ByPlayers = append(topServers.ByPlayers, ServerActivityResponse{
-					ServerID:      serverID.String(),
-					ServerName:    serverMap[serverID],
-					UniquePlayers: playerCount,
-				})
-			}
-		}
-	}
-
-	// Top by chat messages
-	chRows, err = s.Dependencies.Clickhouse.Query(ctx, `
-		SELECT 
-			server_id,
-			COUNT(*) as message_count
-		FROM squad_aegis.server_player_chat_messages
-		WHERE sent_at >= now() - INTERVAL 7 DAY
-		GROUP BY server_id
-		ORDER BY message_count DESC
-		LIMIT 10
-	`)
-
-	if err == nil {
-		defer chRows.Close()
-		for chRows.Next() {
-			var serverID uuid.UUID
-			var messageCount int64
-			if chRows.Scan(&serverID, &messageCount) == nil {
-				topServers.ByMessages = append(topServers.ByMessages, ServerActivityResponse{
-					ServerID:     serverID.String(),
-					ServerName:   serverMap[serverID],
-					ChatMessages: messageCount,
-				})
-			}
-		}
-	}
+	topServers.ByEvents = rankSudoServerActivities(activities, func(activity ServerActivityResponse) int64 {
+		return activity.TotalEvents
+	})
+	topServers.ByPlayers = rankSudoServerActivities(activities, func(activity ServerActivityResponse) int64 {
+		return activity.UniquePlayers
+	})
+	topServers.ByMessages = rankSudoServerActivities(activities, func(activity ServerActivityResponse) int64 {
+		return activity.ChatMessages
+	})
 
 	responses.Success(c, "Top servers retrieved successfully", &gin.H{"data": topServers})
+}
+
+func parseSudoMetricsDays(raw string) int {
+	const (
+		defaultDays = 7
+		maxDays     = 90
+	)
+
+	if raw == "" {
+		return defaultDays
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < 1 {
+		return defaultDays
+	}
+	if days > maxDays {
+		return maxDays
+	}
+	return days
+}
+
+func (s *Server) querySudoServerActivities(ctx context.Context, days int) ([]ServerActivityResponse, error) {
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, sudoServerActivitiesQuery, days-1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	activities := make([]ServerActivityResponse, 0)
+	for rows.Next() {
+		var (
+			activity     ServerActivityResponse
+			serverID     uuid.UUID
+			lastActivity sql.NullTime
+		)
+		if err := rows.Scan(
+			&serverID,
+			&activity.TotalEvents,
+			&activity.ChatMessages,
+			&activity.UniquePlayers,
+			&activity.WorkflowRuns,
+			&activity.AvgPlayerCount,
+			&lastActivity,
+		); err != nil {
+			return nil, fmt.Errorf("scan server activity: %w", err)
+		}
+
+		activity.ServerID = serverID.String()
+		if lastActivity.Valid {
+			activity.LastActivity = lastActivity.Time.UTC().Format("2006-01-02 15:04:05")
+		}
+		activities = append(activities, activity)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read server activities: %w", err)
+	}
+	return activities, nil
+}
+
+func (s *Server) loadSudoServerNames(ctx context.Context) (map[uuid.UUID]string, error) {
+	rows, err := s.Dependencies.DB.QueryContext(ctx, `SELECT id, name FROM servers`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	serverNames := make(map[uuid.UUID]string)
+	for rows.Next() {
+		var (
+			id   uuid.UUID
+			name string
+		)
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("scan server name: %w", err)
+		}
+		serverNames[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read server names: %w", err)
+	}
+	return serverNames, nil
+}
+
+func applySudoServerNames(activities []ServerActivityResponse, serverNames map[uuid.UUID]string) {
+	for i := range activities {
+		serverID, err := uuid.Parse(activities[i].ServerID)
+		if err == nil {
+			activities[i].ServerName = serverNames[serverID]
+		}
+		if activities[i].ServerName == "" {
+			activities[i].ServerName = "Unknown Server"
+		}
+	}
+}
+
+func rankSudoServerActivities(
+	activities []ServerActivityResponse,
+	value func(ServerActivityResponse) int64,
+) []ServerActivityResponse {
+	ranked := append([]ServerActivityResponse(nil), activities...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		left, right := value(ranked[i]), value(ranked[j])
+		if left == right {
+			return ranked[i].ServerID < ranked[j].ServerID
+		}
+		return left > right
+	})
+	if len(ranked) > 10 {
+		ranked = ranked[:10]
+	}
+	return ranked
 }

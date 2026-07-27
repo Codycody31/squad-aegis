@@ -1,0 +1,1 @@
+-- Preflight validation does not modify database state.

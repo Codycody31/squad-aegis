@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/pagination"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	"go.codycody31.dev/squad-aegis/internal/squadlayers"
@@ -72,6 +75,7 @@ type PlayerActivity struct {
 
 // ChatMessage represents a chat message from the player
 type ChatMessage struct {
+	MessageID  string    `json:"message_id"`
 	SentAt     time.Time `json:"sent_at"`
 	Message    string    `json:"message"`
 	ChatType   string    `json:"chat_type"`
@@ -189,6 +193,7 @@ type TeamkillVictim struct {
 
 // SessionHistoryEntry represents a paired connection session
 type SessionHistoryEntry struct {
+	CursorKey         string     `json:"-"`
 	ConnectTime       time.Time  `json:"connect_time"`
 	DisconnectTime    *time.Time `json:"disconnect_time,omitempty"`
 	DurationSeconds   *int64     `json:"duration_seconds,omitempty"`
@@ -201,6 +206,7 @@ type SessionHistoryEntry struct {
 
 // CombatHistoryEntry represents a kill or death event
 type CombatHistoryEntry struct {
+	CursorKey    string    `json:"-"`
 	EventID      string    `json:"event_id,omitempty"`
 	ChainID      string    `json:"chain_id,omitempty"`
 	EventTime    time.Time `json:"event_time"`
@@ -231,11 +237,7 @@ type RelatedPlayer struct {
 
 // PaginatedChatHistory represents paginated chat messages
 type PaginatedChatHistory struct {
-	Messages   []ChatMessage `json:"messages"`
-	Total      int64         `json:"total"`
-	Page       int           `json:"page"`
-	Limit      int           `json:"limit"`
-	TotalPages int           `json:"total_pages"`
+	Messages []ChatMessage `json:"messages"`
 }
 
 // PlayerSearchResult represents a simplified player profile for search results
@@ -311,10 +313,11 @@ func (s *Server) PlayersList(c *gin.Context) {
 	searchQuery = strings.TrimSpace(searchQuery)
 	searchPattern := "%" + searchQuery + "%"
 
-	// Try searching the pre-computed identity table first
+	// Search the published snapshot first. Raw events are a rolling-deploy
+	// fallback only when the snapshot objects or pointer are unavailable.
 	players, err := s.searchPlayersFromIdentityTable(c.Request.Context(), searchQuery, searchPattern, limit)
 	if err != nil {
-		log.Debug().Err(err).Msg("Identity table search returned no results, falling back to raw events")
+		log.Debug().Err(err).Msg("Identity snapshot unavailable, falling back to raw events")
 		players, err = s.searchPlayersFromRawEvents(c.Request.Context(), searchPattern, limit)
 		if err != nil {
 			responses.InternalServerError(c, err, nil)
@@ -330,97 +333,55 @@ func (s *Server) PlayersList(c *gin.Context) {
 
 // searchPlayersFromIdentityTable searches the pre-computed player_identities table
 func (s *Server) searchPlayersFromIdentityTable(ctx context.Context, searchQuery, searchPattern string, limit int) ([]PlayerSearchResult, error) {
-	// Check if the identity table has data
-	var count uint64
-	countRow := s.Dependencies.Clickhouse.QueryRow(ctx, "SELECT count() FROM squad_aegis.player_identities")
-	if err := countRow.Scan(&count); err != nil || count == 0 {
-		return nil, fmt.Errorf("identity table empty or not accessible")
+	predicate := "pil.identifier_type = 'name' AND lowerUTF8(pil.identifier_value) LIKE ?"
+	lookupValue := strings.ToLower(searchPattern)
+	if utils.IsSteamID(searchQuery) {
+		predicate = "pil.identifier_type = 'steam' AND pil.identifier_value = ?"
+		lookupValue = searchQuery
+	} else if normalized := utils.NormalizeEOSID(searchQuery); normalized != "" {
+		predicate = "pil.identifier_type IN ('eos', 'epic') AND pil.identifier_value = ?"
+		lookupValue = normalized
 	}
-
-	normalizedSearchIdentifier := searchQuery
-	if normalized := utils.NormalizeEOSID(searchQuery); normalized != "" {
-		normalizedSearchIdentifier = normalized
-	}
-
-	// Search by name, steam ID, EOS ID, or Epic alias.
-	// Use arrayExists with ilike for case-insensitive partial matching on names
-	query := `
-		SELECT
-			primary_steam_id,
-			primary_eos_id,
-			primary_epic_id,
-			primary_name,
-			last_seen,
-			first_seen
-		FROM squad_aegis.player_identities
-		WHERE
-			has(all_names, ?) OR
-			primary_name ILIKE ? OR
-			has(all_steam_ids, ?) OR
-			has(all_eos_ids, ?) OR
-			has(all_epic_ids, ?) OR
-			arrayExists(x -> x ILIKE ?, all_names)
-		ORDER BY last_seen DESC
-		LIMIT ?
-	`
-
-	// For exact matches, try the lookup table first for speed
-	lookupQuery := `
-		SELECT pi.primary_steam_id, pi.primary_eos_id, pi.primary_epic_id, pi.primary_name, pi.last_seen, pi.first_seen
-		FROM squad_aegis.player_identity_lookup pil
-		JOIN squad_aegis.player_identities pi ON pil.canonical_id = pi.canonical_id
-		WHERE pil.identifier_value = ? OR pil.identifier_value ILIKE ?
-		ORDER BY pi.last_seen DESC
-		LIMIT ?
-	`
-
-	// Try exact lookup first
-	rows, err := s.Dependencies.Clickhouse.Query(ctx, lookupQuery, normalizedSearchIdentifier, searchPattern, limit)
-	if err == nil {
-		defer rows.Close()
-		players := []PlayerSearchResult{}
-		seenCanonical := make(map[string]bool)
-
-		for rows.Next() {
-			var player PlayerSearchResult
-			var steamID, eosID, epicID string
-
-			if err := rows.Scan(&steamID, &eosID, &epicID, &player.PlayerName, &player.LastSeen, &player.FirstSeen); err != nil {
-				continue
-			}
-
-			// Deduplicate by canonical identity
-			key := steamID + "|" + eosID + "|" + epicID
-			if seenCanonical[key] {
-				continue
-			}
-			seenCanonical[key] = true
-
-			player.SteamID = steamID
-			player.EOSID = eosID
-			player.EpicID = epicID
-			players = append(players, player)
-		}
-
-		if len(players) > 0 {
-			return players, nil
-		}
-	}
-
-	// Fallback to broader search on the identities table
-	rows, err = s.Dependencies.Clickhouse.Query(
-		ctx,
-		query,
-		searchQuery,
-		searchPattern,
-		searchQuery,
-		normalizedSearchIdentifier,
-		normalizedSearchIdentifier,
-		searchPattern,
-		limit,
-	)
+	query := fmt.Sprintf(`
+		/* sa.player.identity_search */
+		WITH current AS (
+			SELECT snapshot_id
+			FROM squad_aegis.player_identity_current
+			WHERE pointer_key = 1
+			ORDER BY published_at DESC
+			LIMIT 1
+		), matches AS (
+			SELECT pil.canonical_id
+			FROM squad_aegis.player_identity_lookup_snapshots pil
+			INNER JOIN current c ON pil.snapshot_id = c.snapshot_id
+			WHERE %s
+			GROUP BY pil.canonical_id
+		), results AS (
+			SELECT pi.canonical_id, pi.primary_steam_id, pi.primary_eos_id,
+			       pi.primary_epic_id, pi.primary_name, pi.last_seen, pi.first_seen
+			FROM squad_aegis.player_identity_snapshots pi
+			INNER JOIN current c ON pi.snapshot_id = c.snapshot_id
+			INNER JOIN matches m ON pi.canonical_id = m.canonical_id
+			ORDER BY pi.last_seen DESC, pi.canonical_id ASC
+			LIMIT ?
+		)
+		SELECT *
+		FROM
+		(
+			SELECT toUInt8(1) AS snapshot_status, primary_steam_id, primary_eos_id,
+			       primary_epic_id, primary_name, last_seen, first_seen
+			FROM results
+			UNION ALL
+			SELECT
+				if((SELECT count() FROM current) = 0, toUInt8(2), toUInt8(0)),
+				'', '', '', '', toDateTime64(0, 3, 'UTC'), toDateTime64(0, 3, 'UTC')
+			WHERE NOT EXISTS (SELECT 1 FROM results)
+		)
+		ORDER BY snapshot_status DESC, last_seen DESC
+	`, predicate)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, lookupValue, limit)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("search current identity snapshot: %w", err)
 	}
 	defer rows.Close()
 
@@ -428,8 +389,15 @@ func (s *Server) searchPlayersFromIdentityTable(ctx context.Context, searchQuery
 	for rows.Next() {
 		var player PlayerSearchResult
 		var steamID, eosID, epicID string
+		var snapshotStatus uint8
 
-		if err := rows.Scan(&steamID, &eosID, &epicID, &player.PlayerName, &player.LastSeen, &player.FirstSeen); err != nil {
+		if err := rows.Scan(&snapshotStatus, &steamID, &eosID, &epicID, &player.PlayerName, &player.LastSeen, &player.FirstSeen); err != nil {
+			return nil, fmt.Errorf("scan identity search result: %w", err)
+		}
+		if snapshotStatus == 2 {
+			return nil, errPlayerSnapshotUnavailable
+		}
+		if snapshotStatus == 0 {
 			continue
 		}
 
@@ -438,10 +406,8 @@ func (s *Server) searchPlayersFromIdentityTable(ctx context.Context, searchQuery
 		player.EpicID = epicID
 		players = append(players, player)
 	}
-
-	// If no results found in identity table, return error to trigger fallback to raw events
-	if len(players) == 0 {
-		return nil, fmt.Errorf("no results found in identity table")
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read identity search results: %w", err)
 	}
 
 	return players, nil
@@ -563,25 +529,14 @@ func (s *Server) searchPlayersFromRawEvents(ctx context.Context, searchPattern s
 	players := []PlayerSearchResult{}
 	for rows.Next() {
 		var player PlayerSearchResult
-		var steamID, eosID, epicID *string
-
-		if err := rows.Scan(&steamID, &eosID, &epicID, &player.PlayerName, &player.LastSeen, &player.FirstSeen); err != nil {
-			continue
+		if err := rows.Scan(&player.SteamID, &player.EOSID, &player.EpicID, &player.PlayerName, &player.LastSeen, &player.FirstSeen); err != nil {
+			return nil, err
 		}
-
-		if steamID != nil {
-			player.SteamID = *steamID
-		}
-		if eosID != nil {
-			player.EOSID = *eosID
-		}
-		if epicID != nil {
-			player.EpicID = *epicID
-		}
-
 		players = append(players, player)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return players, nil
 }
 
@@ -604,6 +559,132 @@ func selectProfileLookupIdentifier(profile *PlayerProfile, fallbackID string, fa
 	}
 
 	return fallbackID, fallbackIsSteamID
+}
+
+// ResolvedPlayerIdentity is the single identity resolution shared by a player
+// history request. Helpers receive these arrays instead of resolving the same
+// player independently.
+type ResolvedPlayerIdentity struct {
+	CanonicalID    string
+	SteamIDs       []string
+	EOSIDs         []string
+	EpicIDs        []string
+	Found          bool
+	SnapshotBacked bool
+}
+
+func resolvedPlayerIdentityFromProfile(profile *PlayerProfile, fallbackID string, fallbackIsSteam bool) ResolvedPlayerIdentity {
+	resolved := ResolvedPlayerIdentity{
+		CanonicalID:    profile.CanonicalID,
+		SteamIDs:       append([]string(nil), profile.AllSteamIDs...),
+		EOSIDs:         append([]string(nil), profile.AllEOSIDs...),
+		EpicIDs:        append([]string(nil), profile.AllEpicIDs...),
+		Found:          true,
+		SnapshotBacked: profile.CanonicalID != "",
+	}
+	resolved.SteamIDs = appendUniqueSteamIdentifier(resolved.SteamIDs, profile.SteamID)
+	resolved.EOSIDs = appendUniqueEOSIdentifier(resolved.EOSIDs, profile.EOSID)
+	resolved.EpicIDs = appendUniquePlayerIdentifier(resolved.EpicIDs, profile.EpicID)
+	if len(resolved.SteamIDs) == 0 && len(resolved.EOSIDs) == 0 && len(resolved.EpicIDs) == 0 {
+		if fallbackIsSteam {
+			resolved.SteamIDs = appendUniqueSteamIdentifier(resolved.SteamIDs, fallbackID)
+		} else {
+			resolved.EOSIDs = appendUniqueEOSIdentifier(resolved.EOSIDs, fallbackID)
+			resolved.EpicIDs = appendUniquePlayerIdentifier(resolved.EpicIDs, fallbackID)
+		}
+	}
+	return resolved
+}
+
+func (s *Server) resolvePlayerIdentity(ctx context.Context, rawPlayerID string) (ResolvedPlayerIdentity, error) {
+	playerID, isSteamID := normalizePlayerIdentifier(strings.TrimSpace(rawPlayerID))
+	if playerID == "" {
+		return ResolvedPlayerIdentity{}, fmt.Errorf("invalid player identifier")
+	}
+	profile, err := s.getPlayerFromIdentityTable(ctx, playerID, isSteamID)
+	if err == nil {
+		resolved := ResolvedPlayerIdentity{
+			CanonicalID:    profile.CanonicalID,
+			SteamIDs:       append([]string(nil), profile.AllSteamIDs...),
+			EOSIDs:         append([]string(nil), profile.AllEOSIDs...),
+			EpicIDs:        append([]string(nil), profile.AllEpicIDs...),
+			Found:          true,
+			SnapshotBacked: true,
+		}
+		resolved.SteamIDs = appendUniqueSteamIdentifier(resolved.SteamIDs, profile.SteamID)
+		resolved.EOSIDs = appendUniqueEOSIdentifier(resolved.EOSIDs, profile.EOSID)
+		resolved.EpicIDs = appendUniquePlayerIdentifier(resolved.EpicIDs, profile.EpicID)
+		return resolved, nil
+	}
+	if errors.Is(err, errPlayerNotFoundInSnapshot) {
+		return ResolvedPlayerIdentity{SnapshotBacked: true}, nil
+	}
+
+	// Compatibility fallback when the snapshot objects or pointer are not yet
+	// available during a rolling deployment.
+	resolved := ResolvedPlayerIdentity{Found: true}
+	if isSteamID {
+		resolved.SteamIDs = []string{playerID}
+	} else {
+		resolved.EOSIDs = []string{playerID}
+		resolved.EpicIDs = []string{playerID}
+	}
+	return resolved, nil
+}
+
+func steamIDsAsUint64(values []string) ([]uint64, error) {
+	result := make([]uint64, 0, len(values))
+	for _, value := range values {
+		parsed, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Steam ID %q: %w", value, err)
+		}
+		result = append(result, parsed)
+	}
+	return result, nil
+}
+
+func (s *Server) loadServerNamesBatch(ctx context.Context, serverIDs []string) (map[string]string, error) {
+	unique := make(map[string]struct{}, len(serverIDs))
+	ids := make([]string, 0, len(serverIDs))
+	for _, id := range serverIDs {
+		if id == "" {
+			continue
+		}
+		if _, exists := unique[id]; exists {
+			continue
+		}
+		if _, err := uuid.Parse(id); err != nil {
+			continue
+		}
+		unique[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	result := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	rows, err := s.Dependencies.DB.QueryContext(ctx, `
+		/* sa.player.server_names */
+		SELECT id::text, name
+		FROM servers
+		WHERE id = ANY($1::uuid[])
+	`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		result[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func appendUniquePlayerIdentifier(values []string, value string) []string {
@@ -712,44 +793,9 @@ func buildServerBanIdentifierWhereClause(steamIDs, eosIDs []string, alias string
 	return strings.Join(conditions, " OR "), args, argIdx
 }
 
-func (s *Server) isPlayerCurrentlyBanned(ctx context.Context, steamID, eosID string) (bool, error) {
-	idConditions := []string{}
-	args := []interface{}{}
-
-	if steamID != "" {
-		args = append(args, steamID)
-		idConditions = append(idConditions, fmt.Sprintf("steam_id = $%d", len(args)))
-	}
-
-	normalizedEOSID := utils.NormalizeEOSID(eosID)
-	if normalizedEOSID != "" {
-		args = append(args, normalizedEOSID)
-		idConditions = append(idConditions, fmt.Sprintf("eos_id = $%d", len(args)))
-	}
-
-	if len(idConditions) == 0 {
-		return false, nil
-	}
-
-	query := fmt.Sprintf(`
-		SELECT EXISTS(
-			SELECT 1
-			FROM server_bans
-			WHERE (%s)
-			AND (expires_at IS NULL OR expires_at > NOW())
-		)
-	`, strings.Join(idConditions, " OR "))
-
-	var isBanned bool
-	if err := s.Dependencies.DB.QueryRowContext(ctx, query, args...).Scan(&isBanned); err != nil {
-		return false, err
-	}
-
-	return isBanned, nil
-}
-
 // PlayerGet handles GET /api/players/:playerId - get player profile by steam or eos id
 func (s *Server) PlayerGet(c *gin.Context) {
+	ctx := c.Request.Context()
 	playerID := c.Param("playerId")
 
 	if playerID == "" {
@@ -766,68 +812,88 @@ func (s *Server) PlayerGet(c *gin.Context) {
 		return
 	}
 
-	lookupPlayerID, lookupIsSteamID := selectProfileLookupIdentifier(profile, playerID, isSteamID)
+	identity := resolvedPlayerIdentityFromProfile(profile, playerID, isSteamID)
 
 	// Get player statistics
-	statistics, err := s.getPlayerStatistics(c, lookupPlayerID, lookupIsSteamID)
-	if err == nil {
-		profile.Statistics = *statistics
+	statistics, err := s.getPlayerStatistics(ctx, identity)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load player statistics: %w", err), nil)
+		return
 	}
+	profile.Statistics = *statistics
 
 	// Get recent activity
-	recentActivity, err := s.getPlayerRecentActivity(c, lookupPlayerID, lookupIsSteamID, 20)
-	if err == nil {
-		profile.RecentActivity = recentActivity
+	recentActivity, err := s.getPlayerRecentActivity(ctx, identity, 20)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load player activity: %w", err), nil)
+		return
 	}
+	profile.RecentActivity = recentActivity
 
 	// Get chat history (last 50 messages)
-	chatHistory, err := s.getPlayerChatHistory(c, lookupPlayerID, lookupIsSteamID, 50)
-	if err == nil {
-		profile.ChatHistory = chatHistory
+	chatHistory, err := s.getPlayerChatHistory(ctx, identity, 50)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load player chat history: %w", err), nil)
+		return
 	}
+	profile.ChatHistory = chatHistory
 
 	// Get violations
-	violations, err := s.getPlayerViolations(c, lookupPlayerID, lookupIsSteamID)
-	if err == nil {
-		profile.Violations = violations
+	violations, err := s.getPlayerViolations(ctx, identity)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load player violations: %w", err), nil)
+		return
 	}
+	profile.Violations = violations
 
 	// Get recent servers
-	recentServers, err := s.getPlayerRecentServers(c, lookupPlayerID, lookupIsSteamID)
-	if err == nil {
-		profile.RecentServers = recentServers
+	recentServers, err := s.getPlayerRecentServers(ctx, identity)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load recent servers: %w", err), nil)
+		return
 	}
+	profile.RecentServers = recentServers
 
 	// Get admin-focused data
 	// Active bans — pass both IDs so legacy steam-only bans are found for EOS lookups
-	activeBans, err := s.getPlayerActiveBans(c, profile.SteamID, profile.EOSID)
-	if err == nil {
-		profile.ActiveBans = activeBans
+	activeBans, err := s.getPlayerActiveBans(ctx, identity)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load active bans: %w", err), nil)
+		return
 	}
+	profile.ActiveBans = activeBans
 
 	// Violation summary
-	violationSummary, err := s.getPlayerViolationSummary(c, lookupPlayerID, lookupIsSteamID)
-	if err == nil {
-		profile.ViolationSummary = *violationSummary
+	violationSummary, err := s.getPlayerViolationSummary(ctx, identity)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load violation summary: %w", err), nil)
+		return
 	}
+	profile.ViolationSummary = *violationSummary
 
 	// Teamkill metrics
-	tkMetrics, err := s.getPlayerTeamkillMetrics(c, lookupPlayerID, lookupIsSteamID, profile.TotalSessions)
-	if err == nil {
-		profile.TeamkillMetrics = *tkMetrics
+	tkMetrics, err := s.getPlayerTeamkillMetrics(ctx, identity, profile.TotalSessions)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load teamkill metrics: %w", err), nil)
+		return
 	}
+	profile.TeamkillMetrics = *tkMetrics
 
 	// Name history
-	nameHistory, err := s.getPlayerNameHistory(c, lookupPlayerID, lookupIsSteamID)
-	if err == nil {
-		profile.NameHistory = nameHistory
+	nameHistory, err := s.getPlayerNameHistory(ctx, identity)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load player name history: %w", err), nil)
+		return
 	}
+	profile.NameHistory = nameHistory
 
 	// Weapon stats
-	weaponStats, err := s.getPlayerWeaponStats(c, lookupPlayerID, lookupIsSteamID)
-	if err == nil {
-		profile.WeaponStats = weaponStats
+	weaponStats, err := s.getPlayerWeaponStats(ctx, identity)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load player weapon statistics: %w", err), nil)
+		return
 	}
+	profile.WeaponStats = weaponStats
 
 	// Calculate risk indicators
 	profile.RiskIndicators = s.calculateRiskIndicators(profile)
@@ -865,418 +931,211 @@ func (s *Server) PlayerBanHistory(c *gin.Context) {
 	})
 }
 
-// PlayersStats handles GET /api/players/stats - get player statistics summary
+// PlayersStats handles GET /api/players/stats. Actor identifiers are reduced
+// to one exact type/value pair before joining the current identity snapshot,
+// so every aggregate is grouped by canonical ID without OR joins.
 func (s *Server) PlayersStats(c *gin.Context) {
 	ctx := c.Request.Context()
-
-	summary := PlayerStatsSummary{}
-
-	// Get top players by K/D ratio (min 10 kills to qualify)
-	// Link players by Steam ID or EOS ID - if either matches, they're the same player
-	topPlayersQuery := `
-		WITH player_identity AS (
-			SELECT
-				if(steam != '', steam, '') as steam_id,
-				if(eos != '', eos, '') as eos_id,
-				any(player_suffix) as player_name
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE steam != '' OR eos != ''
-			GROUP BY steam, eos
-		),
-		player_stats AS (
-			SELECT
-				attacker_steam,
-				attacker_eos,
-				attacker_name,
-				countIf(attacker_steam != '' OR attacker_eos != '') as kills,
-				0 as deaths
-			FROM squad_aegis.server_player_died_events
-			WHERE (attacker_steam != '' OR attacker_eos != '')
-			GROUP BY attacker_steam, attacker_eos, attacker_name
-
-			UNION ALL
-
-			SELECT
-				victim_steam as attacker_steam,
-				victim_eos as attacker_eos,
-				victim_name as attacker_name,
-				0 as kills,
-				count(*) as deaths
-			FROM squad_aegis.server_player_died_events
-			WHERE (victim_steam != '' OR victim_eos != '')
-			GROUP BY victim_steam, victim_eos, victim_name
-		),
-		normalized_stats AS (
-			SELECT
-				if(ps.attacker_steam != '', ps.attacker_steam, pi.steam_id) as norm_steam,
-				if(ps.attacker_eos != '', ps.attacker_eos, pi.eos_id) as norm_eos,
-				coalesce(pi.player_name, ps.attacker_name) as player_name,
-				ps.kills,
-				ps.deaths
-			FROM player_stats ps
-			LEFT JOIN player_identity pi ON
-				(ps.attacker_steam != '' AND ps.attacker_steam = pi.steam_id) OR
-				(ps.attacker_eos != '' AND ps.attacker_eos = pi.eos_id)
-		)
-		SELECT
-			any(norm_steam) as steam_id,
-			any(norm_eos) as eos_id,
-			any(player_name) as player_name,
-			sum(kills) as total_kills,
-			sum(deaths) as total_deaths,
-			if(sum(deaths) > 0, sum(kills) / sum(deaths), toFloat64(sum(kills))) as kd_ratio
-		FROM normalized_stats
-		WHERE norm_steam != '' OR norm_eos != ''
-		GROUP BY if(norm_steam != '', norm_steam, norm_eos)
-		HAVING total_kills >= 10
-		ORDER BY kd_ratio DESC
-		LIMIT 10
-	`
-
-	rows, err := s.Dependencies.Clickhouse.Query(ctx, topPlayersQuery)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var player TopPlayerStats
-			var steamID, eosID *string
-			err := rows.Scan(
-				&steamID,
-				&eosID,
-				&player.PlayerName,
-				&player.Kills,
-				&player.Deaths,
-				&player.KDRatio,
-			)
-			if err == nil {
-				if steamID != nil {
-					player.SteamID = *steamID
-				}
-				if eosID != nil {
-					player.EOSID = *eosID
-				}
-
-				// If name is empty, try to fetch it using getPlayerBasicInfo
-				if player.PlayerName == "" {
-					var playerID string
-					isSteamID := false
-					if player.SteamID != "" {
-						playerID = player.SteamID
-						isSteamID = true
-					} else if player.EOSID != "" {
-						playerID = player.EOSID
-						isSteamID = false
-					}
-
-					if playerID != "" {
-						if profile, err := s.getPlayerBasicInfo(c, playerID, isSteamID); err == nil && profile != nil {
-							player.PlayerName = profile.PlayerName
-						}
-					}
-				}
-
-				summary.TopPlayers = append(summary.TopPlayers, player)
-			}
-		}
+	summary := PlayerStatsSummary{
+		TopPlayers:        []TopPlayerStats{},
+		TopTeamkillers:    []TopPlayerStats{},
+		TopMedics:         []TopPlayerStats{},
+		MostRecentPlayers: []PlayerSearchResult{},
 	}
 
-	// Get top teamkillers
-	topTeamkillersQuery := `
-		WITH player_identity AS (
+	query := fmt.Sprintf(`
+		/* sa.player.statistics */
+		WITH current AS (
+			SELECT snapshot_id
+			FROM squad_aegis.player_identity_current
+			WHERE pointer_key = 1
+			ORDER BY published_at DESC
+			LIMIT 1
+		), identity_lookup AS (
+			SELECT identifier_type, identifier_value, min(canonical_id) AS canonical_id
+			FROM squad_aegis.player_identity_lookup_snapshots
+			WHERE snapshot_id = (SELECT snapshot_id FROM current)
+			  AND identifier_type IN ('steam', 'eos')
+			GROUP BY identifier_type, identifier_value
+		), identities AS (
+			SELECT canonical_id, primary_steam_id, primary_eos_id, primary_name,
+			       first_seen, last_seen
+			FROM squad_aegis.player_identity_snapshots
+			WHERE snapshot_id = (SELECT snapshot_id FROM current)
+		), combat_rows AS (
 			SELECT
-				if(steam != '', steam, '') as steam_id,
-				if(eos != '', eos, '') as eos_id,
-				any(player_suffix) as player_name
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE steam != '' OR eos != ''
-			GROUP BY steam, eos
-		),
-		teamkill_stats AS (
-			SELECT
-				d.attacker_steam AS attacker_steam,
-				d.attacker_eos AS attacker_eos,
-				d.attacker_name AS attacker_name,
-				count(*) as teamkills
+				d.event_time,
+				tupleElement(actor, 1) AS actor_role,
+				if(tupleElement(actor, 2) != '', 'steam', 'eos') AS identifier_type,
+				if(tupleElement(actor, 2) != '', tupleElement(actor, 2), tupleElement(actor, 3)) AS identifier_value,
+				tupleElement(actor, 4) AS observed_name,
+				toUInt64(actor_role = 'attacker') AS kills,
+				toUInt64(actor_role = 'victim') AS deaths,
+				toUInt64(actor_role = 'attacker' AND d.teamkill = 1 AND %s = '%s') AS teamkills
 			FROM squad_aegis.server_player_died_events AS d
 			ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
 				ON d.server_id = g.server_id AND d.event_time >= g.event_time
-			WHERE d.teamkill = 1 AND (d.attacker_steam != '' OR d.attacker_eos != '')
-				AND ` + squadlayers.LayerCategorySQL("g.layer", "g.map_classname", "g.layer_classname") + ` = '` + string(squadlayers.CategoryCompetitive) + `'
-			GROUP BY d.attacker_steam, d.attacker_eos, d.attacker_name
-		),
-		normalized_stats AS (
+			ARRAY JOIN [
+				tuple('attacker', ifNull(d.attacker_steam, ''), ifNull(d.attacker_eos, ''), d.attacker_name),
+				tuple('victim', ifNull(d.victim_steam, ''), ifNull(d.victim_eos, ''), d.victim_name)
+			] AS actor
+			WHERE identifier_value != ''
+		), normalized_combat AS (
 			SELECT
-				if(ts.attacker_steam != '', ts.attacker_steam, pi.steam_id) as norm_steam,
-				if(ts.attacker_eos != '', ts.attacker_eos, pi.eos_id) as norm_eos,
-				coalesce(pi.player_name, ts.attacker_name) as player_name,
-				ts.teamkills
-			FROM teamkill_stats ts
-			LEFT JOIN player_identity pi ON
-				(ts.attacker_steam != '' AND ts.attacker_steam = pi.steam_id) OR
-				(ts.attacker_eos != '' AND ts.attacker_eos = pi.eos_id)
-		)
-		SELECT
-			any(norm_steam) as steam_id,
-			any(norm_eos) as eos_id,
-			any(player_name) as player_name,
-			sum(teamkills) as teamkills,
-			0 as kills,
-			0 as deaths
-		FROM normalized_stats
-		WHERE norm_steam != '' OR norm_eos != ''
-		GROUP BY if(norm_steam != '', norm_steam, norm_eos)
-		HAVING teamkills > 0
-		ORDER BY teamkills DESC
-		LIMIT 10
-	`
-
-	rows, err = s.Dependencies.Clickhouse.Query(ctx, topTeamkillersQuery)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var player TopPlayerStats
-			var steamID, eosID *string
-			err := rows.Scan(
-				&steamID,
-				&eosID,
-				&player.PlayerName,
-				&player.Teamkills,
-				&player.Kills,
-				&player.Deaths,
-			)
-			if err == nil {
-				if steamID != nil {
-					player.SteamID = *steamID
-				}
-				if eosID != nil {
-					player.EOSID = *eosID
-				}
-
-				// If name is empty, try to fetch it using getPlayerBasicInfo
-				if player.PlayerName == "" {
-					var playerID string
-					isSteamID := false
-					if player.SteamID != "" {
-						playerID = player.SteamID
-						isSteamID = true
-					} else if player.EOSID != "" {
-						playerID = player.EOSID
-						isSteamID = false
-					}
-
-					if playerID != "" {
-						if profile, err := s.getPlayerBasicInfo(c, playerID, isSteamID); err == nil && profile != nil {
-							player.PlayerName = profile.PlayerName
-						}
-					}
-				}
-
-				summary.TopTeamkillers = append(summary.TopTeamkillers, player)
-			}
-		}
-	}
-
-	// Get top medics (by revives)
-	topMedicsQuery := `
-		WITH player_identity AS (
+				if(ifNull(l.canonical_id, '') != '', l.canonical_id, concat(r.identifier_type, ':', r.identifier_value)) AS canonical_id,
+				ifNull(i.primary_steam_id, if(r.identifier_type = 'steam', r.identifier_value, '')) AS steam_id,
+				ifNull(i.primary_eos_id, if(r.identifier_type = 'eos', r.identifier_value, '')) AS eos_id,
+				if(ifNull(i.primary_name, '') != '', i.primary_name, argMax(r.observed_name, r.event_time)) AS player_name,
+				sum(r.kills) AS kills,
+				sum(r.deaths) AS deaths,
+				sum(r.teamkills) AS teamkills
+			FROM combat_rows AS r
+			LEFT JOIN identity_lookup AS l
+				ON l.identifier_type = r.identifier_type AND l.identifier_value = r.identifier_value
+			LEFT JOIN identities AS i ON i.canonical_id = l.canonical_id
+			GROUP BY canonical_id, steam_id, eos_id, i.primary_name
+		), revive_rows AS (
 			SELECT
-				if(steam != '', steam, '') as steam_id,
-				if(eos != '', eos, '') as eos_id,
-				any(player_suffix) as player_name
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE steam != '' OR eos != ''
-			GROUP BY steam, eos
-		),
-		revive_stats AS (
-			SELECT
-				reviver_steam,
-				reviver_eos,
-				reviver_name,
-				count(*) as revives
+				event_time,
+				if(ifNull(reviver_steam, '') != '', 'steam', 'eos') AS identifier_type,
+				if(ifNull(reviver_steam, '') != '', assumeNotNull(reviver_steam), assumeNotNull(reviver_eos)) AS identifier_value,
+				reviver_name AS observed_name
 			FROM squad_aegis.server_player_revived_events
-			WHERE (reviver_steam != '' OR reviver_eos != '')
-			GROUP BY reviver_steam, reviver_eos, reviver_name
-		),
-		normalized_stats AS (
+			WHERE ifNull(reviver_steam, '') != '' OR ifNull(reviver_eos, '') != ''
+		), normalized_revives AS (
 			SELECT
-				if(rs.reviver_steam != '', rs.reviver_steam, pi.steam_id) as norm_steam,
-				if(rs.reviver_eos != '', rs.reviver_eos, pi.eos_id) as norm_eos,
-				coalesce(pi.player_name, rs.reviver_name) as player_name,
-				rs.revives
-			FROM revive_stats rs
-			LEFT JOIN player_identity pi ON
-				(rs.reviver_steam != '' AND rs.reviver_steam = pi.steam_id) OR
-				(rs.reviver_eos != '' AND rs.reviver_eos = pi.eos_id)
+				if(ifNull(l.canonical_id, '') != '', l.canonical_id, concat(r.identifier_type, ':', r.identifier_value)) AS canonical_id,
+				ifNull(i.primary_steam_id, if(r.identifier_type = 'steam', r.identifier_value, '')) AS steam_id,
+				ifNull(i.primary_eos_id, if(r.identifier_type = 'eos', r.identifier_value, '')) AS eos_id,
+				if(ifNull(i.primary_name, '') != '', i.primary_name, argMax(r.observed_name, r.event_time)) AS player_name,
+				count() AS revives
+			FROM revive_rows AS r
+			LEFT JOIN identity_lookup AS l
+				ON l.identifier_type = r.identifier_type AND l.identifier_value = r.identifier_value
+			LEFT JOIN identities AS i ON i.canonical_id = l.canonical_id
+			GROUP BY canonical_id, steam_id, eos_id, i.primary_name
+		), top_players AS (
+			SELECT * FROM normalized_combat
+			WHERE kills >= 10
+			ORDER BY if(deaths > 0, kills / deaths, toFloat64(kills)) DESC, canonical_id
+			LIMIT 10
+		), top_teamkillers AS (
+			SELECT * FROM normalized_combat
+			WHERE teamkills > 0
+			ORDER BY teamkills DESC, canonical_id
+			LIMIT 10
+		), top_medics AS (
+			SELECT * FROM normalized_revives
+			WHERE revives > 0
+			ORDER BY revives DESC, canonical_id
+			LIMIT 10
+		), recent_players AS (
+			SELECT * FROM identities
+			ORDER BY last_seen DESC, canonical_id
+			LIMIT 10
 		)
-		SELECT
-			any(norm_steam) as steam_id,
-			any(norm_eos) as eos_id,
-			any(player_name) as player_name,
-			sum(revives) as revives,
-			0 as kills,
-			0 as deaths
-		FROM normalized_stats
-		WHERE norm_steam != '' OR norm_eos != ''
-		GROUP BY if(norm_steam != '', norm_steam, norm_eos)
-		HAVING revives > 0
-		ORDER BY revives DESC
-		LIMIT 10
-	`
+		SELECT category, canonical_id, steam_id, eos_id, player_name,
+		       kills, deaths, kd_ratio, teamkills, revives,
+		       last_seen, first_seen, total_players
+		FROM
+		(
+			SELECT 'top_player' AS category, canonical_id, steam_id, eos_id, player_name,
+			       kills, deaths, if(deaths > 0, kills / deaths, toFloat64(kills)) AS kd_ratio,
+			       teamkills, toUInt64(0) AS revives,
+			       CAST(NULL AS Nullable(DateTime64(3, 'UTC'))) AS last_seen,
+			       CAST(NULL AS Nullable(DateTime64(3, 'UTC'))) AS first_seen,
+			       toUInt64(0) AS total_players
+			FROM top_players
 
-	rows, err = s.Dependencies.Clickhouse.Query(ctx, topMedicsQuery)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var player TopPlayerStats
-			var steamID, eosID *string
-			err := rows.Scan(
-				&steamID,
-				&eosID,
-				&player.PlayerName,
-				&player.Revives,
-				&player.Kills,
-				&player.Deaths,
-			)
-			if err == nil {
-				if steamID != nil {
-					player.SteamID = *steamID
-				}
-				if eosID != nil {
-					player.EOSID = *eosID
-				}
+			UNION ALL
 
-				// If name is empty, try to fetch it using getPlayerBasicInfo
-				if player.PlayerName == "" {
-					var playerID string
-					isSteamID := false
-					if player.SteamID != "" {
-						playerID = player.SteamID
-						isSteamID = true
-					} else if player.EOSID != "" {
-						playerID = player.EOSID
-						isSteamID = false
-					}
+			SELECT 'top_teamkiller', canonical_id, steam_id, eos_id, player_name,
+			       kills, deaths, if(deaths > 0, kills / deaths, toFloat64(kills)),
+			       teamkills, toUInt64(0), NULL, NULL, toUInt64(0)
+			FROM top_teamkillers
 
-					if playerID != "" {
-						if profile, err := s.getPlayerBasicInfo(c, playerID, isSteamID); err == nil && profile != nil {
-							player.PlayerName = profile.PlayerName
-						}
-					}
-				}
+			UNION ALL
 
-				summary.TopMedics = append(summary.TopMedics, player)
-			}
-		}
-	}
+			SELECT 'top_medic', canonical_id, steam_id, eos_id, player_name,
+			       toUInt64(0), toUInt64(0), toFloat64(0), toUInt64(0), revives,
+			       NULL, NULL, toUInt64(0)
+			FROM top_medics
 
-	// Get most recent players
-	recentPlayersQuery := `
-		WITH player_records AS (
-			SELECT
-				steam,
-				eos,
-				any(player_suffix) as player_name,
-				max(event_time) as last_seen,
-				min(event_time) as first_seen
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE (steam != '' OR eos != '')
-			GROUP BY steam, eos
+			UNION ALL
+
+			SELECT 'recent', canonical_id, primary_steam_id, primary_eos_id, primary_name,
+			       toUInt64(0), toUInt64(0), toFloat64(0), toUInt64(0), toUInt64(0),
+			       toNullable(last_seen), toNullable(first_seen), toUInt64(0)
+			FROM recent_players
+
+			UNION ALL
+
+			SELECT 'summary', '', '', '', '',
+			       ifNull(sum(kills), toUInt64(0)), ifNull(sum(deaths), toUInt64(0)), toFloat64(0),
+			       ifNull(sum(teamkills), toUInt64(0)), toUInt64(0), NULL, NULL,
+			       uniqExact(canonical_id)
+			FROM normalized_combat
 		)
-		SELECT
-			anyIf(steam, steam != '') as steam_id,
-			anyIf(eos, eos != '') as eos_id,
-			any(player_name) as player_name,
-			max(last_seen) as last_seen,
-			min(first_seen) as first_seen
-		FROM player_records
-		WHERE steam != '' OR eos != ''
-		GROUP BY if(steam != '', steam, eos)
-		ORDER BY last_seen DESC
-		LIMIT 10
-	`
-
-	rows, err = s.Dependencies.Clickhouse.Query(ctx, recentPlayersQuery)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var player PlayerSearchResult
-			var steamID, eosID *string
-			err := rows.Scan(
-				&steamID,
-				&eosID,
-				&player.PlayerName,
-				&player.LastSeen,
-				&player.FirstSeen,
-			)
-			if err == nil {
-				if steamID != nil {
-					player.SteamID = *steamID
-				}
-				if eosID != nil {
-					player.EOSID = *eosID
-				}
-
-				// If name is empty, try to fetch it using getPlayerBasicInfo
-				if player.PlayerName == "" {
-					var playerID string
-					isSteamID := false
-					if player.SteamID != "" {
-						playerID = player.SteamID
-						isSteamID = true
-					} else if player.EOSID != "" {
-						playerID = player.EOSID
-						isSteamID = false
-					}
-
-					if playerID != "" {
-						if profile, err := s.getPlayerBasicInfo(c, playerID, isSteamID); err == nil && profile != nil {
-							player.PlayerName = profile.PlayerName
-						}
-					}
-				}
-
-				summary.MostRecentPlayers = append(summary.MostRecentPlayers, player)
-			}
-		}
-	}
-
-	// Get overall statistics - do it in two steps for ClickHouse compatibility
-	// First get event counts. Teamkills count competitive play only: each row is
-	// matched to its live layer via an ASOF join and seeding/training TKs are
-	// excluded (the ASOF LEFT JOIN keeps every left row, so the kill/death
-	// counts are unaffected).
-	eventStatsQuery := fmt.Sprintf(`
-		SELECT
-			count(*) as total_kills,
-			count(*) as total_deaths,
-			countIf(d.teamkill = 1 AND %s = '%s') as total_teamkills
-		FROM squad_aegis.server_player_died_events AS d
-		ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
-			ON d.server_id = g.server_id AND d.event_time >= g.event_time
+		ORDER BY category, canonical_id
 	`, squadlayers.LayerCategorySQL("g.layer", "g.map_classname", "g.layer_classname"), squadlayers.CategoryCompetitive)
 
-	row := s.Dependencies.Clickhouse.QueryRow(ctx, eventStatsQuery)
-	_ = row.Scan(
-		&summary.TotalKills,
-		&summary.TotalDeaths,
-		&summary.TotalTeamkills,
-	)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("query player statistics: %w", err), nil)
+		return
+	}
+	defer rows.Close()
 
-	// Then get unique player count
-	playerCountQuery := `
-		SELECT uniq(player_id) as total_players
-		FROM (
-			SELECT if(attacker_steam != '', attacker_steam, attacker_eos) as player_id
-			FROM squad_aegis.server_player_died_events
-			WHERE attacker_steam != '' OR attacker_eos != ''
-			UNION ALL
-			SELECT if(victim_steam != '', victim_steam, victim_eos) as player_id
-			FROM squad_aegis.server_player_died_events
-			WHERE victim_steam != '' OR victim_eos != ''
+	for rows.Next() {
+		var (
+			category, canonicalID, steamID, eosID, playerName string
+			kills, deaths, teamkills, revives, totalPlayers   uint64
+			kdRatio                                           float64
+			lastSeen, firstSeen                               *time.Time
 		)
-	`
+		if err := rows.Scan(
+			&category, &canonicalID, &steamID, &eosID, &playerName,
+			&kills, &deaths, &kdRatio, &teamkills, &revives,
+			&lastSeen, &firstSeen, &totalPlayers,
+		); err != nil {
+			responses.InternalServerError(c, fmt.Errorf("scan player statistics: %w", err), nil)
+			return
+		}
 
-	row = s.Dependencies.Clickhouse.QueryRow(ctx, playerCountQuery)
-	_ = row.Scan(&summary.TotalPlayers)
+		switch category {
+		case "top_player":
+			summary.TopPlayers = append(summary.TopPlayers, TopPlayerStats{
+				SteamID: steamID, EOSID: eosID, PlayerName: playerName,
+				Kills: int64(kills), Deaths: int64(deaths), KDRatio: kdRatio, Teamkills: int64(teamkills),
+			})
+		case "top_teamkiller":
+			summary.TopTeamkillers = append(summary.TopTeamkillers, TopPlayerStats{
+				SteamID: steamID, EOSID: eosID, PlayerName: playerName,
+				Kills: int64(kills), Deaths: int64(deaths), KDRatio: kdRatio, Teamkills: int64(teamkills),
+			})
+		case "top_medic":
+			summary.TopMedics = append(summary.TopMedics, TopPlayerStats{
+				SteamID: steamID, EOSID: eosID, PlayerName: playerName, Revives: int64(revives),
+			})
+		case "recent":
+			summary.MostRecentPlayers = append(summary.MostRecentPlayers, PlayerSearchResult{
+				SteamID: steamID, EOSID: eosID, PlayerName: playerName,
+				LastSeen: lastSeen, FirstSeen: firstSeen,
+			})
+		case "summary":
+			summary.TotalPlayers = int64(totalPlayers)
+			summary.TotalKills = int64(kills)
+			summary.TotalDeaths = int64(deaths)
+			summary.TotalTeamkills = int64(teamkills)
+		default:
+			responses.InternalServerError(c, fmt.Errorf("unknown player statistics category %q", category), nil)
+			return
+		}
+	}
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("read player statistics: %w", err), nil)
+		return
+	}
 
 	responses.Success(c, "Player statistics fetched successfully", &gin.H{"stats": summary})
 }
@@ -1353,63 +1212,72 @@ func (s *Server) getLinkedPlayerIdentifiers(c *gin.Context, playerID string, isS
 // Aggregates data across all records that share the same Steam ID or EOS ID
 // Handles transitive linking: if records share ANY identifier, they're the same player
 func (s *Server) getPlayerBasicInfo(c *gin.Context, playerID string, isSteamID bool) (*PlayerProfile, error) {
-	// Try to get from pre-computed identity table first
 	profile, err := s.getPlayerFromIdentityTable(c.Request.Context(), playerID, isSteamID)
 	if err == nil && profile != nil {
 		return profile, nil
 	}
+	if errors.Is(err, errPlayerNotFoundInSnapshot) {
+		return nil, err
+	}
 
-	// Fallback to raw events query
+	// Raw events are a compatibility fallback only when there is no published
+	// snapshot or the snapshot tables are unavailable.
 	return s.getPlayerFromRawEvents(c.Request.Context(), playerID, isSteamID)
 }
 
+var (
+	errPlayerNotFoundInSnapshot  = errors.New("player not found in current identity snapshot")
+	errPlayerSnapshotUnavailable = errors.New("no published player identity snapshot")
+)
+
 // getPlayerFromIdentityTable fetches player profile from pre-computed identity table
 func (s *Server) getPlayerFromIdentityTable(ctx context.Context, playerID string, isSteamID bool) (*PlayerProfile, error) {
-	lookupTypeClause := "identifier_type IN ('eos', 'epic')"
+	lookupTypeClause := "pil.identifier_type IN ('eos', 'epic')"
 	if isSteamID {
-		lookupTypeClause = "identifier_type = 'steam'"
+		lookupTypeClause = "pil.identifier_type = 'steam'"
 	}
-
-	// First, look up the canonical ID
-	lookupQuery := fmt.Sprintf(`
-		SELECT canonical_id
-		FROM squad_aegis.player_identity_lookup
-		WHERE %s AND identifier_value = ?
-		ORDER BY computed_at DESC
+	identityQuery := fmt.Sprintf(`
+		/* sa.player.identity_resolve */
+		WITH current AS (
+			SELECT snapshot_id
+			FROM squad_aegis.player_identity_current
+			WHERE pointer_key = 1
+			ORDER BY published_at DESC
+			LIMIT 1
+		), matched AS (
+			SELECT pil.canonical_id
+			FROM squad_aegis.player_identity_lookup_snapshots pil
+			INNER JOIN current c ON pil.snapshot_id = c.snapshot_id
+			WHERE %s AND pil.identifier_value = ?
+			ORDER BY pil.canonical_id
+			LIMIT 1
+		), identity AS (
+			SELECT pi.canonical_id, pi.primary_steam_id, pi.primary_eos_id,
+			       pi.primary_epic_id, pi.primary_name, pi.all_steam_ids,
+			       pi.all_eos_ids, pi.all_epic_ids, pi.all_names,
+			       pi.total_sessions, pi.first_seen, pi.last_seen
+			FROM squad_aegis.player_identity_snapshots pi
+			INNER JOIN current c ON pi.snapshot_id = c.snapshot_id
+			INNER JOIN matched m ON pi.canonical_id = m.canonical_id
+		)
+		SELECT toUInt8(1), * FROM identity
+		UNION ALL
+		SELECT if((SELECT count() FROM current) = 0, toUInt8(2), toUInt8(0)),
+		       '', '', '', '', '', [], [], [], [], toUInt64(0),
+		       toDateTime64(0, 3, 'UTC'), toDateTime64(0, 3, 'UTC')
+		WHERE NOT EXISTS (SELECT 1 FROM identity)
 		LIMIT 1
 	`, lookupTypeClause)
-
-	var canonicalID string
-	row := s.Dependencies.Clickhouse.QueryRow(ctx, lookupQuery, playerID)
-	if err := row.Scan(&canonicalID); err != nil {
-		return nil, fmt.Errorf("player not found in identity table: %w", err)
-	}
-
-	// Fetch full identity data
-	identityQuery := `
-		SELECT
-			canonical_id,
-			primary_steam_id,
-			primary_eos_id,
-			primary_epic_id,
-			primary_name,
-			all_steam_ids,
-			all_eos_ids,
-			all_epic_ids,
-			all_names,
-			total_sessions,
-			first_seen,
-			last_seen
-		FROM squad_aegis.player_identities
-		WHERE canonical_id = ?
-	`
 
 	var profile PlayerProfile
 	var allSteamIDs, allEOSIDs, allEpicIDs, allNames []string
 	var totalSessions uint64
+	var found uint8
+	var firstSeen, lastSeen time.Time
 
-	row = s.Dependencies.Clickhouse.QueryRow(ctx, identityQuery, canonicalID)
+	row := s.Dependencies.Clickhouse.QueryRow(ctx, identityQuery, playerID)
 	err := row.Scan(
+		&found,
 		&profile.CanonicalID,
 		&profile.SteamID,
 		&profile.EOSID,
@@ -1420,13 +1288,21 @@ func (s *Server) getPlayerFromIdentityTable(ctx context.Context, playerID string
 		&allEpicIDs,
 		&allNames,
 		&totalSessions,
-		&profile.FirstSeen,
-		&profile.LastSeen,
+		&firstSeen,
+		&lastSeen,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch identity: %w", err)
+		return nil, fmt.Errorf("resolve current identity snapshot: %w", err)
+	}
+	if found == 2 {
+		return nil, errPlayerSnapshotUnavailable
+	}
+	if found == 0 {
+		return nil, errPlayerNotFoundInSnapshot
 	}
 
+	profile.FirstSeen = &firstSeen
+	profile.LastSeen = &lastSeen
 	profile.AllSteamIDs = allSteamIDs
 	profile.AllEOSIDs = allEOSIDs
 	profile.AllEpicIDs = allEpicIDs
@@ -1656,126 +1532,64 @@ func (s *Server) getPlayerFromRawEvents(ctx context.Context, playerID string, is
 
 // getPlayerStatistics retrieves player combat statistics
 // Includes all linked identities (transitive linking by Steam ID or EOS ID)
-func (s *Server) getPlayerStatistics(c *gin.Context, playerID string, isSteamID bool) (*PlayerStatistics, error) {
-	whereClause := "steam = ?"
-	if !isSteamID {
-		whereClause = "eos = ?"
+func (s *Server) getPlayerStatistics(ctx context.Context, identity ResolvedPlayerIdentity) (*PlayerStatistics, error) {
+	if len(identity.SteamIDs) == 0 && len(identity.EOSIDs) == 0 {
+		return &PlayerStatistics{}, nil
 	}
+	const identityArrays = `
+		WITH
+			CAST(? AS Array(String)) AS steam_ids,
+			CAST(? AS Array(String)) AS eos_ids`
+	const attackerMatch = `(ifNull(attacker_steam, '') IN steam_ids OR ifNull(attacker_eos, '') IN eos_ids)`
+	const victimMatch = `(ifNull(victim_steam, '') IN steam_ids OR ifNull(victim_eos, '') IN eos_ids)`
 
-	// Get kills, deaths, teamkills across ALL linked identities
-	query := fmt.Sprintf(`
-		WITH initial_records AS (
-			SELECT steam, eos
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE %s
-		),
-		linked_identifiers AS (
-			SELECT
-				groupUniqArray(steam) as steam_ids,
-				groupUniqArray(eos) as eos_ids
-			FROM initial_records
-			WHERE steam != '' OR eos != ''
-		)
+	query := identityArrays + `
+		/* sa.player.profile_combat */
 		SELECT
-			countIf(
-				(attacker_steam != '' AND attacker_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
-				(attacker_eos != '' AND attacker_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
-			) as kills,
-			countIf(
-				(victim_steam != '' AND victim_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
-				(victim_eos != '' AND victim_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
-			) as deaths,
-			countIf(
-				teamkill = 1 AND (
-					(attacker_steam != '' AND attacker_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
-					(attacker_eos != '' AND attacker_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
-				)
-			) as teamkills,
-			sumIf(
-				damage,
-				(attacker_steam != '' AND attacker_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
-				(attacker_eos != '' AND attacker_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
-			) as damage_dealt,
-			sumIf(
-				damage,
-				(victim_steam != '' AND victim_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
-				(victim_eos != '' AND victim_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
-			) as damage_taken
-		FROM squad_aegis.server_player_died_events
-	`, whereClause)
-
-	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, playerID)
+			countIf(` + attackerMatch + `),
+			countIf(` + victimMatch + `),
+			countIf(teamkill = 1 AND ` + attackerMatch + `),
+			sumIf(toFloat64(damage), ` + attackerMatch + `),
+			sumIf(toFloat64(damage), ` + victimMatch + `)
+		FROM squad_aegis.server_player_died_events`
 
 	var stats PlayerStatistics
-	var damageDealt, damageTaken *float64
-
-	err := row.Scan(
+	if err := s.Dependencies.Clickhouse.QueryRow(ctx, query, identity.SteamIDs, identity.EOSIDs).Scan(
 		&stats.Kills,
 		&stats.Deaths,
 		&stats.Teamkills,
-		&damageDealt,
-		&damageTaken,
-	)
-	if err != nil {
+		&stats.DamageDealt,
+		&stats.DamageTaken,
+	); err != nil {
 		return nil, err
 	}
-
-	if damageDealt != nil {
-		stats.DamageDealt = *damageDealt
-	}
-	if damageTaken != nil {
-		stats.DamageTaken = *damageTaken
-	}
-
-	// Calculate K/D ratio
 	if stats.Deaths > 0 {
 		stats.KDRatio = float64(stats.Kills) / float64(stats.Deaths)
 	} else {
 		stats.KDRatio = float64(stats.Kills)
 	}
 
-	// Get revives across all linked identities
-	reviveQuery := fmt.Sprintf(`
-		WITH initial_records AS (
-			SELECT steam, eos
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE %s
-		),
-		linked_identifiers AS (
-			SELECT
-				groupUniqArray(steam) as steam_ids,
-				groupUniqArray(eos) as eos_ids
-			FROM initial_records
-			WHERE steam != '' OR eos != ''
-		)
+	reviveQuery := identityArrays + `
+		/* sa.player.profile_revives */
 		SELECT
-			countIf(
-				(reviver_steam != '' AND reviver_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
-				(reviver_eos != '' AND reviver_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
-			) as revives,
-			countIf(
-				(victim_steam != '' AND victim_steam IN (SELECT arrayJoin(steam_ids) FROM linked_identifiers WHERE steam_ids != [])) OR
-				(victim_eos != '' AND victim_eos IN (SELECT arrayJoin(eos_ids) FROM linked_identifiers WHERE eos_ids != []))
-			) as times_revived
-		FROM squad_aegis.server_player_revived_events
-	`, whereClause)
-
-	row = s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), reviveQuery, playerID)
-	err = row.Scan(&stats.Revives, &stats.TimesRevived)
-	if err != nil {
-		// Non-fatal, just log
-		stats.Revives = 0
-		stats.TimesRevived = 0
+			countIf(ifNull(reviver_steam, '') IN steam_ids OR ifNull(reviver_eos, '') IN eos_ids),
+			countIf(ifNull(victim_steam, '') IN steam_ids OR ifNull(victim_eos, '') IN eos_ids)
+		FROM squad_aegis.server_player_revived_events`
+	if err := s.Dependencies.Clickhouse.QueryRow(ctx, reviveQuery, identity.SteamIDs, identity.EOSIDs).Scan(
+		&stats.Revives,
+		&stats.TimesRevived,
+	); err != nil {
+		return nil, err
 	}
 
 	return &stats, nil
 }
 
 // getPlayerRecentActivity retrieves recent player activity
-func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isSteamID bool, limit int) ([]PlayerActivity, error) {
+func (s *Server) getPlayerRecentActivity(ctx context.Context, identity ResolvedPlayerIdentity, limit int) ([]PlayerActivity, error) {
 	// Combine multiple event types into a single activity feed
 	// We'll query died events, wounded events, and chat messages
-	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+	steamIDs, eosIDs := identity.SteamIDs, identity.EOSIDs
 	connectionWhereClause, connectionArgs := buildClickHouseIdentifierWhereClause("steam", "eos", steamIDs, eosIDs, false)
 	deathWhereClause, deathArgs := buildClickHouseIdentifierWhereClause("victim_steam", "victim_eos", steamIDs, eosIDs, false)
 	chatWhereClause, chatArgs := buildClickHouseIdentifierWhereClause("steam_id", "eos_id", steamIDs, eosIDs, true)
@@ -1783,7 +1597,7 @@ func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isStea
 		return []PlayerActivity{}, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := fmt.Sprintf(`/* sa.player.recent_activity */
 		SELECT
 			event_time,
 			'connection' as event_type,
@@ -1822,7 +1636,7 @@ func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isStea
 	queryArgs = append(queryArgs, chatArgs...)
 	queryArgs = append(queryArgs, limit)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, queryArgs...)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1831,30 +1645,32 @@ func (s *Server) getPlayerRecentActivity(c *gin.Context, playerID string, isStea
 	activities := []PlayerActivity{}
 	for rows.Next() {
 		var activity PlayerActivity
-		err := rows.Scan(
+		if err := rows.Scan(
 			&activity.EventTime,
 			&activity.EventType,
 			&activity.Description,
 			&activity.ServerID,
-		)
-		if err != nil {
-			continue
+		); err != nil {
+			return nil, err
 		}
 		activities = append(activities, activity)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return activities, nil
 }
 
 // getPlayerChatHistory retrieves player chat history
-func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID bool, limit int) ([]ChatMessage, error) {
-	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+func (s *Server) getPlayerChatHistory(ctx context.Context, identity ResolvedPlayerIdentity, limit int) ([]ChatMessage, error) {
+	steamIDs, eosIDs := identity.SteamIDs, identity.EOSIDs
 	whereClause, queryArgs := buildClickHouseIdentifierWhereClause("steam_id", "eos_id", steamIDs, eosIDs, true)
 	if whereClause == "1 = 0" {
 		return []ChatMessage{}, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := fmt.Sprintf(`/* sa.player.profile_chat */
 		SELECT
 			sent_at,
 			message,
@@ -1868,7 +1684,7 @@ func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID
 
 	queryArgs = append(queryArgs, limit)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, queryArgs...)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1877,16 +1693,18 @@ func (s *Server) getPlayerChatHistory(c *gin.Context, playerID string, isSteamID
 	messages := []ChatMessage{}
 	for rows.Next() {
 		var msg ChatMessage
-		err := rows.Scan(
+		if err := rows.Scan(
 			&msg.SentAt,
 			&msg.Message,
 			&msg.ChatType,
 			&msg.ServerID,
-		)
-		if err != nil {
-			continue
+		); err != nil {
+			return nil, err
 		}
 		messages = append(messages, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return messages, nil
@@ -1959,14 +1777,14 @@ func (s *Server) getPlayerBanHistory(c *gin.Context, playerID string, isSteamID 
 }
 
 // getPlayerViolations retrieves player rule violations
-func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID bool) ([]RuleViolation, error) {
-	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+func (s *Server) getPlayerViolations(ctx context.Context, identity ResolvedPlayerIdentity) ([]RuleViolation, error) {
+	steamIDs, eosIDs := identity.SteamIDs, identity.EOSIDs
 	whereClause, args := buildPlayerRuleViolationWhereClause(steamIDs, eosIDs, "")
 	if whereClause == "1 = 0" {
 		return []RuleViolation{}, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := fmt.Sprintf(`/* sa.player.profile_violations */
 		SELECT
 			violation_id,
 			server_id,
@@ -1979,7 +1797,7 @@ func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID 
 		ORDER BY created_at DESC
 	`, whereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, args...)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1988,61 +1806,106 @@ func (s *Server) getPlayerViolations(c *gin.Context, playerID string, isSteamID 
 	violations := []RuleViolation{}
 	for rows.Next() {
 		var violation RuleViolation
-		err := rows.Scan(
+		if err := rows.Scan(
 			&violation.ViolationID,
 			&violation.ServerID,
 			&violation.RuleID,
 			&violation.AdminUserID,
 			&violation.ActionType,
 			&violation.CreatedAt,
-		)
-		if err != nil {
-			continue
+		); err != nil {
+			return nil, err
 		}
-
-		// Enrich with server name from PostgreSQL
-		serverNameQuery := `SELECT name FROM servers WHERE id = $1`
-		row := s.Dependencies.DB.QueryRow(serverNameQuery, violation.ServerID)
-		var serverName string
-		if err := row.Scan(&serverName); err == nil {
-			violation.ServerName = serverName
-		}
-
-		// Enrich with rule name from PostgreSQL if rule_id is present
-		if violation.RuleID != nil && *violation.RuleID != "" {
-			ruleNameQuery := `SELECT title FROM server_rules WHERE id = $1`
-			row := s.Dependencies.DB.QueryRow(ruleNameQuery, *violation.RuleID)
-			var ruleName string
-			if err := row.Scan(&ruleName); err == nil {
-				violation.RuleName = &ruleName
-			}
-		}
-
-		// Enrich with admin name from PostgreSQL if admin_user_id is present
-		if violation.AdminUserID != nil && *violation.AdminUserID != "" {
-			adminNameQuery := `SELECT name FROM users WHERE id = $1`
-			row := s.Dependencies.DB.QueryRow(adminNameQuery, *violation.AdminUserID)
-			var adminName string
-			if err := row.Scan(&adminName); err == nil {
-				violation.AdminName = &adminName
-			}
-		}
-
 		violations = append(violations, violation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.enrichPlayerViolationsBatch(ctx, violations); err != nil {
+		return nil, err
 	}
 
 	return violations, nil
 }
 
+func (s *Server) enrichPlayerViolationsBatch(ctx context.Context, violations []RuleViolation) error {
+	serverIDs := make([]string, 0, len(violations))
+	ruleIDs := make([]string, 0, len(violations))
+	adminIDs := make([]string, 0, len(violations))
+	appendUUID := func(values []string, value string) []string {
+		if _, err := uuid.Parse(value); err == nil {
+			return append(values, value)
+		}
+		return values
+	}
+	for i := range violations {
+		serverIDs = appendUUID(serverIDs, violations[i].ServerID)
+		if violations[i].RuleID != nil {
+			ruleIDs = appendUUID(ruleIDs, *violations[i].RuleID)
+		}
+		if violations[i].AdminUserID != nil {
+			adminIDs = appendUUID(adminIDs, *violations[i].AdminUserID)
+		}
+	}
+	if len(serverIDs) == 0 && len(ruleIDs) == 0 && len(adminIDs) == 0 {
+		return nil
+	}
+
+	rows, err := s.Dependencies.DB.QueryContext(ctx, `
+		/* sa.player.violation_enrichment */
+		SELECT 'server' AS entity_type, id::text, name
+		FROM servers
+		WHERE id = ANY($1::uuid[])
+		UNION ALL
+		SELECT 'rule', id::text, title
+		FROM server_rules
+		WHERE id = ANY($2::uuid[])
+		UNION ALL
+		SELECT 'admin', id::text, COALESCE(name, username)
+		FROM users
+		WHERE id = ANY($3::uuid[])
+	`, pq.Array(serverIDs), pq.Array(ruleIDs), pq.Array(adminIDs))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	names := make(map[string]string, len(serverIDs)+len(ruleIDs)+len(adminIDs))
+	for rows.Next() {
+		var entityType, id, name string
+		if err := rows.Scan(&entityType, &id, &name); err != nil {
+			return err
+		}
+		names[entityType+":"+id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range violations {
+		violations[i].ServerName = names["server:"+violations[i].ServerID]
+		if violations[i].RuleID != nil {
+			if name, ok := names["rule:"+*violations[i].RuleID]; ok {
+				violations[i].RuleName = &name
+			}
+		}
+		if violations[i].AdminUserID != nil {
+			if name, ok := names["admin:"+*violations[i].AdminUserID]; ok {
+				violations[i].AdminName = &name
+			}
+		}
+	}
+	return nil
+}
+
 // getPlayerRecentServers retrieves servers the player has recently played on
-func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteamID bool) ([]RecentServerInfo, error) {
-	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+func (s *Server) getPlayerRecentServers(ctx context.Context, identity ResolvedPlayerIdentity) ([]RecentServerInfo, error) {
+	steamIDs, eosIDs := identity.SteamIDs, identity.EOSIDs
 	whereClause, args := buildClickHouseIdentifierWhereClause("steam", "eos", steamIDs, eosIDs, false)
 	if whereClause == "1 = 0" {
 		return []RecentServerInfo{}, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := fmt.Sprintf(`/* sa.player.recent_servers */
 		SELECT
 			server_id,
 			max(event_time) as last_seen,
@@ -2054,33 +1917,35 @@ func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteam
 		LIMIT 10
 	`, whereClause)
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, args...)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	servers := []RecentServerInfo{}
+	serverIDs := []string{}
 	for rows.Next() {
 		var server RecentServerInfo
-		err := rows.Scan(
+		if err := rows.Scan(
 			&server.ServerID,
 			&server.LastSeen,
 			&server.Sessions,
-		)
-		if err != nil {
-			continue
+		); err != nil {
+			return nil, err
 		}
-
-		// Get server name from PostgreSQL
-		serverNameQuery := `SELECT name FROM servers WHERE id = $1`
-		row := s.Dependencies.DB.QueryRow(serverNameQuery, server.ServerID)
-		var serverName string
-		if err := row.Scan(&serverName); err == nil {
-			server.ServerName = serverName
-		}
-
+		serverIDs = append(serverIDs, server.ServerID)
 		servers = append(servers, server)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	serverNames, err := s.loadServerNamesBatch(ctx, serverIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range servers {
+		servers[i].ServerName = serverNames[servers[i].ServerID]
 	}
 
 	return servers, nil
@@ -2088,31 +1953,11 @@ func (s *Server) getPlayerRecentServers(c *gin.Context, playerID string, isSteam
 
 // getPlayerActiveBans retrieves active bans for the player, matching on both
 // steam_id and eos_id so that legacy steam-only bans are found for EOS lookups.
-func (s *Server) getPlayerActiveBans(c *gin.Context, steamID string, eosID string) ([]ActiveBan, error) {
-	var conditions []string
-	var args []interface{}
-	argIdx := 1
-
-	if steamID != "" {
-		steamIDInt, err := strconv.ParseInt(steamID, 10, 64)
-		if err == nil {
-			conditions = append(conditions, fmt.Sprintf("b.steam_id = $%d", argIdx))
-			args = append(args, steamIDInt)
-			argIdx++
-		}
-	}
-	if eosID != "" {
-		normalizedEOS := utils.NormalizeEOSID(eosID)
-		conditions = append(conditions, fmt.Sprintf("b.eos_id = $%d", argIdx))
-		args = append(args, normalizedEOS)
-		argIdx++
-	}
-
-	if len(conditions) == 0 {
+func (s *Server) getPlayerActiveBans(ctx context.Context, identity ResolvedPlayerIdentity) ([]ActiveBan, error) {
+	whereClause, args, _ := buildServerBanIdentifierWhereClause(identity.SteamIDs, identity.EOSIDs, "b.", 1)
+	if whereClause == "1 = 0" {
 		return []ActiveBan{}, nil
 	}
-
-	whereClause := strings.Join(conditions, " OR ")
 
 	// Query PostgreSQL for active bans
 	query := fmt.Sprintf(`
@@ -2129,7 +1974,7 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, steamID string, eosID strin
 			ORDER BY b.created_at DESC
 	`, whereClause)
 
-	rows, err := s.Dependencies.DB.Query(query, args...)
+	rows, err := s.Dependencies.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2139,7 +1984,7 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, steamID string, eosID strin
 	for rows.Next() {
 		var ban ActiveBan
 		var expiresAt sql.NullTime
-		err := rows.Scan(
+		if err := rows.Scan(
 			&ban.BanID,
 			&ban.ServerID,
 			&ban.Reason,
@@ -2147,9 +1992,8 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, steamID string, eosID strin
 			&ban.CreatedAt,
 			&ban.ServerName,
 			&ban.AdminName,
-		)
-		if err != nil {
-			continue
+		); err != nil {
+			return nil, err
 		}
 		if expiresAt.Valid {
 			ban.ExpiresAt = &expiresAt.Time
@@ -2157,19 +2001,22 @@ func (s *Server) getPlayerActiveBans(c *gin.Context, steamID string, eosID strin
 		ban.Permanent = ban.ExpiresAt == nil
 		bans = append(bans, ban)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return bans, nil
 }
 
 // getPlayerViolationSummary retrieves a summary of player violations
-func (s *Server) getPlayerViolationSummary(c *gin.Context, playerID string, isSteamID bool) (*ViolationSummary, error) {
-	steamIDs, eosIDs := s.resolveLinkedPlayerIdentifiers(c, playerID, isSteamID)
+func (s *Server) getPlayerViolationSummary(ctx context.Context, identity ResolvedPlayerIdentity) (*ViolationSummary, error) {
+	steamIDs, eosIDs := identity.SteamIDs, identity.EOSIDs
 	whereClause, args := buildPlayerRuleViolationWhereClause(steamIDs, eosIDs, "")
 	if whereClause == "1 = 0" {
 		return &ViolationSummary{}, nil
 	}
 
-	query := fmt.Sprintf(`
+	query := fmt.Sprintf(`/* sa.player.violation_summary */
 		SELECT
 			countIf(action_type = 'WARN') as total_warns,
 			countIf(action_type = 'KICK') as total_kicks,
@@ -2179,7 +2026,7 @@ func (s *Server) getPlayerViolationSummary(c *gin.Context, playerID string, isSt
 		WHERE %s
 	`, whereClause)
 
-	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), query, args...)
+	row := s.Dependencies.Clickhouse.QueryRow(ctx, query, args...)
 
 	var summary ViolationSummary
 	err := row.Scan(
@@ -2189,7 +2036,7 @@ func (s *Server) getPlayerViolationSummary(c *gin.Context, playerID string, isSt
 		&summary.LastAction,
 	)
 	if err != nil {
-		return &ViolationSummary{}, nil
+		return nil, err
 	}
 
 	return &summary, nil
@@ -2202,101 +2049,99 @@ func (s *Server) getPlayerViolationSummary(c *gin.Context, playerID string, isSt
 // The headline metrics count competitive play only; seeding and training
 // (Jensen's Range) friendly fire is reported separately and excluded from the
 // TK rate and risk flags.
-func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSteamID bool, totalSessions int64) (*TeamkillMetrics, error) {
-	attackerCol := "attacker_steam"
-	if !isSteamID {
-		attackerCol = "attacker_eos"
+func (s *Server) getPlayerTeamkillMetrics(ctx context.Context, identity ResolvedPlayerIdentity, totalSessions int64) (*TeamkillMetrics, error) {
+	if len(identity.SteamIDs) == 0 && len(identity.EOSIDs) == 0 {
+		return &TeamkillMetrics{}, nil
 	}
 	categoryExpr := squadlayers.LayerCategorySQL("g.layer", "g.map_classname", "g.layer_classname")
 
 	var metrics TeamkillMetrics
-
-	// segment runs a teamkill count for one events table, grouped by the layer
-	// category, and hands each (category, total, recent) bucket to assign.
-	segment := func(table string, assign func(category string, total, recent int64)) {
-		query := fmt.Sprintf(`
+	var competitiveKills, allKills int64
+	query := fmt.Sprintf(`/* sa.player.teamkill_metrics */
+		WITH
+			CAST(? AS Array(String)) AS steam_ids,
+			CAST(? AS Array(String)) AS eos_ids,
+		classified AS (
 			SELECT
-				%s AS category,
-				count(*) AS total,
-				countIf(d.event_time >= now() - INTERVAL 7 DAY) AS recent
-			FROM squad_aegis.%s AS d
+				d.kind,
+				d.event_time,
+				d.teamkill,
+				%s AS category
+			FROM (
+				SELECT server_id, event_time, 'kill' AS kind, toUInt8(teamkill) AS teamkill
+				FROM squad_aegis.server_player_died_events
+				WHERE ifNull(attacker_steam, '') IN steam_ids OR ifNull(attacker_eos, '') IN eos_ids
+				UNION ALL
+				SELECT server_id, event_time, 'wound' AS kind, toUInt8(teamkill) AS teamkill
+				FROM squad_aegis.server_player_wounded_events
+				WHERE teamkill = 1 AND (ifNull(attacker_steam, '') IN steam_ids OR ifNull(attacker_eos, '') IN eos_ids)
+				UNION ALL
+				SELECT server_id, event_time, 'damage' AS kind, toUInt8(teamkill) AS teamkill
+				FROM squad_aegis.server_player_damaged_events
+				WHERE teamkill = 1 AND (ifNull(attacker_steam, '') IN steam_ids OR ifNull(attacker_eos, '') IN eos_ids)
+			) AS d
 			ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
 				ON d.server_id = g.server_id AND d.event_time >= g.event_time
-			WHERE d.teamkill = 1 AND d.%s = ?
-			GROUP BY category
-		`, categoryExpr, table, attackerCol)
-
-		rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID)
-		if err != nil {
-			return
-		}
-		for rows.Next() {
-			var category string
-			var total, recent int64
-			if err := rows.Scan(&category, &total, &recent); err != nil {
-				continue
-			}
-			assign(category, total, recent)
-		}
-		rows.Close()
-	}
-
-	// Teamkills (died events)
-	segment("server_player_died_events", func(category string, total, recent int64) {
-		metrics.AllTeamkills += total
-		switch category {
-		case string(squadlayers.CategorySeeding):
-			metrics.NonCompetitive.SeedingTeamkills += total
-		case string(squadlayers.CategoryTraining):
-			metrics.NonCompetitive.TrainingTeamkills += total
-		default:
-			metrics.TotalTeamkills += total
-			metrics.RecentTeamkills += recent
-		}
-	})
-
-	// Team wounds (wounded events)
-	segment("server_player_wounded_events", func(category string, total, recent int64) {
-		switch category {
-		case string(squadlayers.CategorySeeding):
-			metrics.NonCompetitive.SeedingTeamWounds += total
-		case string(squadlayers.CategoryTraining):
-			metrics.NonCompetitive.TrainingTeamWounds += total
-		default:
-			metrics.TotalTeamWounds += total
-			metrics.RecentTeamWounds += recent
-		}
-	})
-
-	// Team damage (damaged events)
-	segment("server_player_damaged_events", func(category string, total, recent int64) {
-		switch category {
-		case string(squadlayers.CategorySeeding):
-			metrics.NonCompetitive.SeedingTeamDamage += total
-		case string(squadlayers.CategoryTraining):
-			metrics.NonCompetitive.TrainingTeamDamage += total
-		default:
-			metrics.TotalTeamDamage += total
-			metrics.RecentTeamDamage += recent
-		}
-	})
-
-	// Kills split by layer for the ratio denominators: the TK rate compares
-	// competitive TKs against competitive kills (same identity scope as the
-	// numerator above).
-	var competitiveKills, allKills int64
-	killQuery := fmt.Sprintf(`
+		)
 		SELECT
-			countIf(%s = '%s') AS competitive_kills,
-			count(*) AS all_kills
-		FROM squad_aegis.server_player_died_events AS d
-		ASOF LEFT JOIN squad_aegis.server_new_game_events AS g
-			ON d.server_id = g.server_id AND d.event_time >= g.event_time
-		WHERE d.%s = ?
-	`, categoryExpr, squadlayers.CategoryCompetitive, attackerCol)
-	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), killQuery, playerID)
-	// Leaves the denominators at zero on error, yielding a 0 ratio.
-	_ = row.Scan(&competitiveKills, &allKills)
+			countIf(kind = 'kill' AND teamkill = 1),
+			countIf(kind = 'kill' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'kill' AND teamkill = 1 AND category = '%s' AND event_time >= now() - INTERVAL 7 DAY),
+			countIf(kind = 'kill' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'kill' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'wound' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'wound' AND teamkill = 1 AND category = '%s' AND event_time >= now() - INTERVAL 7 DAY),
+			countIf(kind = 'wound' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'wound' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'damage' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'damage' AND teamkill = 1 AND category = '%s' AND event_time >= now() - INTERVAL 7 DAY),
+			countIf(kind = 'damage' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'damage' AND teamkill = 1 AND category = '%s'),
+			countIf(kind = 'kill' AND category = '%s'),
+			countIf(kind = 'kill')
+		FROM classified
+	`,
+		categoryExpr,
+		squadlayers.CategoryCompetitive,
+		squadlayers.CategoryCompetitive,
+		squadlayers.CategorySeeding,
+		squadlayers.CategoryTraining,
+		squadlayers.CategoryCompetitive,
+		squadlayers.CategoryCompetitive,
+		squadlayers.CategorySeeding,
+		squadlayers.CategoryTraining,
+		squadlayers.CategoryCompetitive,
+		squadlayers.CategoryCompetitive,
+		squadlayers.CategorySeeding,
+		squadlayers.CategoryTraining,
+		squadlayers.CategoryCompetitive,
+	)
+
+	err := s.Dependencies.Clickhouse.QueryRow(
+		ctx,
+		query,
+		identity.SteamIDs,
+		identity.EOSIDs,
+	).Scan(
+		&metrics.AllTeamkills,
+		&metrics.TotalTeamkills,
+		&metrics.RecentTeamkills,
+		&metrics.NonCompetitive.SeedingTeamkills,
+		&metrics.NonCompetitive.TrainingTeamkills,
+		&metrics.TotalTeamWounds,
+		&metrics.RecentTeamWounds,
+		&metrics.NonCompetitive.SeedingTeamWounds,
+		&metrics.NonCompetitive.TrainingTeamWounds,
+		&metrics.TotalTeamDamage,
+		&metrics.RecentTeamDamage,
+		&metrics.NonCompetitive.SeedingTeamDamage,
+		&metrics.NonCompetitive.TrainingTeamDamage,
+		&competitiveKills,
+		&allKills,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query player teamkill metrics: %w", err)
+	}
 
 	// Per-session rate (competitive TKs across all sessions)
 	if totalSessions > 0 {
@@ -2318,8 +2163,76 @@ func (s *Server) getPlayerTeamkillMetrics(c *gin.Context, playerID string, isSte
 
 // getPlayerNameHistory retrieves all names used by the player
 // Aggregates names from multiple event tables for comprehensive history
-// Uses linked_identifiers CTE to capture names from ALL linked steam/eos IDs
-func (s *Server) getPlayerNameHistory(c *gin.Context, playerID string, isSteamID bool) ([]NameHistoryEntry, error) {
+func (s *Server) getPlayerNameHistory(ctx context.Context, identity ResolvedPlayerIdentity) ([]NameHistoryEntry, error) {
+	if len(identity.SteamIDs) == 0 && len(identity.EOSIDs) == 0 {
+		return []NameHistoryEntry{}, nil
+	}
+	type identityColumns struct{ steam, eos string }
+	columns := []identityColumns{
+		{"steam", "eos"},
+		{"steam", "eos"},
+		{"player_steam", "player_eos"},
+		{"attacker_steam", "attacker_eos"},
+		{"victim_steam", "victim_eos"},
+		{"attacker_steam", "attacker_eos"},
+		{"victim_steam", "victim_eos"},
+		{"reviver_steam", "reviver_eos"},
+		{"victim_steam", "victim_eos"},
+	}
+	where := make([]string, 0, len(columns))
+	args := make([]interface{}, 0, len(columns)*2)
+	for _, pair := range columns {
+		clause, clauseArgs := buildClickHouseIdentifierWhereClause(pair.steam, pair.eos, identity.SteamIDs, identity.EOSIDs, false)
+		where = append(where, clause)
+		args = append(args, clauseArgs...)
+	}
+	query := fmt.Sprintf(`/* sa.player.name_history */
+		WITH all_names AS (
+			SELECT player_suffix AS name, event_time FROM squad_aegis.server_join_succeeded_events WHERE player_suffix != '' AND (%s)
+			UNION ALL
+			SELECT player_suffix, event_time FROM squad_aegis.server_player_disconnected_events WHERE player_suffix != '' AND (%s)
+			UNION ALL
+			SELECT player_suffix, event_time FROM squad_aegis.server_player_possess_events WHERE player_suffix != '' AND (%s)
+			UNION ALL
+			SELECT attacker_name, event_time FROM squad_aegis.server_player_died_events WHERE attacker_name != '' AND (%s)
+			UNION ALL
+			SELECT victim_name, event_time FROM squad_aegis.server_player_died_events WHERE victim_name != '' AND (%s)
+			UNION ALL
+			SELECT attacker_name, event_time FROM squad_aegis.server_player_wounded_events WHERE attacker_name != '' AND (%s)
+			UNION ALL
+			SELECT victim_name, event_time FROM squad_aegis.server_player_wounded_events WHERE victim_name != '' AND (%s)
+			UNION ALL
+			SELECT reviver_name, event_time FROM squad_aegis.server_player_revived_events WHERE reviver_name != '' AND (%s)
+			UNION ALL
+			SELECT victim_name, event_time FROM squad_aegis.server_player_revived_events WHERE victim_name != '' AND (%s)
+		)
+		SELECT name, min(event_time), max(event_time), count(DISTINCT toDate(event_time))
+		FROM all_names
+		GROUP BY name
+		ORDER BY max(event_time) DESC, name
+	`, where[0], where[1], where[2], where[3], where[4], where[5], where[6], where[7], where[8])
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := []NameHistoryEntry{}
+	for rows.Next() {
+		var entry NameHistoryEntry
+		if err := rows.Scan(&entry.Name, &entry.FirstUsed, &entry.LastUsed, &entry.SessionCount); err != nil {
+			return nil, err
+		}
+		names = append(names, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// getPlayerNameHistoryLegacy is retained only for rollback compatibility with
+// the pre-snapshot query shape and is not used by request paths.
+func (s *Server) getPlayerNameHistoryLegacy(c *gin.Context, playerID string, isSteamID bool) ([]NameHistoryEntry, error) {
 	// Build seed where clause - matches either steam or eos depending on input type
 	seedWhereClause := "steam = ?"
 	seedPlayerWhereClause := "player_steam = ?"
@@ -2454,18 +2367,55 @@ func (s *Server) getPlayerNameHistory(c *gin.Context, playerID string, isSteamID
 	names := []NameHistoryEntry{}
 	for rows.Next() {
 		var entry NameHistoryEntry
-		err := rows.Scan(&entry.Name, &entry.FirstUsed, &entry.LastUsed, &entry.SessionCount)
-		if err != nil {
-			continue
+		if err := rows.Scan(&entry.Name, &entry.FirstUsed, &entry.LastUsed, &entry.SessionCount); err != nil {
+			return nil, err
 		}
 		names = append(names, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return names, nil
 }
 
 // getPlayerWeaponStats retrieves weapon usage statistics
-func (s *Server) getPlayerWeaponStats(c *gin.Context, playerID string, isSteamID bool) ([]WeaponStat, error) {
+func (s *Server) getPlayerWeaponStats(ctx context.Context, identity ResolvedPlayerIdentity) ([]WeaponStat, error) {
+	whereClause, args := buildClickHouseIdentifierWhereClause(
+		"attacker_steam", "attacker_eos", identity.SteamIDs, identity.EOSIDs, false,
+	)
+	if whereClause == "1 = 0" {
+		return []WeaponStat{}, nil
+	}
+	query := fmt.Sprintf(`/* sa.player.weapon_stats */
+		SELECT weapon, count(), countIf(teamkill = 1)
+		FROM squad_aegis.server_player_died_events
+		WHERE (%s) AND weapon != ''
+		GROUP BY weapon
+		ORDER BY count() DESC, weapon
+		LIMIT 20
+	`, whereClause)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	weapons := []WeaponStat{}
+	for rows.Next() {
+		var stat WeaponStat
+		if err := rows.Scan(&stat.Weapon, &stat.Kills, &stat.Teamkills); err != nil {
+			return nil, err
+		}
+		weapons = append(weapons, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return weapons, nil
+}
+
+// getPlayerWeaponStatsLegacy is retained for one rollback-compatible release.
+func (s *Server) getPlayerWeaponStatsLegacy(c *gin.Context, playerID string, isSteamID bool) ([]WeaponStat, error) {
 	whereClause := "attacker_steam = ?"
 	if !isSteamID {
 		whereClause = "attacker_eos = ?"
@@ -2492,11 +2442,13 @@ func (s *Server) getPlayerWeaponStats(c *gin.Context, playerID string, isSteamID
 	weapons := []WeaponStat{}
 	for rows.Next() {
 		var stat WeaponStat
-		err := rows.Scan(&stat.Weapon, &stat.Kills, &stat.Teamkills)
-		if err != nil {
-			continue
+		if err := rows.Scan(&stat.Weapon, &stat.Kills, &stat.Teamkills); err != nil {
+			return nil, err
 		}
 		weapons = append(weapons, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return weapons, nil
@@ -2508,69 +2460,84 @@ type PlayerIdentifier struct {
 	IsSteam bool
 }
 
-// lookupPlayerNamesBatchByIdentifiers looks up player names for a batch of identifiers (Steam or EOS)
-// Returns map with keys like "steam:12345" or "eos:abc123" mapped to player names
-func (s *Server) lookupPlayerNamesBatchByIdentifiers(ctx context.Context, identifiers []PlayerIdentifier) map[string]string {
+// lookupPlayerNamesBatchByIdentifiers looks up Steam and EOS names in one
+// ClickHouse round trip. Result keys use "steam:12345" or "eos:abc123".
+func (s *Server) lookupPlayerNamesBatchByIdentifiers(ctx context.Context, identifiers []PlayerIdentifier) (map[string]string, error) {
 	result := make(map[string]string)
 	if len(identifiers) == 0 || s.Dependencies.Clickhouse == nil {
-		return result
+		return result, nil
 	}
 
-	// Separate Steam IDs and EOS IDs
-	var steamIDs, eosIDs []string
-	for _, id := range identifiers {
-		if id.IsSteam {
-			steamIDs = append(steamIDs, id.Value)
-		} else {
-			eosIDs = append(eosIDs, id.Value)
+	steamIDs := make([]string, 0, len(identifiers))
+	eosIDs := make([]string, 0, len(identifiers))
+	seen := make(map[string]struct{}, len(identifiers))
+	for _, identifier := range identifiers {
+		if identifier.Value == "" {
+			continue
+		}
+		prefix := "eos:"
+		if identifier.IsSteam {
+			prefix = "steam:"
+		}
+		if _, exists := seen[prefix+identifier.Value]; exists {
+			continue
+		}
+		seen[prefix+identifier.Value] = struct{}{}
+		if identifier.IsSteam {
+			steamIDs = append(steamIDs, identifier.Value)
+			continue
+		}
+		eosIDs = append(eosIDs, identifier.Value)
+	}
+	if len(steamIDs) == 0 && len(eosIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, `
+		/* sa.player.names_batch */
+		WITH
+			CAST(? AS Array(String)) AS steam_ids,
+			CAST(? AS Array(String)) AS eos_ids,
+			observed_names AS (
+				SELECT
+					'steam' AS identifier_type,
+					assumeNotNull(steam) AS identifier_value,
+					player_suffix,
+					event_time
+				FROM squad_aegis.server_join_succeeded_events
+				WHERE ifNull(steam, '') IN steam_ids AND player_suffix != ''
+				UNION ALL
+				SELECT
+					'eos' AS identifier_type,
+					assumeNotNull(eos) AS identifier_value,
+					player_suffix,
+					event_time
+				FROM squad_aegis.server_join_succeeded_events
+				WHERE ifNull(eos, '') IN eos_ids AND player_suffix != ''
+			)
+		SELECT identifier_type, identifier_value, argMax(player_suffix, event_time)
+		FROM observed_names
+		GROUP BY identifier_type, identifier_value
+	`, steamIDs, eosIDs)
+	if err != nil {
+		return nil, fmt.Errorf("query player names batch: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var identifierType, identifierValue, playerName string
+		if err := rows.Scan(&identifierType, &identifierValue, &playerName); err != nil {
+			return nil, fmt.Errorf("scan player names batch: %w", err)
+		}
+		if playerName != "" {
+			result[identifierType+":"+identifierValue] = playerName
 		}
 	}
-
-	// Query for Steam IDs
-	if len(steamIDs) > 0 {
-		query := `
-			SELECT steam, argMax(player_suffix, event_time) as player_name
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE steam IN (?) AND player_suffix != ''
-			GROUP BY steam
-		`
-		rows, err := s.Dependencies.Clickhouse.Query(ctx, query, steamIDs)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to lookup player names by Steam IDs from ClickHouse")
-		} else {
-			defer rows.Close()
-			for rows.Next() {
-				var steamID, playerName string
-				if err := rows.Scan(&steamID, &playerName); err == nil && playerName != "" {
-					result["steam:"+steamID] = playerName
-				}
-			}
-		}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read player names batch: %w", err)
 	}
 
-	// Query for EOS IDs
-	if len(eosIDs) > 0 {
-		query := `
-			SELECT eos, argMax(player_suffix, event_time) as player_name
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE eos IN (?) AND player_suffix != ''
-			GROUP BY eos
-		`
-		rows, err := s.Dependencies.Clickhouse.Query(ctx, query, eosIDs)
-		if err != nil {
-			log.Warn().Err(err).Msg("Failed to lookup player names by EOS IDs from ClickHouse")
-		} else {
-			defer rows.Close()
-			for rows.Next() {
-				var eosID, playerName string
-				if err := rows.Scan(&eosID, &playerName); err == nil && playerName != "" {
-					result["eos:"+eosID] = playerName
-				}
-			}
-		}
-	}
-
-	return result
+	return result, nil
 }
 
 // calculateRiskIndicators generates risk flags based on player data
@@ -2659,134 +2626,209 @@ func (s *Server) calculateRiskIndicators(profile *PlayerProfile) []RiskIndicator
 	return indicators
 }
 
-// PlayerChatHistoryPaginated handles GET /api/players/:playerId/chat - paginated chat history
+const (
+	playerChatCursorKind     = "player.chat"
+	playerSessionsCursorKind = "player.sessions"
+	playerCombatCursorKind   = "player.combat"
+	altGroupsCursorKind      = "players.alt_groups"
+)
+
+type playerChatCursorValues struct {
+	SentAt    time.Time `json:"sent_at"`
+	MessageID uuid.UUID `json:"message_id"`
+}
+
+type playerSessionCursorValues struct {
+	ConnectTime time.Time `json:"connect_time"`
+	CursorKey   uuid.UUID `json:"cursor_key"`
+}
+
+type playerCombatCursorValues struct {
+	EventTime time.Time `json:"event_time"`
+	EventType string    `json:"event_type"`
+	CursorKey uuid.UUID `json:"cursor_key"`
+}
+
+type altGroupCursorValues struct {
+	LastActivity time.Time `json:"last_activity"`
+	IP           string    `json:"ip"`
+}
+
+// PlayerChatHistoryPaginated handles GET /api/players/:playerId/chat.
 func (s *Server) PlayerChatHistoryPaginated(c *gin.Context) {
-	playerID := c.Param("playerId")
-	if playerID == "" {
+	ctx := c.Request.Context()
+	if c.Param("playerId") == "" {
 		responses.BadRequest(c, "Player ID is required", nil)
 		return
 	}
-
-	// Parse query parameters
-	page := 1
-	limit := 50
-	chatType := c.Query("type")
-	search := c.Query("search")
-	startDate := c.Query("start_date")
-	endDate := c.Query("end_date")
-
-	if pageStr := c.Query("page"); pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
-		}
+	limit, ok := parseCursorLimit(c, 50, 100)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
 	}
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
-			limit = l
-		}
+	identity, err := s.resolvePlayerIdentity(ctx, c.Param("playerId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid player ID", &gin.H{"error": err.Error()})
+		return
 	}
-
-	playerID, isSteamID := normalizePlayerIdentifier(playerID)
-
-	whereClause := "steam_id = ?"
-	if !isSteamID {
-		whereClause = "eos_id = ?"
+	steamIDs, err := steamIDsAsUint64(identity.SteamIDs)
+	if err != nil {
+		responses.BadRequest(c, "Invalid Steam ID", &gin.H{"error": err.Error()})
+		return
 	}
-
-	var queryPlayerID interface{} = playerID
-	if isSteamID {
-		steamIDUint, err := strconv.ParseUint(playerID, 10, 64)
-		if err != nil {
-			responses.BadRequest(c, "Invalid Steam ID", nil)
+	chatType := strings.ToLower(normalizedAllFilter(c.Query("type")))
+	search := strings.ToLower(strings.TrimSpace(c.Query("search")))
+	startDate := strings.TrimSpace(c.Query("start_date"))
+	endDate := strings.TrimSpace(c.Query("end_date"))
+	filterHash := pagination.MustFilterHash(struct {
+		CanonicalID string   `json:"canonical_id"`
+		SteamIDs    []string `json:"steam_ids"`
+		EOSIDs      []string `json:"eos_ids"`
+		ChatType    string   `json:"chat_type"`
+		Search      string   `json:"search"`
+		StartDate   string   `json:"start_date"`
+		EndDate     string   `json:"end_date"`
+	}{identity.CanonicalID, identity.SteamIDs, identity.EOSIDs, chatType, search, startDate, endDate})
+	var cursorValues *playerChatCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &playerChatCursorValues{}
+		if err := pagination.Decode(encodedCursor, playerChatCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
 			return
 		}
-		queryPlayerID = steamIDUint
 	}
-
-	// Build filters
-	filters := []string{whereClause}
-	args := []interface{}{queryPlayerID}
-
-	if chatType != "" && chatType != "all" {
-		filters = append(filters, "chat_type = ?")
-		args = append(args, chatType)
-	}
-	if search != "" {
-		filters = append(filters, "message ILIKE ?")
-		args = append(args, "%"+search+"%")
-	}
-	if startDate != "" {
-		filters = append(filters, "sent_at >= ?")
-		args = append(args, startDate)
-	}
-	if endDate != "" {
-		filters = append(filters, "sent_at <= ?")
-		args = append(args, endDate)
-	}
-
-	whereSQL := strings.Join(filters, " AND ")
-
-	// Get total count
-	countQuery := fmt.Sprintf(`
-		SELECT count(*) FROM squad_aegis.server_player_chat_messages WHERE %s
-	`, whereSQL)
-
-	var total int64
-	row := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), countQuery, args...)
-	if err := row.Scan(&total); err != nil {
-		responses.InternalServerError(c, err, nil)
+	if !identity.Found {
+		responses.Success(c, "Chat history fetched successfully", &gin.H{"chat": PaginatedChatHistory{Messages: []ChatMessage{}}, "page_info": pagination.PageInfo{}})
 		return
 	}
 
-	// Get paginated results
-	offset := (page - 1) * limit
-	args = append(args, limit, offset)
-
+	where := make([]string, 0, 6)
+	args := make([]interface{}, 0, 10)
+	identityPredicates := make([]string, 0, 2)
+	if len(steamIDs) > 0 {
+		identityPredicates = append(identityPredicates, "steam_id IN (?)")
+		args = append(args, steamIDs)
+	}
+	if len(identity.EOSIDs) > 0 {
+		identityPredicates = append(identityPredicates, "eos_id IN (?)")
+		args = append(args, identity.EOSIDs)
+	}
+	if len(identityPredicates) == 0 {
+		responses.Success(c, "Chat history fetched successfully", &gin.H{"chat": PaginatedChatHistory{Messages: []ChatMessage{}}, "page_info": pagination.PageInfo{}})
+		return
+	}
+	where = append(where, "("+strings.Join(identityPredicates, " OR ")+")")
+	if chatType != "" {
+		where = append(where, "chat_type = ?")
+		args = append(args, chatType)
+	}
+	if search != "" {
+		where = append(where, "lowerUTF8(message) LIKE ?")
+		args = append(args, "%"+search+"%")
+	}
+	if startDate != "" {
+		start, err := parsePlayerHistoryDate(startDate, false)
+		if err != nil {
+			responses.BadRequest(c, "Invalid start date", &gin.H{"error": err.Error()})
+			return
+		}
+		where = append(where, "sent_at >= ?")
+		args = append(args, start)
+	}
+	if endDate != "" {
+		end, err := parsePlayerHistoryDate(endDate, true)
+		if err != nil {
+			responses.BadRequest(c, "Invalid end date", &gin.H{"error": err.Error()})
+			return
+		}
+		where = append(where, "sent_at < ?")
+		args = append(args, end)
+	}
+	if cursorValues != nil {
+		where = append(where, "(sent_at, message_id) < (?, ?)")
+		args = append(args, cursorValues.SentAt, cursorValues.MessageID)
+	}
+	args = append(args, limit+1)
 	query := fmt.Sprintf(`
+		/* sa.player.chat */
 		SELECT
-			message_id,
+			toString(message_id),
 			sent_at,
 			message,
 			chat_type,
 			server_id
 		FROM squad_aegis.server_player_chat_messages
 		WHERE %s
-		ORDER BY sent_at DESC
-		LIMIT ? OFFSET ?
-	`, whereSQL)
+		ORDER BY sent_at DESC, message_id DESC
+		LIMIT ?
+	`, strings.Join(where, " AND "))
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, args...)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 	defer rows.Close()
 
-	messages := []ChatMessage{}
+	messages := make([]ChatMessage, 0, limit+1)
 	for rows.Next() {
 		var msg ChatMessage
-		var messageID string
-		err := rows.Scan(&messageID, &msg.SentAt, &msg.Message, &msg.ChatType, &msg.ServerID)
-		if err != nil {
-			continue
+		if err := rows.Scan(&msg.MessageID, &msg.SentAt, &msg.Message, &msg.ChatType, &msg.ServerID); err != nil {
+			responses.InternalServerError(c, err, nil)
+			return
 		}
 		messages = append(messages, msg)
 	}
-
-	totalPages := int(total) / limit
-	if int(total)%limit > 0 {
-		totalPages++
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	messages, hasMore := pagination.TrimPage(messages, limit)
+	serverIDs := make([]string, 0, len(messages))
+	for i := range messages {
+		serverIDs = append(serverIDs, messages[i].ServerID)
+	}
+	serverNames, err := s.loadServerNamesBatch(ctx, serverIDs)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	for i := range messages {
+		messages[i].ServerName = serverNames[messages[i].ServerID]
+	}
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(messages) > 0 {
+		last := messages[len(messages)-1]
+		lastID, err := uuid.Parse(last.MessageID)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("invalid chat message ID: %w", err), nil)
+			return
+		}
+		encoded, err := pagination.Encode(playerChatCursorKind, filterHash, playerChatCursorValues{SentAt: last.SentAt, MessageID: lastID})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode chat cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
 	}
 
 	responses.Success(c, "Chat history fetched successfully", &gin.H{
-		"chat": PaginatedChatHistory{
-			Messages:   messages,
-			Total:      total,
-			Page:       page,
-			Limit:      limit,
-			TotalPages: totalPages,
-		},
+		"chat":      PaginatedChatHistory{Messages: messages},
+		"page_info": pageInfo,
 	})
+}
+
+func parsePlayerHistoryDate(raw string, endExclusive bool) (time.Time, error) {
+	if value, err := time.Parse(time.RFC3339, raw); err == nil {
+		return value, nil
+	}
+	value, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if endExclusive {
+		value = value.AddDate(0, 0, 1)
+	}
+	return value, nil
 }
 
 // PlayerTeamkillsAnalysis handles GET /api/players/:playerId/teamkills - teamkill analysis
@@ -2885,10 +2927,65 @@ func (s *Server) PlayerTeamkillsAnalysis(c *gin.Context) {
 	})
 }
 
+func playerSessionsBaseQuery(identityWhere string) string {
+	return fmt.Sprintf(`
+		/* sa.player.sessions */
+		WITH events AS (
+			SELECT event_time, server_id, ip, 'connected' AS event_type, cursor_key
+			FROM squad_aegis.server_player_connected_events
+			WHERE %s
+			UNION ALL
+			SELECT event_time, server_id, ip, 'disconnected' AS event_type, cursor_key
+			FROM squad_aegis.server_player_disconnected_events
+			WHERE %s
+		), sequenced AS (
+			SELECT
+				event_time,
+				server_id,
+				ip,
+				event_type,
+				cursor_key,
+				leadInFrame(event_type, 1, '') OVER session_window AS next_event_type,
+				leadInFrame(event_time, 1, toDateTime64(0, 3, 'UTC')) OVER session_window AS next_event_time
+			FROM events
+			WINDOW session_window AS (
+				PARTITION BY server_id
+				ORDER BY event_time ASC, cursor_key ASC
+				ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+			)
+		), sessions AS (
+			SELECT
+				event_time AS connect_time,
+				if(next_event_type = 'disconnected', toNullable(next_event_time), CAST(NULL, 'Nullable(DateTime64(3, \'UTC\'))')) AS disconnect_time,
+				server_id,
+				ip,
+				cursor_key
+			FROM sequenced
+			WHERE event_type = 'connected'
+		)
+		SELECT connect_time, disconnect_time, toString(server_id), ip, toString(cursor_key)
+		FROM sessions
+	`, identityWhere, identityWhere)
+}
+
+func classifyPlayerSession(session *SessionHistoryEntry, disconnectTime *time.Time, now time.Time) {
+	if disconnectTime != nil {
+		session.DisconnectTime = disconnectTime
+		duration := int64(disconnectTime.Sub(session.ConnectTime).Seconds())
+		session.DurationSeconds = &duration
+		return
+	}
+	if now.Sub(session.ConnectTime) < time.Hour {
+		session.Ongoing = true
+	} else {
+		session.MissingDisconnect = true
+	}
+}
+
 // PlayerSessionHistory handles GET /api/players/:playerId/sessions - session history
 func (s *Server) PlayerSessionHistory(c *gin.Context) {
-	playerID := c.Param("playerId")
-	if playerID == "" {
+	ctx := c.Request.Context()
+	if c.Param("playerId") == "" {
 		responses.BadRequest(c, "Player ID is required", nil)
 		return
 	}
@@ -2899,169 +2996,128 @@ func (s *Server) PlayerSessionHistory(c *gin.Context) {
 		canViewIPs = true
 	}
 
-	page := 1
-	limit := 50
-	if pageStr := c.Query("page"); pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
+	limit, ok := parseCursorLimit(c, 50, 100)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
+	}
+	identity, err := s.resolvePlayerIdentity(ctx, c.Param("playerId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid player ID", &gin.H{"error": err.Error()})
+		return
+	}
+	filterHash := pagination.MustFilterHash(struct {
+		CanonicalID string   `json:"canonical_id"`
+		SteamIDs    []string `json:"steam_ids"`
+		EOSIDs      []string `json:"eos_ids"`
+		EpicIDs     []string `json:"epic_ids"`
+	}{identity.CanonicalID, identity.SteamIDs, identity.EOSIDs, identity.EpicIDs})
+	var cursorValues *playerSessionCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &playerSessionCursorValues{}
+		if err := pagination.Decode(encodedCursor, playerSessionsCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
 		}
 	}
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
-			limit = l
-		}
+	if !identity.Found {
+		responses.Success(c, "Session history fetched successfully", &gin.H{"sessions": []SessionHistoryEntry{}, "can_view_ip": canViewIPs, "page_info": pagination.PageInfo{}})
+		return
 	}
-
-	playerID, isSteamID := normalizePlayerIdentifier(playerID)
-
-	whereClause := "steam = ?"
-	if !isSteamID {
-		whereClause = "eos = ?"
+	identityPredicates := make([]string, 0, 3)
+	identityArgs := make([]interface{}, 0, 3)
+	if len(identity.SteamIDs) > 0 {
+		identityPredicates = append(identityPredicates, "steam IN (?)")
+		identityArgs = append(identityArgs, identity.SteamIDs)
 	}
+	if len(identity.EOSIDs) > 0 {
+		identityPredicates = append(identityPredicates, "eos IN (?)")
+		identityArgs = append(identityArgs, identity.EOSIDs)
+	}
+	if len(identity.EpicIDs) > 0 {
+		identityPredicates = append(identityPredicates, "epic IN (?)")
+		identityArgs = append(identityArgs, identity.EpicIDs)
+	}
+	if len(identityPredicates) == 0 {
+		responses.Success(c, "Session history fetched successfully", &gin.H{"sessions": []SessionHistoryEntry{}, "can_view_ip": canViewIPs, "page_info": pagination.PageInfo{}})
+		return
+	}
+	identityWhere := "(" + strings.Join(identityPredicates, " OR ") + ")"
+	query := playerSessionsBaseQuery(identityWhere)
+	args := append([]interface{}{}, identityArgs...)
+	args = append(args, identityArgs...)
+	if cursorValues != nil {
+		query += " WHERE (connect_time, cursor_key) < (?, ?)"
+		args = append(args, cursorValues.ConnectTime, cursorValues.CursorKey)
+	}
+	query += " ORDER BY connect_time DESC, cursor_key DESC LIMIT ?"
+	args = append(args, limit+1)
 
-	// Fetch all events (connects and disconnects) ordered by time DESC
-	// We fetch more than needed to ensure proper pairing at page boundaries
-	bufferMultiplier := 3
-	fetchLimit := limit * bufferMultiplier
-
-	query := fmt.Sprintf(`
-		SELECT * FROM (
-			SELECT
-				event_time,
-				server_id,
-				ip,
-				'connected' as event_type
-			FROM squad_aegis.server_player_connected_events
-			WHERE %s
-			UNION ALL
-			SELECT
-				event_time,
-				server_id,
-				ip,
-				'disconnected' as event_type
-			FROM squad_aegis.server_player_disconnected_events
-			WHERE %s
-		) ORDER BY event_time DESC
-		LIMIT ?
-	`, whereClause, whereClause)
-
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, fetchLimit)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 	defer rows.Close()
 
-	// Collect raw events
-	type rawEvent struct {
-		EventTime time.Time
-		ServerID  string
-		IP        string
-		EventType string
-	}
-	var events []rawEvent
+	sessions := make([]SessionHistoryEntry, 0, limit+1)
 	for rows.Next() {
-		var e rawEvent
-		if err := rows.Scan(&e.EventTime, &e.ServerID, &e.IP, &e.EventType); err != nil {
-			continue
-		}
-		events = append(events, e)
-	}
-
-	// Pair connect events with their corresponding disconnect events
-	// Events are ordered newest first (DESC)
-	sessions := []SessionHistoryEntry{}
-	usedDisconnects := make(map[int]bool)
-
-	for i, e := range events {
-		if e.EventType != "connected" {
-			continue
-		}
-
-		session := SessionHistoryEntry{
-			ConnectTime: e.EventTime,
-			ServerID:    e.ServerID,
+		var session SessionHistoryEntry
+		var disconnectTime *time.Time
+		var ip string
+		if err := rows.Scan(&session.ConnectTime, &disconnectTime, &session.ServerID, &ip, &session.CursorKey); err != nil {
+			responses.InternalServerError(c, err, nil)
+			return
 		}
 		if canViewIPs {
-			session.IP = e.IP
+			session.IP = ip
 		}
-
-		// Look for the first disconnect after this connect (searching forward in time-descending list means looking backward)
-		// In our DESC-ordered list, disconnects that happened AFTER connect are at indices BEFORE i
-		foundDisconnect := false
-		for j := i - 1; j >= 0; j-- {
-			if events[j].EventType == "disconnected" && !usedDisconnects[j] {
-				// Check if there's another connect between this disconnect and our connect
-				hasIntermediateConnect := false
-				for k := j + 1; k < i; k++ {
-					if events[k].EventType == "connected" {
-						hasIntermediateConnect = true
-						break
-					}
-				}
-
-				if !hasIntermediateConnect {
-					// This disconnect belongs to our connect
-					usedDisconnects[j] = true
-					disconnectTime := events[j].EventTime
-					session.DisconnectTime = &disconnectTime
-					duration := int64(disconnectTime.Sub(e.EventTime).Seconds())
-					session.DurationSeconds = &duration
-					foundDisconnect = true
-					break
-				}
-			}
-		}
-
-		if !foundDisconnect {
-			// Check if this is an ongoing session (connected within the last hour)
-			if time.Since(e.EventTime) < time.Hour {
-				session.Ongoing = true
-			} else {
-				session.MissingDisconnect = true
-			}
-		}
+		classifyPlayerSession(&session, disconnectTime, time.Now())
 
 		sessions = append(sessions, session)
 	}
-
-	// Apply pagination to paired sessions
-	offset := (page - 1) * limit
-	end := offset + limit
-	if offset > len(sessions) {
-		sessions = []SessionHistoryEntry{}
-	} else {
-		if end > len(sessions) {
-			end = len(sessions)
-		}
-		sessions = sessions[offset:end]
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
 	}
-
-	// Cache server names to avoid repeated queries
-	serverNameCache := make(map[string]string)
+	sessions, hasMore := pagination.TrimPage(sessions, limit)
+	serverIDs := make([]string, 0, len(sessions))
 	for i := range sessions {
-		serverID := sessions[i].ServerID
-		if name, ok := serverNameCache[serverID]; ok {
-			sessions[i].ServerName = name
-		} else {
-			var serverName string
-			if err := s.Dependencies.DB.QueryRow(`SELECT name FROM servers WHERE id = $1`, serverID).Scan(&serverName); err == nil {
-				serverNameCache[serverID] = serverName
-				sessions[i].ServerName = serverName
-			}
+		serverIDs = append(serverIDs, sessions[i].ServerID)
+	}
+	serverNames, err := s.loadServerNamesBatch(ctx, serverIDs)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	for i := range sessions {
+		sessions[i].ServerName = serverNames[sessions[i].ServerID]
+	}
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(sessions) > 0 {
+		last := sessions[len(sessions)-1]
+		lastKey, err := uuid.Parse(last.CursorKey)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("invalid session cursor key: %w", err), nil)
+			return
 		}
+		encoded, err := pagination.Encode(playerSessionsCursorKind, filterHash, playerSessionCursorValues{ConnectTime: last.ConnectTime, CursorKey: lastKey})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode session cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
 	}
 
 	responses.Success(c, "Session history fetched successfully", &gin.H{
 		"sessions":    sessions,
 		"can_view_ip": canViewIPs,
-		"page":        page,
-		"limit":       limit,
+		"page_info":   pageInfo,
 	})
 }
 
 // PlayerRelatedPlayers handles GET /api/players/:playerId/related - related players (same IP)
 func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
+	ctx := c.Request.Context()
 	playerID := c.Param("playerId")
 	if playerID == "" {
 		responses.BadRequest(c, "Player ID is required", nil)
@@ -3075,40 +3131,62 @@ func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
 		return
 	}
 
-	playerID, isSteamID := normalizePlayerIdentifier(playerID)
-
-	whereClause := "steam = ?"
-	if !isSteamID {
-		whereClause = "eos = ?"
+	identity, err := s.resolvePlayerIdentity(ctx, playerID)
+	if err != nil {
+		responses.BadRequest(c, "Invalid player ID", &gin.H{"error": err.Error()})
+		return
+	}
+	if !identity.Found {
+		responses.Success(c, "Related players fetched successfully", &gin.H{"related_players": []RelatedPlayer{}})
+		return
 	}
 
-	// Find players sharing the same IPs
-	// Need to join with server_join_succeeded_events to get player names
-	query := fmt.Sprintf(`
-		WITH player_ips AS (
+	query := `/* sa.player.related */
+		WITH
+			CAST(? AS Array(String)) AS target_steam_ids,
+			CAST(? AS Array(String)) AS target_eos_ids,
+			CAST(? AS Array(String)) AS target_epic_ids,
+		player_ips AS (
 			SELECT DISTINCT ip
 			FROM squad_aegis.server_player_connected_events
-			WHERE %s AND ip != ''
+			WHERE ip != '' AND (
+				ifNull(steam, '') IN target_steam_ids
+				OR ifNull(eos, '') IN target_eos_ids
+				OR ifNull(epic, '') IN target_epic_ids
+			)
 		),
 		related_connections AS (
 			SELECT
 				steam,
 				eos,
+				if(ifNull(steam, '') != '', 'steam', 'eos') AS identifier_type,
+				if(ifNull(steam, '') != '', assumeNotNull(steam), assumeNotNull(eos)) AS identifier_value,
 				count(*) as shared_sessions
 			FROM squad_aegis.server_player_connected_events
 			WHERE ip IN (SELECT ip FROM player_ips)
-				AND NOT (%s)
+				AND NOT (
+					ifNull(steam, '') IN target_steam_ids
+					OR ifNull(eos, '') IN target_eos_ids
+					OR ifNull(epic, '') IN target_epic_ids
+				)
 				AND (steam != '' OR eos != '')
 			GROUP BY steam, eos
 		),
 		player_names AS (
 			SELECT
-				steam,
-				eos,
-				any(player_suffix) as player_name
-			FROM squad_aegis.server_join_succeeded_events
-			WHERE steam != '' OR eos != ''
-			GROUP BY steam, eos
+				identifier_type,
+				identifier_value,
+				argMax(player_suffix, event_time) AS player_name
+			FROM (
+				SELECT 'steam' AS identifier_type, assumeNotNull(steam) AS identifier_value, player_suffix, event_time
+				FROM squad_aegis.server_join_succeeded_events
+				WHERE ifNull(steam, '') != ''
+				UNION ALL
+				SELECT 'eos' AS identifier_type, assumeNotNull(eos) AS identifier_value, player_suffix, event_time
+				FROM squad_aegis.server_join_succeeded_events
+				WHERE ifNull(eos, '') != ''
+			)
+			GROUP BY identifier_type, identifier_value
 		)
 		SELECT
 			rc.steam,
@@ -3116,12 +3194,14 @@ func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
 			COALESCE(pn.player_name, '') as player_name,
 			rc.shared_sessions
 		FROM related_connections rc
-		LEFT JOIN player_names pn ON (rc.steam != '' AND rc.steam = pn.steam) OR (rc.eos != '' AND rc.eos = pn.eos)
+		LEFT JOIN player_names pn
+		  ON rc.identifier_type = pn.identifier_type
+		 AND rc.identifier_value = pn.identifier_value
 		ORDER BY rc.shared_sessions DESC
 		LIMIT 20
-	`, whereClause, whereClause)
+	`
 
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, identity.SteamIDs, identity.EOSIDs, identity.EpicIDs)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
@@ -3129,20 +3209,33 @@ func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
 	defer rows.Close()
 
 	related := []RelatedPlayer{}
+	identifiers := []PlayerIdentifier{}
 	for rows.Next() {
 		var player RelatedPlayer
-		err := rows.Scan(&player.SteamID, &player.EOSID, &player.PlayerName, &player.SharedSessions)
-		if err != nil {
-			continue
+		if err := rows.Scan(&player.SteamID, &player.EOSID, &player.PlayerName, &player.SharedSessions); err != nil {
+			responses.InternalServerError(c, err, nil)
+			return
 		}
 		player.RelationType = "same_ip"
-
-		// Check if this player currently has an active ban by either Steam or EOS ID.
-		if isBanned, err := s.isPlayerCurrentlyBanned(c.Request.Context(), player.SteamID, player.EOSID); err == nil {
-			player.IsBanned = isBanned
+		if player.SteamID != "" {
+			identifiers = append(identifiers, PlayerIdentifier{Value: player.SteamID, IsSteam: true})
 		}
-
+		if player.EOSID != "" {
+			identifiers = append(identifiers, PlayerIdentifier{Value: player.EOSID})
+		}
 		related = append(related, player)
+	}
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	banned, err := s.loadActiveBanIdentifiers(ctx, identifiers)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	for idx := range related {
+		related[idx].IsBanned = banned["steam:"+related[idx].SteamID] || banned["eos:"+utils.NormalizeEOSID(related[idx].EOSID)]
 	}
 
 	responses.Success(c, "Related players fetched successfully", &gin.H{
@@ -3152,184 +3245,124 @@ func (s *Server) PlayerRelatedPlayers(c *gin.Context) {
 
 // PlayerCombatHistory handles GET /api/players/:playerId/combat - combat history (kills and deaths)
 func (s *Server) PlayerCombatHistory(c *gin.Context) {
-	playerID := c.Param("playerId")
-	if playerID == "" {
+	ctx := c.Request.Context()
+	if c.Param("playerId") == "" {
 		responses.BadRequest(c, "Player ID is required", nil)
 		return
 	}
-
-	page := 1
-	limit := 50
-	if pageStr := c.Query("page"); pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
+	limit, ok := parseCursorLimit(c, 50, 100)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
+	}
+	identity, err := s.resolvePlayerIdentity(ctx, c.Param("playerId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid player ID", &gin.H{"error": err.Error()})
+		return
+	}
+	eventTypeFilter := strings.ToLower(normalizedAllFilter(c.Query("type")))
+	validTypes := map[string]bool{"": true, "kill": true, "death": true, "wounded": true, "wounded_by": true, "damaged": true, "damaged_by": true}
+	if !validTypes[eventTypeFilter] {
+		responses.BadRequest(c, "Invalid combat event type", nil)
+		return
+	}
+	filterHash := pagination.MustFilterHash(struct {
+		CanonicalID string   `json:"canonical_id"`
+		SteamIDs    []string `json:"steam_ids"`
+		EOSIDs      []string `json:"eos_ids"`
+		EventType   string   `json:"event_type"`
+	}{identity.CanonicalID, identity.SteamIDs, identity.EOSIDs, eventTypeFilter})
+	var cursorValues *playerCombatCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &playerCombatCursorValues{}
+		if err := pagination.Decode(encodedCursor, playerCombatCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
 		}
 	}
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 100 {
-			limit = l
+	if !identity.Found || (len(identity.SteamIDs) == 0 && len(identity.EOSIDs) == 0) {
+		responses.Success(c, "Combat history fetched successfully", &gin.H{"events": []CombatHistoryEntry{}, "page_info": pagination.PageInfo{}})
+		return
+	}
+
+	type combatBranch struct {
+		eventType string
+		table     string
+		actor     string
+		other     string
+	}
+	branches := []combatBranch{
+		{"kill", "server_player_died_events", "attacker", "victim"},
+		{"death", "server_player_died_events", "victim", "attacker"},
+		{"wounded", "server_player_wounded_events", "attacker", "victim"},
+		{"wounded_by", "server_player_wounded_events", "victim", "attacker"},
+		{"damaged", "server_player_damaged_events", "attacker", "victim"},
+		{"damaged_by", "server_player_damaged_events", "victim", "attacker"},
+	}
+	queryParts := make([]string, 0, len(branches))
+	args := make([]interface{}, 0, len(branches)*3+4)
+	for _, branch := range branches {
+		if eventTypeFilter != "" && branch.eventType != eventTypeFilter {
+			continue
 		}
+		identityParts := make([]string, 0, 2)
+		if len(identity.SteamIDs) > 0 {
+			identityParts = append(identityParts, branch.actor+"_steam IN (?)")
+			args = append(args, identity.SteamIDs)
+		}
+		if len(identity.EOSIDs) > 0 {
+			identityParts = append(identityParts, branch.actor+"_eos IN (?)")
+			args = append(args, identity.EOSIDs)
+		}
+		where := "(" + strings.Join(identityParts, " OR ") + ")"
+		if cursorValues != nil {
+			where += " AND event_time <= ?"
+			args = append(args, cursorValues.EventTime)
+		}
+		queryParts = append(queryParts, fmt.Sprintf(`
+			SELECT
+				toString(cursor_key) AS cursor_key,
+				chain_id,
+				event_time,
+				'%s' AS event_type,
+				toString(server_id) AS server_id,
+				toString(weapon) AS weapon,
+				damage,
+				teamkill,
+				%s_name AS other_name,
+				ifNull(%s_steam, '') AS other_steam_id,
+				ifNull(%s_eos, '') AS other_eos_id,
+				ifNull(%s_team, '') AS other_team,
+				ifNull(%s_squad, '') AS other_squad,
+				ifNull(%s_team, '') AS player_team,
+				ifNull(%s_squad, '') AS player_squad
+			FROM squad_aegis.%s
+			WHERE %s`, branch.eventType, branch.other, branch.other, branch.other, branch.other, branch.other, branch.actor, branch.actor, branch.table, where))
 	}
-
-	playerID, isSteamID := normalizePlayerIdentifier(playerID)
-
-	// Build WHERE clauses for kills (player is attacker) and deaths (player is victim)
-	var killWhereClause, deathWhereClause string
-	if isSteamID {
-		killWhereClause = "attacker_steam = ?"
-		deathWhereClause = "victim_steam = ?"
-	} else {
-		killWhereClause = "attacker_eos = ?"
-		deathWhereClause = "victim_eos = ?"
+	query := "/* sa.player.combat */ SELECT * FROM (" + strings.Join(queryParts, " UNION ALL ") + ")"
+	if cursorValues != nil {
+		query += " WHERE (event_time, event_type, cursor_key) < (?, ?, ?)"
+		args = append(args, cursorValues.EventTime, cursorValues.EventType, cursorValues.CursorKey)
 	}
+	query += " ORDER BY event_time DESC, event_type DESC, cursor_key DESC LIMIT ?"
+	args = append(args, limit+1)
 
-	offset := (page - 1) * limit
-
-	query := fmt.Sprintf(`
-		SELECT * FROM (
-			-- Kills (player killed someone)
-			SELECT
-				toString(id) as event_id,
-				chain_id,
-				event_time,
-				'kill' as event_type,
-				server_id,
-				weapon,
-				damage,
-				teamkill,
-				victim_name as other_name,
-				victim_steam as other_steam_id,
-				victim_eos as other_eos_id,
-				victim_team as other_team,
-				victim_squad as other_squad,
-				attacker_team as player_team,
-				attacker_squad as player_squad
-			FROM squad_aegis.server_player_died_events
-			WHERE %s
-			UNION ALL
-			-- Deaths (player was killed)
-			SELECT
-				toString(id) as event_id,
-				chain_id,
-				event_time,
-				'death' as event_type,
-				server_id,
-				weapon,
-				damage,
-				teamkill,
-				attacker_name as other_name,
-				attacker_steam as other_steam_id,
-				attacker_eos as other_eos_id,
-				attacker_team as other_team,
-				attacker_squad as other_squad,
-				victim_team as player_team,
-				victim_squad as player_squad
-			FROM squad_aegis.server_player_died_events
-			WHERE %s
-			UNION ALL
-			-- Wounded someone (player downed someone)
-			SELECT
-				toString(id) as event_id,
-				chain_id,
-				event_time,
-				'wounded' as event_type,
-				server_id,
-				weapon,
-				damage,
-				teamkill,
-				victim_name as other_name,
-				victim_steam as other_steam_id,
-				victim_eos as other_eos_id,
-				victim_team as other_team,
-				victim_squad as other_squad,
-				attacker_team as player_team,
-				attacker_squad as player_squad
-			FROM squad_aegis.server_player_wounded_events
-			WHERE %s
-			UNION ALL
-			-- Wounded by (player was downed)
-			SELECT
-				toString(id) as event_id,
-				chain_id,
-				event_time,
-				'wounded_by' as event_type,
-				server_id,
-				weapon,
-				damage,
-				teamkill,
-				attacker_name as other_name,
-				attacker_steam as other_steam_id,
-				attacker_eos as other_eos_id,
-				attacker_team as other_team,
-				attacker_squad as other_squad,
-				victim_team as player_team,
-				victim_squad as player_squad
-			FROM squad_aegis.server_player_wounded_events
-			WHERE %s
-			UNION ALL
-			-- Damaged someone (player dealt damage)
-			SELECT
-				toString(id) as event_id,
-				chain_id,
-				event_time,
-				'damaged' as event_type,
-				server_id,
-				weapon,
-				damage,
-				teamkill,
-				victim_name as other_name,
-				victim_steam as other_steam_id,
-				victim_eos as other_eos_id,
-				victim_team as other_team,
-				victim_squad as other_squad,
-				attacker_team as player_team,
-				attacker_squad as player_squad
-			FROM squad_aegis.server_player_damaged_events
-			WHERE %s
-			UNION ALL
-			-- Damaged by (player took damage)
-			SELECT
-				toString(id) as event_id,
-				chain_id,
-				event_time,
-				'damaged_by' as event_type,
-				server_id,
-				weapon,
-				damage,
-				teamkill,
-				attacker_name as other_name,
-				attacker_steam as other_steam_id,
-				attacker_eos as other_eos_id,
-				attacker_team as other_team,
-				attacker_squad as other_squad,
-				victim_team as player_team,
-				victim_squad as player_squad
-			FROM squad_aegis.server_player_damaged_events
-			WHERE %s
-		) ORDER BY event_time DESC
-		LIMIT ? OFFSET ?
-	`, killWhereClause, deathWhereClause, killWhereClause, deathWhereClause, killWhereClause, deathWhereClause)
-
-	// Fetch one extra row to detect whether more pages exist after deduplication.
-	rows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), query, playerID, playerID, playerID, playerID, playerID, playerID, limit+1, offset)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 	defer rows.Close()
 
-	events := []CombatHistoryEntry{}
-	serverNameCache := make(map[string]string)
+	events := make([]CombatHistoryEntry, 0, limit+1)
 	missingIdentifiers := []PlayerIdentifier{}
-	identifierSet := make(map[string]bool) // For deduplication
-	eventSet := make(map[string]bool)
+	identifierSet := make(map[string]bool)
 
 	// First pass: scan all events and collect missing player identifiers
 	for rows.Next() {
 		var entry CombatHistoryEntry
 		var teamkillInt uint8
 		err := rows.Scan(
-			&entry.EventID,
+			&entry.CursorKey,
 			&entry.ChainID,
 			&entry.EventTime,
 			&entry.EventType,
@@ -3346,37 +3379,11 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			&entry.PlayerSquad,
 		)
 		if err != nil {
-			continue
+			responses.InternalServerError(c, err, nil)
+			return
 		}
+		entry.EventID = entry.CursorKey
 		entry.Teamkill = teamkillInt == 1
-
-		eventKey := entry.EventType + ":" + entry.EventID
-		if entry.EventID == "" {
-			eventKey = fmt.Sprintf(
-				"%s:%s:%s:%s:%.3f:%s",
-				entry.EventType,
-				entry.EventTime.UTC().Format(time.RFC3339Nano),
-				entry.ServerID,
-				entry.Weapon,
-				entry.Damage,
-				entry.OtherEOSID+entry.OtherSteamID+entry.OtherName,
-			)
-		}
-		if eventSet[eventKey] {
-			continue
-		}
-		eventSet[eventKey] = true
-
-		// Get server name from cache or database
-		if name, ok := serverNameCache[entry.ServerID]; ok {
-			entry.ServerName = name
-		} else {
-			var serverName string
-			if err := s.Dependencies.DB.QueryRow(`SELECT name FROM servers WHERE id = $1`, entry.ServerID).Scan(&serverName); err == nil {
-				serverNameCache[entry.ServerID] = serverName
-				entry.ServerName = serverName
-			}
-		}
 
 		// Collect missing player identifiers for batch lookup
 		if entry.OtherName == "" && (entry.OtherSteamID != "" || entry.OtherEOSID != "") {
@@ -3397,18 +3404,31 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 
 		events = append(events, entry)
 	}
-
-	// Determine if more pages exist, then trim to the requested limit.
-	hasMore := len(events) > limit
-	if hasMore {
-		events = events[:limit]
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
 	}
+	events, hasMore := pagination.TrimPage(events, limit)
 
 	// Batch lookup missing player names
-	playerNameMap := s.lookupPlayerNamesBatchByIdentifiers(c.Request.Context(), missingIdentifiers)
+	playerNameMap, err := s.lookupPlayerNamesBatchByIdentifiers(ctx, missingIdentifiers)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	serverIDs := make([]string, 0, len(events))
+	for i := range events {
+		serverIDs = append(serverIDs, events[i].ServerID)
+	}
+	serverNames, err := s.loadServerNamesBatch(ctx, serverIDs)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
 
 	// Second pass: fill in missing player names from batch lookup
 	for i := range events {
+		events[i].ServerName = serverNames[events[i].ServerID]
 		if events[i].OtherName == "" && (events[i].OtherSteamID != "" || events[i].OtherEOSID != "") {
 			var key string
 			if events[i].OtherSteamID != "" {
@@ -3421,12 +3441,25 @@ func (s *Server) PlayerCombatHistory(c *gin.Context) {
 			}
 		}
 	}
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(events) > 0 {
+		last := events[len(events)-1]
+		lastKey, err := uuid.Parse(last.CursorKey)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("invalid combat cursor key: %w", err), nil)
+			return
+		}
+		encoded, err := pagination.Encode(playerCombatCursorKind, filterHash, playerCombatCursorValues{EventTime: last.EventTime, EventType: last.EventType, CursorKey: lastKey})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode combat cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
+	}
 
 	responses.Success(c, "Combat history fetched successfully", &gin.H{
-		"events":   events,
-		"page":     page,
-		"limit":    limit,
-		"has_more": hasMore,
+		"events":    events,
+		"page_info": pageInfo,
 	})
 }
 
@@ -3439,175 +3472,230 @@ func (s *Server) PlayersAltGroups(c *gin.Context) {
 		return
 	}
 
-	// Pagination
-	page := 1
-	limit := 20
-	if pageStr := c.Query("page"); pageStr != "" {
-		if parsedPage, err := strconv.Atoi(pageStr); err == nil && parsedPage > 0 {
-			page = parsedPage
+	ctx := c.Request.Context()
+	limit, ok := parseCursorLimit(c, 20, 50)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
+	}
+	filterHash := pagination.MustFilterHash(struct {
+		Scope string `json:"scope"`
+	}{Scope: "all"})
+	var cursorValues *altGroupCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &altGroupCursorValues{}
+		if err := pagination.Decode(encodedCursor, altGroupsCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
 		}
 	}
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 && parsedLimit <= 50 {
-			limit = parsedLimit
-		}
-	}
-	offset := (page - 1) * limit
 
-	// Step 1: Get IPs shared by multiple players with last activity
-	ipsQuery := `
+	query := `
+		/* sa.player.alt_groups */
+		WITH
+			(
+				SELECT ifNull(argMax(backfill_complete, updated_at), 0)
+				FROM squad_aegis.sql_rollup_state
+				WHERE rollup_name = 'player_ip_activity'
+			) = 1 AS use_rollup,
+			current_identity AS (
+				SELECT argMax(snapshot_id, published_at) AS snapshot_id
+				FROM squad_aegis.player_identity_current
+				WHERE pointer_key = 1
+			),
+			activity AS (
+				SELECT
+					ip,
+					multiIf(ifNull(steam, '') != '', 'steam', ifNull(eos, '') != '', 'eos', 'epic') AS identifier_type,
+					multiIf(ifNull(steam, '') != '', assumeNotNull(steam), ifNull(eos, '') != '', assumeNotNull(eos), assumeNotNull(epic)) AS identifier_value,
+					count() AS sessions,
+					max(event_time) AS last_seen
+				FROM squad_aegis.server_player_connected_events
+				WHERE NOT use_rollup AND ip != ''
+				  AND (ifNull(steam, '') != '' OR ifNull(eos, '') != '' OR ifNull(epic, '') != '')
+				GROUP BY ip, identifier_type, identifier_value
+				UNION ALL
+				SELECT ip, identifier_type, identifier_value, sum(sessions), max(last_seen)
+				FROM squad_aegis.player_ip_activity
+				WHERE use_rollup
+				GROUP BY ip, identifier_type, identifier_value
+			),
+			eligible_ips AS (
+				SELECT ip, max(last_seen) AS last_activity
+				FROM activity
+				GROUP BY ip
+				HAVING uniqExact(tuple(identifier_type, identifier_value)) > 1
+			),
+			page_ips AS (
+				SELECT ip, last_activity
+				FROM eligible_ips`
+	args := make([]interface{}, 0, 3)
+	if cursorValues != nil {
+		query += " WHERE (last_activity, ip) < (?, ?)"
+		args = append(args, cursorValues.LastActivity, cursorValues.IP)
+	}
+	query += `
+				ORDER BY last_activity DESC, ip DESC
+				LIMIT ?
+			)
 		SELECT
-			ip,
-			max(event_time) as last_activity,
-			countDistinct(if(steam != '', steam, eos)) as player_count
-		FROM squad_aegis.server_player_connected_events
-		WHERE ip != '' AND (steam != '' OR eos != '')
-		GROUP BY ip
-		HAVING player_count > 1
-		ORDER BY last_activity DESC
-		LIMIT ? OFFSET ?
+			p.ip,
+			p.last_activity,
+			a.identifier_type,
+			a.identifier_value,
+			a.sessions,
+			a.last_seen,
+			ifNull(any(pi.primary_name), '') AS player_name
+		FROM page_ips p
+		INNER JOIN activity a ON a.ip = p.ip
+		LEFT JOIN current_identity ci ON 1
+		LEFT JOIN squad_aegis.player_identity_lookup_snapshots pil
+		  ON pil.snapshot_id = ci.snapshot_id
+		 AND pil.identifier_type = a.identifier_type
+		 AND pil.identifier_value = a.identifier_value
+		LEFT JOIN squad_aegis.player_identity_snapshots pi
+		  ON pi.snapshot_id = ci.snapshot_id
+		 AND pi.canonical_id = pil.canonical_id
+		GROUP BY p.ip, p.last_activity, a.identifier_type, a.identifier_value, a.sessions, a.last_seen
+		ORDER BY p.last_activity DESC, p.ip DESC, a.last_seen DESC, a.identifier_value ASC
 	`
-
-	ipRows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), ipsQuery, limit, offset)
+	args = append(args, limit+1)
+	rows, err := s.Dependencies.Clickhouse.Query(ctx, query, args...)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to query shared IPs")
 		responses.InternalServerError(c, err, nil)
 		return
 	}
-	defer ipRows.Close()
-
-	type ipInfo struct {
-		IP           string
-		LastActivity time.Time
-		PlayerCount  uint64
-	}
-	sharedIPs := []ipInfo{}
-	for ipRows.Next() {
-		var info ipInfo
-		if err := ipRows.Scan(&info.IP, &info.LastActivity, &info.PlayerCount); err != nil {
-			log.Error().Err(err).Msg("Failed to scan IP row")
-			continue
+	defer rows.Close()
+	groups := make([]AltAccountGroup, 0, limit+1)
+	groupIndex := make(map[string]int, limit+1)
+	for rows.Next() {
+		var ip, identifierType, identifierValue, playerName string
+		var lastActivity, lastSeen time.Time
+		var sessions uint64
+		if err := rows.Scan(&ip, &lastActivity, &identifierType, &identifierValue, &sessions, &lastSeen, &playerName); err != nil {
+			responses.InternalServerError(c, err, nil)
+			return
 		}
-		sharedIPs = append(sharedIPs, info)
+		idx, exists := groupIndex[ip]
+		if !exists {
+			idx = len(groups)
+			groupIndex[ip] = idx
+			activity := lastActivity
+			groups = append(groups, AltAccountGroup{GroupID: ip, SharedIPCount: 1, LastActivity: &activity, Players: []AltAccountPlayer{}})
+		}
+		player := AltAccountPlayer{PlayerName: playerName, SharedSessions: int64(sessions), LastSeen: &lastSeen}
+		if identifierType == "steam" {
+			player.SteamID = identifierValue
+		} else if identifierType == "eos" {
+			player.EOSID = identifierValue
+		}
+		if player.PlayerName == "" {
+			player.PlayerName = identifierValue
+		}
+		groups[idx].Players = append(groups[idx].Players, player)
 	}
-
-	groups := []AltAccountGroup{}
-
-	// Step 2: For each IP, get the players
-	for _, ipInfo := range sharedIPs {
-		playersQuery := `
-			WITH player_sessions AS (
-				SELECT
-					steam,
-					eos,
-					count() as sessions,
-					max(event_time) as last_seen
-				FROM squad_aegis.server_player_connected_events
-				WHERE ip = ? AND (steam != '' OR eos != '')
-				GROUP BY steam, eos
-			),
-			all_names AS (
-				-- Collect names from multiple event sources
-				SELECT steam, eos, player_suffix as name, event_time
-				FROM squad_aegis.server_join_succeeded_events
-				WHERE player_suffix != '' AND (steam != '' OR eos != '')
-				UNION ALL
-				SELECT steam, eos, player_suffix as name, event_time
-				FROM squad_aegis.server_player_disconnected_events
-				WHERE player_suffix != '' AND (steam != '' OR eos != '')
-				UNION ALL
-				SELECT attacker_steam as steam, attacker_eos as eos, attacker_name as name, event_time
-				FROM squad_aegis.server_player_died_events
-				WHERE attacker_name != '' AND (attacker_steam != '' OR attacker_eos != '')
-				UNION ALL
-				SELECT victim_steam as steam, victim_eos as eos, victim_name as name, event_time
-				FROM squad_aegis.server_player_died_events
-				WHERE victim_name != '' AND (victim_steam != '' OR victim_eos != '')
-			),
-			player_names AS (
-				SELECT
-					steam,
-					eos,
-					argMax(name, event_time) as player_name
-				FROM all_names
-				GROUP BY steam, eos
-			)
-			SELECT
-				ps.steam,
-				ps.eos,
-				COALESCE(pn.player_name, '') as player_name,
-				ps.sessions,
-				ps.last_seen
-			FROM player_sessions ps
-			LEFT JOIN player_names pn ON (ps.steam != '' AND ps.steam = pn.steam) OR (ps.eos != '' AND ps.eos = pn.eos)
-			ORDER BY ps.last_seen DESC
-		`
-
-		playerRows, err := s.Dependencies.Clickhouse.Query(c.Request.Context(), playersQuery, ipInfo.IP)
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	groups, hasMore := pagination.TrimPage(groups, limit)
+	banned, err := s.loadActiveBanIdentifiersBatch(ctx, groups)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	for groupIdx := range groups {
+		for playerIdx := range groups[groupIdx].Players {
+			player := &groups[groupIdx].Players[playerIdx]
+			player.IsBanned = banned["steam:"+player.SteamID] || banned["eos:"+player.EOSID]
+		}
+	}
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(groups) > 0 {
+		last := groups[len(groups)-1]
+		encoded, err := pagination.Encode(altGroupsCursorKind, filterHash, altGroupCursorValues{LastActivity: *last.LastActivity, IP: last.GroupID})
 		if err != nil {
-			log.Error().Err(err).Str("ip", ipInfo.IP).Msg("Failed to query players for IP")
-			continue
+			responses.InternalServerError(c, fmt.Errorf("encode alt group cursor: %w", err), nil)
+			return
 		}
+		pageInfo.NextCursor = &encoded
+	}
+	responses.Success(c, "Alt account groups fetched successfully", &gin.H{"alt_groups": groups, "page_info": pageInfo})
+}
 
-		lastActivity := ipInfo.LastActivity
-		group := AltAccountGroup{
-			GroupID:       ipInfo.IP,
-			SharedIPCount: 1,
-			LastActivity:  &lastActivity,
-			Players:       []AltAccountPlayer{},
+func (s *Server) loadActiveBanIdentifiersBatch(ctx context.Context, groups []AltAccountGroup) (map[string]bool, error) {
+	identifiers := make([]PlayerIdentifier, 0)
+	for _, group := range groups {
+		for _, player := range group.Players {
+			if player.SteamID != "" {
+				identifiers = append(identifiers, PlayerIdentifier{Value: player.SteamID, IsSteam: true})
+			}
+			if player.EOSID != "" {
+				identifiers = append(identifiers, PlayerIdentifier{Value: player.EOSID})
+			}
 		}
+	}
+	return s.loadActiveBanIdentifiers(ctx, identifiers)
+}
 
-		for playerRows.Next() {
-			var steam, eos, name string
-			var sessions uint64
-			var lastSeen time.Time
-			if err := playerRows.Scan(&steam, &eos, &name, &sessions, &lastSeen); err != nil {
-				log.Error().Err(err).Msg("Failed to scan player row")
+func (s *Server) loadActiveBanIdentifiers(ctx context.Context, identifiers []PlayerIdentifier) (map[string]bool, error) {
+	steamIDs := make([]int64, 0, len(identifiers))
+	eosIDs := make([]string, 0, len(identifiers))
+	seen := make(map[string]struct{}, len(identifiers))
+	for _, identifier := range identifiers {
+		if identifier.IsSteam {
+			value, err := strconv.ParseInt(identifier.Value, 10, 64)
+			if err != nil {
 				continue
 			}
-
-			player := AltAccountPlayer{
-				SteamID:        steam,
-				EOSID:          eos,
-				PlayerName:     name,
-				SharedSessions: int64(sessions),
-				LastSeen:       &lastSeen,
+			key := "steam:" + strconv.FormatInt(value, 10)
+			if _, exists := seen[key]; exists {
+				continue
 			}
-
-			// Check if this player currently has an active ban by either Steam or EOS ID.
-			if isBanned, err := s.isPlayerCurrentlyBanned(c.Request.Context(), player.SteamID, player.EOSID); err == nil {
-				player.IsBanned = isBanned
-			}
-
-			group.Players = append(group.Players, player)
+			seen[key] = struct{}{}
+			steamIDs = append(steamIDs, value)
+			continue
 		}
-		playerRows.Close()
-
-		if len(group.Players) > 1 {
-			groups = append(groups, group)
+		normalized := utils.NormalizeEOSID(identifier.Value)
+		if normalized == "" {
+			continue
+		}
+		key := "eos:" + normalized
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		eosIDs = append(eosIDs, normalized)
+	}
+	result := make(map[string]bool)
+	if len(steamIDs) == 0 && len(eosIDs) == 0 {
+		return result, nil
+	}
+	rows, err := s.Dependencies.DB.QueryContext(ctx, `
+		/* sa.player.active_bans */
+		SELECT steam_id, eos_id
+		FROM server_bans
+		WHERE (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+		  AND (steam_id = ANY($1::bigint[]) OR eos_id = ANY($2::text[]))
+	`, pq.Array(steamIDs), pq.Array(eosIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var steamID sql.NullInt64
+		var eosID sql.NullString
+		if err := rows.Scan(&steamID, &eosID); err != nil {
+			return nil, err
+		}
+		if steamID.Valid {
+			result["steam:"+strconv.FormatInt(steamID.Int64, 10)] = true
+		}
+		if eosID.Valid {
+			result["eos:"+utils.NormalizeEOSID(eosID.String)] = true
 		}
 	}
-
-	// Get total count for pagination
-	countQuery := `
-		SELECT count() FROM (
-			SELECT ip
-			FROM squad_aegis.server_player_connected_events
-			WHERE ip != '' AND (steam != '' OR eos != '')
-			GROUP BY ip
-			HAVING countDistinct(if(steam != '', steam, eos)) > 1
-		)
-	`
-	var totalGroups int64
-	if err := s.Dependencies.Clickhouse.QueryRow(c.Request.Context(), countQuery).Scan(&totalGroups); err != nil {
-		log.Warn().Err(err).Msg("Failed to get alt groups count")
-		totalGroups = int64(len(groups))
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-
-	responses.Success(c, "Alt account groups fetched successfully", &gin.H{
-		"alt_groups":   groups,
-		"total_groups": totalGroups,
-		"page":         page,
-		"limit":        limit,
-	})
+	return result, nil
 }

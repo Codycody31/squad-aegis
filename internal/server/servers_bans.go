@@ -20,6 +20,7 @@ import (
 	dbpkg "go.codycody31.dev/squad-aegis/internal/db"
 	"go.codycody31.dev/squad-aegis/internal/file_upload"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/pagination"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 	squadRcon "go.codycody31.dev/squad-aegis/internal/squad-rcon"
@@ -29,6 +30,19 @@ type normalizedBanSubject struct {
 	steamIDVal      interface{}
 	eosIDVal        interface{}
 	normalizedEOSID string
+}
+
+const serverBansCursorKind = "bans.server"
+
+type serverBanCursorValues struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
+}
+
+type serverBanListFilters struct {
+	ServerID uuid.UUID `json:"server_id"`
+	Search   string    `json:"search"`
+	Status   string    `json:"status"`
 }
 
 func normalizeBanSubject(steamID string, eosID string) (normalizedBanSubject, string) {
@@ -57,6 +71,7 @@ func normalizeBanSubject(steamID string, eosID string) (normalizedBanSubject, st
 
 // ServerBansList handles listing all bans for a server
 func (s *Server) ServerBansList(c *gin.Context) {
+	ctx := c.Request.Context()
 	user := s.getUserFromSession(c)
 
 	serverIdString := c.Param("serverId")
@@ -67,29 +82,87 @@ func (s *Server) ServerBansList(c *gin.Context) {
 	}
 
 	// Check if user has access to this server
-	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverId, user)
+	_, err = core.GetServerById(ctx, s.Dependencies.DB, serverId, user)
 	if err != nil {
 		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
 		return
 	}
 
-	// Query the database for bans
-	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), `
-		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') as admin_name, sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.rule_id, sr.title as rule_title,  sb.ban_list_id, bl.name as ban_list_name, sb.evidence_text, sb.created_at, sb.updated_at
+	limit, ok := parseCursorLimit(c, 50, 100)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
+	}
+	filters := serverBanListFilters{
+		ServerID: serverId,
+		Search:   strings.ToLower(strings.TrimSpace(c.Query("search"))),
+		Status:   strings.ToLower(strings.TrimSpace(c.DefaultQuery("status", "all"))),
+	}
+	if filters.Status == "" {
+		filters.Status = "all"
+	}
+	if filters.Status != "all" && filters.Status != "active" && filters.Status != "expired" {
+		responses.BadRequest(c, "Invalid ban status", &gin.H{"error": "status must be all, active, or expired"})
+		return
+	}
+	filterHash := pagination.MustFilterHash(filters)
+	var cursorValues *serverBanCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &serverBanCursorValues{}
+		if err := pagination.Decode(encodedCursor, serverBansCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	query := `
+		/* sa.bans.list */
+		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System') AS admin_name,
+		       sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.rule_id,
+		       sr.title AS rule_title, sb.ban_list_id, bl.name AS ban_list_name,
+		       sb.evidence_text, sb.created_at, sb.updated_at,
+		       EXISTS (SELECT 1 FROM ban_evidence be WHERE be.ban_id = sb.id) AS has_evidence
 		FROM server_bans sb
 		LEFT JOIN users u ON sb.admin_id = u.id
 		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
 		LEFT JOIN server_rules sr ON sb.rule_id = sr.id
-		WHERE sb.server_id = $1
-		ORDER BY sb.created_at DESC
-	`, serverId)
+		WHERE sb.server_id = $1`
+	args := []any{serverId}
+	addArg := func(value any) string {
+		args = append(args, value)
+		return "$" + strconv.Itoa(len(args))
+	}
+	if filters.Search != "" {
+		placeholder := addArg("%" + filters.Search + "%")
+		query += ` AND (
+			lower(sb.reason) LIKE ` + placeholder + ` OR
+			COALESCE(sb.steam_id::text, '') LIKE ` + placeholder + ` OR
+			lower(COALESCE(sb.eos_id, '')) LIKE ` + placeholder + ` OR
+			lower(COALESCE(u.username, '')) LIKE ` + placeholder + ` OR
+			lower(COALESCE(sr.title, '')) LIKE ` + placeholder + ` OR
+			lower(COALESCE(bl.name, '')) LIKE ` + placeholder + `
+		)`
+	}
+	switch filters.Status {
+	case "active":
+		query += " AND (sb.expires_at IS NULL OR sb.expires_at > CURRENT_TIMESTAMP)"
+	case "expired":
+		query += " AND sb.expires_at <= CURRENT_TIMESTAMP"
+	}
+	if cursorValues != nil {
+		createdAtArg := addArg(cursorValues.CreatedAt)
+		idArg := addArg(cursorValues.ID)
+		query += " AND (sb.created_at, sb.id) < (" + createdAtArg + ", " + idArg + ")"
+	}
+	query += " ORDER BY sb.created_at DESC, sb.id DESC LIMIT " + addArg(limit+1)
+
+	rows, err := s.Dependencies.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		responses.InternalServerError(c, err, nil)
 		return
 	}
 	defer rows.Close()
 
-	bans := []models.ServerBan{}
+	bans := make([]models.ServerBan, 0, limit+1)
 	identifiers := []PlayerIdentifier{}
 	for rows.Next() {
 		var ban models.ServerBan
@@ -118,6 +191,7 @@ func (s *Server) ServerBansList(c *gin.Context) {
 			&evidenceText,
 			&ban.CreatedAt,
 			&ban.UpdatedAt,
+			&ban.HasEvidence,
 		)
 		if err != nil {
 			responses.InternalServerError(c, err, nil)
@@ -176,13 +250,6 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		}
 		ban.Permanent = ban.ExpiresAt == nil
 
-		// Load evidence records for this ban
-		evidence, evidenceErr := s.loadBanEvidence(c.Request.Context(), ban.ID)
-		if evidenceErr != nil {
-			log.Error().Err(evidenceErr).Str("ban_id", ban.ID).Msg("Failed to load ban evidence")
-		}
-		ban.Evidence = evidence
-
 		bans = append(bans, ban)
 	}
 	if err := rows.Err(); err != nil {
@@ -190,8 +257,21 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		return
 	}
 
-	// Batch lookup player names from ClickHouse
-	playerNames := s.lookupPlayerNamesBatchByIdentifiers(c.Request.Context(), identifiers)
+	bans, hasMore := pagination.TrimPage(bans, limit)
+	identifiers = identifiers[:0]
+	for i := range bans {
+		if bans[i].SteamID != "" {
+			identifiers = append(identifiers, PlayerIdentifier{Value: bans[i].SteamID, IsSteam: true})
+		}
+		if bans[i].EOSID != "" {
+			identifiers = append(identifiers, PlayerIdentifier{Value: bans[i].EOSID, IsSteam: false})
+		}
+	}
+	playerNames, err := s.lookupPlayerNamesBatchByIdentifiers(ctx, identifiers)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
 
 	// Assign player names to bans
 	for i := range bans {
@@ -214,9 +294,123 @@ func (s *Server) ServerBansList(c *gin.Context) {
 		}
 	}
 
-	responses.Success(c, "Bans fetched successfully", &gin.H{
-		"bans": bans,
-	})
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(bans) > 0 {
+		last := bans[len(bans)-1]
+		lastID, err := uuid.Parse(last.ID)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("invalid ban ID returned by database: %w", err), nil)
+			return
+		}
+		encoded, err := pagination.Encode(serverBansCursorKind, filterHash, serverBanCursorValues{CreatedAt: last.CreatedAt, ID: lastID})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode bans cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
+	}
+
+	responses.Success(c, "Bans fetched successfully", &gin.H{"bans": bans, "page_info": pageInfo})
+}
+
+// ServerBanGet returns one ban and its complete evidence. PostgreSQL work is
+// deliberately bounded to one ban query and one ordered evidence query.
+func (s *Server) ServerBanGet(c *gin.Context) {
+	ctx := c.Request.Context()
+	serverID, err := uuid.Parse(c.Param("serverId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
+		return
+	}
+	banID, err := uuid.Parse(c.Param("banId"))
+	if err != nil {
+		responses.BadRequest(c, "Invalid ban ID", &gin.H{"error": err.Error()})
+		return
+	}
+	if _, err := core.GetServerById(ctx, s.Dependencies.DB, serverID, s.getUserFromSession(c)); err != nil {
+		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
+		return
+	}
+
+	var ban models.ServerBan
+	var adminIDStr, eosIDStr, ruleID, ruleTitle, banListID, banListName, evidenceText sql.NullString
+	var steamIDInt sql.NullInt64
+	var expiresAt sql.NullTime
+	err = s.Dependencies.DB.QueryRowContext(ctx, `
+		/* sa.bans.detail */
+		SELECT sb.id, sb.server_id, sb.admin_id, COALESCE(u.username, 'System'),
+		       sb.steam_id, sb.eos_id, sb.reason, sb.expires_at, sb.rule_id,
+		       sr.title, sb.ban_list_id, bl.name, sb.evidence_text,
+		       sb.created_at, sb.updated_at
+		FROM server_bans sb
+		LEFT JOIN users u ON sb.admin_id = u.id
+		LEFT JOIN ban_lists bl ON sb.ban_list_id = bl.id
+		LEFT JOIN server_rules sr ON sb.rule_id = sr.id
+		WHERE sb.server_id = $1 AND sb.id = $2
+	`, serverID, banID).Scan(
+		&ban.ID, &ban.ServerID, &adminIDStr, &ban.AdminName, &steamIDInt,
+		&eosIDStr, &ban.Reason, &expiresAt, &ruleID, &ruleTitle, &banListID,
+		&banListName, &evidenceText, &ban.CreatedAt, &ban.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			responses.NotFound(c, "Ban not found", nil)
+			return
+		}
+		responses.InternalServerError(c, fmt.Errorf("query ban detail: %w", err), nil)
+		return
+	}
+	if adminIDStr.Valid {
+		value, parseErr := uuid.Parse(adminIDStr.String)
+		if parseErr != nil {
+			responses.InternalServerError(c, fmt.Errorf("parse ban admin ID: %w", parseErr), nil)
+			return
+		}
+		ban.AdminID = &value
+	}
+	if steamIDInt.Valid {
+		ban.SteamID = strconv.FormatInt(steamIDInt.Int64, 10)
+	}
+	if eosIDStr.Valid {
+		ban.EOSID = utils.NormalizeEOSID(eosIDStr.String)
+	}
+	if ruleID.Valid {
+		ban.RuleID = &ruleID.String
+	}
+	if ruleTitle.Valid {
+		ban.RuleName = &ruleTitle.String
+	}
+	if banListID.Valid {
+		ban.BanListID = &banListID.String
+	}
+	if banListName.Valid {
+		ban.BanListName = &banListName.String
+	}
+	if evidenceText.Valid {
+		ban.EvidenceText = &evidenceText.String
+	}
+	if expiresAt.Valid {
+		ban.ExpiresAt = &expiresAt.Time
+	}
+	ban.Permanent = ban.ExpiresAt == nil
+
+	evidence, err := s.loadBanEvidence(ctx, ban.ID)
+	if err != nil {
+		responses.InternalServerError(c, fmt.Errorf("load ban evidence: %w", err), nil)
+		return
+	}
+	ban.Evidence = evidence
+	ban.HasEvidence = len(evidence) > 0
+	// Keep the detail endpoint within its two-ClickHouse-query budget. Names are
+	// already present on list rows; a direct detail navigation falls back to the
+	// stable player identifier.
+	if ban.SteamID != "" {
+		ban.Name = ban.SteamID
+	} else {
+		ban.Name = ban.EOSID
+	}
+
+	responses.Success(c, "Ban fetched successfully", &gin.H{"ban": ban})
 }
 
 // ServerBansAdd handles adding a new ban
@@ -1258,10 +1452,11 @@ func buildMergedServerBansCfgContent(managedBans []models.ServerBan, existingCon
 // loadBanEvidence loads all evidence records for a given ban
 func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.BanEvidence, error) {
 	rows, err := s.Dependencies.DB.QueryContext(ctx, `
+		/* sa.bans.evidence */
 		SELECT id, ban_id, evidence_type, clickhouse_table, record_id, server_id, event_time, metadata, file_path, file_name, file_size, file_type, text_content, created_at, updated_at
 		FROM ban_evidence
 		WHERE ban_id = $1
-		ORDER BY COALESCE(event_time, created_at) DESC
+		ORDER BY COALESCE(event_time, created_at) DESC, id DESC
 	`, banID)
 	if err != nil {
 		return nil, err
@@ -1324,29 +1519,170 @@ func (s *Server) loadBanEvidence(ctx context.Context, banID string) ([]models.Ba
 			ev.TextContent = &textContent.String
 		}
 
-		// Fetch metadata from ClickHouse if it is missing or too sparse to render.
-		if ev.EvidenceType != "file_upload" && ev.EvidenceType != "text_paste" {
-			ev.Metadata = parseEvidenceMetadataJSON(metadataJSON)
-			if shouldHydrateEvidenceMetadata(ev.EvidenceType, ev.Metadata) {
-				ev.Metadata = s.fetchAndMergeEvidenceMetadata(ctx, ev)
-			}
-		} else {
-			// For file/text evidence, parse metadata if present
-			if len(metadataJSON) > 0 && string(metadataJSON) != "{}" {
-				var metadata map[string]interface{}
-				if err := json.Unmarshal(metadataJSON, &metadata); err == nil {
-					ev.Metadata = metadata
-				} else {
-					ev.Metadata = make(map[string]interface{})
-				}
-			} else {
-				ev.Metadata = make(map[string]interface{})
-			}
-		}
+		ev.Metadata = parseEvidenceMetadataJSON(metadataJSON)
 
 		evidence = append(evidence, ev)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return s.hydrateBanEvidenceBatch(ctx, evidence)
+}
 
+// hydrateBanEvidenceBatch hydrates all supported evidence with at most two
+// ClickHouse queries: one for chat and one normalized union for gameplay rows.
+func (s *Server) hydrateBanEvidenceBatch(ctx context.Context, evidence []models.BanEvidence) ([]models.BanEvidence, error) {
+	if len(evidence) == 0 || s.Dependencies.Clickhouse == nil {
+		return evidence, nil
+	}
+
+	idsByType := make(map[string][]string)
+	for i := range evidence {
+		if evidence[i].RecordID == nil || !shouldHydrateEvidenceMetadata(evidence[i].EvidenceType, evidence[i].Metadata) {
+			continue
+		}
+		switch evidence[i].EvidenceType {
+		case "chat_message", "player_connected", "player_died", "player_wounded", "player_damaged":
+			idsByType[evidence[i].EvidenceType] = append(idsByType[evidence[i].EvidenceType], *evidence[i].RecordID)
+		}
+	}
+
+	hydrated := make(map[string]map[string]interface{})
+	mergeRow := func(evidenceType, recordID string, metadata map[string]interface{}) {
+		hydrated[evidenceType+"\x00"+recordID] = metadata
+	}
+
+	if ids := idsByType["chat_message"]; len(ids) > 0 {
+		rows, err := s.Dependencies.Clickhouse.Query(ctx, `
+			/* sa.bans.evidence.chat */
+			SELECT toString(message_id), toString(sent_at), player_name, chat_type,
+			       message, steam_id, eos_id
+			FROM squad_aegis.server_player_chat_messages
+			WHERE server_id = ? AND toString(message_id) IN (?)
+		`, evidence[0].ServerID, ids)
+		if err != nil {
+			return nil, fmt.Errorf("hydrate chat evidence: %w", err)
+		}
+		for rows.Next() {
+			var recordID, eventTime, playerName, chatType, message, eosID string
+			var steamID uint64
+			if err := rows.Scan(&recordID, &eventTime, &playerName, &chatType, &message, &steamID, &eosID); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan chat evidence: %w", err)
+			}
+			mergeRow("chat_message", recordID, map[string]interface{}{
+				"message_id": recordID, "event_time": eventTime, "sent_at": eventTime,
+				"player_name": playerName, "chat_type": chatType, "message": message,
+				"steam_id": steamID, "eos_id": eosID,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate chat evidence: %w", err)
+		}
+		rows.Close()
+	}
+
+	type eventBranch struct {
+		evidenceType string
+		query        string
+	}
+	branches := []eventBranch{
+		{evidenceType: "player_died", query: `
+			SELECT if(toString(evidence_key) IN (?), toString(evidence_key), toString(id)),
+			       'player_died', toString(event_time), victim_name, toString(weapon),
+			       attacker_player_controller, ifNull(attacker_steam, ''), ifNull(attacker_eos, ''),
+			       teamkill, damage, '', '', ''
+			FROM squad_aegis.server_player_died_events
+			WHERE server_id = ?
+			  AND (toString(evidence_key) IN (?) OR toString(id) IN (?))`},
+		{evidenceType: "player_wounded", query: `
+			SELECT if(toString(evidence_key) IN (?), toString(evidence_key), toString(id)),
+			       'player_wounded', toString(event_time), victim_name, toString(weapon),
+			       attacker_player_controller, ifNull(attacker_steam, ''), ifNull(attacker_eos, ''),
+			       teamkill, damage, '', '', ''
+			FROM squad_aegis.server_player_wounded_events
+			WHERE server_id = ?
+			  AND (toString(evidence_key) IN (?) OR toString(id) IN (?))`},
+		{evidenceType: "player_damaged", query: `
+			SELECT if(toString(evidence_key) IN (?), toString(evidence_key), toString(id)),
+			       'player_damaged', toString(event_time), victim_name, toString(weapon),
+			       attacker_controller, ifNull(attacker_steam, ''), ifNull(attacker_eos, ''),
+			       teamkill, damage, '', '', ''
+			FROM squad_aegis.server_player_damaged_events
+			WHERE server_id = ?
+			  AND (toString(evidence_key) IN (?) OR toString(id) IN (?))`},
+		{evidenceType: "player_connected", query: `
+			SELECT if(toString(evidence_key) IN (?), toString(evidence_key), toString(id)),
+			       'player_connected', toString(event_time), '', '',
+			       player_controller, ifNull(steam, ''), ifNull(eos, ''),
+			       toUInt8(0), toFloat32(0), '', '', ip
+			FROM squad_aegis.server_player_connected_events
+			WHERE server_id = ?
+			  AND (toString(evidence_key) IN (?) OR toString(id) IN (?))`},
+	}
+	queryParts := make([]string, 0, len(branches))
+	args := make([]interface{}, 0, len(branches)*4)
+	for _, branch := range branches {
+		ids := idsByType[branch.evidenceType]
+		if len(ids) == 0 {
+			continue
+		}
+		queryParts = append(queryParts, branch.query)
+		args = append(args, ids, evidence[0].ServerID, ids, ids)
+	}
+	if len(queryParts) > 0 {
+		rows, err := s.Dependencies.Clickhouse.Query(ctx, "/* sa.bans.evidence.events */ "+strings.Join(queryParts, " UNION ALL "), args...)
+		if err != nil {
+			return nil, fmt.Errorf("hydrate gameplay evidence: %w", err)
+		}
+		for rows.Next() {
+			var recordID, evidenceType, eventTime, victimName, weapon, controller, steamID, eosID string
+			var message, chatType, ip string
+			var teamkill uint8
+			var damage float32
+			if err := rows.Scan(&recordID, &evidenceType, &eventTime, &victimName, &weapon, &controller, &steamID, &eosID, &teamkill, &damage, &message, &chatType, &ip); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan gameplay evidence: %w", err)
+			}
+			metadata := map[string]interface{}{
+				"id": recordID, "event_time": eventTime, "victim_name": victimName,
+				"weapon": weapon, "attacker_player_controller": controller,
+				"attacker_controller": controller, "attacker_steam": steamID,
+				"attacker_eos": eosID, "teamkill": teamkill == 1, "damage": damage,
+			}
+			if evidenceType == "player_connected" {
+				metadata = map[string]interface{}{
+					"id": recordID, "event_time": eventTime, "player_controller": controller,
+					"steam": steamID, "eos": eosID, "ip": ip,
+				}
+			}
+			mergeRow(evidenceType, recordID, metadata)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("iterate gameplay evidence: %w", err)
+		}
+		rows.Close()
+	}
+
+	for i := range evidence {
+		if evidence[i].RecordID == nil {
+			continue
+		}
+		metadata := hydrated[evidence[i].EvidenceType+"\x00"+*evidence[i].RecordID]
+		for key, value := range evidence[i].Metadata {
+			if _, exists := metadata[key]; metadata != nil && !exists {
+				metadata[key] = value
+			}
+		}
+		if metadata != nil {
+			evidence[i].Metadata = metadata
+		}
+	}
 	return evidence, nil
 }
 
@@ -1376,6 +1712,9 @@ func shouldHydrateEvidenceMetadata(evidenceType string, metadata map[string]inte
 		_, hasJoinedName := metadata["joined_name"]
 		_, hasPlayerController := metadata["player_controller"]
 		return !hasJoinedName && !hasPlayerController
+	case "player_died", "player_wounded", "player_damaged":
+		_, hasVictimName := metadata["victim_name"]
+		return !hasVictimName
 	default:
 		return false
 	}

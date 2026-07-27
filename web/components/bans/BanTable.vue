@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -23,18 +23,31 @@ const props = defineProps<{
     bans: BannedPlayer[];
     loading: boolean;
     serverId: string;
+    search: string;
+    status: "all" | "active" | "expired";
+    pageSize: number;
 }>();
 
 const emit = defineEmits<{
     (e: "edit", ban: BannedPlayer): void;
     (e: "remove", ban: BannedPlayer): void;
     (e: "view", ban: BannedPlayer): void;
+    (e: "update:search", value: string): void;
+    (e: "update:status", value: "all" | "active" | "expired"): void;
+    (e: "update:page-size", value: number): void;
 }>();
 
 const authStore = useAuthStore();
 
-const searchQuery = ref("");
-const statusFilter = ref<"all" | "active" | "expired">("all");
+const searchQuery = computed({
+    get: () => props.search,
+    set: (value: string) => emit("update:search", value),
+});
+const statusFilter = computed({
+    get: () => props.status,
+    set: (value: "all" | "active" | "expired") =>
+        emit("update:status", value),
+});
 
 const canEdit = computed(() =>
     authStore.hasPermission(props.serverId, UI_PERMISSIONS.BANS_EDIT),
@@ -43,53 +56,11 @@ const canRemove = computed(() =>
     authStore.hasPermission(props.serverId, UI_PERMISSIONS.BANS_DELETE),
 );
 
-// Helper function to check if a ban is expired
-function isBanExpired(ban: BannedPlayer): boolean {
-    // Permanent bans never expire
-    if (ban.permanent) {
-        return false;
-    }
-
-    // Check if expires_at exists and is in the past
-    if (ban.expires_at) {
-        const expiresAt = new Date(ban.expires_at);
-        const now = new Date();
-        return expiresAt < now;
-    }
-
-    // If no expires_at and not permanent, consider it expired
-    // (shouldn't happen in normal cases, but handle it)
-    return false;
-}
-
-// Computed property for filtered banned players
-const filteredBans = computed(() => {
-    let filtered = props.bans;
-
-    if (statusFilter.value === "active") {
-        filtered = filtered.filter((player) => !isBanExpired(player));
-    } else if (statusFilter.value === "expired") {
-        filtered = filtered.filter((player) => isBanExpired(player));
-    }
-
-    // Apply search query filter
-    if (searchQuery.value.trim()) {
-        const query = searchQuery.value.toLowerCase();
-        filtered = filtered.filter(
-            (player) =>
-                player.name.toLowerCase().includes(query) ||
-                player.steam_id?.includes(query) ||
-                player.eos_id?.toLowerCase().includes(query) ||
-                player.reason.toLowerCase().includes(query),
-        );
-    }
-
-    return filtered;
-});
-
 const emptyText = computed(() =>
     props.bans.length === 0
-        ? "No banned players found"
+        ? props.search.trim() || props.status !== "all"
+            ? "No bans match these filters"
+            : "No banned players found"
         : "No players match your search",
 );
 
@@ -110,6 +81,7 @@ const columns: DataTableColumn<BannedPlayer>[] = [
 
 function hasEvidence(ban: BannedPlayer): boolean {
     return Boolean(
+        ban.has_evidence ||
         (ban.evidence && ban.evidence.length > 0) ||
             (ban.evidence_text && ban.evidence_text.trim()),
     );
@@ -134,16 +106,32 @@ function hasEvidence(ban: BannedPlayer): boolean {
                     <SelectItem value="expired">Expired</SelectItem>
                 </SelectContent>
             </Select>
+            <Select
+                :model-value="pageSize.toString()"
+                @update:model-value="
+                    emit('update:page-size', Number($event) || 50)
+                "
+            >
+                <SelectTrigger class="w-full sm:w-28">
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="25">25 rows</SelectItem>
+                    <SelectItem value="50">50 rows</SelectItem>
+                    <SelectItem value="100">100 rows</SelectItem>
+                </SelectContent>
+            </Select>
         </div>
 
         <div class="text-xs sm:text-sm text-muted-foreground mb-2">
-            Showing {{ filteredBans.length }} of {{ bans.length }} bans
+            Showing {{ bans.length }} bans
         </div>
 
         <DataTable
             :columns="columns"
-            :rows="filteredBans"
+            :rows="bans"
             row-key="id"
+            sort-mode="server"
             :loading="loading && bans.length === 0"
             :empty-text="emptyText"
         >
@@ -232,7 +220,7 @@ function hasEvidence(ban: BannedPlayer): boolean {
                             class="h-3 w-3 sm:h-4 sm:w-4 text-green-500"
                         />
                         <span class="text-xs sm:text-sm">
-                            {{ player.evidence ? player.evidence.length : 0 }} item(s)
+                            View evidence
                         </span>
                     </div>
                 </Button>

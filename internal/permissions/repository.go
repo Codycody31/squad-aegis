@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Repository provides database operations for permissions.
@@ -211,24 +212,60 @@ func (r *Repository) GetRoleTemplatePermissions(ctx context.Context, templateId 
 
 // GetRoleTemplatesWithPermissions retrieves all role templates with their permissions.
 func (r *Repository) GetRoleTemplatesWithPermissions(ctx context.Context) ([]RoleTemplateWithPermissions, error) {
-	templates, err := r.GetAllRoleTemplates(ctx)
+	const query = `
+		/* sa.permissions.templates */
+		SELECT
+			rt.id,
+			rt.name,
+			rt.description,
+			rt.is_system,
+			rt.is_admin,
+			rt.created_at,
+			COALESCE(
+				array_agg(p.code::text ORDER BY p.code) FILTER (WHERE p.code IS NOT NULL),
+				ARRAY[]::text[]
+			) AS permissions
+		FROM role_templates AS rt
+		LEFT JOIN role_template_permissions AS rtp
+		  ON rtp.role_template_id = rt.id
+		LEFT JOIN permissions AS p
+		  ON p.id = rtp.permission_id
+		GROUP BY
+			rt.id,
+			rt.name,
+			rt.description,
+			rt.is_system,
+			rt.is_admin,
+			rt.created_at
+		ORDER BY rt.name
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var result []RoleTemplateWithPermissions
-	for _, t := range templates {
-		perms, err := r.GetRoleTemplatePermissions(ctx, t.Id)
-		if err != nil {
+	for rows.Next() {
+		var template RoleTemplateWithPermissions
+		var permissionCodes pq.StringArray
+		if err := rows.Scan(
+			&template.Id,
+			&template.Name,
+			&template.Description,
+			&template.IsSystem,
+			&template.IsAdmin,
+			&template.CreatedAt,
+			&permissionCodes,
+		); err != nil {
 			return nil, err
 		}
-		result = append(result, RoleTemplateWithPermissions{
-			RoleTemplate: t,
-			Permissions:  perms,
-		})
+		template.Permissions = []string(permissionCodes)
+		result = append(result, template)
 	}
 
-	return result, nil
+	return result, rows.Err()
 }
 
 // SetServerRolePermissions sets the permissions for a server role.
@@ -246,12 +283,14 @@ func (r *Repository) SetServerRolePermissions(ctx context.Context, roleId uuid.U
 		return err
 	}
 
-	// Insert new permissions
-	for _, code := range permissionCodes {
+	if len(permissionCodes) > 0 {
 		_, err = tx.ExecContext(ctx, `
+			/* sa.permissions.role.replace */
 			INSERT INTO server_role_permissions (server_role_id, permission_id)
-			SELECT $1, id FROM permissions WHERE code = $2
-		`, roleId, code)
+			SELECT $1, id
+			FROM permissions
+			WHERE code = ANY($2)
+		`, roleId, pq.Array(permissionCodes))
 		if err != nil {
 			return err
 		}

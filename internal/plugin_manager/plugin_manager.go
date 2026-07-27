@@ -1359,7 +1359,7 @@ func (pm *PluginManager) createPluginAPIs(ctx context.Context, serverID, instanc
 		apis.DiscordAPI = pm.wrapDiscordAPIWithAllowlist(pm.getDiscordAPI(), serverID, instanceID)
 	}
 	if pm.shouldExposePluginAPI(pluginID, NativePluginCapabilityAPILog) {
-		apis.LogAPI = NewLogAPI(serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager)
+		apis.LogAPI = NewLogAPI(ctx, serverID, instanceID, pluginName, pluginID, logLevel, pm.clickhouseClient, pm.db, pm.eventManager)
 	}
 	if pm.shouldExposeConnectorAPI(pluginID) {
 		apis.ConnectorAPI = newConnectorAPI(pm, pluginID)
@@ -1488,8 +1488,15 @@ type PluginLog struct {
 	IngestedAt   time.Time              `json:"ingested_at"`
 }
 
+// PluginLogCursor is the decoded keyset position for plugin log history.
+// Opaque cursor validation is owned by the HTTP layer.
+type PluginLogCursor struct {
+	Timestamp time.Time
+	LogID     uuid.UUID
+}
+
 // GetPluginLogs retrieves logs for a specific plugin instance from ClickHouse
-func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int, before, after, order, level, search string) ([]PluginLog, error) {
+func (pm *PluginManager) GetPluginLogs(ctx context.Context, serverID, instanceID uuid.UUID, limit int, cursor *PluginLogCursor, level, search string) ([]PluginLog, error) {
 	if pm.clickhouseClient == nil {
 		return nil, fmt.Errorf("ClickHouse client not available")
 	}
@@ -1500,12 +1507,11 @@ func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int
 	}
 
 	// Prevent excessively large queries
-	if limit > 1000 {
-		limit = 1000
+	if limit > 501 {
+		limit = 501
 	}
 
-	// Build the query
-	query := "SELECT log_id, timestamp, level, message, error_message, fields, ingested_at FROM squad_aegis.plugin_logs WHERE server_id = ? AND plugin_instance_id = ?"
+	query := "/* sa.plugin.logs */ SELECT log_id, timestamp, level, message, error_message, fields, ingested_at FROM squad_aegis.plugin_logs WHERE server_id = ? AND plugin_instance_id = ?"
 	args := []interface{}{serverID, instanceID}
 
 	if level != "" && level != "all" {
@@ -1514,50 +1520,19 @@ func (pm *PluginManager) GetPluginLogs(serverID, instanceID uuid.UUID, limit int
 	}
 
 	if search != "" {
-		query += " AND (message LIKE ? OR error_message LIKE ?)"
-		searchPattern := "%" + search + "%"
-		args = append(args, searchPattern, searchPattern)
+		query += " AND lowerUTF8(concat(message, ' ', ifNull(error_message, ''))) LIKE ?"
+		args = append(args, "%"+strings.ToLower(search)+"%")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Handle cursor-based pagination
-	if before != "" {
-		var beforeTimestamp time.Time
-		tsQuery := "SELECT timestamp FROM squad_aegis.plugin_logs WHERE log_id = ? AND server_id = ? AND plugin_instance_id = ?"
-		err := pm.clickhouseClient.QueryRow(ctx, tsQuery, before, serverID, instanceID).Scan(&beforeTimestamp)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return []PluginLog{}, nil // If cursor not found, return no older logs
-			}
-			return nil, fmt.Errorf("failed to get timestamp for 'before' cursor: %w", err)
-		}
+	if cursor != nil {
 		query += " AND (timestamp, log_id) < (?, ?)"
-		args = append(args, beforeTimestamp, before)
+		args = append(args, cursor.Timestamp, cursor.LogID)
 	}
 
-	if after != "" {
-		var afterTimestamp time.Time
-		tsQuery := "SELECT timestamp FROM squad_aegis.plugin_logs WHERE log_id = ? AND server_id = ? AND plugin_instance_id = ?"
-		err := pm.clickhouseClient.QueryRow(ctx, tsQuery, after, serverID, instanceID).Scan(&afterTimestamp)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return []PluginLog{}, nil // If cursor not found, return no newer logs
-			}
-			return nil, fmt.Errorf("failed to get timestamp for 'after' cursor: %w", err)
-		}
-		query += " AND (timestamp, log_id) > (?, ?)"
-		args = append(args, afterTimestamp, after)
-	}
-
-	// Handle order
-	if order == "desc" {
-		query += " ORDER BY timestamp DESC, log_id DESC"
-	} else {
-		query += " ORDER BY timestamp ASC, log_id ASC"
-	}
-
+	query += " ORDER BY timestamp DESC, log_id DESC"
 	query += " LIMIT ?"
 	args = append(args, limit)
 
@@ -1619,7 +1594,7 @@ type AggregatedPluginLog struct {
 }
 
 // GetServerPluginLogs retrieves logs for all plugin instances for a specific server from ClickHouse
-func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, before, after, order, level, search string) ([]AggregatedPluginLog, error) {
+func (pm *PluginManager) GetServerPluginLogs(ctx context.Context, serverID uuid.UUID, limit int, cursor *PluginLogCursor, level, search string) ([]AggregatedPluginLog, error) {
 	if pm.clickhouseClient == nil {
 		return nil, fmt.Errorf("ClickHouse client not available")
 	}
@@ -1630,12 +1605,12 @@ func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, befo
 	}
 
 	// Prevent excessively large queries
-	if limit > 1000 {
-		limit = 1000
+	if limit > 501 {
+		limit = 501
 	}
 
 	// Build the query - aggregate logs from all plugins for this server
-	query := `SELECT
+	query := `/* sa.plugin.logs */ SELECT
 		log_id,
 		timestamp,
 		level,
@@ -1654,50 +1629,19 @@ func (pm *PluginManager) GetServerPluginLogs(serverID uuid.UUID, limit int, befo
 	}
 
 	if search != "" {
-		query += " AND (message LIKE ? OR error_message LIKE ?)"
-		searchPattern := "%" + search + "%"
-		args = append(args, searchPattern, searchPattern)
+		query += " AND lowerUTF8(concat(message, ' ', ifNull(error_message, ''))) LIKE ?"
+		args = append(args, "%"+strings.ToLower(search)+"%")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Handle cursor-based pagination
-	if before != "" {
-		var beforeTimestamp time.Time
-		tsQuery := "SELECT timestamp FROM squad_aegis.plugin_logs WHERE log_id = ? AND server_id = ?"
-		err := pm.clickhouseClient.QueryRow(ctx, tsQuery, before, serverID).Scan(&beforeTimestamp)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return []AggregatedPluginLog{}, nil // If cursor not found, return no older logs
-			}
-			return nil, fmt.Errorf("failed to get timestamp for 'before' cursor: %w", err)
-		}
+	if cursor != nil {
 		query += " AND (timestamp, log_id) < (?, ?)"
-		args = append(args, beforeTimestamp, before)
+		args = append(args, cursor.Timestamp, cursor.LogID)
 	}
 
-	if after != "" {
-		var afterTimestamp time.Time
-		tsQuery := "SELECT timestamp FROM squad_aegis.plugin_logs WHERE log_id = ? AND server_id = ?"
-		err := pm.clickhouseClient.QueryRow(ctx, tsQuery, after, serverID).Scan(&afterTimestamp)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				return []AggregatedPluginLog{}, nil // If cursor not found, return no newer logs
-			}
-			return nil, fmt.Errorf("failed to get timestamp for 'after' cursor: %w", err)
-		}
-		query += " AND (timestamp, log_id) > (?, ?)"
-		args = append(args, afterTimestamp, after)
-	}
-
-	// Handle order
-	if order == "desc" {
-		query += " ORDER BY timestamp DESC, log_id DESC"
-	} else {
-		query += " ORDER BY timestamp ASC, log_id ASC"
-	}
-
+	query += " ORDER BY timestamp DESC, log_id DESC"
 	query += " LIMIT ?"
 	args = append(args, limit)
 

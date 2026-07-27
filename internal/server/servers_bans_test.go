@@ -71,6 +71,52 @@ func TestNormalizeBanSubject(t *testing.T) {
 	}
 }
 
+func TestShouldHydrateEvidenceMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		evidenceType string
+		metadata     map[string]interface{}
+		want         bool
+	}{
+		{
+			name:         "workflow gameplay metadata still needs hydration",
+			evidenceType: "player_died",
+			metadata:     map[string]interface{}{"event_type": "LOG_PLAYER_DIED", "event_id": "stable-key"},
+			want:         true,
+		},
+		{
+			name:         "hydrated gameplay metadata is complete",
+			evidenceType: "player_wounded",
+			metadata:     map[string]interface{}{"victim_name": "Player"},
+			want:         false,
+		},
+		{
+			name:         "connected metadata without player fields needs hydration",
+			evidenceType: "player_connected",
+			metadata:     map[string]interface{}{"event_type": "PLAYER_CONNECTED"},
+			want:         true,
+		},
+		{
+			name:         "chat metadata with message is complete",
+			evidenceType: "chat_message",
+			metadata:     map[string]interface{}{"message": "hello"},
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shouldHydrateEvidenceMetadata(tt.evidenceType, tt.metadata); got != tt.want {
+				t.Fatalf("shouldHydrateEvidenceMetadata(%q, %#v) = %v, want %v", tt.evidenceType, tt.metadata, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShouldPreserveExistingBansCfgEntry(t *testing.T) {
 	t.Parallel()
 

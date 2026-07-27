@@ -115,6 +115,16 @@ lint: install-tools ## Lint code
 test:
 	go test -race -cover -coverprofile server-coverage.out -timeout 60s -tags 'test' go.codycody31.dev/squad-aegis/...
 
+CLICKHOUSE_TEST_IMAGE ?= clickhouse/clickhouse-server:25.3
+
+.PHONY: test-sql
+test-sql: ## Run SQL migrations and integration tests on disposable PostgreSQL 18 and ClickHouse containers
+	CLICKHOUSE_TEST_IMAGE='$(CLICKHOUSE_TEST_IMAGE)' bash scripts/test-sql.sh
+
+.PHONY: test-sql-clickhouse-next
+test-sql-clickhouse-next: ## Run SQL integration tests against the forward ClickHouse compatibility image
+	$(MAKE) test-sql CLICKHOUSE_TEST_IMAGE=clickhouse/clickhouse-server:26.3
+
 ##@ Build
 
 build-web: ## Build Web UI

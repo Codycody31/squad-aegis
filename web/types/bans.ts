@@ -1,6 +1,8 @@
 // Ban domain types shared by the banned-players page and components/bans/*.
 // Field names mirror the backend API payloads exactly.
 
+import type { PageInfo } from "~/types";
+
 export interface BanEvidence {
     id: string;
     evidence_type: string;
@@ -38,11 +40,19 @@ export interface BannedPlayer {
     player_name?: string;
     evidence_text?: string;
     evidence?: BanEvidence[];
+    has_evidence: boolean;
 }
 
 export interface BannedPlayersResponse {
     data: {
         bans: BannedPlayer[];
+        page_info: PageInfo;
+    };
+}
+
+export interface BannedPlayerDetailResponse {
+    data: {
+        ban: BannedPlayer;
     };
 }
 

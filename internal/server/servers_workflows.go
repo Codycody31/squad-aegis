@@ -3,16 +3,40 @@ package server
 import (
 	"database/sql"
 	"errors"
-	"strconv"
+	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/google/uuid"
+	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/pagination"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/workflow_manager"
 )
+
+const (
+	workflowExecutionsCursorKind = "workflow.executions"
+	workflowLogsCursorKind       = "workflow.execution_logs"
+	workflowMessagesCursorKind   = "workflow.messages"
+)
+
+type workflowExecutionCursorValues struct {
+	StartedAt time.Time `json:"started_at"`
+	ID        uuid.UUID `json:"id"`
+}
+
+type workflowLogCursorValues struct {
+	StepOrder uint32    `json:"step_order"`
+	EventTime time.Time `json:"event_time"`
+	EntryID   uuid.UUID `json:"entry_id"`
+}
+
+type workflowMessageCursorValues struct {
+	LogTime time.Time `json:"log_time"`
+	EntryID uuid.UUID `json:"entry_id"`
+}
 
 // ServerWorkflowsList returns all workflows for a server
 func (s *Server) ServerWorkflowsList(c *gin.Context) {
@@ -29,7 +53,7 @@ func (s *Server) ServerWorkflowsList(c *gin.Context) {
 	}
 
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
-	workflows, err := workflowDB.GetWorkflowsByServerID(serverID)
+	workflows, err := workflowDB.GetWorkflowsByServerID(c.Request.Context(), serverID)
 	if err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get workflows"})
 		return
@@ -61,7 +85,7 @@ func (s *Server) ServerWorkflowGet(c *gin.Context) {
 	}
 
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -126,7 +150,7 @@ func (s *Server) ServerWorkflowCreate(c *gin.Context) {
 	}
 
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
-	if err := workflowDB.CreateWorkflow(workflow); err != nil {
+	if err := workflowDB.CreateWorkflow(c.Request.Context(), workflow); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to create workflow"})
 		return
 	}
@@ -171,7 +195,7 @@ func (s *Server) ServerWorkflowUpdate(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Get existing workflow
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -203,7 +227,7 @@ func (s *Server) ServerWorkflowUpdate(c *gin.Context) {
 	workflow.UpdatedAt = time.Now()
 
 	// Update workflow
-	if err := workflowDB.UpdateWorkflow(workflow); err != nil {
+	if err := workflowDB.UpdateWorkflow(c.Request.Context(), workflow); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to update workflow"})
 		return
 	}
@@ -241,7 +265,7 @@ func (s *Server) ServerWorkflowDelete(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Get existing workflow to verify ownership
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -258,7 +282,7 @@ func (s *Server) ServerWorkflowDelete(c *gin.Context) {
 	}
 
 	// Delete workflow
-	if err := workflowDB.DeleteWorkflow(workflowID); err != nil {
+	if err := workflowDB.DeleteWorkflow(c.Request.Context(), workflowID); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete workflow"})
 		return
 	}
@@ -291,24 +315,27 @@ func (s *Server) ServerWorkflowExecutions(c *gin.Context) {
 		return
 	}
 
-	// Parse pagination parameters
-	limitStr := c.DefaultQuery("limit", "50")
-	offsetStr := c.DefaultQuery("offset", "0")
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 || limit > 1000 {
-		limit = 50
+	limit, ok := parseCursorLimit(c, 50, 100)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
 	}
-
-	offset, err := strconv.Atoi(offsetStr)
-	if err != nil || offset < 0 {
-		offset = 0
+	filterHash := pagination.MustFilterHash(struct {
+		ServerID   uuid.UUID `json:"server_id"`
+		WorkflowID uuid.UUID `json:"workflow_id"`
+	}{ServerID: serverID, WorkflowID: workflowID})
+	var cursorValues *workflowExecutionCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &workflowExecutionCursorValues{}
+		if err := pagination.Decode(encodedCursor, workflowExecutionsCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -323,18 +350,30 @@ func (s *Server) ServerWorkflowExecutions(c *gin.Context) {
 		return
 	}
 
-	// Get executions
-	executions, err := workflowDB.GetExecutionsByWorkflowID(workflowID, limit, offset)
+	var beforeStartedAt *time.Time
+	var beforeID *uuid.UUID
+	if cursorValues != nil {
+		beforeStartedAt = &cursorValues.StartedAt
+		beforeID = &cursorValues.ID
+	}
+	executions, err := workflowDB.GetExecutionsByWorkflowID(c.Request.Context(), workflowID, limit+1, beforeStartedAt, beforeID)
 	if err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get executions"})
 		return
 	}
 
-	responses.Success(c, "Executions retrieved successfully", &gin.H{
-		"executions": executions,
-		"limit":      limit,
-		"offset":     offset,
-	})
+	executions, hasMore := pagination.TrimPage(executions, limit)
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(executions) > 0 {
+		last := executions[len(executions)-1]
+		encoded, err := pagination.Encode(workflowExecutionsCursorKind, filterHash, workflowExecutionCursorValues{StartedAt: last.StartedAt, ID: last.ID})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode execution cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
+	}
+	responses.Success(c, "Executions retrieved successfully", &gin.H{"executions": executions, "page_info": pageInfo})
 }
 
 // ServerWorkflowExecutionStats returns computed statistics for a workflow
@@ -360,7 +399,7 @@ func (s *Server) ServerWorkflowExecutionStats(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -376,7 +415,7 @@ func (s *Server) ServerWorkflowExecutionStats(c *gin.Context) {
 	}
 
 	// Get statistics
-	stats, err := workflowDB.GetWorkflowExecutionStats(workflowID)
+	stats, err := workflowDB.GetWorkflowExecutionStats(c.Request.Context(), workflowID)
 	if err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get execution statistics"})
 		return
@@ -416,7 +455,7 @@ func (s *Server) ServerWorkflowExecutionGet(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -432,7 +471,7 @@ func (s *Server) ServerWorkflowExecutionGet(c *gin.Context) {
 	}
 
 	// Get execution details
-	execution, err := workflowDB.GetWorkflowExecution(executionID)
+	execution, err := workflowDB.GetWorkflowExecution(c.Request.Context(), executionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Execution not found", nil)
@@ -482,7 +521,7 @@ func (s *Server) ServerWorkflowExecutionLogs(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -498,7 +537,7 @@ func (s *Server) ServerWorkflowExecutionLogs(c *gin.Context) {
 	}
 
 	// Get execution details to verify it belongs to this workflow
-	execution, err := workflowDB.GetWorkflowExecution(executionID)
+	execution, err := workflowDB.GetWorkflowExecution(c.Request.Context(), executionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Execution not found", nil)
@@ -513,33 +552,52 @@ func (s *Server) ServerWorkflowExecutionLogs(c *gin.Context) {
 		return
 	}
 
-	// Parse pagination parameters
-	limitStr := c.DefaultQuery("limit", "100")
-	offsetStr := c.DefaultQuery("offset", "0")
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 || limit > 1000 {
-		limit = 100
+	limit, ok := parseCursorLimit(c, 100, 200)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
+	}
+	filterHash := pagination.MustFilterHash(struct {
+		ServerID    uuid.UUID `json:"server_id"`
+		WorkflowID  uuid.UUID `json:"workflow_id"`
+		ExecutionID uuid.UUID `json:"execution_id"`
+	}{ServerID: serverID, WorkflowID: workflowID, ExecutionID: executionID})
+	var cursorValues *workflowLogCursorValues
+	var queryCursor *clickhouse.WorkflowExecutionLogCursor
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &workflowLogCursorValues{}
+		if err := pagination.Decode(encodedCursor, workflowLogsCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
+		}
+		queryCursor = &clickhouse.WorkflowExecutionLogCursor{
+			StepOrder: cursorValues.StepOrder,
+			EventTime: cursorValues.EventTime,
+			EntryID:   cursorValues.EntryID,
+		}
 	}
 
-	offset, err := strconv.Atoi(offsetStr)
-	if err != nil || offset < 0 {
-		offset = 0
-	}
-
-	// Get detailed logs from ClickHouse
-	logs, err := s.Dependencies.Clickhouse.GetWorkflowExecutionLogs(c.Request.Context(), executionID, limit, offset)
+	logs, err := s.Dependencies.Clickhouse.GetWorkflowExecutionLogs(c.Request.Context(), serverID, workflowID, executionID, limit+1, queryCursor)
 	if err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get execution logs"})
 		return
 	}
 
-	responses.Success(c, "Execution logs retrieved successfully", &gin.H{
-		"execution": execution,
-		"logs":      logs,
-		"limit":     limit,
-		"offset":    offset,
-	})
+	logs, hasMore := pagination.TrimPage(logs, limit)
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(logs) > 0 {
+		last := logs[len(logs)-1]
+		encoded, err := pagination.Encode(workflowLogsCursorKind, filterHash, workflowLogCursorValues{
+			StepOrder: last.StepOrder,
+			EventTime: last.EventTime,
+			EntryID:   last.EntryID,
+		})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode workflow log cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
+	}
+	responses.Success(c, "Execution logs retrieved successfully", &gin.H{"execution": execution, "logs": logs, "page_info": pageInfo})
 }
 
 // ServerWorkflowExecutionMessages returns workflow log messages for a specific execution
@@ -571,7 +629,7 @@ func (s *Server) ServerWorkflowExecutionMessages(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -587,7 +645,7 @@ func (s *Server) ServerWorkflowExecutionMessages(c *gin.Context) {
 	}
 
 	// Get execution details to verify it belongs to this workflow
-	execution, err := workflowDB.GetWorkflowExecution(executionID)
+	execution, err := workflowDB.GetWorkflowExecution(c.Request.Context(), executionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Execution not found", nil)
@@ -602,33 +660,44 @@ func (s *Server) ServerWorkflowExecutionMessages(c *gin.Context) {
 		return
 	}
 
-	// Parse pagination parameters
-	limitStr := c.DefaultQuery("limit", "100")
-	offsetStr := c.DefaultQuery("offset", "0")
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 || limit > 1000 {
-		limit = 100
+	limit, ok := parseCursorLimit(c, 100, 200)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
+	}
+	filterHash := pagination.MustFilterHash(struct {
+		ServerID    uuid.UUID `json:"server_id"`
+		WorkflowID  uuid.UUID `json:"workflow_id"`
+		ExecutionID uuid.UUID `json:"execution_id"`
+	}{ServerID: serverID, WorkflowID: workflowID, ExecutionID: executionID})
+	var cursorValues *workflowMessageCursorValues
+	var queryCursor *clickhouse.WorkflowLogMessageCursor
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &workflowMessageCursorValues{}
+		if err := pagination.Decode(encodedCursor, workflowMessagesCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
+		}
+		queryCursor = &clickhouse.WorkflowLogMessageCursor{LogTime: cursorValues.LogTime, EntryID: cursorValues.EntryID}
 	}
 
-	offset, err := strconv.Atoi(offsetStr)
-	if err != nil || offset < 0 {
-		offset = 0
-	}
-
-	// Get workflow log messages from ClickHouse
-	messages, err := s.Dependencies.Clickhouse.GetWorkflowLogMessages(c.Request.Context(), executionID, limit, offset)
+	messages, err := s.Dependencies.Clickhouse.GetWorkflowLogMessages(c.Request.Context(), serverID, workflowID, executionID, limit+1, queryCursor)
 	if err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get workflow log messages"})
 		return
 	}
 
-	responses.Success(c, "Workflow log messages retrieved successfully", &gin.H{
-		"execution": execution,
-		"messages":  messages,
-		"limit":     limit,
-		"offset":    offset,
-	})
+	messages, hasMore := pagination.TrimPage(messages, limit)
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(messages) > 0 {
+		last := messages[len(messages)-1]
+		encoded, err := pagination.Encode(workflowMessagesCursorKind, filterHash, workflowMessageCursorValues{LogTime: last.LogTime, EntryID: last.EntryID})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode workflow message cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
+	}
+	responses.Success(c, "Workflow log messages retrieved successfully", &gin.H{"execution": execution, "messages": messages, "page_info": pageInfo})
 }
 
 // ServerWorkflowVariablesList returns variables for a workflow
@@ -654,7 +723,7 @@ func (s *Server) ServerWorkflowVariablesList(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Get workflow with variables
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -714,7 +783,7 @@ func (s *Server) ServerWorkflowVariableCreate(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -740,7 +809,7 @@ func (s *Server) ServerWorkflowVariableCreate(c *gin.Context) {
 		UpdatedAt:   time.Now(),
 	}
 
-	if err := workflowDB.CreateWorkflowVariable(variable); err != nil {
+	if err := workflowDB.CreateWorkflowVariable(c.Request.Context(), variable); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to create variable"})
 		return
 	}
@@ -790,7 +859,7 @@ func (s *Server) ServerWorkflowVariableUpdate(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -831,7 +900,7 @@ func (s *Server) ServerWorkflowVariableUpdate(c *gin.Context) {
 	}
 	variable.UpdatedAt = time.Now()
 
-	if err := workflowDB.UpdateWorkflowVariable(variable); err != nil {
+	if err := workflowDB.UpdateWorkflowVariable(c.Request.Context(), variable); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to update variable"})
 		return
 	}
@@ -875,7 +944,7 @@ func (s *Server) ServerWorkflowVariableDelete(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -904,7 +973,7 @@ func (s *Server) ServerWorkflowVariableDelete(c *gin.Context) {
 		return
 	}
 
-	if err := workflowDB.DeleteWorkflowVariable(variableID); err != nil {
+	if err := workflowDB.DeleteWorkflowVariable(c.Request.Context(), variableID); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete variable"})
 		return
 	}
@@ -940,7 +1009,7 @@ func (s *Server) ServerWorkflowKVList(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -956,7 +1025,7 @@ func (s *Server) ServerWorkflowKVList(c *gin.Context) {
 	}
 
 	// Get all KV pairs
-	kvPairs, err := workflowDB.GetAllKVPairs(workflowID)
+	kvPairs, err := workflowDB.GetAllKVPairs(c.Request.Context(), workflowID)
 	if err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to get KV pairs"})
 		return
@@ -1008,7 +1077,7 @@ func (s *Server) ServerWorkflowKVGet(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -1024,7 +1093,7 @@ func (s *Server) ServerWorkflowKVGet(c *gin.Context) {
 	}
 
 	// Get KV value
-	value, err := workflowDB.GetKVValue(workflowID, key)
+	value, err := workflowDB.GetKVValue(c.Request.Context(), workflowID, key)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Key not found", nil)
@@ -1079,7 +1148,7 @@ func (s *Server) ServerWorkflowKVSet(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -1095,7 +1164,7 @@ func (s *Server) ServerWorkflowKVSet(c *gin.Context) {
 	}
 
 	// Set KV value
-	if err := workflowDB.SetKVValue(workflowID, req.Key, req.Value); err != nil {
+	if err := workflowDB.SetKVValue(c.Request.Context(), workflowID, req.Key, req.Value); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to set KV value"})
 		return
 	}
@@ -1135,7 +1204,7 @@ func (s *Server) ServerWorkflowKVDelete(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -1151,7 +1220,7 @@ func (s *Server) ServerWorkflowKVDelete(c *gin.Context) {
 	}
 
 	// Delete KV value
-	if err := workflowDB.DeleteKVValue(workflowID, key); err != nil {
+	if err := workflowDB.DeleteKVValue(c.Request.Context(), workflowID, key); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to delete KV value"})
 		return
 	}
@@ -1182,7 +1251,7 @@ func (s *Server) ServerWorkflowKVClear(c *gin.Context) {
 	workflowDB := workflow_manager.NewWorkflowDatabase(s.Dependencies.DB)
 
 	// Verify workflow exists and belongs to server
-	workflow, err := workflowDB.GetWorkflow(workflowID)
+	workflow, err := workflowDB.GetWorkflow(c.Request.Context(), workflowID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			responses.NotFound(c, "Workflow not found", nil)
@@ -1198,7 +1267,7 @@ func (s *Server) ServerWorkflowKVClear(c *gin.Context) {
 	}
 
 	// Clear KV store
-	if err := workflowDB.ClearKVStore(workflowID); err != nil {
+	if err := workflowDB.ClearKVStore(c.Request.Context(), workflowID); err != nil {
 		responses.InternalServerError(c, err, &gin.H{"error": "Failed to clear KV store"})
 		return
 	}

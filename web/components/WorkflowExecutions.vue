@@ -7,7 +7,7 @@
           View past workflow executions and their status
         </p>
       </div>
-      <Button @click="loadExecutions(false)" :disabled="loading">
+      <Button @click="refreshExecutions" :disabled="loading">
         <RefreshCw class="h-4 w-4 mr-2" :class="{ 'animate-spin': loading }" />
         Refresh
       </Button>
@@ -123,13 +123,6 @@
         </div>
       </div>
 
-      <!-- Pagination -->
-      <div v-if="hasMore" class="flex justify-center pt-4">
-        <Button variant="outline" @click="loadMore" :disabled="loading">
-          <ChevronDown class="h-4 w-4 mr-2" />
-          Load More Executions
-        </Button>
-      </div>
     </div>
 
     <!-- No Executions -->
@@ -138,17 +131,46 @@
       <p>No executions found</p>
       <p class="text-sm">This workflow hasn't been executed yet</p>
     </div>
+
+    <div
+      v-if="canGoPrevious || canGoNext"
+      class="flex items-center justify-between border-t pt-4"
+    >
+      <span class="text-sm text-muted-foreground">
+        Page {{ page }} · {{ executions.length }} executions
+      </span>
+      <div class="flex gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="!canGoPrevious || loading"
+          @click="previousPage"
+        >
+          <ChevronLeft class="h-4 w-4 mr-1" />
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="!canGoNext || loading"
+          @click="nextPage"
+        >
+          Next
+          <ChevronRight class="h-4 w-4 ml-1" />
+        </Button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { useRouter } from "vue-router";
 import {
   RefreshCw,
   Loader2,
   AlertCircle,
-  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   PlayCircle,
   ExternalLink,
   CheckCircle,
@@ -157,6 +179,7 @@ import {
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import type { PageInfo } from "~/types";
 
 interface WorkflowExecution {
   id: string;
@@ -174,9 +197,9 @@ interface WorkflowExecution {
 }
 
 interface ApiResponse<T = any> {
-  success: boolean;
   message?: string;
   data: T;
+  code: number;
 }
 
 interface Props {
@@ -186,15 +209,22 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-const router = useRouter();
 
 // State
 const loading = ref(false);
 const error = ref<string | null>(null);
 const executions = ref<WorkflowExecution[]>([]);
-const offset = ref(0);
-const limit = ref(20);
-const hasMore = ref(true);
+const {
+  limit,
+  cursor,
+  page,
+  canGoPrevious,
+  canGoNext,
+  setPageInfo,
+  reset: resetPagination,
+  next: advancePage,
+  previous: returnToPreviousPage,
+} = useCursorPagination(50);
 
 // Methods
 const getStatusIcon = (status: string) => {
@@ -268,7 +298,7 @@ const getTriggerDescription = (triggerData: any) => {
   return "Manual";
 };
 
-const loadExecutions = async (append = false) => {
+const loadExecutions = async () => {
   try {
     const runtimeConfig = useRuntimeConfig();
     const cookieToken = useCookie(
@@ -279,23 +309,17 @@ const loadExecutions = async (append = false) => {
     loading.value = true;
     error.value = null;
 
-    if (!append) {
-      executions.value = [];
-      offset.value = 0;
-    }
-
     const response = await $fetch<
       ApiResponse<{
         executions: WorkflowExecution[];
-        limit: number;
-        offset: number;
+        page_info: PageInfo;
       }>
     >(
       `/api/servers/${props.serverId}/workflows/${props.workflowId}/executions`,
       {
         query: {
           limit: limit.value,
-          offset: offset.value,
+          cursor: cursor.value || undefined,
         },
         headers: {
           Authorization: `Bearer ${token}`,
@@ -304,15 +328,8 @@ const loadExecutions = async (append = false) => {
     );
 
     if (response.code === 200) {
-      const newExecutions = response.data.executions || [];
-
-      if (append) {
-        executions.value.push(...newExecutions);
-      } else {
-        executions.value = newExecutions;
-      }
-
-      hasMore.value = newExecutions.length === limit.value;
+      executions.value = response.data.executions || [];
+      setPageInfo(response.data.page_info);
     } else {
       error.value = response.message || "Failed to load executions";
     }
@@ -323,9 +340,21 @@ const loadExecutions = async (append = false) => {
   }
 };
 
-const loadMore = () => {
-  offset.value += limit.value;
-  loadExecutions(true);
+const nextPage = () => {
+  if (advancePage()) {
+    loadExecutions();
+  }
+};
+
+const previousPage = () => {
+  if (returnToPreviousPage()) {
+    loadExecutions();
+  }
+};
+
+const refreshExecutions = () => {
+  resetPagination();
+  loadExecutions();
 };
 
 // Lifecycle

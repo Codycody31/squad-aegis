@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
@@ -83,6 +82,7 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		tableName = "server_player_chat_messages"
 		filterCol, identifierArgs := buildClickHouseIdentifierWhereClause("steam_id", "eos_id", steamIDs, eosIDs, true)
 		query = fmt.Sprintf(`
+			/* sa.bans.evidence.search */
 			SELECT
 				message_id,
 				sent_at as event_time,
@@ -103,8 +103,9 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		tableName = "server_player_connected_events"
 		filterCol, identifierArgs := buildClickHouseIdentifierWhereClause("pc.steam", "pc.eos", steamIDs, eosIDs, false)
 		query = fmt.Sprintf(`
+			/* sa.bans.evidence.search */
 			SELECT
-				pc.id,
+				pc.evidence_key,
 				pc.event_time,
 				pc.player_controller,
 				pc.ip,
@@ -122,7 +123,7 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 				)
 				AND abs(toUnixTimestamp(pc.event_time) - toUnixTimestamp(js.event_time)) <= 10
 			WHERE pc.server_id = ? AND %s
-			GROUP BY pc.id, pc.event_time, pc.player_controller, pc.ip, pc.steam, pc.eos, pc.chain_id
+			GROUP BY pc.evidence_key, pc.event_time, pc.player_controller, pc.ip, pc.steam, pc.eos, pc.chain_id
 			ORDER BY pc.event_time DESC
 			LIMIT ?
 		`, tableName, filterCol)
@@ -160,8 +161,8 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 
 			err := rows.Scan(&messageID, &eventTime, &playerName, &chatType, &message, &steamIDVal, &eosID)
 			if err != nil {
-				log.Error().Err(err).Msg("Failed to scan row")
-				continue
+				responses.InternalServerError(c, fmt.Errorf("scan chat evidence search result: %w", err), nil)
+				return
 			}
 
 			recordID := messageID.String()
@@ -177,20 +178,20 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 			event["eos_id"] = eosID
 
 		case "player_connected":
-			var id uuid.UUID
+			var evidenceKey uuid.UUID
 			var playerController, ip, steam, eos, chainID string
 			var eventTime string
 			var joinedName sql.NullString
 
-			err := rows.Scan(&id, &eventTime, &playerController, &ip, &steam, &eos, &chainID, &joinedName)
+			err := rows.Scan(&evidenceKey, &eventTime, &playerController, &ip, &steam, &eos, &chainID, &joinedName)
 			if err != nil {
-				log.Error().Err(err).Msg("Failed to scan row")
-				continue
+				responses.InternalServerError(c, fmt.Errorf("scan connected-player evidence search result: %w", err), nil)
+				return
 			}
 
-			recordID := id.String()
+			recordID := evidenceKey.String()
 			event["event_id"] = recordID  // For frontend compatibility
-			event["record_id"] = recordID // Actual id UUID
+			event["record_id"] = recordID // Deterministic evidence UUID
 			event["event_time"] = eventTime
 			event["player_controller"] = playerController
 			event["ip"] = ip
@@ -203,6 +204,10 @@ func (s *Server) ServerEventsSearch(c *gin.Context) {
 		}
 
 		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		responses.InternalServerError(c, fmt.Errorf("read evidence search results: %w", err), nil)
+		return
 	}
 
 	responseData := gin.H{

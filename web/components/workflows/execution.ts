@@ -11,6 +11,7 @@ export interface WorkflowExecution {
 }
 
 export interface WorkflowExecutionLog {
+  entry_id: string;
   execution_id: string;
   workflow_id: string;
   server_id: string;
@@ -31,6 +32,7 @@ export interface WorkflowExecutionLog {
 }
 
 export interface WorkflowLogMessage {
+  entry_id: string;
   execution_id: string;
   workflow_id: string;
   server_id: string;
@@ -44,10 +46,9 @@ export interface WorkflowLogMessage {
 }
 
 export interface ApiResponse<T = any> {
-  success: boolean;
   message?: string;
   data: T;
-  code?: number;
+  code: number;
 }
 
 export const getStatusIcon = (status: string) => {

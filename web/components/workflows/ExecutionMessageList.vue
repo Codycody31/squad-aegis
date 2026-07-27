@@ -12,7 +12,7 @@ import {
 defineProps<{
   messages: WorkflowLogMessage[];
   loading: boolean;
-  totalMessages: number;
+  hasMore: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -34,7 +34,7 @@ const emit = defineEmits<{
     <div v-else-if="messages.length > 0" class="space-y-2">
       <div
         v-for="message in messages"
-        :key="`${message.step_id}-${message.log_time}`"
+        :key="message.entry_id"
         class="rounded-lg border p-3 transition-colors hover:bg-muted/25 sm:p-4"
       >
         <div
@@ -116,7 +116,7 @@ const emit = defineEmits<{
 
       <!-- Messages Pagination -->
       <div
-        v-if="totalMessages > messages.length"
+        v-if="hasMore"
         class="flex justify-center pt-4"
       >
         <Button
@@ -126,7 +126,7 @@ const emit = defineEmits<{
           @click="emit('load-more')"
         >
           <ChevronDown class="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
-          Load More Messages ({{ totalMessages - messages.length }} remaining)
+          Load More Messages
         </Button>
       </div>
     </div>

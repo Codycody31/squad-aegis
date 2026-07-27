@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS public.uq_server_workflow_executions_execution_id;

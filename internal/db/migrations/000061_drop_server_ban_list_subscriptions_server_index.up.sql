@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_server_ban_list_subscriptions_server_id;

@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 )
@@ -126,11 +129,6 @@ func (r *Resolver) ComputeIdentities(ctx context.Context) error {
 		return err
 	}
 	log.Info().Int("pairs", len(pairs)).Msg("Fetched identifier pairs")
-
-	if len(pairs) == 0 {
-		log.Info().Msg("No identifier pairs found, skipping identity computation")
-		return nil
-	}
 
 	// Step 2: Build Union-Find structure and link identifiers
 	uf := NewUnionFind()
@@ -277,13 +275,12 @@ func (r *Resolver) fetchAllIdentifierPairs(ctx context.Context) ([]IdentifierPai
 	for rows.Next() {
 		var p IdentifierPair
 		if err := rows.Scan(&p.Steam, &p.EOS, &p.Epic, &p.Name, &p.FirstSeen, &p.LastSeen, &p.SessionCnt); err != nil {
-			log.Error().Err(err).Msg("Failed to scan identifier pair")
-			continue
+			return nil, err
 		}
 		pairs = append(pairs, p)
 	}
 
-	return pairs, nil
+	return pairs, rows.Err()
 }
 
 // groupByCanonical groups all identifiers by their canonical root
@@ -406,37 +403,38 @@ func (r *Resolver) buildIdentities(pairs []IdentifierPair, groups map[string][]s
 	return identities
 }
 
-// writeIdentities writes player identities to ClickHouse tables using batch inserts
+// writeIdentities builds an isolated snapshot and publishes it with one pointer
+// insert. Readers never observe one identity table without the matching lookup
+// table, and a failed refresh leaves the previous pointer untouched.
 func (r *Resolver) writeIdentities(ctx context.Context, identities []PlayerIdentity) error {
-	if len(identities) == 0 {
-		return nil
-	}
+	snapshotID := uuid.New()
+	published := false
+	defer func() {
+		if published {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if err := r.dropSnapshotPartitions(cleanupCtx, snapshotID); err != nil {
+			log.Warn().
+				Err(err).
+				Stringer("snapshot_id", snapshotID).
+				Msg("Failed to clean unpublished identity snapshot")
+		}
+	}()
 
-	// Clear existing data (we're doing a full refresh)
-	if err := r.clickhouse.Exec(ctx, "TRUNCATE TABLE squad_aegis.player_identities"); err != nil {
-		log.Warn().Err(err).Msg("Failed to truncate player_identities table")
-	}
-	if err := r.clickhouse.Exec(ctx, "TRUNCATE TABLE squad_aegis.player_identity_lookup"); err != nil {
-		log.Warn().Err(err).Msg("Failed to truncate player_identity_lookup table")
-	}
-
-	// Batch insert identities (1000 at a time)
 	const batchSize = 1000
 	for i := 0; i < len(identities); i += batchSize {
 		end := i + batchSize
 		if end > len(identities) {
 			end = len(identities)
 		}
-		batch := identities[i:end]
-
-		if err := r.insertIdentityBatch(ctx, batch); err != nil {
-			log.Error().Err(err).Int("batch_start", i).Msg("Failed to insert identity batch")
+		if err := r.insertIdentityBatch(ctx, snapshotID, identities[i:end]); err != nil {
+			return fmt.Errorf("insert identity snapshot batch at row %d: %w", i, err)
 		}
 	}
 
-	// Collect all lookup entries
-	var lookups []LookupEntry
-
+	lookups := make([]LookupEntry, 0, len(identities)*4)
 	for _, identity := range identities {
 		for _, steamID := range identity.AllSteamIDs {
 			lookups = append(lookups, LookupEntry{"steam", steamID, identity.CanonicalID})
@@ -452,48 +450,88 @@ func (r *Resolver) writeIdentities(ctx context.Context, identities []PlayerIdent
 		}
 	}
 
-	// Batch insert lookups
 	for i := 0; i < len(lookups); i += batchSize {
 		end := i + batchSize
 		if end > len(lookups) {
 			end = len(lookups)
 		}
-		batch := lookups[i:end]
-
-		if err := r.insertLookupBatch(ctx, batch); err != nil {
-			log.Error().Err(err).Int("batch_start", i).Msg("Failed to insert lookup batch")
+		if err := r.insertLookupBatch(ctx, snapshotID, lookups[i:end]); err != nil {
+			return fmt.Errorf("insert identity lookup snapshot batch at row %d: %w", i, err)
 		}
 	}
 
+	var identityCount, lookupCount uint64
+	if err := r.clickhouse.QueryRow(ctx, `
+		SELECT
+			(
+				SELECT count()
+				FROM squad_aegis.player_identity_snapshots
+				WHERE snapshot_id = ?
+			),
+			(
+				SELECT count()
+				FROM squad_aegis.player_identity_lookup_snapshots
+				WHERE snapshot_id = ?
+			)
+	`, snapshotID, snapshotID).Scan(&identityCount, &lookupCount); err != nil {
+		return fmt.Errorf("verify identity snapshot: %w", err)
+	}
+	if identityCount != uint64(len(identities)) || lookupCount != uint64(len(lookups)) {
+		return fmt.Errorf(
+			"identity snapshot verification failed: identities=%d/%d lookups=%d/%d",
+			identityCount,
+			len(identities),
+			lookupCount,
+			len(lookups),
+		)
+	}
+
+	if err := r.clickhouse.Exec(ctx, `
+		INSERT INTO squad_aegis.player_identity_current (
+			pointer_key, snapshot_id, identity_count, lookup_count, published_at
+		) VALUES (?, ?, ?, ?, now64(3))
+	`, uint8(1), snapshotID, identityCount, lookupCount); err != nil {
+		return fmt.Errorf("publish identity snapshot: %w", err)
+	}
+	published = true
+
+	if err := r.retainNewestSnapshots(ctx, 2); err != nil {
+		log.Warn().Err(err).Msg("Failed to prune old identity snapshots")
+	}
+
 	log.Info().
+		Stringer("snapshot_id", snapshotID).
 		Int("identities", len(identities)).
 		Int("lookups", len(lookups)).
-		Msg("Wrote identity data to ClickHouse")
+		Msg("Published identity snapshot")
 
 	return nil
 }
 
-// insertIdentityBatch inserts a batch of identities
-func (r *Resolver) insertIdentityBatch(ctx context.Context, batch []PlayerIdentity) error {
-	if len(batch) == 0 {
+func (r *Resolver) insertIdentityBatch(
+	ctx context.Context,
+	snapshotID uuid.UUID,
+	identities []PlayerIdentity,
+) error {
+	if len(identities) == 0 {
 		return nil
 	}
 
-	// Build batch insert query
-	query := `
-		INSERT INTO squad_aegis.player_identities (
-			canonical_id, primary_steam_id, primary_eos_id, primary_epic_id, primary_name,
+	batch, err := r.clickhouse.PrepareBatch(ctx, `
+		INSERT INTO squad_aegis.player_identity_snapshots (
+			snapshot_id, canonical_id,
+			primary_steam_id, primary_eos_id, primary_epic_id, primary_name,
 			all_steam_ids, all_eos_ids, all_epic_ids, all_names,
 			total_sessions, first_seen, last_seen
-		) VALUES `
+		)
+	`)
+	if err != nil {
+		return err
+	}
 
-	args := make([]interface{}, 0, len(batch)*12)
-	for i, identity := range batch {
-		if i > 0 {
-			query += ", "
-		}
-		query += "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-		args = append(args,
+	for _, identity := range identities {
+		if err := batch.Append(
+			snapshotID,
 			identity.CanonicalID,
 			identity.PrimarySteamID,
 			identity.PrimaryEOSID,
@@ -506,33 +544,108 @@ func (r *Resolver) insertIdentityBatch(ctx context.Context, batch []PlayerIdenti
 			identity.TotalSessions,
 			identity.FirstSeen,
 			identity.LastSeen,
-		)
+		); err != nil {
+			_ = batch.Abort()
+			return err
+		}
 	}
 
-	return r.clickhouse.Exec(ctx, query, args...)
+	return batch.Send()
 }
 
-// insertLookupBatch inserts a batch of lookup entries
-func (r *Resolver) insertLookupBatch(ctx context.Context, batch []LookupEntry) error {
-	if len(batch) == 0 {
+func (r *Resolver) insertLookupBatch(
+	ctx context.Context,
+	snapshotID uuid.UUID,
+	entries []LookupEntry,
+) error {
+	if len(entries) == 0 {
 		return nil
 	}
 
-	query := `
-		INSERT INTO squad_aegis.player_identity_lookup (
-			identifier_type, identifier_value, canonical_id
-		) VALUES `
-
-	args := make([]interface{}, 0, len(batch)*3)
-	for i, entry := range batch {
-		if i > 0 {
-			query += ", "
-		}
-		query += "(?, ?, ?)"
-		args = append(args, entry.Type, entry.Value, entry.CanonicalID)
+	batch, err := r.clickhouse.PrepareBatch(ctx, `
+		INSERT INTO squad_aegis.player_identity_lookup_snapshots (
+			snapshot_id, identifier_type, identifier_value, canonical_id
+		)
+	`)
+	if err != nil {
+		return err
 	}
 
-	return r.clickhouse.Exec(ctx, query, args...)
+	for _, entry := range entries {
+		if err := batch.Append(snapshotID, entry.Type, entry.Value, entry.CanonicalID); err != nil {
+			_ = batch.Abort()
+			return err
+		}
+	}
+
+	return batch.Send()
+}
+
+func (r *Resolver) retainNewestSnapshots(ctx context.Context, keep int) error {
+	if keep < 1 {
+		return fmt.Errorf("identity snapshot retention must keep at least one snapshot")
+	}
+
+	rows, err := r.clickhouse.Query(ctx, `
+		SELECT snapshot_id
+		FROM squad_aegis.player_identity_current
+		GROUP BY snapshot_id
+		ORDER BY max(published_at) DESC
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var snapshots []uuid.UUID
+	for rows.Next() {
+		var snapshotID uuid.UUID
+		if err := rows.Scan(&snapshotID); err != nil {
+			return err
+		}
+		snapshots = append(snapshots, snapshotID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(snapshots) <= keep {
+		return nil
+	}
+
+	for _, snapshotID := range snapshots[keep:] {
+		if err := r.dropSnapshotPartitions(ctx, snapshotID); err != nil {
+			return err
+		}
+
+		query := fmt.Sprintf(`
+			ALTER TABLE squad_aegis.player_identity_current
+			DELETE WHERE snapshot_id = toUUID('%s')
+			SETTINGS mutations_sync = 1
+		`, snapshotID.String())
+		if err := r.clickhouse.Exec(ctx, query); err != nil {
+			return fmt.Errorf("remove identity snapshot pointer %s: %w", snapshotID, err)
+		}
+	}
+
+	return nil
+}
+
+func (r *Resolver) dropSnapshotPartitions(ctx context.Context, snapshotID uuid.UUID) error {
+	var errs []error
+	for _, table := range []string{
+		"player_identity_snapshots",
+		"player_identity_lookup_snapshots",
+	} {
+		query := fmt.Sprintf(
+			"ALTER TABLE squad_aegis.%s DROP PARTITION '%s'",
+			table,
+			snapshotID.String(),
+		)
+		if err := r.clickhouse.Exec(ctx, query); err != nil {
+			errs = append(errs, fmt.Errorf("drop %s partition: %w", table, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // setToSortedSlice converts a string set to a sorted slice

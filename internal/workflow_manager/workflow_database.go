@@ -1,26 +1,30 @@
 package workflow_manager
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
+	"go.codycody31.dev/squad-aegis/internal/db"
 	"go.codycody31.dev/squad-aegis/internal/models"
 )
 
 // WorkflowDatabase handles database operations for workflows
 type WorkflowDatabase struct {
-	db *sql.DB
+	db db.Executor
 }
 
 // NewWorkflowDatabase creates a new workflow database handler
-func NewWorkflowDatabase(db *sql.DB) *WorkflowDatabase {
-	return &WorkflowDatabase{db: db}
+func NewWorkflowDatabase(database db.Executor) *WorkflowDatabase {
+	return &WorkflowDatabase{db: database}
 }
 
 // CreateWorkflow creates a new workflow in the database
-func (wd *WorkflowDatabase) CreateWorkflow(workflow *models.ServerWorkflow) error {
+func (wd *WorkflowDatabase) CreateWorkflow(ctx context.Context, workflow *models.ServerWorkflow) error {
 	definitionJSON, err := json.Marshal(workflow.Definition)
 	if err != nil {
 		return fmt.Errorf("failed to marshal workflow definition: %w", err)
@@ -31,7 +35,7 @@ func (wd *WorkflowDatabase) CreateWorkflow(workflow *models.ServerWorkflow) erro
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`
 
-	_, err = wd.db.Exec(query,
+	_, err = wd.db.ExecContext(ctx, query,
 		workflow.ID,
 		workflow.ServerID,
 		workflow.Name,
@@ -47,8 +51,9 @@ func (wd *WorkflowDatabase) CreateWorkflow(workflow *models.ServerWorkflow) erro
 }
 
 // GetWorkflow retrieves a workflow by ID
-func (wd *WorkflowDatabase) GetWorkflow(workflowID uuid.UUID) (*models.ServerWorkflow, error) {
+func (wd *WorkflowDatabase) GetWorkflow(ctx context.Context, workflowID uuid.UUID) (*models.ServerWorkflow, error) {
 	query := `
+		/* sa.workflow.get */
 		SELECT id, server_id, name, description, enabled, definition, created_by, created_at, updated_at
 		FROM server_workflows
 		WHERE id = $1
@@ -58,7 +63,7 @@ func (wd *WorkflowDatabase) GetWorkflow(workflowID uuid.UUID) (*models.ServerWor
 	var definitionJSON []byte
 	var description sql.NullString
 
-	err := wd.db.QueryRow(query, workflowID).Scan(
+	err := wd.db.QueryRowContext(ctx, query, workflowID).Scan(
 		&workflow.ID,
 		&workflow.ServerID,
 		&workflow.Name,
@@ -82,24 +87,25 @@ func (wd *WorkflowDatabase) GetWorkflow(workflowID uuid.UUID) (*models.ServerWor
 		return nil, fmt.Errorf("failed to unmarshal workflow definition: %w", err)
 	}
 
-	// Load variables
-	if err := wd.loadWorkflowVariables(&workflow); err != nil {
+	workflows := []models.ServerWorkflow{workflow}
+	if err := wd.loadWorkflowVariables(ctx, workflows); err != nil {
 		return nil, fmt.Errorf("failed to load workflow variables: %w", err)
 	}
 
-	return &workflow, nil
+	return &workflows[0], nil
 }
 
 // GetWorkflowsByServerID retrieves all workflows for a server
-func (wd *WorkflowDatabase) GetWorkflowsByServerID(serverID uuid.UUID) ([]models.ServerWorkflow, error) {
+func (wd *WorkflowDatabase) GetWorkflowsByServerID(ctx context.Context, serverID uuid.UUID) ([]models.ServerWorkflow, error) {
 	query := `
+		/* sa.workflow.list */
 		SELECT id, server_id, name, description, enabled, definition, created_by, created_at, updated_at
 		FROM server_workflows
 		WHERE server_id = $1
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, id DESC
 	`
 
-	rows, err := wd.db.Query(query, serverID)
+	rows, err := wd.db.QueryContext(ctx, query, serverID)
 	if err != nil {
 		return nil, err
 	}
@@ -136,19 +142,79 @@ func (wd *WorkflowDatabase) GetWorkflowsByServerID(serverID uuid.UUID) ([]models
 			return nil, fmt.Errorf("failed to unmarshal workflow definition for workflow %s: %w", workflow.ID, err)
 		}
 
-		// Load variables
-		if err := wd.loadWorkflowVariables(&workflow); err != nil {
-			return nil, fmt.Errorf("failed to load variables for workflow %s: %w", workflow.ID, err)
-		}
-
 		workflows = append(workflows, workflow)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := wd.loadWorkflowVariables(ctx, workflows); err != nil {
+		return nil, fmt.Errorf("failed to load workflow variables: %w", err)
+	}
+
+	return workflows, nil
+}
+
+// GetEnabledWorkflows retrieves every enabled workflow in two queries:
+// one for workflows and one batched query for their variables.
+func (wd *WorkflowDatabase) GetEnabledWorkflows(ctx context.Context) ([]models.ServerWorkflow, error) {
+	const query = `
+		/* sa.workflow.enabled */
+		SELECT id, server_id, name, description, enabled, definition, created_by, created_at, updated_at
+		FROM server_workflows
+		WHERE enabled
+		ORDER BY server_id, created_at DESC, id DESC
+	`
+
+	rows, err := wd.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var workflows []models.ServerWorkflow
+	for rows.Next() {
+		var workflow models.ServerWorkflow
+		var definitionJSON []byte
+		var description sql.NullString
+		if err := rows.Scan(
+			&workflow.ID,
+			&workflow.ServerID,
+			&workflow.Name,
+			&description,
+			&workflow.Enabled,
+			&definitionJSON,
+			&workflow.CreatedBy,
+			&workflow.CreatedAt,
+			&workflow.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if description.Valid {
+			workflow.Description = &description.String
+		}
+		if err := json.Unmarshal(definitionJSON, &workflow.Definition); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal workflow definition for workflow %s: %w", workflow.ID, err)
+		}
+		workflows = append(workflows, workflow)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := wd.loadWorkflowVariables(ctx, workflows); err != nil {
+		return nil, fmt.Errorf("failed to load workflow variables: %w", err)
 	}
 
 	return workflows, nil
 }
 
 // UpdateWorkflow updates a workflow in the database
-func (wd *WorkflowDatabase) UpdateWorkflow(workflow *models.ServerWorkflow) error {
+func (wd *WorkflowDatabase) UpdateWorkflow(ctx context.Context, workflow *models.ServerWorkflow) error {
 	definitionJSON, err := json.Marshal(workflow.Definition)
 	if err != nil {
 		return fmt.Errorf("failed to marshal workflow definition: %w", err)
@@ -160,7 +226,7 @@ func (wd *WorkflowDatabase) UpdateWorkflow(workflow *models.ServerWorkflow) erro
 		WHERE id = $6
 	`
 
-	_, err = wd.db.Exec(query,
+	_, err = wd.db.ExecContext(ctx, query,
 		workflow.Name,
 		workflow.Description,
 		workflow.Enabled,
@@ -173,15 +239,15 @@ func (wd *WorkflowDatabase) UpdateWorkflow(workflow *models.ServerWorkflow) erro
 }
 
 // DeleteWorkflow deletes a workflow from the database
-func (wd *WorkflowDatabase) DeleteWorkflow(workflowID uuid.UUID) error {
+func (wd *WorkflowDatabase) DeleteWorkflow(ctx context.Context, workflowID uuid.UUID) error {
 	// This will cascade delete variables and executions
 	query := `DELETE FROM server_workflows WHERE id = $1`
-	_, err := wd.db.Exec(query, workflowID)
+	_, err := wd.db.ExecContext(ctx, query, workflowID)
 	return err
 }
 
 // CreateWorkflowVariable creates a new workflow variable
-func (wd *WorkflowDatabase) CreateWorkflowVariable(variable *models.ServerWorkflowVariable) error {
+func (wd *WorkflowDatabase) CreateWorkflowVariable(ctx context.Context, variable *models.ServerWorkflowVariable) error {
 	valueJSON, err := json.Marshal(variable.Value)
 	if err != nil {
 		return fmt.Errorf("failed to marshal variable value: %w", err)
@@ -192,7 +258,7 @@ func (wd *WorkflowDatabase) CreateWorkflowVariable(variable *models.ServerWorkfl
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 
-	_, err = wd.db.Exec(query,
+	_, err = wd.db.ExecContext(ctx, query,
 		variable.ID,
 		variable.WorkflowID,
 		variable.Name,
@@ -206,7 +272,7 @@ func (wd *WorkflowDatabase) CreateWorkflowVariable(variable *models.ServerWorkfl
 }
 
 // GetWorkflowVariable retrieves a specific workflow variable
-func (wd *WorkflowDatabase) GetWorkflowVariable(workflowID uuid.UUID, name string) (*models.ServerWorkflowVariable, error) {
+func (wd *WorkflowDatabase) GetWorkflowVariable(ctx context.Context, workflowID uuid.UUID, name string) (*models.ServerWorkflowVariable, error) {
 	query := `
 		SELECT id, workflow_id, name, value, description, created_at, updated_at
 		FROM server_workflow_variables
@@ -217,7 +283,7 @@ func (wd *WorkflowDatabase) GetWorkflowVariable(workflowID uuid.UUID, name strin
 	var valueJSON []byte
 	var description sql.NullString
 
-	err := wd.db.QueryRow(query, workflowID, name).Scan(
+	err := wd.db.QueryRowContext(ctx, query, workflowID, name).Scan(
 		&variable.ID,
 		&variable.WorkflowID,
 		&variable.Name,
@@ -243,7 +309,7 @@ func (wd *WorkflowDatabase) GetWorkflowVariable(workflowID uuid.UUID, name strin
 }
 
 // UpdateWorkflowVariable updates a workflow variable
-func (wd *WorkflowDatabase) UpdateWorkflowVariable(variable *models.ServerWorkflowVariable) error {
+func (wd *WorkflowDatabase) UpdateWorkflowVariable(ctx context.Context, variable *models.ServerWorkflowVariable) error {
 	valueJSON, err := json.Marshal(variable.Value)
 	if err != nil {
 		return fmt.Errorf("failed to marshal variable value: %w", err)
@@ -255,32 +321,44 @@ func (wd *WorkflowDatabase) UpdateWorkflowVariable(variable *models.ServerWorkfl
 		WHERE id = $4
 	`
 
-	_, err = wd.db.Exec(query, valueJSON, variable.Description, variable.UpdatedAt, variable.ID)
+	_, err = wd.db.ExecContext(ctx, query, valueJSON, variable.Description, variable.UpdatedAt, variable.ID)
 	return err
 }
 
 // DeleteWorkflowVariable deletes a workflow variable
-func (wd *WorkflowDatabase) DeleteWorkflowVariable(variableID uuid.UUID) error {
+func (wd *WorkflowDatabase) DeleteWorkflowVariable(ctx context.Context, variableID uuid.UUID) error {
 	query := `DELETE FROM server_workflow_variables WHERE id = $1`
-	_, err := wd.db.Exec(query, variableID)
+	_, err := wd.db.ExecContext(ctx, query, variableID)
 	return err
 }
 
-// loadWorkflowVariables loads all variables for a workflow
-func (wd *WorkflowDatabase) loadWorkflowVariables(workflow *models.ServerWorkflow) error {
-	query := `
-		SELECT id, name, value, description, created_at, updated_at
+// loadWorkflowVariables loads all variables for a workflow set in one query.
+func (wd *WorkflowDatabase) loadWorkflowVariables(ctx context.Context, workflows []models.ServerWorkflow) error {
+	if len(workflows) == 0 {
+		return nil
+	}
+
+	workflowByID := make(map[uuid.UUID]*models.ServerWorkflow, len(workflows))
+	workflowIDs := make([]uuid.UUID, 0, len(workflows))
+	for i := range workflows {
+		workflows[i].Variables = []models.ServerWorkflowVariable{}
+		workflowByID[workflows[i].ID] = &workflows[i]
+		workflowIDs = append(workflowIDs, workflows[i].ID)
+	}
+
+	const query = `
+		/* sa.workflow.variables */
+		SELECT workflow_id, id, name, value, description, created_at, updated_at
 		FROM server_workflow_variables
-		WHERE workflow_id = $1
+		WHERE workflow_id = ANY($1)
+		ORDER BY workflow_id, name, id
 	`
 
-	rows, err := wd.db.Query(query, workflow.ID)
+	rows, err := wd.db.QueryContext(ctx, query, pq.Array(workflowIDs))
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-
-	workflow.Variables = []models.ServerWorkflowVariable{}
 
 	for rows.Next() {
 		var variable models.ServerWorkflowVariable
@@ -288,6 +366,7 @@ func (wd *WorkflowDatabase) loadWorkflowVariables(workflow *models.ServerWorkflo
 		var description sql.NullString
 
 		err := rows.Scan(
+			&variable.WorkflowID,
 			&variable.ID,
 			&variable.Name,
 			&valueJSON,
@@ -308,24 +387,43 @@ func (wd *WorkflowDatabase) loadWorkflowVariables(workflow *models.ServerWorkflo
 			return fmt.Errorf("failed to unmarshal variable value for %s: %w", variable.Name, err)
 		}
 
-		variable.WorkflowID = workflow.ID
+		workflow, ok := workflowByID[variable.WorkflowID]
+		if !ok {
+			return fmt.Errorf("workflow variable %s references unexpected workflow %s", variable.ID, variable.WorkflowID)
+		}
 		workflow.Variables = append(workflow.Variables, variable)
 	}
 
-	return nil
+	return rows.Err()
 }
 
 // GetExecutionsByWorkflowID retrieves workflow executions for a workflow
-func (wd *WorkflowDatabase) GetExecutionsByWorkflowID(workflowID uuid.UUID, limit, offset int) ([]models.ServerWorkflowExecution, error) {
+func (wd *WorkflowDatabase) GetExecutionsByWorkflowID(
+	ctx context.Context,
+	workflowID uuid.UUID,
+	limit int,
+	beforeStartedAt *time.Time,
+	beforeID *uuid.UUID,
+) ([]models.ServerWorkflowExecution, error) {
+	if (beforeStartedAt == nil) != (beforeID == nil) {
+		return nil, fmt.Errorf("workflow execution cursor requires both started_at and id")
+	}
+
 	query := `
+		/* sa.workflow.executions */
 		SELECT id, workflow_id, execution_id, status, trigger_data, started_at, completed_at, error_message
 		FROM server_workflow_executions
 		WHERE workflow_id = $1
-		ORDER BY started_at DESC
-		LIMIT $2 OFFSET $3
 	`
+	args := []interface{}{workflowID}
+	if beforeStartedAt != nil {
+		query += ` AND (started_at, id) < ($2, $3)`
+		args = append(args, *beforeStartedAt, *beforeID)
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(" ORDER BY started_at DESC, id DESC LIMIT $%d", len(args))
 
-	rows, err := wd.db.Query(query, workflowID, limit, offset)
+	rows, err := wd.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -371,21 +469,37 @@ func (wd *WorkflowDatabase) GetExecutionsByWorkflowID(workflowID uuid.UUID, limi
 		executions = append(executions, execution)
 	}
 
-	return executions, nil
+	return executions, rows.Err()
 }
 
 // GetExecutionsByServerID retrieves workflow executions for a server
-func (wd *WorkflowDatabase) GetExecutionsByServerID(serverID uuid.UUID, limit, offset int) ([]models.ServerWorkflowExecution, error) {
+func (wd *WorkflowDatabase) GetExecutionsByServerID(
+	ctx context.Context,
+	serverID uuid.UUID,
+	limit int,
+	beforeStartedAt *time.Time,
+	beforeID *uuid.UUID,
+) ([]models.ServerWorkflowExecution, error) {
+	if (beforeStartedAt == nil) != (beforeID == nil) {
+		return nil, fmt.Errorf("server workflow execution cursor requires both started_at and id")
+	}
+
 	query := `
+		/* sa.workflow.server_executions */
 		SELECT e.id, e.workflow_id, e.execution_id, e.status, e.trigger_data, e.started_at, e.completed_at, e.error_message
 		FROM server_workflow_executions e
 		JOIN server_workflows w ON e.workflow_id = w.id
 		WHERE w.server_id = $1
-		ORDER BY e.started_at DESC
-		LIMIT $2 OFFSET $3
 	`
+	args := []interface{}{serverID}
+	if beforeStartedAt != nil {
+		query += ` AND (e.started_at, e.id) < ($2, $3)`
+		args = append(args, *beforeStartedAt, *beforeID)
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(" ORDER BY e.started_at DESC, e.id DESC LIMIT $%d", len(args))
 
-	rows, err := wd.db.Query(query, serverID, limit, offset)
+	rows, err := wd.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -431,11 +545,11 @@ func (wd *WorkflowDatabase) GetExecutionsByServerID(serverID uuid.UUID, limit, o
 		executions = append(executions, execution)
 	}
 
-	return executions, nil
+	return executions, rows.Err()
 }
 
 // CreateWorkflowExecution creates a new workflow execution record
-func (wd *WorkflowDatabase) CreateWorkflowExecution(execution *models.ServerWorkflowExecution) error {
+func (wd *WorkflowDatabase) CreateWorkflowExecution(ctx context.Context, execution *models.ServerWorkflowExecution) error {
 	query := `
 		INSERT INTO server_workflow_executions (id, workflow_id, execution_id, status, trigger_data, started_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -446,7 +560,7 @@ func (wd *WorkflowDatabase) CreateWorkflowExecution(execution *models.ServerWork
 		return fmt.Errorf("failed to marshal trigger_data: %w", err)
 	}
 
-	_, err = wd.db.Exec(query,
+	_, err = wd.db.ExecContext(ctx, query,
 		execution.ID,
 		execution.WorkflowID,
 		execution.ExecutionID,
@@ -459,14 +573,14 @@ func (wd *WorkflowDatabase) CreateWorkflowExecution(execution *models.ServerWork
 }
 
 // UpdateWorkflowExecution updates a workflow execution record
-func (wd *WorkflowDatabase) UpdateWorkflowExecution(execution *models.ServerWorkflowExecution) error {
+func (wd *WorkflowDatabase) UpdateWorkflowExecution(ctx context.Context, execution *models.ServerWorkflowExecution) error {
 	query := `
 		UPDATE server_workflow_executions
 		SET status = $1, completed_at = $2, error_message = $3
 		WHERE execution_id = $4
 	`
 
-	_, err := wd.db.Exec(query,
+	_, err := wd.db.ExecContext(ctx, query,
 		execution.Status,
 		execution.CompletedAt,
 		execution.ErrorMessage,
@@ -477,7 +591,7 @@ func (wd *WorkflowDatabase) UpdateWorkflowExecution(execution *models.ServerWork
 }
 
 // GetWorkflowExecution retrieves a workflow execution by execution ID
-func (wd *WorkflowDatabase) GetWorkflowExecution(executionID uuid.UUID) (*models.ServerWorkflowExecution, error) {
+func (wd *WorkflowDatabase) GetWorkflowExecution(ctx context.Context, executionID uuid.UUID) (*models.ServerWorkflowExecution, error) {
 	query := `
 		SELECT id, workflow_id, execution_id, status, trigger_data, started_at, completed_at, error_message
 		FROM server_workflow_executions
@@ -489,7 +603,7 @@ func (wd *WorkflowDatabase) GetWorkflowExecution(executionID uuid.UUID) (*models
 	var errorMessage sql.NullString
 	var triggerDataJSON []byte
 
-	err := wd.db.QueryRow(query, executionID).Scan(
+	err := wd.db.QueryRowContext(ctx, query, executionID).Scan(
 		&execution.ID,
 		&execution.WorkflowID,
 		&execution.ExecutionID,
@@ -524,7 +638,7 @@ func (wd *WorkflowDatabase) GetWorkflowExecution(executionID uuid.UUID) (*models
 // KV Store Operations
 
 // GetKVValue retrieves a value from the workflow KV store
-func (wd *WorkflowDatabase) GetKVValue(workflowID uuid.UUID, key string) (interface{}, error) {
+func (wd *WorkflowDatabase) GetKVValue(ctx context.Context, workflowID uuid.UUID, key string) (interface{}, error) {
 	query := `
 		SELECT value
 		FROM server_workflow_kv_store
@@ -532,7 +646,7 @@ func (wd *WorkflowDatabase) GetKVValue(workflowID uuid.UUID, key string) (interf
 	`
 
 	var valueJSON []byte
-	err := wd.db.QueryRow(query, workflowID, key).Scan(&valueJSON)
+	err := wd.db.QueryRowContext(ctx, query, workflowID, key).Scan(&valueJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -546,7 +660,7 @@ func (wd *WorkflowDatabase) GetKVValue(workflowID uuid.UUID, key string) (interf
 }
 
 // SetKVValue sets a value in the workflow KV store (creates or updates)
-func (wd *WorkflowDatabase) SetKVValue(workflowID uuid.UUID, key string, value interface{}) error {
+func (wd *WorkflowDatabase) SetKVValue(ctx context.Context, workflowID uuid.UUID, key string, value interface{}) error {
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to marshal KV value: %w", err)
@@ -559,23 +673,23 @@ func (wd *WorkflowDatabase) SetKVValue(workflowID uuid.UUID, key string, value i
 		DO UPDATE SET value = $3, updated_at = NOW()
 	`
 
-	_, err = wd.db.Exec(query, workflowID, key, valueJSON)
+	_, err = wd.db.ExecContext(ctx, query, workflowID, key, valueJSON)
 	return err
 }
 
 // DeleteKVValue deletes a value from the workflow KV store
-func (wd *WorkflowDatabase) DeleteKVValue(workflowID uuid.UUID, key string) error {
+func (wd *WorkflowDatabase) DeleteKVValue(ctx context.Context, workflowID uuid.UUID, key string) error {
 	query := `DELETE FROM server_workflow_kv_store WHERE workflow_id = $1 AND key = $2`
-	_, err := wd.db.Exec(query, workflowID, key)
+	_, err := wd.db.ExecContext(ctx, query, workflowID, key)
 	return err
 }
 
 // KVExists checks if a key exists in the workflow KV store
-func (wd *WorkflowDatabase) KVExists(workflowID uuid.UUID, key string) (bool, error) {
+func (wd *WorkflowDatabase) KVExists(ctx context.Context, workflowID uuid.UUID, key string) (bool, error) {
 	query := `SELECT EXISTS(SELECT 1 FROM server_workflow_kv_store WHERE workflow_id = $1 AND key = $2)`
 
 	var exists bool
-	err := wd.db.QueryRow(query, workflowID, key).Scan(&exists)
+	err := wd.db.QueryRowContext(ctx, query, workflowID, key).Scan(&exists)
 	if err != nil {
 		return false, err
 	}
@@ -584,7 +698,7 @@ func (wd *WorkflowDatabase) KVExists(workflowID uuid.UUID, key string) (bool, er
 }
 
 // ListKVKeys returns all keys in the workflow KV store
-func (wd *WorkflowDatabase) ListKVKeys(workflowID uuid.UUID) ([]string, error) {
+func (wd *WorkflowDatabase) ListKVKeys(ctx context.Context, workflowID uuid.UUID) ([]string, error) {
 	query := `
 		SELECT key
 		FROM server_workflow_kv_store
@@ -592,7 +706,7 @@ func (wd *WorkflowDatabase) ListKVKeys(workflowID uuid.UUID) ([]string, error) {
 		ORDER BY key ASC
 	`
 
-	rows, err := wd.db.Query(query, workflowID)
+	rows, err := wd.db.QueryContext(ctx, query, workflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -607,11 +721,11 @@ func (wd *WorkflowDatabase) ListKVKeys(workflowID uuid.UUID) ([]string, error) {
 		keys = append(keys, key)
 	}
 
-	return keys, nil
+	return keys, rows.Err()
 }
 
 // GetAllKVPairs returns all key-value pairs for a workflow
-func (wd *WorkflowDatabase) GetAllKVPairs(workflowID uuid.UUID) (map[string]interface{}, error) {
+func (wd *WorkflowDatabase) GetAllKVPairs(ctx context.Context, workflowID uuid.UUID) (map[string]interface{}, error) {
 	query := `
 		SELECT key, value
 		FROM server_workflow_kv_store
@@ -619,7 +733,7 @@ func (wd *WorkflowDatabase) GetAllKVPairs(workflowID uuid.UUID) (map[string]inte
 		ORDER BY key ASC
 	`
 
-	rows, err := wd.db.Query(query, workflowID)
+	rows, err := wd.db.QueryContext(ctx, query, workflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -642,22 +756,22 @@ func (wd *WorkflowDatabase) GetAllKVPairs(workflowID uuid.UUID) (map[string]inte
 		kvPairs[key] = value
 	}
 
-	return kvPairs, nil
+	return kvPairs, rows.Err()
 }
 
 // ClearKVStore removes all key-value pairs for a workflow
-func (wd *WorkflowDatabase) ClearKVStore(workflowID uuid.UUID) error {
+func (wd *WorkflowDatabase) ClearKVStore(ctx context.Context, workflowID uuid.UUID) error {
 	query := `DELETE FROM server_workflow_kv_store WHERE workflow_id = $1`
-	_, err := wd.db.Exec(query, workflowID)
+	_, err := wd.db.ExecContext(ctx, query, workflowID)
 	return err
 }
 
 // CountKVPairs returns the number of key-value pairs for a workflow
-func (wd *WorkflowDatabase) CountKVPairs(workflowID uuid.UUID) (int, error) {
+func (wd *WorkflowDatabase) CountKVPairs(ctx context.Context, workflowID uuid.UUID) (int, error) {
 	query := `SELECT COUNT(*) FROM server_workflow_kv_store WHERE workflow_id = $1`
 
 	var count int
-	err := wd.db.QueryRow(query, workflowID).Scan(&count)
+	err := wd.db.QueryRowContext(ctx, query, workflowID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -674,7 +788,7 @@ type WorkflowExecutionStats struct {
 }
 
 // GetWorkflowExecutionStats computes aggregate statistics for a workflow
-func (wd *WorkflowDatabase) GetWorkflowExecutionStats(workflowID uuid.UUID) (*WorkflowExecutionStats, error) {
+func (wd *WorkflowDatabase) GetWorkflowExecutionStats(ctx context.Context, workflowID uuid.UUID) (*WorkflowExecutionStats, error) {
 	query := `
 		SELECT
 			COUNT(*) as total_executions,
@@ -695,7 +809,7 @@ func (wd *WorkflowDatabase) GetWorkflowExecutionStats(workflowID uuid.UUID) (*Wo
 	var stats WorkflowExecutionStats
 	var avgDurationMs sql.NullFloat64
 
-	err := wd.db.QueryRow(query, workflowID).Scan(
+	err := wd.db.QueryRowContext(ctx, query, workflowID).Scan(
 		&stats.TotalExecutions,
 		&stats.SuccessRate,
 		&avgDurationMs,

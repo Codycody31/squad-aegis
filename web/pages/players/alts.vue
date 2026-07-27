@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import {
+  ref,
+  onMounted,
+  onUnmounted,
+  computed,
+  watch,
+} from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { Card, CardContent } from "~/components/ui/card";
@@ -48,15 +54,24 @@ if (!authStore.user?.super_admin) {
 const loading = ref(true);
 const error = ref<string | null>(null);
 const altGroups = ref<AltAccountGroup[]>([]);
-const totalGroups = ref(0);
-const page = ref(1);
-const limit = 20;
+const {
+  limit,
+  cursor,
+  page,
+  canGoPrevious,
+  canGoNext,
+  setPageInfo,
+  reset: resetPagination,
+  next: advancePage,
+  previous: returnToPreviousPage,
+} = useCursorPagination(20);
 const expandedGroups = ref<Set<string>>(new Set());
 const searchFilter = ref("");
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function fetchAltGroups(resetPage = false) {
   if (resetPage) {
-    page.value = 1;
+    resetPagination();
     altGroups.value = [];
   }
 
@@ -64,13 +79,17 @@ async function fetchAltGroups(resetPage = false) {
   error.value = null;
 
   try {
+    const params = new URLSearchParams({ limit: limit.value.toString() });
+    if (cursor.value) {
+      params.set("cursor", cursor.value);
+    }
     const data = await useAuthFetchImperative<{
       data: AltAccountGroupsResponse;
     }>(
-      `${runtimeConfig.public.backendApi}/players/alt-groups?page=${page.value}&limit=${limit}`
+      `${runtimeConfig.public.backendApi}/players/alt-groups?${params.toString()}`
     );
     altGroups.value = data.data.alt_groups || [];
-    totalGroups.value = data.data.total_groups || 0;
+    setPageInfo(data.data.page_info);
   } catch (err: any) {
     if (err?.response?.status === 403 || err?.statusCode === 403) {
       navigateTo("/players");
@@ -120,15 +139,13 @@ function formatDate(dateString: string | null): string {
 }
 
 function nextPage() {
-  if (page.value * limit < totalGroups.value) {
-    page.value++;
+  if (advancePage()) {
     fetchAltGroups();
   }
 }
 
 function prevPage() {
-  if (page.value > 1) {
-    page.value--;
+  if (returnToPreviousPage()) {
     fetchAltGroups();
   }
 }
@@ -160,6 +177,20 @@ const groupStats = computed(() => {
 
 onMounted(() => {
   fetchAltGroups();
+});
+
+watch(searchFilter, () => {
+  resetPagination();
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+  }
+  searchTimer = setTimeout(fetchAltGroups, 350);
+});
+
+onUnmounted(() => {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+  }
 });
 </script>
 
@@ -205,8 +236,8 @@ onMounted(() => {
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       <Card>
         <CardContent class="py-3 px-4">
-          <p class="text-xs text-muted-foreground">Total Groups</p>
-          <p class="text-lg font-semibold">{{ totalGroups }}</p>
+          <p class="text-xs text-muted-foreground">Current Page</p>
+          <p class="text-lg font-semibold">{{ page }}</p>
         </CardContent>
       </Card>
       <Card>
@@ -452,31 +483,35 @@ onMounted(() => {
         </Collapsible>
       </Card>
 
-      <!-- Pagination -->
-      <div class="flex items-center justify-between pt-4">
-        <p class="text-sm text-muted-foreground">
-          Showing {{ altGroups.length }} of {{ totalGroups }} groups
-        </p>
-        <div class="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="page <= 1 || loading"
-            @click="prevPage"
-          >
-            <ChevronLeft class="h-4 w-4 mr-1" />
-            Previous
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="page * limit >= totalGroups || loading"
-            @click="nextPage"
-          >
-            Next
-            <ChevronRight class="h-4 w-4 ml-1" />
-          </Button>
-        </div>
+    </div>
+
+    <!-- Keep Previous available when a once-valid final page becomes empty. -->
+    <div
+      v-if="canGoPrevious || canGoNext"
+      class="flex items-center justify-between pt-4"
+    >
+      <p class="text-sm text-muted-foreground">
+        Showing {{ altGroups.length }} groups on page {{ page }}
+      </p>
+      <div class="flex gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="!canGoPrevious || loading"
+          @click="prevPage"
+        >
+          <ChevronLeft class="h-4 w-4 mr-1" />
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="!canGoNext || loading"
+          @click="nextPage"
+        >
+          Next
+          <ChevronRight class="h-4 w-4 ml-1" />
+        </Button>
       </div>
     </div>
   </div>

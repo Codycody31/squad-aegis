@@ -4,12 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
+	"go.codycody31.dev/squad-aegis/internal/pagination"
 	"go.codycody31.dev/squad-aegis/internal/plugin_manager"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
@@ -20,6 +21,16 @@ import (
 // plugin_manager but the handler enforces the limit before delegating, so
 // keep them in sync.
 const handlerDefaultPluginMaxUploadSize = 50 * 1024 * 1024
+
+const (
+	pluginLogsCursorKind       = "plugin.logs.instance"
+	serverPluginLogsCursorKind = "plugin.logs.server"
+)
+
+type pluginLogCursorValues struct {
+	Timestamp time.Time `json:"timestamp"`
+	LogID     uuid.UUID `json:"log_id"`
+}
 
 func pluginUploadMaxBytes() int64 {
 	if maxUploadSize := config.Config.Plugins.MaxUploadSize; maxUploadSize > 0 {
@@ -415,31 +426,54 @@ func (s *Server) ServerPluginLogs(c *gin.Context) {
 		return
 	}
 
-	// Parse query parameters
-	limit := 100 // default
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
-			limit = parsed
+	limit, ok := parseCursorLimit(c, 100, 500)
+	if !ok || rejectLegacyPagination(c, "page", "offset", "before", "after") {
+		return
+	}
+	if order := strings.ToLower(strings.TrimSpace(c.Query("order"))); order != "" && order != "desc" {
+		responses.BadRequest(c, "Invalid log order", &gin.H{"error": "plugin log history is ordered descending"})
+		return
+	}
+	level := strings.ToLower(normalizedAllFilter(c.Query("level")))
+	search := strings.TrimSpace(c.Query("search"))
+	filterHash := pagination.MustFilterHash(struct {
+		ServerID   uuid.UUID `json:"server_id"`
+		InstanceID uuid.UUID `json:"instance_id"`
+		Level      string    `json:"level"`
+		Search     string    `json:"search"`
+	}{serverID, instanceID, level, strings.ToLower(search)})
+	var queryCursor *plugin_manager.PluginLogCursor
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		values := pluginLogCursorValues{}
+		if err := pagination.Decode(encodedCursor, pluginLogsCursorKind, filterHash, &values); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
 		}
+		queryCursor = &plugin_manager.PluginLogCursor{Timestamp: values.Timestamp, LogID: values.LogID}
 	}
-	if limit > 1000 {
-		limit = 1000
-	}
-
-	before := c.Query("before")
-	after := c.Query("after")
-	order := c.Query("order")
-	level := c.Query("level")
-	search := c.Query("search")
-
-	// Get logs from ClickHouse via PluginManager
-	logs, err := s.Dependencies.PluginManager.GetPluginLogs(serverID, instanceID, limit, before, after, order, level, search)
+	logs, err := s.Dependencies.PluginManager.GetPluginLogs(c.Request.Context(), serverID, instanceID, limit+1, queryCursor, level, search)
 	if err != nil {
 		responses.InternalServerError(c, fmt.Errorf("failed to retrieve plugin logs: %w", err), nil)
 		return
 	}
 
-	responses.Success(c, "Plugin logs fetched successfully", &gin.H{"logs": logs})
+	logs, hasMore := pagination.TrimPage(logs, limit)
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(logs) > 0 {
+		last := logs[len(logs)-1]
+		lastID, err := uuid.Parse(last.ID)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("invalid plugin log ID: %w", err), nil)
+			return
+		}
+		encoded, err := pagination.Encode(pluginLogsCursorKind, filterHash, pluginLogCursorValues{Timestamp: last.Timestamp, LogID: lastID})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode plugin log cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
+	}
+	responses.Success(c, "Plugin logs fetched successfully", &gin.H{"logs": logs, "page_info": pageInfo})
 }
 
 // ServerPluginMetrics returns metrics for a plugin instance. The body is
@@ -484,29 +518,51 @@ func (s *Server) ServerPluginLogsAll(c *gin.Context) {
 		return
 	}
 
-	// Parse query parameters
-	limit := 100 // default
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
-			limit = parsed
+	limit, ok := parseCursorLimit(c, 100, 500)
+	if !ok || rejectLegacyPagination(c, "page", "offset", "before", "after") {
+		return
+	}
+	if order := strings.ToLower(strings.TrimSpace(c.Query("order"))); order != "" && order != "desc" {
+		responses.BadRequest(c, "Invalid log order", &gin.H{"error": "plugin log history is ordered descending"})
+		return
+	}
+	level := strings.ToLower(normalizedAllFilter(c.Query("level")))
+	search := strings.TrimSpace(c.Query("search"))
+	filterHash := pagination.MustFilterHash(struct {
+		ServerID uuid.UUID `json:"server_id"`
+		Level    string    `json:"level"`
+		Search   string    `json:"search"`
+	}{serverID, level, strings.ToLower(search)})
+	var queryCursor *plugin_manager.PluginLogCursor
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		values := pluginLogCursorValues{}
+		if err := pagination.Decode(encodedCursor, serverPluginLogsCursorKind, filterHash, &values); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
 		}
+		queryCursor = &plugin_manager.PluginLogCursor{Timestamp: values.Timestamp, LogID: values.LogID}
 	}
-	if limit > 1000 {
-		limit = 1000
-	}
-
-	before := c.Query("before")
-	after := c.Query("after")
-	order := c.Query("order")
-	level := c.Query("level")
-	search := c.Query("search")
-
-	// Get aggregated logs from ClickHouse via PluginManager
-	logs, err := s.Dependencies.PluginManager.GetServerPluginLogs(serverID, limit, before, after, order, level, search)
+	logs, err := s.Dependencies.PluginManager.GetServerPluginLogs(c.Request.Context(), serverID, limit+1, queryCursor, level, search)
 	if err != nil {
 		responses.InternalServerError(c, fmt.Errorf("failed to retrieve server plugin logs: %w", err), nil)
 		return
 	}
 
-	responses.Success(c, "Server plugin logs fetched successfully", &gin.H{"logs": logs})
+	logs, hasMore := pagination.TrimPage(logs, limit)
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(logs) > 0 {
+		last := logs[len(logs)-1]
+		lastID, err := uuid.Parse(last.ID)
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("invalid plugin log ID: %w", err), nil)
+			return
+		}
+		encoded, err := pagination.Encode(serverPluginLogsCursorKind, filterHash, pluginLogCursorValues{Timestamp: last.Timestamp, LogID: lastID})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode plugin log cursor: %w", err), nil)
+			return
+		}
+		pageInfo.NextCursor = &encoded
+	}
+	responses.Success(c, "Server plugin logs fetched successfully", &gin.H{"logs": logs, "page_info": pageInfo})
 }

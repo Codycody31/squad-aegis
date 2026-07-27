@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
 	"github.com/samber/oops"
 
 	"github.com/gin-gonic/gin"
@@ -91,12 +90,19 @@ func run(ctx context.Context) error {
 	// Initialize database
 	var database *sql.DB
 	postgresDSN := db.PostgresDSN(config.Config.Db.Host, config.Config.Db.Port, config.Config.Db.User, config.Config.Db.Pass, config.Config.Db.Name)
-	log.Trace().Msgf("Connecting to database: %s", postgresDSN)
-	database, err = sql.Open("postgres", postgresDSN)
+	log.Trace().
+		Str("host", config.Config.Db.Host).
+		Int("port", config.Config.Db.Port).
+		Str("database", config.Config.Db.Name).
+		Msg("Connecting to PostgreSQL")
+	database, err = db.OpenPostgres(postgresDSN)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %v", err)
 	}
 	defer database.Close()
+	database.SetMaxOpenConns(config.Config.Db.MaxOpenConns)
+	database.SetMaxIdleConns(config.Config.Db.MaxIdleConns)
+	database.SetConnMaxLifetime(time.Duration(config.Config.Db.ConnMaxLifetimeMinutes) * time.Minute)
 
 	// Ping database
 	if err = database.Ping(); err != nil {
@@ -224,6 +230,7 @@ func run(ctx context.Context) error {
 	deps := &server.Dependencies{
 		DB:                   database,
 		Clickhouse:           clickhouseClient,
+		EventIngester:        eventIngester,
 		Valkey:               valkeyClient,
 		RconManager:          rconManager,
 		EventManager:         eventManager,

@@ -350,61 +350,30 @@ func (wm *WorkflowManager) ReloadWorkflows() error {
 
 // loadWorkflows loads all enabled workflows from the database
 func (wm *WorkflowManager) loadWorkflows() error {
-	// Get all servers that might have workflows
-	rows, err := wm.db.Query("SELECT DISTINCT server_id FROM server_workflows WHERE enabled = true")
+	workflows, err := wm.workflowDB.GetEnabledWorkflows(wm.ctx)
 	if err != nil {
-		return fmt.Errorf("failed to query server IDs: %w", err)
-	}
-	defer rows.Close()
-
-	var serverIDs []uuid.UUID
-	for rows.Next() {
-		var serverID uuid.UUID
-		if err := rows.Scan(&serverID); err != nil {
-			return fmt.Errorf("failed to scan server ID: %w", err)
-		}
-		serverIDs = append(serverIDs, serverID)
+		return fmt.Errorf("failed to load enabled workflows: %w", err)
 	}
 
-	// Clear existing workflows
 	wm.activeWorkflows = make(map[uuid.UUID]*models.ServerWorkflow)
+	for i := range workflows {
+		workflow := &workflows[i]
+		wm.activeWorkflows[workflow.ID] = workflow
+		log.Info().
+			Str("workflow_id", workflow.ID.String()).
+			Str("workflow_name", workflow.Name).
+			Str("server_id", workflow.ServerID.String()).
+			Int("trigger_count", len(workflow.Definition.Triggers)).
+			Msg("Loaded active workflow")
 
-	// Load workflows for each server
-	for _, serverID := range serverIDs {
-		workflows, err := wm.workflowDB.GetWorkflowsByServerID(serverID)
-		if err != nil {
-			log.Error().Err(err).Str("server_id", serverID.String()).Msg("Failed to load workflows for server")
-			continue
-		}
-
-		log.Debug().Str("server_id", serverID.String()).Int("workflow_count", len(workflows)).Msg("Retrieved workflows from database")
-
-		for _, workflow := range workflows {
-			if workflow.Enabled {
-				wm.activeWorkflows[workflow.ID] = &workflow
-				log.Info().
-					Str("workflow_id", workflow.ID.String()).
-					Str("workflow_name", workflow.Name).
-					Str("server_id", workflow.ServerID.String()).
-					Int("trigger_count", len(workflow.Definition.Triggers)).
-					Msg("Loaded active workflow")
-
-				// Log each trigger for debugging
-				for _, trigger := range workflow.Definition.Triggers {
-					log.Debug().
-						Str("workflow_id", workflow.ID.String()).
-						Str("trigger_id", trigger.ID).
-						Str("trigger_name", trigger.Name).
-						Str("event_type", trigger.EventType).
-						Bool("enabled", trigger.Enabled).
-						Msg("Workflow trigger")
-				}
-			} else {
-				log.Debug().
-					Str("workflow_id", workflow.ID.String()).
-					Str("workflow_name", workflow.Name).
-					Msg("Skipping disabled workflow")
-			}
+		for _, trigger := range workflow.Definition.Triggers {
+			log.Debug().
+				Str("workflow_id", workflow.ID.String()).
+				Str("trigger_id", trigger.ID).
+				Str("trigger_name", trigger.Name).
+				Str("event_type", trigger.EventType).
+				Bool("enabled", trigger.Enabled).
+				Msg("Workflow trigger")
 		}
 	}
 
@@ -764,7 +733,7 @@ func (wm *WorkflowManager) executeWorkflow(workflow *models.ServerWorkflow, trig
 		StartedAt:   context.StartedAt,
 	}
 
-	if err := wm.workflowDB.CreateWorkflowExecution(pgExecution); err != nil {
+	if err := wm.workflowDB.CreateWorkflowExecution(wm.ctx, pgExecution); err != nil {
 		log.Error().Err(err).Str("execution_id", executionID.String()).Msg("Failed to create execution record in PostgreSQL")
 	}
 
@@ -835,7 +804,7 @@ func (wm *WorkflowManager) executeWorkflow(workflow *models.ServerWorkflow, trig
 	}
 
 	// Update execution record in PostgreSQL
-	if err := wm.workflowDB.UpdateWorkflowExecution(pgExecution); err != nil {
+	if err := wm.workflowDB.UpdateWorkflowExecution(wm.ctx, pgExecution); err != nil {
 		log.Error().Err(err).Str("execution_id", executionID.String()).Msg("Failed to update execution record in PostgreSQL")
 	}
 
@@ -3833,7 +3802,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		key := L.CheckString(1)
 		defaultValue := L.Get(2) // Optional default value
 
-		value, err := wm.workflowDB.GetKVValue(workflowContext.WorkflowID, key)
+		value, err := wm.workflowDB.GetKVValue(wm.ctx, workflowContext.WorkflowID, key)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				// Key doesn't exist, return default value
@@ -3870,7 +3839,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 
 		goValue := wm.convertFromLuaValue(value)
 
-		err := wm.workflowDB.SetKVValue(workflowContext.WorkflowID, key, goValue)
+		err := wm.workflowDB.SetKVValue(wm.ctx, workflowContext.WorkflowID, key, goValue)
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -3897,7 +3866,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 	L.SetField(kvTable, "delete", L.NewFunction(func(L *lua.LState) int {
 		key := L.CheckString(1)
 
-		err := wm.workflowDB.DeleteKVValue(workflowContext.WorkflowID, key)
+		err := wm.workflowDB.DeleteKVValue(wm.ctx, workflowContext.WorkflowID, key)
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -3923,7 +3892,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 	L.SetField(kvTable, "exists", L.NewFunction(func(L *lua.LState) int {
 		key := L.CheckString(1)
 
-		exists, err := wm.workflowDB.KVExists(workflowContext.WorkflowID, key)
+		exists, err := wm.workflowDB.KVExists(wm.ctx, workflowContext.WorkflowID, key)
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -3939,7 +3908,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		return 1
 	}))
 	L.SetField(kvTable, "keys", L.NewFunction(func(L *lua.LState) int {
-		keys, err := wm.workflowDB.ListKVKeys(workflowContext.WorkflowID)
+		keys, err := wm.workflowDB.ListKVKeys(wm.ctx, workflowContext.WorkflowID)
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -3960,7 +3929,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		return 1
 	}))
 	L.SetField(kvTable, "get_all", L.NewFunction(func(L *lua.LState) int {
-		kvPairs, err := wm.workflowDB.GetAllKVPairs(workflowContext.WorkflowID)
+		kvPairs, err := wm.workflowDB.GetAllKVPairs(wm.ctx, workflowContext.WorkflowID)
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -3981,7 +3950,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		return 1
 	}))
 	L.SetField(kvTable, "clear", L.NewFunction(func(L *lua.LState) int {
-		err := wm.workflowDB.ClearKVStore(workflowContext.WorkflowID)
+		err := wm.workflowDB.ClearKVStore(wm.ctx, workflowContext.WorkflowID)
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -4003,7 +3972,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		return 2 // Return success boolean and error
 	}))
 	L.SetField(kvTable, "count", L.NewFunction(func(L *lua.LState) int {
-		count, err := wm.workflowDB.CountKVPairs(workflowContext.WorkflowID)
+		count, err := wm.workflowDB.CountKVPairs(wm.ctx, workflowContext.WorkflowID)
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -4022,7 +3991,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		delta := L.OptNumber(2, 1) // Default increment by 1
 
 		// Get current value
-		value, err := wm.workflowDB.GetKVValue(workflowContext.WorkflowID, key)
+		value, err := wm.workflowDB.GetKVValue(wm.ctx, workflowContext.WorkflowID, key)
 		var currentNum float64
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -4059,7 +4028,7 @@ func (wm *WorkflowManager) addLuaUtilityFunctions(L *lua.LState, workflowTable *
 		newNum := currentNum + float64(delta)
 
 		// Save back
-		err = wm.workflowDB.SetKVValue(workflowContext.WorkflowID, key, newNum)
+		err = wm.workflowDB.SetKVValue(wm.ctx, workflowContext.WorkflowID, key, newNum)
 		if err != nil {
 			log.Error().
 				Err(err).

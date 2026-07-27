@@ -9,6 +9,7 @@ import (
 
 	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"go.codycody31.dev/squad-aegis/internal/db"
 	"go.codycody31.dev/squad-aegis/internal/models"
 )
@@ -94,88 +95,42 @@ func GetServers(ctx context.Context, database db.Executor, user *models.User) ([
 }
 
 func GetServerById(ctx context.Context, database db.Executor, serverId uuid.UUID, user *models.User) (*models.Server, error) {
-	if user == nil {
-		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-		sql, args, err := psql.Select(
-			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
-			"log_source_type", "log_host", "log_port", "log_username", "log_password",
-			"log_poll_frequency", "log_read_from_start", "squad_game_path",
-			"created_at", "updated_at",
-		).From("servers").Where(squirrel.Eq{"id": serverId}).ToSql()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SQL query: %w", err)
-		}
-
-		rows, err := database.QueryContext(ctx, sql, args...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to execute SQL query: %w", err)
-		}
-		defer rows.Close()
-
-		server := &models.Server{}
-
-		for rows.Next() {
-			err = rows.Scan(
-				&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword,
-				&server.LogSourceType, &server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword,
-				&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath,
-				&server.CreatedAt, &server.UpdatedAt,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("failed to scan row: %w", err)
-			}
-		}
-
-		return server, nil
-	}
-
-	isSuperAdmin := user.SuperAdmin
-
-	psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-	var sql string
-	var args []interface{}
-	var err error
-
-	if isSuperAdmin {
-		sql, args, err = psql.Select(
-			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
-			"log_source_type", "log_host", "log_port", "log_username", "log_password",
-			"log_poll_frequency", "log_read_from_start", "squad_game_path",
-			"created_at", "updated_at",
-		).From("servers").Where(squirrel.Eq{"id": serverId}).ToSql()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SQL query: %w", err)
-		}
-	} else {
-		sql, args, err = psql.Select(
-			"id", "name", "ip_address", "game_port", "rcon_ip_address", "rcon_port", "rcon_password", "enabled",
-			"log_source_type", "log_host", "log_port", "log_username", "log_password",
-			"log_poll_frequency", "log_read_from_start", "squad_game_path",
-			"created_at", "updated_at",
-		).From("servers").Where(squirrel.Eq{"id": serverId}).Where(squirrel.Expr("id IN (SELECT server_id FROM server_admins WHERE user_id = $2)", user.Id)).ToSql()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SQL query: %w", err)
-		}
-	}
-
-	rows, err := database.QueryContext(ctx, sql, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute SQL query: %w", err)
-	}
-	defer rows.Close()
-
 	server := &models.Server{}
+	query := `
+		/* sa.server.get */
+		SELECT
+			s.id, s.name, s.ip_address, s.game_port, s.rcon_ip_address, s.rcon_port,
+			s.rcon_password, s.enabled, s.log_source_type, s.log_host, s.log_port,
+			s.log_username, s.log_password, s.log_poll_frequency, s.log_read_from_start,
+			s.squad_game_path, s.created_at, s.updated_at
+		FROM public.servers AS s
+		WHERE s.id = $1
+	`
+	args := []interface{}{serverId}
+	if user != nil && !user.SuperAdmin {
+		query += `
+			AND EXISTS (
+				SELECT 1
+				FROM public.server_admins AS sa
+				WHERE sa.server_id = s.id
+				  AND sa.user_id = $2
+				  AND (sa.expires_at IS NULL OR sa.expires_at > CURRENT_TIMESTAMP)
+			)
+		`
+		args = append(args, user.Id)
+	}
 
-	for rows.Next() {
-		err = rows.Scan(
-			&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword, &server.Enabled,
-			&server.LogSourceType, &server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword,
-			&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath,
-			&server.CreatedAt, &server.UpdatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
+	err := database.QueryRowContext(ctx, query, args...).Scan(
+		&server.Id, &server.Name, &server.IpAddress, &server.GamePort, &server.RconIpAddress, &server.RconPort, &server.RconPassword, &server.Enabled,
+		&server.LogSourceType, &server.LogHost, &server.LogPort, &server.LogUsername, &server.LogPassword,
+		&server.LogPollFrequency, &server.LogReadFromStart, &server.SquadGamePath,
+		&server.CreatedAt, &server.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, sql.ErrNoRows
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get server: %w", err)
 	}
 
 	return server, nil
@@ -272,73 +227,111 @@ func GetServerAdmins(ctx context.Context, database db.Executor, serverId uuid.UU
 
 // GetUserServerPermissions retrieves all servers a user has access to along with their permissions
 func GetUserServerPermissions(ctx context.Context, database db.Executor, userId uuid.UUID) (map[string][]string, error) {
-	// For super admins, we need to get all servers
-	var user *models.User
-	var err error
+	const query = `
+		/* sa.permissions.user_servers */
+		WITH RECURSIVE
+		target_user AS (
+			SELECT super_admin
+			FROM public.users
+			WHERE id = $1
+		),
+		role_hierarchy (server_id, role_id, path) AS (
+			SELECT
+				sa.server_id,
+				sa.server_role_id,
+				ARRAY[sa.server_role_id]
+			FROM public.server_admins AS sa
+			JOIN target_user AS tu ON NOT tu.super_admin
+			JOIN public.server_roles AS sr
+			  ON sr.id = sa.server_role_id
+			 AND sr.server_id = sa.server_id
+			WHERE sa.user_id = $1
+			  AND (sa.expires_at IS NULL OR sa.expires_at > NOW())
 
-	user, err = GetUserById(ctx, database, userId, &userId)
+			UNION ALL
+
+			SELECT
+				rh.server_id,
+				ri.parent_role_id,
+				rh.path || ri.parent_role_id
+			FROM role_hierarchy AS rh
+			JOIN public.role_inheritance AS ri
+			  ON ri.child_role_id = rh.role_id
+			JOIN public.server_roles AS parent_role
+			  ON parent_role.id = ri.parent_role_id
+			 AND parent_role.server_id = rh.server_id
+			WHERE NOT ri.parent_role_id = ANY(rh.path)
+		),
+		user_servers AS (
+			SELECT s.id AS server_id, TRUE AS super_admin
+			FROM public.servers AS s
+			JOIN target_user AS tu ON tu.super_admin
+
+			UNION ALL
+
+			SELECT DISTINCT rh.server_id, FALSE
+			FROM role_hierarchy AS rh
+		),
+		permission_rows AS (
+			SELECT
+				us.server_id,
+				CASE
+					WHEN us.super_admin THEN ARRAY['*']::text[]
+					ELSE COALESCE(
+						array_agg(DISTINCT p.code::text ORDER BY p.code::text)
+							FILTER (WHERE p.code IS NOT NULL),
+						ARRAY[]::text[]
+					)
+				END AS permissions
+			FROM user_servers AS us
+			LEFT JOIN role_hierarchy AS rh
+			  ON rh.server_id = us.server_id
+			 AND NOT us.super_admin
+			LEFT JOIN public.server_role_permissions AS srp
+			  ON srp.server_role_id = rh.role_id
+			LEFT JOIN public.permissions AS p
+			  ON p.id = srp.permission_id
+			GROUP BY us.server_id, us.super_admin
+		),
+		result_rows AS (
+			SELECT server_id, permissions
+			FROM permission_rows
+
+			UNION ALL
+
+			SELECT NULL::uuid, ARRAY[]::text[]
+			FROM target_user
+			WHERE NOT EXISTS (SELECT 1 FROM permission_rows)
+		)
+		SELECT server_id, permissions
+		FROM result_rows
+		ORDER BY server_id NULLS FIRST
+	`
+
+	rows, err := database.QueryContext(ctx, query, userId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user: %w", err)
+		return nil, fmt.Errorf("failed to get user server permissions: %w", err)
 	}
+	defer rows.Close()
 
-	// Get all servers the user has access to
-	servers, err := GetServers(ctx, database, user)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get servers: %w", err)
-	}
-
-	// Initialize the result map
 	serverPermissions := make(map[string][]string)
-
-	// If user is super admin, they have all permissions on all servers
-	if user.SuperAdmin {
-		for _, server := range servers {
-			// Super admins have all permissions
-			serverPermissions[server.Id.String()] = []string{"*"}
+	userExists := false
+	for rows.Next() {
+		var serverID uuid.NullUUID
+		var permissionCodes pq.StringArray
+		if err := rows.Scan(&serverID, &permissionCodes); err != nil {
+			return nil, fmt.Errorf("failed to scan user server permissions: %w", err)
 		}
-		return serverPermissions, nil
+		userExists = true
+		if serverID.Valid {
+			serverPermissions[serverID.UUID.String()] = []string(permissionCodes)
+		}
 	}
-
-	// For regular users, we need to get their roles for each server
-	for _, server := range servers {
-		// Get the user's admin record for this server
-		psql := squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar)
-		sql, args, err := psql.Select("server_role_id").
-			From("server_admins").
-			Where(squirrel.Eq{"server_id": server.Id, "user_id": userId}).
-			ToSql()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SQL query: %w", err)
-		}
-
-		var roleId uuid.UUID
-		err = database.QueryRowContext(ctx, sql, args...).Scan(&roleId)
-		if err != nil {
-			if strings.Contains(err.Error(), "no rows") {
-				// User doesn't have a role for this server, skip
-				continue
-			}
-			return nil, fmt.Errorf("failed to get role ID: %w", err)
-		}
-
-		// Get the role's permissions
-		sql, args, err = psql.Select("permissions").
-			From("server_roles").
-			Where(squirrel.Eq{"id": roleId}).
-			ToSql()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SQL query: %w", err)
-		}
-
-		var permissionsStr string
-		err = database.QueryRowContext(ctx, sql, args...).Scan(&permissionsStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get permissions: %w", err)
-		}
-
-		// Parse permissions from comma-separated string
-		permissions := strings.Split(permissionsStr, ",")
-		serverPermissions[server.Id.String()] = permissions
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read user server permissions: %w", err)
+	}
+	if !userExists {
+		return nil, ErrorUserNotFound
 	}
 
 	return serverPermissions, nil

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -20,6 +20,7 @@ import { isSecureOrLocalConnection } from "~/utils/security";
 import AdminTable from "./AdminTable.vue";
 import AdminFormDialog from "./AdminFormDialog.vue";
 import type { ServerAdmin, ServerRole, User } from "./shared";
+import type { PageInfo } from "~/types";
 
 const props = defineProps<{
   serverId: string;
@@ -34,12 +35,7 @@ interface RolesResponse {
 interface AdminsResponse {
   data: {
     admins: ServerAdmin[];
-    pagination?: {
-      total: number;
-      pages: number;
-      page: number;
-      limit: number;
-    };
+    page_info: PageInfo;
   };
 }
 
@@ -65,10 +61,17 @@ const cleanupLoading = ref(false);
 const showAdminCfgPopover = ref(false);
 
 const adminSearchQuery = ref("");
-const adminCurrentPage = ref(1);
-const adminItemsPerPage = ref("30");
-const adminTotalItems = ref(0);
-const adminTotalPages = ref(0);
+const {
+  limit: adminItemsPerPage,
+  cursor: adminCursor,
+  page: adminCurrentPage,
+  canGoPrevious: canGoToPreviousAdminPage,
+  canGoNext: canGoToNextAdminPage,
+  setPageInfo: setAdminPageInfo,
+  reset: resetAdminPagination,
+  next: advanceAdminPage,
+  previous: returnToPreviousAdminPage,
+} = useCursorPagination(30);
 
 const showAdminDialog = ref(false);
 const adminDialogMode = ref<"create" | "edit">("create");
@@ -104,9 +107,12 @@ async function fetchAdmins() {
   error.value = null;
 
   const queryParams = new URLSearchParams({
-    page: adminCurrentPage.value.toString(),
-    limit: adminItemsPerPage.value,
+    limit: adminItemsPerPage.value.toString(),
   });
+
+  if (adminCursor.value) {
+    queryParams.append("cursor", adminCursor.value);
+  }
 
   if (adminSearchQuery.value.trim()) {
     queryParams.append("search", adminSearchQuery.value.trim());
@@ -120,16 +126,10 @@ async function fetchAdmins() {
 
     if (data && data.data) {
       admins.value = data.data.admins || [];
-      adminTotalItems.value =
-        data.data.pagination?.total ?? admins.value.length;
-      adminTotalPages.value =
-        data.data.pagination?.pages ?? (admins.value.length > 0 ? 1 : 0);
+      setAdminPageInfo(data.data.page_info);
 
-      if (
-        adminTotalPages.value > 0 &&
-        adminCurrentPage.value > adminTotalPages.value
-      ) {
-        adminCurrentPage.value = adminTotalPages.value;
+      if (admins.value.length === 0 && canGoToPreviousAdminPage.value) {
+        returnToPreviousAdminPage();
         await fetchAdmins();
         return;
       }
@@ -147,14 +147,28 @@ async function fetchAdmins() {
 
 async function fetchAllAdmins() {
   try {
-    const data = await useAuthFetchImperative<AdminsResponse>(
-      `${runtimeConfig.public.backendApi}/servers/${props.serverId}/admins`,
-      { method: "GET" }
-    );
+    const collected: ServerAdmin[] = [];
+    let nextCursor: string | null = null;
 
-    if (data && data.data) {
-      allAdmins.value = data.data.admins || [];
-    }
+    do {
+      const queryParams = new URLSearchParams({ limit: "100" });
+      if (nextCursor) {
+        queryParams.set("cursor", nextCursor);
+      }
+
+      const data = await useAuthFetchImperative<AdminsResponse>(
+        `${runtimeConfig.public.backendApi}/servers/${props.serverId}/admins?${queryParams.toString()}`,
+        { method: "GET" }
+      );
+
+      collected.push(...(data.data?.admins || []));
+      nextCursor =
+        data.data?.page_info?.has_more && data.data.page_info.next_cursor
+          ? data.data.page_info.next_cursor
+          : null;
+    } while (nextCursor);
+
+    allAdmins.value = collected;
   } catch (err) {
     console.error("Error fetching full admin list:", err);
   }
@@ -185,32 +199,32 @@ async function fetchUsers() {
 }
 
 function applyAdminFilters() {
-  adminCurrentPage.value = 1;
+  resetAdminPagination();
   fetchAdmins();
 }
 
 function resetAdminFilters() {
   adminSearchQuery.value = "";
-  adminCurrentPage.value = 1;
+  resetAdminPagination();
   fetchAdmins();
 }
 
-function changeAdminPage(page: number) {
-  if (page < 1 || page === adminCurrentPage.value) {
-    return;
+function nextAdminPage() {
+  if (advanceAdminPage()) {
+    fetchAdmins();
   }
-
-  if (adminTotalPages.value > 0 && page > adminTotalPages.value) {
-    return;
-  }
-
-  adminCurrentPage.value = page;
-  fetchAdmins();
 }
 
-function changeAdminPageSize(value: any) {
-  adminItemsPerPage.value = value;
-  adminCurrentPage.value = 1;
+function previousAdminPage() {
+  if (returnToPreviousAdminPage()) {
+    fetchAdmins();
+  }
+}
+
+function changeAdminPageSize(value: unknown) {
+  const parsed = Number(value);
+  adminItemsPerPage.value = Number.isFinite(parsed) ? parsed : 30;
+  resetAdminPagination();
   fetchAdmins();
 }
 
@@ -301,7 +315,7 @@ function openEditAdminDialog(admin: ServerAdmin) {
 
 async function handleAdminSaved() {
   if (adminDialogMode.value === "create") {
-    adminCurrentPage.value = 1;
+    resetAdminPagination();
     await fetchAdmins();
     await fetchAllAdmins();
   } else {
@@ -348,44 +362,7 @@ function selectAdminCfgUrl(event: Event) {
   input.select();
 }
 
-const adminRangeStart = computed(() => {
-  if (adminTotalItems.value === 0 || admins.value.length === 0) {
-    return 0;
-  }
-
-  return (adminCurrentPage.value - 1) * Number(adminItemsPerPage.value) + 1;
-});
-
-const adminRangeEnd = computed(() => {
-  if (adminTotalItems.value === 0 || admins.value.length === 0) {
-    return 0;
-  }
-
-  return adminRangeStart.value + admins.value.length - 1;
-});
-
-const adminVisiblePages = computed(() => {
-  const totalPages = adminTotalPages.value;
-  if (totalPages <= 0) {
-    return [];
-  }
-
-  if (totalPages <= 5) {
-    return Array.from({ length: totalPages }, (_, index) => index + 1);
-  }
-
-  const visiblePages = new Set<number>([
-    1,
-    totalPages,
-    adminCurrentPage.value - 1,
-    adminCurrentPage.value,
-    adminCurrentPage.value + 1,
-  ]);
-
-  return Array.from(visiblePages)
-    .filter((page) => page >= 1 && page <= totalPages)
-    .sort((left, right) => left - right);
-});
+watch(adminSearchQuery, resetAdminPagination);
 
 onMounted(() => {
   fetchRoles();
@@ -494,7 +471,7 @@ onMounted(() => {
               Per Page
             </span>
             <Select
-              :model-value="adminItemsPerPage"
+              :model-value="adminItemsPerPage.toString()"
               @update:model-value="changeAdminPageSize"
             >
               <SelectTrigger class="w-[90px]">
@@ -531,40 +508,32 @@ onMounted(() => {
           <div
             class="text-xs sm:text-sm text-muted-foreground text-center sm:text-left"
           >
-            Showing {{ adminRangeStart }}-{{ adminRangeEnd }} of
-            {{ adminTotalItems }} entries
+            Page {{ adminCurrentPage }} · {{ admins.length }} entries
           </div>
 
           <div
-            v-if="adminTotalPages > 1"
+            v-if="canGoToPreviousAdminPage || canGoToNextAdminPage"
             class="flex items-center gap-1 sm:gap-2 flex-wrap justify-center"
           >
             <Button
               variant="outline"
               size="sm"
-              @click="changeAdminPage(adminCurrentPage - 1)"
-              :disabled="adminCurrentPage === 1"
+              @click="previousAdminPage"
+              :disabled="!canGoToPreviousAdminPage || loading.admins"
               class="text-xs sm:text-sm"
             >
               Prev
             </Button>
 
-            <Button
-              v-for="page in adminVisiblePages"
-              :key="page"
-              size="sm"
-              :variant="page === adminCurrentPage ? 'default' : 'outline'"
-              class="min-w-9 text-xs sm:text-sm"
-              @click="changeAdminPage(page)"
-            >
-              {{ page }}
-            </Button>
+            <span class="px-2 text-xs text-muted-foreground sm:text-sm">
+              Page {{ adminCurrentPage }}
+            </span>
 
             <Button
               variant="outline"
               size="sm"
-              @click="changeAdminPage(adminCurrentPage + 1)"
-              :disabled="adminCurrentPage === adminTotalPages"
+              @click="nextAdminPage"
+              :disabled="!canGoToNextAdminPage || loading.admins"
               class="text-xs sm:text-sm"
             >
               Next

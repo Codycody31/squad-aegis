@@ -17,9 +17,8 @@ const router = useRouter();
 const loading = ref(true);
 const error = ref<string | null>(null);
 const altGroups = ref<AltAccountGroup[]>([]);
-const totalGroups = ref(0);
-const page = ref(1);
 const limit = 5;
+const hasMore = ref(false);
 const expandedGroups = ref<Set<string>>(new Set());
 
 async function fetchAltGroups() {
@@ -30,10 +29,10 @@ async function fetchAltGroups() {
     const data = await useAuthFetchImperative<{
       data: AltAccountGroupsResponse;
     }>(
-      `${runtimeConfig.public.backendApi}/players/alt-groups?page=${page.value}&limit=${limit}`
+      `${runtimeConfig.public.backendApi}/players/alt-groups?limit=${limit}`
     );
     altGroups.value = data.data.alt_groups || [];
-    totalGroups.value = data.data.total_groups || 0;
+    hasMore.value = data.data.page_info?.has_more ?? false;
   } catch (err: any) {
     if (err?.response?.status === 403 || err?.statusCode === 403) {
       error.value = "permission_denied";
@@ -226,12 +225,12 @@ onMounted(() => {
         </Collapsible>
 
         <!-- View All Link -->
-        <div v-if="totalGroups > limit" class="pt-3 text-center">
+        <div v-if="hasMore" class="pt-3 text-center">
           <NuxtLink
             to="/players/alts"
             class="text-sm text-primary hover:underline"
           >
-            View all {{ totalGroups }} groups
+            View all groups
           </NuxtLink>
         </div>
       </div>

@@ -15,12 +15,15 @@ type Struct struct {
 		}
 	}
 	Db struct {
-		Host    string `default:"localhost"`
-		Port    int    `default:"5432"`
-		Name    string `default:"squad-aegis"`
-		User    string `default:"squad-aegis"`
-		Pass    string `default:"squad-aegis"`
-		Migrate struct {
+		Host                   string `default:"localhost"`
+		Port                   int    `default:"5432"`
+		Name                   string `default:"squad-aegis"`
+		User                   string `default:"squad-aegis"`
+		Pass                   string `default:"squad-aegis"`
+		MaxOpenConns           int    `default:"25"`
+		MaxIdleConns           int    `default:"10"`
+		ConnMaxLifetimeMinutes int    `default:"30"`
+		Migrate                struct {
 			Verbose bool `default:"false"`
 		}
 	}

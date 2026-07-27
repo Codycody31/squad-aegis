@@ -1,3 +1,5 @@
+import type { PageInfo } from "~/types";
+
 // Player Profile Types for Admin Dashboard
 
 export interface PlayerProfile {
@@ -52,7 +54,7 @@ export interface PlayerActivity {
 }
 
 export interface ChatMessage {
-  message_id?: string;
+  message_id: string;
   sent_at: string;
   message: string;
   chat_type: "all" | "team" | "squad" | "admin";
@@ -223,17 +225,11 @@ export interface AltAccountGroup {
 
 export interface AltAccountGroupsResponse {
   alt_groups: AltAccountGroup[];
-  total_groups: number;
-  page: number;
-  limit: number;
+  page_info: PageInfo;
 }
 
 export interface PaginatedChatHistory {
   messages: ChatMessage[];
-  total: number;
-  page: number;
-  limit: number;
-  total_pages: number;
 }
 
 export interface CBLBan {

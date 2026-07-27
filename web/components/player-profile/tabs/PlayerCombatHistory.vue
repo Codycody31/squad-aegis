@@ -36,6 +36,7 @@ import {
   Heart,
 } from "lucide-vue-next";
 import type { CombatHistoryEntry } from "~/types/player";
+import type { PageInfo } from "~/types";
 
 interface CombatHistoryDisplayEntry extends CombatHistoryEntry {
   row_id: string;
@@ -54,9 +55,17 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const events = ref<CombatHistoryEntry[]>([]);
-const hasMore = ref(false);
-const page = ref(1);
-const limit = ref(50);
+const {
+  limit,
+  cursor,
+  page,
+  canGoPrevious,
+  canGoNext,
+  setPageInfo,
+  reset: resetPagination,
+  next: advancePage,
+  previous: returnToPreviousPage,
+} = useCursorPagination(50);
 const eventTypeFilter = ref("all");
 const burstEventTypes = new Set<CombatHistoryEntry["event_type"]>([
   "damaged",
@@ -69,15 +78,25 @@ async function fetchCombatHistory() {
 
   try {
     const params = new URLSearchParams({
-      page: page.value.toString(),
       limit: limit.value.toString(),
     });
+    if (cursor.value) {
+      params.set("cursor", cursor.value);
+    }
+    if (eventTypeFilter.value !== "all") {
+      params.set("type", eventTypeFilter.value);
+    }
 
-    const data = await useAuthFetchImperative<any>(
+    const data = await useAuthFetchImperative<{
+      data: {
+        events: CombatHistoryEntry[];
+        page_info: PageInfo;
+      };
+    }>(
       `${runtimeConfig.public.backendApi}/players/${props.playerId}/combat?${params}`
     );
     events.value = data.data.events || [];
-    hasMore.value = data.data.has_more ?? false;
+    setPageInfo(data.data.page_info);
   } catch (err: any) {
     error.value = extractApiErrorMessage(err);
   } finally {
@@ -263,7 +282,8 @@ function getDamageMeta(entry: CombatHistoryDisplayEntry): string {
 }
 
 watch(eventTypeFilter, () => {
-  page.value = 1;
+  resetPagination();
+  fetchCombatHistory();
 });
 
 watch(
@@ -271,21 +291,24 @@ watch(
   (newPlayerId, oldPlayerId) => {
     if (!newPlayerId || newPlayerId === oldPlayerId) return;
 
-    page.value = 1;
+    resetPagination();
+    const filterChanged = eventTypeFilter.value !== "all";
     eventTypeFilter.value = "all";
     events.value = [];
-    fetchCombatHistory();
+    if (!filterChanged) {
+      fetchCombatHistory();
+    }
   }
 );
 
 function nextPage() {
-  page.value++;
-  fetchCombatHistory();
+  if (advancePage()) {
+    fetchCombatHistory();
+  }
 }
 
 function prevPage() {
-  if (page.value > 1) {
-    page.value--;
+  if (returnToPreviousPage()) {
     fetchCombatHistory();
   }
 }
@@ -521,27 +544,31 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Pagination -->
-        <div class="flex items-center justify-between mt-4 pt-4 border-t">
-          <div class="text-sm text-muted-foreground">Page {{ page }}</div>
-          <div class="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="page <= 1"
-              @click="prevPage"
-            >
-              <ChevronLeft class="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="!hasMore"
-              @click="nextPage"
-            >
-              <ChevronRight class="h-4 w-4" />
-            </Button>
-          </div>
+      </div>
+
+      <!-- Keep Previous available when a once-valid final page becomes empty. -->
+      <div
+        v-if="canGoPrevious || canGoNext"
+        class="flex items-center justify-between mt-4 pt-4 border-t"
+      >
+        <div class="text-sm text-muted-foreground">Page {{ page }}</div>
+        <div class="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="!canGoPrevious || loading"
+            @click="prevPage"
+          >
+            <ChevronLeft class="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="!canGoNext || loading"
+            @click="nextPage"
+          >
+            <ChevronRight class="h-4 w-4" />
+          </Button>
         </div>
       </div>
     </CardContent>

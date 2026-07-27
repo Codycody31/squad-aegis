@@ -6,16 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.codycody31.dev/squad-aegis/internal/core"
+	"go.codycody31.dev/squad-aegis/internal/pagination"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
-// AuditLogEntry represents an audit log entry
+const serverAuditCursorKind = "audit.server"
+
+// AuditLogEntry represents an audit log entry.
 type AuditLogEntry struct {
 	ID        uuid.UUID       `json:"id"`
 	UserID    *uuid.UUID      `json:"user_id,omitempty"`
@@ -25,193 +29,218 @@ type AuditLogEntry struct {
 	Timestamp time.Time       `json:"timestamp"`
 }
 
-// CreateAuditLog creates a new audit log entry
+type auditCursorValues struct {
+	Timestamp time.Time `json:"timestamp"`
+	ID        uuid.UUID `json:"id"`
+}
+
+type serverAuditFilters struct {
+	ServerID  uuid.UUID  `json:"server_id"`
+	Action    string     `json:"action"`
+	UserID    *uuid.UUID `json:"user_id"`
+	Search    string     `json:"search"`
+	DateRange string     `json:"date_range"`
+}
+
+// CreateAuditLog creates a new audit log entry.
 func (s *Server) CreateAuditLog(ctx context.Context, serverID *uuid.UUID, userID *uuid.UUID, action string, changes interface{}) {
-	// Convert changes to JSON
 	changesJSON, err := json.Marshal(changes)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to marshal changes for audit log")
 		return
 	}
 
-	// Insert the audit log into the database. username_snapshot captures the acting
-	// user's name at write time so the row remains attributable after user deletion
-	// (FK is ON DELETE SET NULL).
 	_, err = s.Dependencies.DB.ExecContext(ctx, `
+		/* sa.audit.create */
 		INSERT INTO audit_logs (id, server_id, user_id, action, changes, timestamp, username_snapshot)
 		VALUES ($1, $2, $3, $4, $5, $6, (SELECT username FROM users WHERE id = $3))
 	`, uuid.New(), serverID, userID, action, changesJSON, time.Now())
-
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create audit log")
-		return
 	}
 }
 
-// ServerAuditLogs handles listing audit logs for a server
+// ServerAuditLogs handles keyset-paginated audit logs for a server.
 func (s *Server) ServerAuditLogs(c *gin.Context) {
+	ctx := c.Request.Context()
 	user := s.getUserFromSession(c)
-
-	serverIDString := c.Param("serverId")
-	serverID, err := uuid.Parse(serverIDString)
+	serverID, err := uuid.Parse(c.Param("serverId"))
 	if err != nil {
 		responses.BadRequest(c, "Invalid server ID", &gin.H{"error": err.Error()})
 		return
 	}
-
-	// Check if user has access to this server
-	_, err = core.GetServerById(c.Request.Context(), s.Dependencies.DB, serverID, user)
-	if err != nil {
+	if _, err = core.GetServerById(ctx, s.Dependencies.DB, serverID, user); err != nil {
 		responses.BadRequest(c, "Failed to get server", &gin.H{"error": err.Error()})
 		return
 	}
 
-	// Parse pagination parameters
-	page := 1
-	limit := 20
-	if pageStr := c.Query("page"); pageStr != "" {
-		if pageInt, err := parseInt(pageStr); err == nil && pageInt > 0 {
-			page = pageInt
-		}
-	}
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if limitInt, err := parseInt(limitStr); err == nil && limitInt > 0 {
-			limit = limitInt
-		}
-	}
-	offset := (page - 1) * limit
-
-	// Build the query. COALESCE prefers the live username, falls back to the
-	// snapshot captured at write time so rows for deleted users still show a name.
-	query := `
-		SELECT al.id, al.user_id, COALESCE(u.username, al.username_snapshot), al.action, al.changes, al.timestamp
-		FROM audit_logs al
-		LEFT JOIN users u ON al.user_id = u.id
-		WHERE al.server_id = $1
-	`
-	countQuery := `
-		SELECT COUNT(*)
-		FROM audit_logs al
-		WHERE al.server_id = $1
-	`
-	args := []interface{}{serverID}
-	whereCount := 1
-
-	// Add filters if provided
-	if actionType := c.Query("actionType"); actionType != "" && actionType != "all" {
-		whereCount++
-		query += " AND al.action = $" + intToString(whereCount)
-		countQuery += " AND action = $" + intToString(whereCount)
-		args = append(args, actionType)
-	}
-
-	if userIDStr := c.Query("userId"); userIDStr != "" && userIDStr != "all" {
-		userID, err := uuid.Parse(userIDStr)
-		if err == nil {
-			whereCount++
-			query += " AND al.user_id = $" + intToString(whereCount)
-			countQuery += " AND user_id = $" + intToString(whereCount)
-			args = append(args, userID)
-		}
-	}
-
-	// Add search if provided. Also search the username snapshot so deleted users
-	// remain findable by name.
-	if search := c.Query("search"); search != "" {
-		whereCount++
-		p := intToString(whereCount)
-		query += " AND (u.username ILIKE $" + p + " OR al.username_snapshot ILIKE $" + p + " OR al.action ILIKE $" + p + ")"
-		countQuery += " AND (EXISTS (SELECT 1 FROM users WHERE id = user_id AND username ILIKE $" + p + ") OR username_snapshot ILIKE $" + p + " OR action ILIKE $" + p + ")"
-		args = append(args, "%"+search+"%")
-	}
-
-	// Add date filter if provided
-	if dateFilter := c.Query("dateFilter"); dateFilter != "" && dateFilter != "all" {
-		var timeFilter time.Time
-		now := time.Now()
-
-		switch dateFilter {
-		case "today":
-			timeFilter = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		case "yesterday":
-			yesterday := now.AddDate(0, 0, -1)
-			timeFilter = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, now.Location())
-		case "week":
-			timeFilter = now.AddDate(0, 0, -7)
-		case "month":
-			timeFilter = now.AddDate(0, -1, 0)
-		}
-
-		if !timeFilter.IsZero() {
-			whereCount++
-			query += " AND al.timestamp >= $" + intToString(whereCount)
-			countQuery += " AND timestamp >= $" + intToString(whereCount)
-			args = append(args, timeFilter)
-		}
-	}
-
-	// Add ordering and pagination
-	query += " ORDER BY al.timestamp DESC LIMIT $" + intToString(whereCount+1) + " OFFSET $" + intToString(whereCount+2)
-	args = append(args, limit, offset)
-
-	// Get total count
-	var totalCount int
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), countQuery, args[:whereCount]...).Scan(&totalCount)
-	if err != nil {
-		responses.BadRequest(c, "Failed to count audit logs", &gin.H{"error": err.Error()})
+	limit, ok := parseCursorLimit(c, 50, 100)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
 		return
 	}
 
-	// Calculate total pages
-	totalPages := (totalCount + limit - 1) / limit
+	filters := serverAuditFilters{
+		ServerID:  serverID,
+		Action:    normalizedAllFilter(c.Query("actionType")),
+		Search:    strings.ToLower(strings.TrimSpace(c.Query("search"))),
+		DateRange: normalizedAllFilter(c.Query("dateFilter")),
+	}
+	if rawUserID := normalizedAllFilter(c.Query("userId")); rawUserID != "" {
+		parsed, parseErr := uuid.Parse(rawUserID)
+		if parseErr != nil {
+			responses.BadRequest(c, "Invalid user ID", &gin.H{"error": parseErr.Error()})
+			return
+		}
+		filters.UserID = &parsed
+	}
+	filterHash := pagination.MustFilterHash(filters)
 
-	// Execute the query
-	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), query, args...)
+	var cursorValues *auditCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &auditCursorValues{}
+		if err := pagination.Decode(encodedCursor, serverAuditCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	query := `
+		/* sa.audit.list */
+		SELECT al.id, al.user_id, COALESCE(u.username, al.username_snapshot),
+		       al.action, al.changes, al.timestamp
+		FROM audit_logs al
+		LEFT JOIN users u ON al.user_id = u.id
+		WHERE al.server_id = $1`
+	args := []any{serverID}
+	addArg := func(value any) string {
+		args = append(args, value)
+		return "$" + strconv.Itoa(len(args))
+	}
+
+	if filters.Action != "" {
+		query += " AND al.action = " + addArg(filters.Action)
+	}
+	if filters.UserID != nil {
+		query += " AND al.user_id = " + addArg(*filters.UserID)
+	}
+	if filters.Search != "" {
+		placeholder := addArg("%" + filters.Search + "%")
+		query += ` AND (
+			lower(al.action) LIKE ` + placeholder + ` OR
+			lower(COALESCE(al.username_snapshot, '')) LIKE ` + placeholder + ` OR
+			EXISTS (SELECT 1 FROM users au WHERE au.id = al.user_id AND lower(au.username) LIKE ` + placeholder + `)
+		)`
+	}
+	if start := auditDateStart(filters.DateRange, time.Now()); start != nil {
+		query += " AND al.timestamp >= " + addArg(*start)
+	}
+	if cursorValues != nil {
+		timestampArg := addArg(cursorValues.Timestamp)
+		idArg := addArg(cursorValues.ID)
+		query += " AND (al.timestamp, al.id) < (" + timestampArg + ", " + idArg + ")"
+	}
+	query += " ORDER BY al.timestamp DESC, al.id DESC LIMIT " + addArg(limit+1)
+
+	started := time.Now()
+	rows, err := s.Dependencies.DB.QueryContext(ctx, query, args...)
 	if err != nil {
-		responses.BadRequest(c, "Failed to query audit logs", &gin.H{"error": err.Error()})
+		logAuditQuery("sa.audit.list", started, 0, err)
+		responses.InternalServerError(c, fmt.Errorf("failed to query audit logs: %w", err), nil)
 		return
 	}
 	defer rows.Close()
 
-	// Parse the results
-	logs := []AuditLogEntry{}
+	logs := make([]AuditLogEntry, 0, limit+1)
 	for rows.Next() {
-		var log AuditLogEntry
+		var entry AuditLogEntry
 		var username sql.NullString
-		err := rows.Scan(
-			&log.ID,
-			&log.UserID,
-			&username,
-			&log.Action,
-			&log.Changes,
-			&log.Timestamp,
-		)
-		if err != nil {
-			responses.BadRequest(c, "Failed to scan audit log", &gin.H{"error": err.Error()})
+		if err := rows.Scan(&entry.ID, &entry.UserID, &username, &entry.Action, &entry.Changes, &entry.Timestamp); err != nil {
+			logAuditQuery("sa.audit.list", started, len(logs), err)
+			responses.InternalServerError(c, fmt.Errorf("failed to scan audit log: %w", err), nil)
 			return
 		}
-
 		if username.Valid {
-			log.Username = username.String
+			entry.Username = username.String
 		} else {
-			log.Username = "System"
+			entry.Username = "System"
 		}
-
-		logs = append(logs, log)
+		logs = append(logs, entry)
 	}
+	if err := rows.Err(); err != nil {
+		logAuditQuery("sa.audit.list", started, len(logs), err)
+		responses.InternalServerError(c, fmt.Errorf("iterate audit logs: %w", err), nil)
+		return
+	}
+	logs, hasMore := pagination.TrimPage(logs, limit)
+	pageInfo, err := auditPageInfo(serverAuditCursorKind, filterHash, logs, hasMore)
+	if err != nil {
+		responses.InternalServerError(c, err, nil)
+		return
+	}
+	logAuditQuery("sa.audit.list", started, len(logs), nil)
 
 	responses.Success(c, "Audit logs fetched successfully", &gin.H{
-		"logs": logs,
-		"pagination": gin.H{
-			"total": totalCount,
-			"pages": totalPages,
-			"page":  page,
-			"limit": limit,
-		},
+		"logs":      logs,
+		"page_info": pageInfo,
 	})
 }
 
-// Helper functions
+func auditPageInfo[T interface {
+	AuditLogEntry | GlobalAuditLogEntry
+}](kind, filterHash string, logs []T, hasMore bool) (pagination.PageInfo, error) {
+	info := pagination.PageInfo{HasMore: hasMore}
+	if !hasMore || len(logs) == 0 {
+		return info, nil
+	}
+	var values auditCursorValues
+	switch entry := any(logs[len(logs)-1]).(type) {
+	case AuditLogEntry:
+		values = auditCursorValues{Timestamp: entry.Timestamp, ID: entry.ID}
+	case GlobalAuditLogEntry:
+		values = auditCursorValues{Timestamp: entry.Timestamp, ID: entry.ID}
+	default:
+		return info, fmt.Errorf("unsupported audit cursor row")
+	}
+	encoded, err := pagination.Encode(kind, filterHash, values)
+	if err != nil {
+		return info, fmt.Errorf("encode audit cursor: %w", err)
+	}
+	info.NextCursor = &encoded
+	return info, nil
+}
+
+func auditDateStart(dateFilter string, now time.Time) *time.Time {
+	switch dateFilter {
+	case "today":
+		value := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		return &value
+	case "yesterday":
+		yesterday := now.AddDate(0, 0, -1)
+		value := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, now.Location())
+		return &value
+	case "week":
+		value := now.AddDate(0, 0, -7)
+		return &value
+	case "month":
+		value := now.AddDate(0, -1, 0)
+		return &value
+	default:
+		return nil
+	}
+}
+
+func logAuditQuery(label string, started time.Time, rows int, err error) {
+	duration := time.Since(started)
+	event := log.Debug()
+	if err != nil {
+		event = log.Error().Err(err)
+	} else if duration >= 500*time.Millisecond {
+		event = log.Warn()
+	}
+	event.Str("query", label).Dur("duration", duration).Int("rows", rows).Msg("database query")
+}
+
+// Helper functions retained for existing handlers.
 func parseInt(s string) (int, error) {
 	var i int
 	_, err := fmt.Sscanf(s, "%d", &i)

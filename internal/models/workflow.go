@@ -190,6 +190,7 @@ type WorkflowExecuteRequest struct {
 
 // WorkflowExecutionLog represents a single log entry from ClickHouse
 type WorkflowExecutionLog struct {
+	EntryID          uuid.UUID              `json:"entry_id"`
 	ExecutionID      uuid.UUID              `json:"execution_id"`
 	WorkflowID       uuid.UUID              `json:"workflow_id"`
 	ServerID         uuid.UUID              `json:"server_id"`
@@ -229,6 +230,7 @@ type WorkflowExecutionSummary struct {
 
 // WorkflowLogMessage represents a log message from a workflow execution
 type WorkflowLogMessage struct {
+	EntryID     uuid.UUID              `json:"entry_id"`
 	ExecutionID uuid.UUID              `json:"execution_id"`
 	WorkflowID  uuid.UUID              `json:"workflow_id"`
 	ServerID    uuid.UUID              `json:"server_id"`

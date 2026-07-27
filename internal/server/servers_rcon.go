@@ -840,66 +840,50 @@ type RuleEscalationSuggestion struct {
 	RuleId            *string `json:"rule_id"` // Rule ID for generating reason in UI
 }
 
-// calculateRuleNumber calculates the hierarchical rule number (e.g., "1.2.3") for a given rule
+// calculateRuleNumber calculates the hierarchical rule number (e.g. "1.2.3")
+// in one recursive query. Sibling row_number() makes ties deterministic.
 func calculateRuleNumber(ctx context.Context, db *sql.DB, ruleId uuid.UUID, serverId uuid.UUID) string {
-	type ruleNode struct {
-		id           uuid.UUID
-		parentId     sql.NullString
-		displayOrder int
+	var ruleNumber string
+	err := db.QueryRowContext(ctx, `
+		/* sa.rules.number */
+		WITH RECURSIVE ranked_rules AS (
+			SELECT
+				id,
+				parent_id,
+				row_number() OVER (
+					PARTITION BY parent_id
+					ORDER BY display_order, id
+				)::text AS sibling_number
+			FROM server_rules
+			WHERE server_id = $2
+		), rule_paths AS (
+			SELECT
+				id,
+				parent_id,
+				sibling_number AS rule_number,
+				ARRAY[id] AS visited
+			FROM ranked_rules
+			WHERE parent_id IS NULL
+
+			UNION ALL
+
+			SELECT
+				child.id,
+				child.parent_id,
+				parent.rule_number || '.' || child.sibling_number,
+				parent.visited || child.id
+			FROM ranked_rules child
+			JOIN rule_paths parent ON child.parent_id = parent.id
+			WHERE NOT child.id = ANY(parent.visited)
+		)
+		SELECT rule_number
+		FROM rule_paths
+		WHERE id = $1
+	`, ruleId, serverId).Scan(&ruleNumber)
+	if err != nil {
+		return ""
 	}
-
-	// Build the hierarchy path from root to target rule
-	path := []ruleNode{}
-	currentRuleId := ruleId
-
-	for {
-		var node ruleNode
-		var parentId sql.NullString
-		query := `SELECT id, parent_id, display_order FROM server_rules WHERE id = $1 AND server_id = $2`
-		err := db.QueryRowContext(ctx, query, currentRuleId, serverId).Scan(&node.id, &parentId, &node.displayOrder)
-		if err != nil {
-			break
-		}
-
-		node.parentId = parentId
-		path = append([]ruleNode{node}, path...) // Prepend to build path from root to target
-
-		if !parentId.Valid {
-			break // Reached root
-		}
-
-		currentRuleId, err = uuid.Parse(parentId.String)
-		if err != nil {
-			break
-		}
-	}
-
-	// Calculate number by traversing down the path
-	var parts []string
-	for i, node := range path {
-		if i == 0 {
-			// Root level - find its position among root rules
-			query := `SELECT COUNT(*) FROM server_rules WHERE server_id = $1 AND parent_id IS NULL AND display_order < $2`
-			var position int
-			err := db.QueryRowContext(ctx, query, serverId, node.displayOrder).Scan(&position)
-			if err != nil {
-				return ""
-			}
-			parts = append(parts, strconv.Itoa(position+1))
-		} else {
-			// Child level - find its position among siblings
-			parentId := path[i-1].id
-			query := `SELECT COUNT(*) FROM server_rules WHERE server_id = $1 AND parent_id = $2 AND display_order < $3`
-			var position int
-			err := db.QueryRowContext(ctx, query, serverId, parentId, node.displayOrder).Scan(&position)
-			if err != nil {
-				return ""
-			}
-			parts = append(parts, strconv.Itoa(position+1))
-		}
-	}
-
-	return strings.Join(parts, ".")
+	return ruleNumber
 }
 
 // formatDuration formats the duration in days to a human-readable string

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.codycody31.dev/squad-aegis/internal/clickhouse"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/shared/config"
 )
@@ -40,6 +41,13 @@ type SystemConfigResponse struct {
 	Log        gin.H `json:"log"`
 }
 
+type clickHouseHealthClient interface {
+	Ping(context.Context) error
+	Query(context.Context, string, ...interface{}) (*clickhouse.Rows, error)
+}
+
+var _ clickHouseHealthClient = (*clickhouse.Client)(nil)
+
 // GetSystemHealth returns overall system health status
 func (s *Server) GetSystemHealth(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -52,6 +60,18 @@ func (s *Server) GetSystemHealth(c *gin.Context) {
 	// Check ClickHouse
 	if s.Dependencies.Clickhouse != nil {
 		health.ClickHouse = checkClickHouseHealth(ctx, s.Dependencies.Clickhouse)
+		if health.ClickHouse.Details == nil {
+			health.ClickHouse.Details = gin.H{}
+		}
+		health.ClickHouse.Details["pools"] = s.Dependencies.Clickhouse.Stats()
+		if s.Dependencies.EventIngester != nil {
+			ingesterStats := s.Dependencies.EventIngester.Stats()
+			health.ClickHouse.Details["ingester"] = ingesterStats
+			if ingesterStats.Degraded && health.ClickHouse.Status == "healthy" {
+				health.ClickHouse.Status = "degraded"
+				health.ClickHouse.Message = "ClickHouse ingestion is degraded"
+			}
+		}
 	} else {
 		health.ClickHouse = SystemServiceHealth{
 			Status:  "unhealthy",
@@ -167,11 +187,16 @@ func checkPostgreSQLHealth(ctx context.Context, db *sql.DB) SystemServiceHealth 
 	stats := db.Stats()
 
 	details := gin.H{
-		"database_size":    dbSize,
-		"table_count":      tableCount,
-		"open_connections": stats.OpenConnections,
-		"in_use":           stats.InUse,
-		"idle":             stats.Idle,
+		"database_size":        dbSize,
+		"table_count":          tableCount,
+		"max_open_connections": stats.MaxOpenConnections,
+		"open_connections":     stats.OpenConnections,
+		"in_use":               stats.InUse,
+		"idle":                 stats.Idle,
+		"wait_count":           stats.WaitCount,
+		"wait_duration_ms":     stats.WaitDuration.Milliseconds(),
+		"max_idle_closed":      stats.MaxIdleClosed,
+		"max_lifetime_closed":  stats.MaxLifetimeClosed,
 	}
 
 	status := "healthy"
@@ -200,13 +225,8 @@ func checkPostgreSQLHealth(ctx context.Context, db *sql.DB) SystemServiceHealth 
 func checkClickHouseHealth(ctx context.Context, ch interface{}) SystemServiceHealth {
 	start := time.Now()
 
-	// Type assertion to get the underlying connection
-	type ClickHousePinger interface {
-		Ping(context.Context) error
-		Query(context.Context, string, ...interface{}) (*sql.Rows, error)
-	}
-
-	client, ok := ch.(ClickHousePinger)
+	// Type assertion to get the underlying connection.
+	client, ok := ch.(clickHouseHealthClient)
 	if !ok {
 		return SystemServiceHealth{
 			Status:  "unhealthy",
@@ -228,18 +248,22 @@ func checkClickHouseHealth(ctx context.Context, ch interface{}) SystemServiceHea
 	// Get database stats
 	var totalRows, totalBytes uint64
 
-	rows, err := client.Query(ctx, `
-		SELECT 
-			SUM(rows) as total_rows,
-			SUM(bytes) as total_bytes
+	rows, statsErr := client.Query(ctx, `
+		/* sa.health.clickhouse */
+		SELECT
+			ifNull(sum(rows), 0) AS total_rows,
+			ifNull(sum(bytes_on_disk), 0) AS total_bytes
 		FROM system.parts
 		WHERE database = 'squad_aegis' AND active = 1
 	`)
 
-	if err == nil {
+	if statsErr == nil {
 		defer rows.Close()
 		if rows.Next() {
-			rows.Scan(&totalRows, &totalBytes)
+			statsErr = rows.Scan(&totalRows, &totalBytes)
+		}
+		if statsErr == nil {
+			statsErr = rows.Err()
 		}
 	}
 
@@ -251,7 +275,10 @@ func checkClickHouseHealth(ctx context.Context, ch interface{}) SystemServiceHea
 	status := "healthy"
 	message := "ClickHouse is operational"
 
-	if latency > 200 {
+	if statsErr != nil {
+		status = "degraded"
+		message = "ClickHouse is connected, but statistics are unavailable"
+	} else if latency > 200 {
 		status = "degraded"
 		message = "High latency detected"
 	}

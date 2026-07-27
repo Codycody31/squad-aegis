@@ -3,8 +3,10 @@ package server
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 )
 
@@ -259,18 +261,30 @@ func (s *Server) OptimizeDatabase(c *gin.Context) {
 			responses.InternalServerError(c, fmt.Errorf("failed to get tables: %w", err), nil)
 			return
 		}
-		defer rows.Close()
-
-		optimizedTables := []string{}
+		tableNames := []string{}
 		for rows.Next() {
 			var tableName string
-			if rows.Scan(&tableName) == nil {
-				// Run ANALYZE (VACUUM requires elevated privileges)
-				_, err := s.Dependencies.DB.ExecContext(ctx, fmt.Sprintf("ANALYZE %s", tableName))
-				if err == nil {
-					optimizedTables = append(optimizedTables, tableName)
-				}
+			if err := rows.Scan(&tableName); err != nil {
+				rows.Close()
+				responses.InternalServerError(c, fmt.Errorf("scan PostgreSQL table: %w", err), nil)
+				return
 			}
+			tableNames = append(tableNames, tableName)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			responses.InternalServerError(c, fmt.Errorf("iterate PostgreSQL tables: %w", err), nil)
+			return
+		}
+		rows.Close()
+
+		optimizedTables := make([]string, 0, len(tableNames))
+		for _, tableName := range tableNames {
+			if _, err := s.Dependencies.DB.ExecContext(ctx, "ANALYZE "+pq.QuoteIdentifier(tableName)); err != nil {
+				responses.InternalServerError(c, fmt.Errorf("analyze PostgreSQL table %q: %w", tableName, err), nil)
+				return
+			}
+			optimizedTables = append(optimizedTables, tableName)
 		}
 
 		responses.Success(c, "PostgreSQL optimization completed", &gin.H{
@@ -292,24 +306,43 @@ func (s *Server) OptimizeDatabase(c *gin.Context) {
 			responses.InternalServerError(c, fmt.Errorf("failed to get tables: %w", err), nil)
 			return
 		}
-		defer rows.Close()
-
-		optimizedTables := []string{}
+		tableNames := []string{}
 		for rows.Next() {
 			var tableName string
-			if rows.Scan(&tableName) == nil {
-				// OPTIMIZE TABLE can be resource intensive, so we'll just note it
-				// In production, you might want to run this during off-peak hours
-				optimizedTables = append(optimizedTables, tableName)
+			if err := rows.Scan(&tableName); err != nil {
+				rows.Close()
+				responses.InternalServerError(c, fmt.Errorf("scan ClickHouse table: %w", err), nil)
+				return
 			}
+			tableNames = append(tableNames, tableName)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			responses.InternalServerError(c, fmt.Errorf("iterate ClickHouse tables: %w", err), nil)
+			return
+		}
+		rows.Close()
+
+		optimizedTables := make([]string, 0, len(tableNames))
+		for _, tableName := range tableNames {
+			query := "OPTIMIZE TABLE `squad_aegis`." + quoteClickHouseIdentifier(tableName)
+			if err := s.Dependencies.Clickhouse.Exec(ctx, query); err != nil {
+				responses.InternalServerError(c, fmt.Errorf("optimize ClickHouse table %q: %w", tableName, err), nil)
+				return
+			}
+			optimizedTables = append(optimizedTables, tableName)
 		}
 
-		responses.Success(c, "ClickHouse optimization queued", &gin.H{
+		responses.Success(c, "ClickHouse optimization completed", &gin.H{
 			"tables": optimizedTables,
-			"note":   "Optimization should be run during off-peak hours",
+			"count":  len(optimizedTables),
 		})
 
 	default:
 		responses.BadRequest(c, "Invalid database type", nil)
 	}
+}
+
+func quoteClickHouseIdentifier(identifier string) string {
+	return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
 }

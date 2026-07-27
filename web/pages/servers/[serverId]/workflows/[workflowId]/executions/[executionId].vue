@@ -28,6 +28,7 @@ import type {
   WorkflowExecutionLog,
   WorkflowLogMessage,
 } from "~/components/workflows/execution";
+import type { PageInfo } from "~/types";
 
 const route = useRoute();
 
@@ -44,12 +45,12 @@ const error = ref<string | null>(null);
 const execution = ref<WorkflowExecution | null>(null);
 const logs = ref<WorkflowExecutionLog[]>([]);
 const messages = ref<WorkflowLogMessage[]>([]);
-const totalLogs = ref(0);
-const totalMessages = ref(0);
-const logsOffset = ref(0);
-const messagesOffset = ref(0);
-const logsPageSize = ref("50");
-const messagesPageSize = ref("50");
+const logsCursor = ref<string | null>(null);
+const messagesCursor = ref<string | null>(null);
+const logsHasMore = ref(false);
+const messagesHasMore = ref(false);
+const logsPageSize = ref("100");
+const messagesPageSize = ref("100");
 const activeTab = ref("logs"); // "logs" or "messages"
 
 const stepList = ref<InstanceType<typeof ExecutionStepList> | null>(null);
@@ -82,22 +83,22 @@ const loadMessages = async (append = false) => {
     messagesLoading.value = true;
     if (!append) {
       messages.value = [];
-      messagesOffset.value = 0;
+      messagesCursor.value = null;
+      messagesHasMore.value = false;
     }
 
     const response = await useAuthFetchImperative<
       ApiResponse<{
         execution: WorkflowExecution;
         messages: WorkflowLogMessage[];
-        limit: number;
-        offset: number;
+        page_info: PageInfo;
       }>
     >(
       `/api/servers/${serverId.value}/workflows/${workflowId.value}/executions/${executionId.value}/messages`,
       {
         query: {
           limit: parseInt(messagesPageSize.value),
-          offset: messagesOffset.value,
+          cursor: append ? messagesCursor.value || undefined : undefined,
         },
       }
     );
@@ -119,7 +120,8 @@ const loadMessages = async (append = false) => {
       } else {
         messages.value = messagesData || [];
       }
-      totalMessages.value = messagesData?.length || 0;
+      messagesCursor.value = response.data.page_info?.next_cursor ?? null;
+      messagesHasMore.value = response.data.page_info?.has_more ?? false;
     } else {
       error.value = response.message || "Failed to load messages";
     }
@@ -131,8 +133,9 @@ const loadMessages = async (append = false) => {
 };
 
 const loadMoreMessages = () => {
-  messagesOffset.value += parseInt(messagesPageSize.value);
-  loadMessages(true);
+  if (messagesHasMore.value && messagesCursor.value) {
+    loadMessages(true);
+  }
 };
 
 const onMessagePageSizeChange = () => {
@@ -144,22 +147,22 @@ const loadLogs = async (append = false) => {
     logsLoading.value = true;
     if (!append) {
       logs.value = [];
-      logsOffset.value = 0;
+      logsCursor.value = null;
+      logsHasMore.value = false;
     }
 
     const response = await useAuthFetchImperative<
       ApiResponse<{
         execution: WorkflowExecution;
         logs: WorkflowExecutionLog[];
-        limit: number;
-        offset: number;
+        page_info: PageInfo;
       }>
     >(
       `/api/servers/${serverId.value}/workflows/${workflowId.value}/executions/${executionId.value}/logs`,
       {
         query: {
           limit: parseInt(logsPageSize.value),
-          offset: logsOffset.value,
+          cursor: append ? logsCursor.value || undefined : undefined,
         },
       }
     );
@@ -181,7 +184,8 @@ const loadLogs = async (append = false) => {
       } else {
         logs.value = logsData || [];
       }
-      totalLogs.value = logsData?.length || 0;
+      logsCursor.value = response.data.page_info?.next_cursor ?? null;
+      logsHasMore.value = response.data.page_info?.has_more ?? false;
     } else {
       error.value = response.message || "Failed to load logs";
     }
@@ -193,8 +197,9 @@ const loadLogs = async (append = false) => {
 };
 
 const loadMoreLogs = () => {
-  logsOffset.value += parseInt(logsPageSize.value);
-  loadLogs(true);
+  if (logsHasMore.value && logsCursor.value) {
+    loadLogs(true);
+  }
 };
 
 const onPageSizeChange = () => {
@@ -409,7 +414,7 @@ useHead({
             ref="stepList"
             :logs="logs"
             :loading="logsLoading"
-            :total-logs="totalLogs"
+            :has-more="logsHasMore"
             @load-more="loadMoreLogs"
           />
 
@@ -418,7 +423,7 @@ useHead({
             v-else-if="activeTab === 'messages'"
             :messages="messages"
             :loading="messagesLoading"
-            :total-messages="totalMessages"
+            :has-more="messagesHasMore"
             @load-more="loadMoreMessages"
           />
         </CardContent>

@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
+import {
+    ref,
+    computed,
+    onMounted,
+    onUnmounted,
+    nextTick,
+    watch,
+} from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import {
@@ -30,6 +37,27 @@ import {
     ArrowDown,
     Filter,
 } from "lucide-vue-next";
+import type { PageInfo } from "~/types";
+
+interface PluginLog {
+    id: string;
+    timestamp: string;
+    level: string;
+    message: string;
+    error_message?: string | null;
+    fields?: Record<string, unknown> | null;
+    ingested_at?: string;
+    plugin_name?: string;
+    plugin_id?: string;
+    plugin_instance_id?: string;
+}
+
+interface PluginLogsResponse {
+    data: {
+        logs: PluginLog[];
+        page_info: PageInfo;
+    };
+}
 
 const props = defineProps<{
     serverId: string;
@@ -46,21 +74,28 @@ const isAggregated = computed(() => !props.pluginId);
 
 // State variables
 const loading = ref(true);
-const logs = ref<any[]>([]);
+const logs = ref<PluginLog[]>([]);
 const refreshing = ref(false);
 const loadingOlder = ref(false);
-const logsPerPage = ref(50);
+const logsPerPage = ref(100);
 const logLevelFilter = ref("");
 const searchFilter = ref("");
 const pluginFilter = ref("");
 const expandedLogs = ref<Set<string>>(new Set());
 const showMetadata = ref(true);
 const showFields = ref(true);
-const hasMoreLogs = ref(true);
-const oldestLogId = ref<string | null>(null);
-const newestLogId = ref<string | null>(null);
+const hasMoreLogs = ref(false);
+const nextCursor = ref<string | null>(null);
 const isAtBottom = ref(true);
 const consoleContainer = ref<HTMLElement | null>(null);
+let historyRevision = 0;
+
+const invalidateHistory = () => {
+    historyRevision += 1;
+    nextCursor.value = null;
+    hasMoreLogs.value = false;
+    loadingOlder.value = false;
+};
 
 // WebSocket state
 const isConnected = ref(false);
@@ -209,18 +244,24 @@ const formatConsoleTimestamp = (timestamp: string) => {
     });
 };
 
-// Append level/search filters to a history request URL
-const appendFilterParams = (url: string) => {
-    const params = new URLSearchParams();
+// Build a descending history request. The cursor remains opaque to the UI.
+const buildHistoryUrl = (cursor?: string | null) => {
+    const params = new URLSearchParams({
+        limit: logsPerPage.value.toString(),
+        order: "desc",
+    });
     if (logLevelFilter.value && logLevelFilter.value !== "all") {
-        params.append("level", logLevelFilter.value);
+        params.set("level", logLevelFilter.value);
     }
-    if (searchFilter.value) params.append("search", searchFilter.value);
+    const search = searchFilter.value.trim();
+    if (search) {
+        params.set("search", search);
+    }
+    if (cursor) {
+        params.set("cursor", cursor);
+    }
 
-    if (params.toString()) {
-        url += "&" + params.toString();
-    }
-    return url;
+    return `${logsHttpBase.value}?${params.toString()}`;
 };
 
 // Scroll detection and infinite scroll
@@ -241,30 +282,33 @@ const handleScroll = async (event: Event) => {
 
 // Load initial logs (latest first)
 const loadInitialLogs = async () => {
+    const revision = historyRevision;
     try {
-        const url = appendFilterParams(
-            `${logsHttpBase.value}?limit=${logsPerPage.value}&order=desc`,
-        );
-
-        const response = await useAuthFetchImperative<any>(url);
+        const response =
+            await useAuthFetchImperative<PluginLogsResponse>(
+                buildHistoryUrl(),
+            );
+        if (revision !== historyRevision) {
+            return;
+        }
 
         const newLogs = response.data.logs || [];
         const reversedLogs = newLogs.slice().reverse();
         logs.value = reversedLogs;
-
-        if (reversedLogs.length > 0) {
-            newestLogId.value = reversedLogs[reversedLogs.length - 1].id;
-            oldestLogId.value = reversedLogs[0].id;
-        }
-
-        hasMoreLogs.value = newLogs.length === logsPerPage.value;
+        nextCursor.value = response.data.page_info?.next_cursor ?? null;
+        hasMoreLogs.value = response.data.page_info?.has_more ?? false;
 
         // Always scroll to bottom after initial load with a slight delay
         await nextTick();
         setTimeout(() => {
-            scrollToBottom();
+            if (revision === historyRevision) {
+                scrollToBottom();
+            }
         }, 100);
     } catch (error: any) {
+        if (revision !== historyRevision) {
+            return;
+        }
         console.error("Failed to load logs:", error);
         toast({
             title: "Error",
@@ -276,18 +320,22 @@ const loadInitialLogs = async () => {
 
 // Load older logs (for infinite scroll)
 const loadOlderLogs = async () => {
-    if (!hasMoreLogs.value || loadingOlder.value || !oldestLogId.value) return;
+    if (!hasMoreLogs.value || loadingOlder.value || !nextCursor.value) return;
 
+    const revision = historyRevision;
+    const cursor = nextCursor.value;
     loadingOlder.value = true;
     const container = consoleContainer.value;
     const previousScrollHeight = container?.scrollHeight || 0;
 
     try {
-        const url = appendFilterParams(
-            `${logsHttpBase.value}?limit=${logsPerPage.value}&order=desc&before=${oldestLogId.value}`,
-        );
-
-        const response = await useAuthFetchImperative<any>(url);
+        const response =
+            await useAuthFetchImperative<PluginLogsResponse>(
+                buildHistoryUrl(cursor),
+            );
+        if (revision !== historyRevision) {
+            return;
+        }
 
         const olderLogs = response.data.logs || [];
         const reversedOlderLogs = olderLogs.slice().reverse();
@@ -295,7 +343,6 @@ const loadOlderLogs = async () => {
         if (reversedOlderLogs.length > 0) {
             // Prepend older logs to the beginning of the array
             logs.value = [...reversedOlderLogs, ...logs.value];
-            oldestLogId.value = reversedOlderLogs[0].id;
 
             // Maintain scroll position
             await nextTick();
@@ -305,8 +352,12 @@ const loadOlderLogs = async () => {
             }
         }
 
-        hasMoreLogs.value = olderLogs.length === logsPerPage.value;
+        nextCursor.value = response.data.page_info?.next_cursor ?? null;
+        hasMoreLogs.value = response.data.page_info?.has_more ?? false;
     } catch (error: any) {
+        if (revision !== historyRevision) {
+            return;
+        }
         console.error("Failed to load older logs:", error);
         toast({
             title: "Error",
@@ -315,46 +366,6 @@ const loadOlderLogs = async () => {
         });
     } finally {
         loadingOlder.value = false;
-    }
-};
-
-// Load newer logs (for auto-refresh)
-const loadNewerLogs = async () => {
-    if (!newestLogId.value) return;
-
-    try {
-        const url = appendFilterParams(
-            `${logsHttpBase.value}?limit=${logsPerPage.value}&order=desc&after=${newestLogId.value}`,
-        );
-
-        const response = await useAuthFetchImperative<any>(url);
-
-        const newerLogs = response.data.logs || [];
-        const reversedNewerLogs = newerLogs.slice().reverse();
-
-        if (reversedNewerLogs.length > 0) {
-            // Append newer logs to the end of the array
-            logs.value = [...logs.value, ...reversedNewerLogs];
-            newestLogId.value =
-                reversedNewerLogs[reversedNewerLogs.length - 1].id;
-
-            // Auto-scroll to bottom if user was already at bottom
-            if (isAtBottom.value) {
-                await nextTick();
-                scrollToBottom();
-            } else {
-                toast({
-                    title: "New logs available",
-                    description: `${reversedNewerLogs.length} new log entries`,
-                    action: {
-                        label: "Scroll to bottom",
-                        onClick: scrollToBottom,
-                    },
-                });
-            }
-        }
-    } catch (error: any) {
-        console.error("Failed to load newer logs:", error);
     }
 };
 
@@ -373,7 +384,12 @@ const refreshLogs = async () => {
     refreshing.value = true;
     try {
         // Always reload from scratch for manual refresh
+        invalidateHistory();
+        const revision = historyRevision;
         await loadInitialLogs();
+        if (revision !== historyRevision) {
+            return;
+        }
 
         toast({
             title: "Success",
@@ -493,18 +509,20 @@ const handleLogEvent = (event: any) => {
         if (
             logLevelFilter.value &&
             logLevelFilter.value !== "all" &&
-            event.level !== logLevelFilter.value
+            String(event.level).toLowerCase() !==
+                logLevelFilter.value.toLowerCase()
         ) {
             return;
         }
         if (pluginFilter.value && event.plugin_name !== pluginFilter.value) {
             return;
         }
+        const search = searchFilter.value.trim().toLowerCase();
         if (
-            searchFilter.value &&
-            !event.message
+            search &&
+            !`${event.message || ""} ${event.error_message || ""}`
                 .toLowerCase()
-                .includes(searchFilter.value.toLowerCase())
+                .includes(search)
         ) {
             return;
         }
@@ -515,9 +533,6 @@ const handleLogEvent = (event: any) => {
             logs.value = logs.value.slice(-maxLogs);
         }
 
-        // Update newest log ID
-        newestLogId.value = event.id;
-
         // Auto-scroll to bottom if user was already at bottom
         if (isAtBottom.value) {
             nextTick(() => scrollToBottom());
@@ -527,8 +542,12 @@ const handleLogEvent = (event: any) => {
 
 // Scroll to bottom and load newer logs
 const scrollToBottomAndRefresh = async () => {
-    await loadNewerLogs();
-    scrollToBottom();
+    invalidateHistory();
+    const revision = historyRevision;
+    await loadInitialLogs();
+    if (revision === historyRevision) {
+        scrollToBottom();
+    }
 };
 
 const prevPage = () => {
@@ -542,9 +561,7 @@ const prevPage = () => {
 // Handle filtering
 const applyFilters = async () => {
     logs.value = [];
-    oldestLogId.value = null;
-    newestLogId.value = null;
-    hasMoreLogs.value = true;
+    invalidateHistory();
     await loadInitialLogs();
 };
 
@@ -553,11 +570,13 @@ const clearFilters = async () => {
     searchFilter.value = "";
     pluginFilter.value = "";
     logs.value = [];
-    oldestLogId.value = null;
-    newestLogId.value = null;
-    hasMoreLogs.value = true;
+    invalidateHistory();
     await loadInitialLogs();
 };
+
+watch([logLevelFilter, searchFilter, pluginFilter], invalidateHistory, {
+    flush: "sync",
+});
 
 // Export logs
 const exportLogs = () => {

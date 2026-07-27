@@ -63,7 +63,7 @@
                     <SelectItem value="failed">Failed</SelectItem>
                 </SelectContent>
             </Select>
-            <Button @click="() => { loadStats(); loadExecutions(false); }" :disabled="loading" variant="outline" class="w-full sm:w-auto">
+            <Button @click="refreshData" :disabled="loading" variant="outline" class="w-full sm:w-auto">
                 <RefreshCw class="h-4 w-4 mr-2" :class="{ 'animate-spin': loading }" />
                 Refresh
             </Button>
@@ -222,13 +222,6 @@
                 </div>
             </div>
 
-            <!-- Pagination -->
-            <div v-if="hasMore" class="flex justify-center pt-4">
-                <Button variant="outline" @click="loadMore" :disabled="loading" class="w-full sm:w-auto">
-                    <ChevronDown class="h-4 w-4 mr-2" />
-                    Load More Executions
-                </Button>
-            </div>
         </div>
 
         <!-- No Executions -->
@@ -239,11 +232,40 @@
                 {{ statusFilter !== 'all' ? 'Try changing the filter' : 'This workflow hasn\'t been executed yet' }}
             </p>
         </div>
+
+        <div
+            v-if="canGoPrevious || canGoNext"
+            class="flex items-center justify-between border-t pt-4"
+        >
+            <span class="text-sm text-muted-foreground">
+                Page {{ page }} · {{ executions.length }} executions
+            </span>
+            <div class="flex gap-2">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    :disabled="!canGoPrevious || loading"
+                    @click="previousPage"
+                >
+                    <ChevronLeft class="h-4 w-4 mr-1" />
+                    Previous
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    :disabled="!canGoNext || loading"
+                    @click="nextPage"
+                >
+                    Next
+                    <ChevronRight class="h-4 w-4 ml-1" />
+                </Button>
+            </div>
+        </div>
     </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import {
     RefreshCw,
     Loader2,
@@ -259,6 +281,8 @@ import {
     TrendingUp,
     Zap,
     SkipForward,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-vue-next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -272,6 +296,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import type { PageInfo } from "~/types";
 
 interface WorkflowExecution {
     id: string;
@@ -289,10 +314,9 @@ interface WorkflowExecution {
 }
 
 interface ApiResponse<T = any> {
-    success: boolean;
     message?: string;
     data: T;
-    code?: number;
+    code: number;
 }
 
 interface Props {
@@ -315,12 +339,21 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const executions = ref<WorkflowExecution[]>([]);
 const stats = ref<WorkflowStats | null>(null);
-const offset = ref(0);
-const limit = ref(20);
-const hasMore = ref(true);
+const {
+    limit,
+    cursor,
+    page,
+    canGoPrevious,
+    canGoNext,
+    setPageInfo,
+    reset: resetPagination,
+    next: advancePage,
+    previous: returnToPreviousPage,
+} = useCursorPagination(50);
 const expandedIds = ref<Set<string>>(new Set());
 const searchQuery = ref("");
 const statusFilter = ref("all");
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Computed
 const filteredExecutions = computed(() => {
@@ -584,7 +617,7 @@ const loadStats = async () => {
     }
 };
 
-const loadExecutions = async (append = false) => {
+const loadExecutions = async () => {
     try {
         const runtimeConfig = useRuntimeConfig();
         const cookieToken = useCookie(
@@ -595,23 +628,17 @@ const loadExecutions = async (append = false) => {
         loading.value = true;
         error.value = null;
 
-        if (!append) {
-            executions.value = [];
-            offset.value = 0;
-        }
-
         const response = await $fetch<
             ApiResponse<{
                 executions: WorkflowExecution[];
-                limit: number;
-                offset: number;
+                page_info: PageInfo;
             }>
         >(
             `/api/servers/${props.serverId}/workflows/${props.workflowId}/executions`,
             {
                 query: {
                     limit: limit.value,
-                    offset: offset.value,
+                    cursor: cursor.value || undefined,
                 },
                 headers: {
                     Authorization: `Bearer ${token}`,
@@ -620,15 +647,8 @@ const loadExecutions = async (append = false) => {
         );
 
         if (response.code === 200) {
-            const newExecutions = response.data.executions || [];
-
-            if (append) {
-                executions.value.push(...newExecutions);
-            } else {
-                executions.value = newExecutions;
-            }
-
-            hasMore.value = newExecutions.length === limit.value;
+            executions.value = response.data.executions || [];
+            setPageInfo(response.data.page_info);
         } else {
             error.value = response.message || "Failed to load executions";
         }
@@ -639,14 +659,54 @@ const loadExecutions = async (append = false) => {
     }
 };
 
-const loadMore = () => {
-    offset.value += limit.value;
-    loadExecutions(true);
+const nextPage = () => {
+    if (advancePage()) {
+        loadExecutions();
+    }
 };
+
+const previousPage = () => {
+    if (returnToPreviousPage()) {
+        loadExecutions();
+    }
+};
+
+const refreshData = () => {
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+        searchTimer = null;
+    }
+    resetPagination();
+    loadStats();
+    loadExecutions();
+};
+
+watch(searchQuery, () => {
+    resetPagination();
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+    }
+    searchTimer = setTimeout(loadExecutions, 350);
+});
+
+watch(statusFilter, () => {
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+        searchTimer = null;
+    }
+    resetPagination();
+    loadExecutions();
+});
 
 // Lifecycle
 onMounted(() => {
     loadStats();
     loadExecutions();
+});
+
+onUnmounted(() => {
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+    }
 });
 </script>

@@ -22,7 +22,7 @@ import {
 const props = defineProps<{
   logs: WorkflowExecutionLog[];
   loading: boolean;
-  totalLogs: number;
+  hasMore: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -31,26 +31,21 @@ const emit = defineEmits<{
 
 const collapsedSteps = ref<Set<number>>(new Set());
 
-// Sort logs by step order, then by status (running first, then completed)
+// Keep the API's stable cursor order. Re-sorting by status would move entries
+// across the `(step_order, event_time, entry_id)` boundary used by pagination.
 const sortedLogs = computed(() => {
   return [...props.logs].sort((a, b) => {
-    // First sort by step order
     if (a.step_order !== b.step_order) {
       return a.step_order - b.step_order;
     }
 
-    // Then sort by status: running comes before completed (case-insensitive)
-    const statusOrder: { [key: string]: number } = {
-      running: 0,
-      executing: 0,
-      completed: 1,
-      failed: 1,
-      error: 1,
-    };
-    const aOrder = statusOrder[a.step_status.toLowerCase()] ?? 2;
-    const bOrder = statusOrder[b.step_status.toLowerCase()] ?? 2;
+    const eventTimeOrder =
+      new Date(a.event_time).getTime() - new Date(b.event_time).getTime();
+    if (eventTimeOrder !== 0) {
+      return eventTimeOrder;
+    }
 
-    return aOrder - bOrder;
+    return a.entry_id.localeCompare(b.entry_id);
   });
 });
 
@@ -93,7 +88,7 @@ defineExpose({ expandAllSteps, collapseAllSteps });
     <div v-else-if="logs.length > 0" class="space-y-4">
       <div
         v-for="log in sortedLogs"
-        :key="`${log.step_order}-${log.step_status}`"
+        :key="log.entry_id"
         class="overflow-hidden rounded-lg border"
       >
         <!-- Step Header (Always Visible) -->
@@ -240,7 +235,7 @@ defineExpose({ expandAllSteps, collapseAllSteps });
       </div>
 
       <!-- Pagination -->
-      <div v-if="totalLogs > logs.length" class="flex justify-center pt-4">
+      <div v-if="hasMore" class="flex justify-center pt-4">
         <Button
           variant="outline"
           :disabled="loading"
@@ -248,7 +243,7 @@ defineExpose({ expandAllSteps, collapseAllSteps });
           @click="emit('load-more')"
         >
           <ChevronDown class="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
-          Load More Logs ({{ totalLogs - logs.length }} remaining)
+          Load More Logs
         </Button>
       </div>
     </div>

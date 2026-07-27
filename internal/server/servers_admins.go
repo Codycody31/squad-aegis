@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/leighmacdonald/steamid/v3/steamid"
 	"go.codycody31.dev/squad-aegis/internal/core"
 	"go.codycody31.dev/squad-aegis/internal/models"
+	"go.codycody31.dev/squad-aegis/internal/pagination"
 	"go.codycody31.dev/squad-aegis/internal/server/responses"
 	"go.codycody31.dev/squad-aegis/internal/shared/utils"
 )
@@ -21,6 +21,13 @@ type serverAdminListItem struct {
 	models.ServerAdmin
 	IsActive  bool `json:"is_active"`
 	IsExpired bool `json:"is_expired"`
+}
+
+const serverAdminsCursorKind = "admins.server"
+
+type serverAdminCursorValues struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        uuid.UUID `json:"id"`
 }
 
 func buildServerAdminListWhereClause(serverID uuid.UUID, searchQuery string) (string, []interface{}) {
@@ -77,42 +84,27 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 	}
 
 	searchQuery := strings.TrimSpace(c.Query("search"))
-	page := 1
-	limit := 30
-	shouldPaginate := c.Query("page") != "" || c.Query("limit") != "" || searchQuery != ""
-
-	if pageString := c.Query("page"); pageString != "" {
-		if parsedPage, parseErr := strconv.Atoi(pageString); parseErr == nil && parsedPage > 0 {
-			page = parsedPage
-		}
+	limit, ok := parseCursorLimit(c, 30, 100)
+	if !ok || rejectLegacyPagination(c, "page", "offset") {
+		return
 	}
-
-	if limitString := c.Query("limit"); limitString != "" {
-		if parsedLimit, parseErr := strconv.Atoi(limitString); parseErr == nil && parsedLimit > 0 {
-			limit = parsedLimit
+	filterHash := pagination.MustFilterHash(struct {
+		ServerID uuid.UUID `json:"server_id"`
+		Search   string    `json:"search"`
+	}{ServerID: serverId, Search: strings.ToLower(searchQuery)})
+	var cursorValues *serverAdminCursorValues
+	if encodedCursor := c.Query("cursor"); encodedCursor != "" {
+		cursorValues = &serverAdminCursorValues{}
+		if err := pagination.Decode(encodedCursor, serverAdminsCursorKind, filterHash, cursorValues); err != nil {
+			responses.BadRequest(c, "Invalid cursor", &gin.H{"error": err.Error()})
+			return
 		}
-	}
-	if limit > 200 {
-		limit = 200
 	}
 
 	whereClause, queryArgs := buildServerAdminListWhereClause(serverId, searchQuery)
 
-	countQuery := `
-			SELECT COUNT(*)
-		FROM server_admins sa
-		LEFT JOIN users u ON sa.user_id = u.id
-		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
-	` + whereClause
-
-	var totalCount int
-	err = s.Dependencies.DB.QueryRowContext(c.Request.Context(), countQuery, queryArgs...).Scan(&totalCount)
-	if err != nil {
-		responses.InternalServerError(c, err, nil)
-		return
-	}
-
 	listQuery := `
+		/* sa.admins.list */
 		SELECT
 			sa.id,
 			sa.server_id,
@@ -126,16 +118,15 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 		FROM server_admins sa
 		LEFT JOIN users u ON sa.user_id = u.id
 		LEFT JOIN server_roles sr ON sa.server_role_id = sr.id
-	` + whereClause + `
-		ORDER BY sa.created_at DESC, sa.id DESC
-	`
+	` + whereClause
 
 	listArgs := append([]interface{}{}, queryArgs...)
-	if shouldPaginate {
-		offset := (page - 1) * limit
-		listQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(listArgs)+1, len(listArgs)+2)
-		listArgs = append(listArgs, limit, offset)
+	if cursorValues != nil {
+		listQuery += fmt.Sprintf(" AND (sa.created_at, sa.id) < ($%d, $%d)", len(listArgs)+1, len(listArgs)+2)
+		listArgs = append(listArgs, cursorValues.CreatedAt, cursorValues.ID)
 	}
+	listQuery += fmt.Sprintf(" ORDER BY sa.created_at DESC, sa.id DESC LIMIT $%d", len(listArgs)+1)
+	listArgs = append(listArgs, limit+1)
 
 	rows, err := s.Dependencies.DB.QueryContext(c.Request.Context(), listQuery, listArgs...)
 	if err != nil {
@@ -144,7 +135,7 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	admins := []models.ServerAdmin{}
+	admins := make([]models.ServerAdmin, 0, limit+1)
 
 	for rows.Next() {
 		var admin models.ServerAdmin
@@ -162,34 +153,26 @@ func (s *Server) ServerAdminsList(c *gin.Context) {
 		return
 	}
 
-	// Prepare response with additional status information
+	admins, hasMore := pagination.TrimPage(admins, limit)
 	adminResponses := make([]serverAdminListItem, 0, len(admins))
 	for _, admin := range admins {
 		adminResponses = append(adminResponses, newServerAdminListItem(admin))
 	}
 
-	totalPages := 0
-	responsePage := 1
-	responseLimit := len(adminResponses)
-
-	if shouldPaginate {
-		responsePage = page
-		responseLimit = limit
-		if totalCount > 0 {
-			totalPages = (totalCount + limit - 1) / limit
+	pageInfo := pagination.PageInfo{HasMore: hasMore}
+	if hasMore && len(admins) > 0 {
+		last := admins[len(admins)-1]
+		encoded, err := pagination.Encode(serverAdminsCursorKind, filterHash, serverAdminCursorValues{CreatedAt: last.CreatedAt, ID: last.Id})
+		if err != nil {
+			responses.InternalServerError(c, fmt.Errorf("encode admins cursor: %w", err), nil)
+			return
 		}
-	} else if totalCount > 0 {
-		totalPages = 1
+		pageInfo.NextCursor = &encoded
 	}
 
 	responses.Success(c, "Admins fetched successfully", &gin.H{
-		"admins": adminResponses,
-		"pagination": gin.H{
-			"total": totalCount,
-			"pages": totalPages,
-			"page":  responsePage,
-			"limit": responseLimit,
-		},
+		"admins":    adminResponses,
+		"page_info": pageInfo,
 	})
 }
 

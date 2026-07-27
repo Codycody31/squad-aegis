@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Button } from "~/components/ui/button";
@@ -13,6 +13,7 @@ import {
 } from "~/components/ui/select";
 import { Search, ChevronLeft, ChevronRight, Loader2 } from "lucide-vue-next";
 import type { ChatMessage, PaginatedChatHistory } from "~/types/player";
+import type { PageInfo } from "~/types";
 
 const props = defineProps<{
   playerId: string;
@@ -24,10 +25,17 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const messages = ref<ChatMessage[]>(props.initialMessages);
-const total = ref(props.initialMessages.length);
-const page = ref(1);
-const limit = ref(50);
-const totalPages = ref(1);
+const {
+  limit,
+  cursor,
+  page,
+  canGoPrevious,
+  canGoNext,
+  setPageInfo,
+  reset: resetPagination,
+  next: advancePage,
+  previous: returnToPreviousPage,
+} = useCursorPagination(50);
 
 const searchQuery = ref("");
 const chatTypeFilter = ref("all");
@@ -38,9 +46,11 @@ async function fetchChat() {
 
   try {
     const params = new URLSearchParams({
-      page: page.value.toString(),
       limit: limit.value.toString(),
     });
+    if (cursor.value) {
+      params.set("cursor", cursor.value);
+    }
 
     if (chatTypeFilter.value && chatTypeFilter.value !== "all") {
       params.set("type", chatTypeFilter.value);
@@ -49,13 +59,17 @@ async function fetchChat() {
       params.set("search", searchQuery.value);
     }
 
-    const data = await useAuthFetchImperative<any>(
+    const data = await useAuthFetchImperative<{
+      data: {
+        chat: PaginatedChatHistory;
+        page_info: PageInfo;
+      };
+    }>(
       `${runtimeConfig.public.backendApi}/players/${props.playerId}/chat?${params}`
     );
     const chat: PaginatedChatHistory = data.data.chat;
-    messages.value = chat.messages;
-    total.value = chat.total;
-    totalPages.value = chat.total_pages;
+    messages.value = chat?.messages || [];
+    setPageInfo(data.data.page_info);
   } catch (err: any) {
     error.value = extractApiErrorMessage(err);
   } finally {
@@ -100,16 +114,16 @@ let searchTimeout: any = null;
 let suppressAutoFetch = false;
 watch(searchQuery, () => {
   if (suppressAutoFetch) return;
+  resetPagination();
   if (searchTimeout) clearTimeout(searchTimeout);
   searchTimeout = setTimeout(() => {
-    page.value = 1;
     fetchChat();
   }, 500);
 });
 
 watch(chatTypeFilter, () => {
   if (suppressAutoFetch) return;
-  page.value = 1;
+  resetPagination();
   fetchChat();
 });
 
@@ -124,27 +138,30 @@ watch(
     chatTypeFilter.value = "all";
     suppressAutoFetch = false;
 
-    page.value = 1;
-    total.value = 0;
-    totalPages.value = 1;
+    resetPagination();
     messages.value = [];
     fetchChat();
   }
 );
 
 function nextPage() {
-  if (page.value < totalPages.value) {
-    page.value++;
+  if (advancePage()) {
     fetchChat();
   }
 }
 
 function prevPage() {
-  if (page.value > 1) {
-    page.value--;
+  if (returnToPreviousPage()) {
     fetchChat();
   }
 }
+
+onMounted(fetchChat);
+onUnmounted(() => {
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+});
 </script>
 
 <template>
@@ -194,8 +211,8 @@ function prevPage() {
 
       <div v-else class="space-y-2">
         <div
-          v-for="(msg, index) in messages"
-          :key="index"
+          v-for="msg in messages"
+          :key="msg.message_id"
           class="p-3 rounded-md hover:bg-muted/50 transition-colors"
           :class="{ 'bg-destructive/10': msg.chat_type === 'admin' }"
         >
@@ -217,17 +234,17 @@ function prevPage() {
 
       <!-- Pagination -->
       <div
-        v-if="totalPages > 1"
+        v-if="canGoPrevious || canGoNext"
         class="flex items-center justify-between mt-4 pt-4 border-t"
       >
         <div class="text-sm text-muted-foreground">
-          Page {{ page }} of {{ totalPages }} ({{ total }} messages)
+          Page {{ page }} · {{ messages.length }} messages
         </div>
         <div class="flex gap-2">
           <Button
             variant="outline"
             size="sm"
-            :disabled="page <= 1"
+            :disabled="!canGoPrevious || loading"
             @click="prevPage"
           >
             <ChevronLeft class="h-4 w-4" />
@@ -235,7 +252,7 @@ function prevPage() {
           <Button
             variant="outline"
             size="sm"
-            :disabled="page >= totalPages"
+            :disabled="!canGoNext || loading"
             @click="nextPage"
           >
             <ChevronRight class="h-4 w-4" />

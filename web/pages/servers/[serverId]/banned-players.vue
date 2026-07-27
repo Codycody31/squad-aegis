@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import {
@@ -41,7 +41,11 @@ import BanImportDialog from "~/components/bans/BanImportDialog.vue";
 import BanListSubscriptionsCard from "~/components/bans/BanListSubscriptionsCard.vue";
 import BanTable from "~/components/bans/BanTable.vue";
 import BanViewDialog from "~/components/bans/BanViewDialog.vue";
-import type { BannedPlayer, BannedPlayersResponse } from "~/types/bans";
+import type {
+    BannedPlayer,
+    BannedPlayerDetailResponse,
+    BannedPlayersResponse,
+} from "~/types/bans";
 
 definePageMeta({ middleware: ["auth"] });
 
@@ -55,6 +59,20 @@ const serverId = Array.isArray(route.params.serverId)
 const loading = ref(true);
 const error = ref<string | null>(null);
 const bannedPlayers = ref<BannedPlayer[]>([]);
+const searchQuery = ref("");
+const statusFilter = ref<"all" | "active" | "expired">("all");
+const {
+    limit,
+    cursor,
+    page,
+    canGoPrevious,
+    canGoNext,
+    setPageInfo,
+    reset: resetPagination,
+    next: advancePage,
+    previous: returnToPreviousPage,
+} = useCursorPagination(50);
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Add/edit ban dialog (components/bans/BanFormDialog.vue)
 const showBanFormDialog = ref(false);
@@ -64,6 +82,8 @@ const editingBan = ref<BannedPlayer | null>(null);
 // Evidence view dialog (components/bans/BanViewDialog.vue)
 const showEvidenceViewDialog = ref(false);
 const viewingBanEvidence = ref<BannedPlayer | null>(null);
+const detailLoadingId = ref<string | null>(null);
+const banDetailCache = new Map<string, BannedPlayer>();
 
 // Ban Import from Bans.cfg (components/bans/BanImportDialog.vue)
 const showImportDialog = ref(false);
@@ -76,40 +96,94 @@ async function fetchBannedPlayers() {
     loading.value = true;
     error.value = null;
 
-    const runtimeConfig = useRuntimeConfig();
-
     try {
-        const { data, error: fetchError } =
-            await useAuthFetch<BannedPlayersResponse>(
-                `${runtimeConfig.public.backendApi}/servers/${serverId}/bans`,
-                {
-                    method: "GET",
-                },
-            );
-
-        if (fetchError.value) {
-            throw new Error(
-                extractApiErrorMessage(fetchError.value, "Failed to fetch banned players data"),
-            );
+        const params = new URLSearchParams({
+            limit: limit.value.toString(),
+            status: statusFilter.value,
+        });
+        if (cursor.value) {
+            params.set("cursor", cursor.value);
+        }
+        if (searchQuery.value.trim()) {
+            params.set("search", searchQuery.value.trim());
         }
 
-        if (data.value && data.value.data) {
-            bannedPlayers.value = data.value.data.bans || [];
+        const response = await useAuthFetchImperative<BannedPlayersResponse>(
+            `${runtimeConfig.public.backendApi}/servers/${serverId}/bans?${params.toString()}`,
+            { method: "GET" },
+        );
 
-            // Sort by ban date (most recent first)
-            bannedPlayers.value.sort((a, b) => {
-                return (
-                    new Date(b.created_at).getTime() -
-                    new Date(a.created_at).getTime()
-                );
-            });
-        }
+        bannedPlayers.value = response.data?.bans || [];
+        setPageInfo(response.data?.page_info);
     } catch (err: any) {
         error.value = extractApiErrorMessage(err, "An error occurred while fetching banned players data");
         console.error(err);
     } finally {
         loading.value = false;
     }
+}
+
+async function fetchBanDetail(ban: BannedPlayer): Promise<BannedPlayer | null> {
+    const cached = banDetailCache.get(ban.id);
+    if (cached) {
+        return cached;
+    }
+
+    if (detailLoadingId.value) {
+        return null;
+    }
+
+    detailLoadingId.value = ban.id;
+    try {
+        const response =
+            await useAuthFetchImperative<BannedPlayerDetailResponse>(
+                `${runtimeConfig.public.backendApi}/servers/${serverId}/bans/${ban.id}`,
+                { method: "GET" },
+            );
+        const detail = response.data?.ban;
+        if (!detail) {
+            throw new Error("Ban details were not returned");
+        }
+        const detailedBan = {
+            ...ban,
+            ...detail,
+            name: ban.name || detail.name,
+        };
+        banDetailCache.set(ban.id, detailedBan);
+        return detailedBan;
+    } catch (err: any) {
+        error.value = extractApiErrorMessage(
+            err,
+            "An error occurred while fetching ban evidence",
+        );
+        return null;
+    } finally {
+        detailLoadingId.value = null;
+    }
+}
+
+async function resetBanList() {
+    banDetailCache.clear();
+    resetPagination();
+    await fetchBannedPlayers();
+}
+
+function nextPage() {
+    if (advancePage()) {
+        fetchBannedPlayers();
+    }
+}
+
+function previousPage() {
+    if (returnToPreviousPage()) {
+        fetchBannedPlayers();
+    }
+}
+
+function changePageSize(value: number) {
+    limit.value = value;
+    resetPagination();
+    fetchBannedPlayers();
 }
 
 // Function to remove a ban
@@ -140,8 +214,7 @@ async function removeBan(banId: string) {
             description: "Ban removed successfully",
         });
 
-        // Refresh the banned players list
-        fetchBannedPlayers();
+        await resetBanList();
     } catch (err: any) {
         error.value = extractApiErrorMessage(err, "An error occurred while removing the ban");
     } finally {
@@ -157,20 +230,51 @@ function openAddBanDialog() {
 }
 
 // Function to open the edit ban dialog
-function openEditBanDialog(ban: BannedPlayer) {
+async function openEditBanDialog(ban: BannedPlayer) {
+    const detailedBan = await fetchBanDetail(ban);
+    if (!detailedBan) {
+        return;
+    }
     banFormMode.value = "edit";
-    editingBan.value = ban;
+    editingBan.value = detailedBan;
     showBanFormDialog.value = true;
 }
 
 // Function to open evidence view dialog
-function openEvidenceViewDialog(ban: BannedPlayer) {
-    viewingBanEvidence.value = ban;
+async function openEvidenceViewDialog(ban: BannedPlayer) {
+    const detailedBan = await fetchBanDetail(ban);
+    if (!detailedBan) {
+        return;
+    }
+    viewingBanEvidence.value = detailedBan;
     showEvidenceViewDialog.value = true;
 }
 
-onMounted(async () => {
-    await fetchBannedPlayers();
+watch(searchQuery, () => {
+    resetPagination();
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+    }
+    searchTimer = setTimeout(fetchBannedPlayers, 350);
+});
+
+watch(statusFilter, () => {
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+        searchTimer = null;
+    }
+    resetPagination();
+    fetchBannedPlayers();
+});
+
+onMounted(() => {
+    fetchBannedPlayers();
+});
+
+onUnmounted(() => {
+    if (searchTimer) {
+        clearTimeout(searchTimer);
+    }
 });
 
 // Computed property for ban config URL
@@ -307,10 +411,42 @@ function selectBanCfgUrl(event: Event) {
                             :bans="bannedPlayers"
                             :loading="loading"
                             :server-id="serverId as string"
+                            :search="searchQuery"
+                            :status="statusFilter"
+                            :page-size="limit"
+                            @update:search="searchQuery = $event"
+                            @update:status="statusFilter = $event"
+                            @update:page-size="changePageSize"
                             @edit="openEditBanDialog"
                             @remove="(ban) => removeBan(ban.id)"
                             @view="openEvidenceViewDialog"
                         />
+                        <div
+                            v-if="canGoPrevious || canGoNext"
+                            class="mt-4 flex items-center justify-between border-t pt-4"
+                        >
+                            <span class="text-xs text-muted-foreground sm:text-sm">
+                                Page {{ page }} · {{ bannedPlayers.length }} bans
+                            </span>
+                            <div class="flex gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    :disabled="!canGoPrevious || loading"
+                                    @click="previousPage"
+                                >
+                                    Previous
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    :disabled="!canGoNext || loading"
+                                    @click="nextPage"
+                                >
+                                    Next
+                                </Button>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
             </TabsContent>
@@ -318,7 +454,7 @@ function selectBanCfgUrl(event: Event) {
             <TabsContent value="subscriptions" class="space-y-3">
                 <BanListSubscriptionsCard
                     :server-id="serverId as string"
-                    @changed="fetchBannedPlayers"
+                    @changed="resetBanList"
                 />
                 <p class="text-xs sm:text-sm text-muted-foreground">
                     Ban list subscriptions allow this server to automatically
@@ -335,14 +471,14 @@ function selectBanCfgUrl(event: Event) {
             :mode="banFormMode"
             :server-id="serverId as string"
             :ban="editingBan"
-            @saved="fetchBannedPlayers"
+            @saved="resetBanList"
         />
 
         <!-- Import from Bans.cfg Dialog -->
         <BanImportDialog
             v-model:open="showImportDialog"
             :server-id="serverId as string"
-            @imported="fetchBannedPlayers"
+            @imported="resetBanList"
         />
 
         <!-- Evidence View Dialog -->

@@ -37,6 +37,7 @@ type Server struct {
 type Dependencies struct {
 	DB                   *sql.DB
 	Clickhouse           *clickhouse.Client
+	EventIngester        *clickhouse.EventIngester
 	Valkey               *valkey.Client
 	RconManager          *rcon_manager.RconManager
 	EventManager         *event_manager.EventManager
@@ -277,6 +278,7 @@ func NewRouter(server *Server) *gin.Engine {
 				serverGroup.DELETE("/admins/:adminId", server.AuthIsSuperAdmin(), server.ServerAdminsRemove)
 
 				serverGroup.GET("/bans", server.RequirePermission(permissions.UIBansView), server.ServerBansList)
+				serverGroup.GET("/bans/:banId", server.RequirePermission(permissions.UIBansView), server.ServerBanGet)
 				serverGroup.POST("/bans", server.RequirePermission(permissions.UIBansCreate), server.ServerBansAdd)
 				serverGroup.PUT("/bans/:banId", server.RequirePermission(permissions.UIBansEdit), server.ServerBansUpdate)
 				serverGroup.DELETE("/bans/:banId", server.RequirePermission(permissions.UIBansDelete), server.ServerBansRemove)

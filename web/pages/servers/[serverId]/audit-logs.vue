@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -22,6 +22,7 @@ import {
   getActionDescription,
   hasDetailedChanges,
 } from "~/utils/audit";
+import type { PageInfo } from "~/types";
 
 definePageMeta({ middleware: ["auth"] });
 
@@ -35,22 +36,24 @@ const searchQuery = ref("");
 const actionTypeFilter = ref("all");
 const userFilter = ref("all");
 const dateFilter = ref("all");
-const currentPage = ref(1);
-const itemsPerPage = ref(20);
-const totalItems = ref(0);
-const totalPages = ref(0);
+const {
+  limit: itemsPerPage,
+  cursor,
+  page: currentPage,
+  canGoPrevious,
+  canGoNext,
+  setPageInfo,
+  reset: resetPagination,
+  next: advancePage,
+  previous: returnToPreviousPage,
+} = useCursorPagination(50);
 const selectedLog = ref<AuditLog | null>(null);
 const showLogDetailsDialog = ref(false);
 
 interface AuditLogsResponse {
   data: {
     logs: AuditLog[];
-    pagination: {
-      total: number;
-      pages: number;
-      page: number;
-      limit: number;
-    };
+    page_info: PageInfo;
   };
 }
 
@@ -110,8 +113,10 @@ async function fetchAuditLogs() {
   const runtimeConfig = useRuntimeConfig();
 
   const queryParams = new URLSearchParams();
-  queryParams.append("page", currentPage.value.toString());
   queryParams.append("limit", itemsPerPage.value.toString());
+  if (cursor.value) {
+    queryParams.append("cursor", cursor.value);
+  }
 
   if (searchQuery.value) {
     queryParams.append("search", searchQuery.value);
@@ -135,8 +140,7 @@ async function fetchAuditLogs() {
     );
 
     auditLogs.value = data.data?.logs || [];
-    totalItems.value = data.data?.pagination.total ?? 0;
-    totalPages.value = data.data?.pagination.pages ?? 0;
+    setPageInfo(data.data?.page_info);
   } catch (err: any) {
     error.value = extractApiErrorMessage(
       err,
@@ -147,13 +151,20 @@ async function fetchAuditLogs() {
   }
 }
 
-function changePage(page: number) {
-  currentPage.value = page;
-  fetchAuditLogs();
+function nextPage() {
+  if (advancePage()) {
+    fetchAuditLogs();
+  }
+}
+
+function previousPage() {
+  if (returnToPreviousPage()) {
+    fetchAuditLogs();
+  }
 }
 
 function applyFilters() {
-  currentPage.value = 1;
+  resetPagination();
   fetchAuditLogs();
 }
 
@@ -164,6 +175,11 @@ function resetFilters() {
   dateFilter.value = "all";
   applyFilters();
 }
+
+watch(
+  [searchQuery, actionTypeFilter, userFilter, dateFilter],
+  resetPagination,
+);
 
 function viewLogDetails(log: AuditLog) {
   selectedLog.value = log;
@@ -292,7 +308,7 @@ onMounted(() => {
       <CardHeader class="pb-3 sm:pb-4">
         <CardTitle class="text-base sm:text-lg">Activity History</CardTitle>
         <p class="mt-1 text-xs text-muted-foreground sm:text-sm">
-          {{ totalItems }} total logs found
+          Newest matching activity first
         </p>
       </CardHeader>
       <CardContent>
@@ -346,31 +362,33 @@ onMounted(() => {
           class="flex flex-col items-center justify-between gap-3 pt-4 sm:flex-row"
         >
           <div class="text-center text-xs text-muted-foreground sm:text-left sm:text-sm">
-            Showing {{ Math.min(auditLogs.length, itemsPerPage) }} of
-            {{ totalItems }} entries
+            Page {{ currentPage }} · {{ auditLogs.length }} entries
           </div>
 
-          <div v-if="totalPages > 1" class="flex items-center gap-2">
+          <div
+            v-if="canGoPrevious || canGoNext"
+            class="flex items-center gap-2"
+          >
             <Button
               variant="outline"
               size="sm"
-              :disabled="currentPage === 1"
-              @click="changePage(Math.max(1, currentPage - 1))"
+              :disabled="!canGoPrevious || loading"
+              @click="previousPage"
             >
               <Icon name="lucide:chevron-left" class="h-4 w-4" />
               Previous
             </Button>
 
             <div class="flex items-center gap-1 px-2 text-xs sm:text-sm">
+              <span class="text-muted-foreground">Page</span>
               <span class="font-medium">{{ currentPage }}</span>
-              <span class="text-muted-foreground">/ {{ totalPages }}</span>
             </div>
 
             <Button
               variant="outline"
               size="sm"
-              :disabled="currentPage === totalPages"
-              @click="changePage(Math.min(totalPages, currentPage + 1))"
+              :disabled="!canGoNext || loading"
+              @click="nextPage"
             >
               Next
               <Icon name="lucide:chevron-right" class="h-4 w-4" />

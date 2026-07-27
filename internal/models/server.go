@@ -50,6 +50,7 @@ type ServerBan struct {
 	BanListName  *string       `json:"ban_list_name,omitempty"`
 	EvidenceText *string       `json:"evidence_text,omitempty"`
 	Evidence     []BanEvidence `json:"evidence,omitempty"`
+	HasEvidence  bool          `json:"has_evidence"`
 	Permanent    bool          `json:"permanent"` // computed: ExpiresAt == nil
 	CreatedAt    time.Time     `json:"created_at"`
 	UpdatedAt    time.Time     `json:"updated_at"`

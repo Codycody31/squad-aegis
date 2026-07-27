@@ -15,6 +15,7 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "test:cursor": "node --experimental-strip-types --test type-tests/useCursorPagination.test.ts",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare"
   },
